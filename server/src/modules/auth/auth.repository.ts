@@ -17,6 +17,11 @@ export class AuthRepository {
     return UserModel.findById(userId);
   }
 
+  async findSuperAdminById(id: string): Promise<ISuperAdmin | null> {
+    assertDbConnected();
+    return SuperAdminModel.findById(id);
+  }
+
   async incrementFailedAttempts(userId: string): Promise<void> {
     assertDbConnected();
     await UserModel.findByIdAndUpdate(userId, {

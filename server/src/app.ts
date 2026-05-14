@@ -7,6 +7,7 @@ import { requestLogger } from './shared/middleware/request-logger';
 import { errorHandler, NotFoundError } from './shared/middleware/error-handler';
 import healthRouter from './shared/routes/health.routes';
 import authRouter from './modules/auth/auth.routes';
+import superAdminRouter from './modules/super-admin/super-admin.routes';
 import tenantRouter from './modules/tenant/tenant.routes';
 import userRouter from './modules/user/user.routes';
 
@@ -55,9 +56,10 @@ const publicRateLimiter = rateLimit({
 app.use(publicRateLimiter, healthRouter);
 
 // API routes
-app.use('/api/auth',    authRouter);
-app.use('/api/tenants', tenantRouter);
-app.use('/api/users',   userRouter);
+app.use('/api/auth',        authRouter);
+app.use('/api/super-admin', superAdminRouter);
+app.use('/api/tenants',     tenantRouter);
+app.use('/api/users',       userRouter);
 
 // ─── 404 handler (APP-08) ─────────────────────────────────────────────────────
 app.use((_req, _res, next) => {
