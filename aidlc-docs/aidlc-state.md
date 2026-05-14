@@ -41,11 +41,11 @@
 
 ### 🟢 CONSTRUCTION PHASE
 - [ ] Per-Unit Loop — Unit 1: Foundation
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
+  - [x] Functional Design — COMPLETED
+  - [x] NFR Requirements — COMPLETED
+  - [x] NFR Design — COMPLETED
+  - [x] Infrastructure Design — COMPLETED
+  - [x] Code Generation — COMPLETED
 - [ ] Per-Unit Loop — Unit 2: Patient & OPD
   - [ ] Functional Design
   - [ ] NFR Requirements
@@ -88,7 +88,7 @@
 - [ ] Operations — PLACEHOLDER
 
 ## Current Status
-- **Lifecycle Phase**: INCEPTION
-- **Current Stage**: Units Generation — Complete
-- **Next Stage**: CONSTRUCTION PHASE — Unit 1: Foundation (Functional Design)
-- **Status**: Awaiting user approval to proceed
+- **Lifecycle Phase**: CONSTRUCTION
+- **Current Stage**: Unit 1: Foundation — Code Generation — Part 1: Planning
+- **Next Stage**: Code Generation Part 2: Generation
+- **Status**: Creating code generation plan
