@@ -99,13 +99,19 @@ export function errorHandler(
     message    = err.message;
   }
 
+  // Always include field-level validation errors so clients can fix their requests.
+  // These come from Zod via ValidationError.details and contain no sensitive internals.
+  const appDetails = err instanceof AppError ? err.details : undefined;
+
   if (config.nodeEnv === 'production') {
-    res.status(statusCode).json({ status: 'error', message });
+    const body: Record<string, unknown> = { status: 'error', message };
+    if (appDetails) body.details = appDetails;
+    res.status(statusCode).json(body);
   } else {
     res.status(statusCode).json({
       status:  'error',
       message,
-      details: { stack: err.stack },
+      details: appDetails ? { ...appDetails, stack: err.stack } : { stack: err.stack },
     });
   }
 }

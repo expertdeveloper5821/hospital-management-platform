@@ -11,6 +11,7 @@ import superAdminRouter from './modules/super-admin/super-admin.routes';
 import tenantRouter from './modules/tenant/tenant.routes';
 import userRouter    from './modules/user/user.routes';
 import patientRouter from './modules/patient/patient.routes';
+import opdRouter     from './modules/opd/opd.routes';
 
 const app = express();
 
@@ -62,6 +63,7 @@ app.use('/api/super-admin', superAdminRouter);
 app.use('/api/tenants',     tenantRouter);
 app.use('/api/users',       userRouter);
 app.use('/api/patients',    patientRouter);
+app.use('/api/opd',         opdRouter);
 
 // ─── 404 handler (APP-08) ─────────────────────────────────────────────────────
 app.use((_req, _res, next) => {

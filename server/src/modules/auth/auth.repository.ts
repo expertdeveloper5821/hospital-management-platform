@@ -7,6 +7,11 @@ export class AuthRepository {
     return UserModel.findOne({ tenantId, email: email.toLowerCase() });
   }
 
+  async findUserByEmailAnyTenant(email: string): Promise<IUser | null> {
+    assertDbConnected();
+    return UserModel.findOne({ email: email.toLowerCase() });
+  }
+
   async findSuperAdminByEmail(email: string): Promise<ISuperAdmin | null> {
     assertDbConnected();
     return SuperAdminModel.findOne({ email: email.toLowerCase() });
