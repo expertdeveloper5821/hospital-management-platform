@@ -240,7 +240,7 @@ describe('PatientService — example-based', () => {
       mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
       mockTenantRepo.findById.mockResolvedValue({ ...BASE_TENANT } as never);
       const stubPdf = Buffer.from('PDF-STUB');
-      mockPdfSvc.generateMedicalCard.mockReturnValue(stubPdf);
+      mockPdfSvc.generateMedicalCard.mockResolvedValue(stubPdf);
 
       const result = await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
@@ -270,7 +270,7 @@ describe('PatientService — example-based', () => {
         ...BASE_TENANT,
         branding: { displayName: 'Apollo Branded', primaryColor: '#fff', logoUrl: null },
       } as never);
-      mockPdfSvc.generateMedicalCard.mockReturnValue(Buffer.from(''));
+      mockPdfSvc.generateMedicalCard.mockResolvedValue(Buffer.from(''));
 
       await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
@@ -286,7 +286,7 @@ describe('PatientService — example-based', () => {
         name:     'Apollo Hospital',
         branding: { displayName: '', primaryColor: '#fff', logoUrl: null },
       } as never);
-      mockPdfSvc.generateMedicalCard.mockReturnValue(Buffer.from(''));
+      mockPdfSvc.generateMedicalCard.mockResolvedValue(Buffer.from(''));
 
       await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
@@ -351,7 +351,7 @@ describe('PatientService — property-based', () => {
   test('PBT: searching by exact mobile always returns the created patient', async () => {
     await fc.assert(
       fc.asyncProperty(
-        fc.string({ minLength: 7, maxLength: 10 }).filter((s) => /^[0-9]+$/.test(s)),
+        fc.integer({ min: 1000000, max: 9999999999 }).map((n) => String(n)),
         fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0),
         async (mobile, name) => {
           const expectedPatient = {

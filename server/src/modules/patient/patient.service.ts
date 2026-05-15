@@ -135,15 +135,18 @@ export class PatientService {
     if (!tenant)  throw new NotFoundError('Tenant not found');
 
     return pdfService.generateMedicalCard({
-      patientId:        patient.patientId,
-      fullName:         patient.fullName,
-      dateOfBirth:      patient.dateOfBirth,
-      gender:           patient.gender,
-      mobileNumber:     patient.mobileNumber,
-      bloodGroup:       patient.bloodGroup   ?? undefined,
-      hospitalName:     tenant.branding.displayName || tenant.name,
-      hospitalLogoUrl:  tenant.branding.logoUrl     ?? undefined,
-      primaryColor:     tenant.branding.primaryColor,
+      patientId:               patient.patientId,
+      fullName:                patient.fullName,
+      dateOfBirth:             patient.dateOfBirth,
+      gender:                  patient.gender,
+      mobileNumber:            patient.mobileNumber,
+      address:                 patient.address               ?? undefined,
+      bloodGroup:              patient.bloodGroup            ?? undefined,
+      emergencyContactName:    patient.emergencyContactName  ?? undefined,
+      emergencyContactMobile:  patient.emergencyContactMobile ?? undefined,
+      hospitalName:            tenant.branding.displayName || tenant.name,
+      hospitalLogoUrl:         tenant.branding.logoUrl      ?? undefined,
+      primaryColor:            tenant.branding.primaryColor,
     });
   }
 }
