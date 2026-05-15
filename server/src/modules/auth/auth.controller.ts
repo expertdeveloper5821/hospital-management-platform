@@ -36,6 +36,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const result = await authService.login({
       email:        body.data.email,
       password:     body.data.password,
+      tenantId:     body.data.tenantId,
       isSuperAdmin: body.data.isSuperAdmin,
     });
     res.status(200).json({ status: 'success', data: result });

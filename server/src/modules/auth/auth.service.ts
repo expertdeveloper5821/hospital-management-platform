@@ -22,15 +22,14 @@ export class AuthService {
   async login(data: LoginRequest): Promise<LoginResponse> {
     const { email, password, isSuperAdmin = false } = data;
 
-    // Find user or super admin
     const account = isSuperAdmin
       ? await authRepository.findSuperAdminByEmail(email)
       : null;
 
-    // For tenant users, tenantId must come from the request context
-    // (handled at controller level — login endpoint accepts tenantId for tenant users)
     const user = !isSuperAdmin
-      ? await authRepository.findUserByEmail('', email) // tenantId resolved in controller
+      ? data.tenantId
+        ? await authRepository.findUserByEmail(data.tenantId, email)
+        : await authRepository.findUserByEmailAnyTenant(email)
       : null;
 
     const record = account ?? user;
