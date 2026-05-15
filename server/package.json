@@ -10,7 +10,12 @@
     "test": "jest",
     "test:unit": "jest --testPathPattern=tests/unit",
     "test:integration": "jest --testPathPattern=tests/integration",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "seed:super-admin":     "ts-node scripts/seed-super-admin.ts",
+    "seed:tenants":         "ts-node scripts/seed-tenants.ts",
+    "seed:hospital-roles":  "ts-node scripts/seed-hospital-roles.ts",
+    "seed:patients":        "ts-node scripts/seed-patients.ts",
+    "seed:all":             "npm run seed:super-admin && npm run seed:tenants && npm run seed:hospital-roles && npm run seed:patients"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.575.0",
