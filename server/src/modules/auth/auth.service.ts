@@ -20,20 +20,18 @@ const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 export class AuthService {
   async login(data: LoginRequest): Promise<LoginResponse> {
-    const { email, password, isSuperAdmin = false } = data;
-
-    // Find user or super admin
+    const { email, password, tenantId: inputTenantId, isSuperAdmin = false } = data;
+    
     const account = isSuperAdmin
       ? await authRepository.findSuperAdminByEmail(email)
       : null;
 
-    // For tenant users, tenantId must come from the request context
-    // (handled at controller level — login endpoint accepts tenantId for tenant users)
     const user = !isSuperAdmin
-      ? await authRepository.findUserByEmail('', email) // tenantId resolved in controller
+      ? await authRepository.findUserByEmail(inputTenantId ?? '', email)
       : null;
 
     const record = account ?? user;
+   
     if (!record) {
       // FR-05.2: Never reveal whether email or password was incorrect
       throw new UnauthorizedError('Invalid credentials');

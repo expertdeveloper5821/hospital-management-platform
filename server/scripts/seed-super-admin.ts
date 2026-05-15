@@ -8,7 +8,7 @@ require('dotenv-safe').config({
 
 import { SuperAdminModel } from '../src/modules/auth/auth.model';
 
-const EMAIL    = process.env.SEED_SA_EMAIL    ?? 'superadmin@hospital.local';
+const EMAIL    = process.env.SEED_SA_EMAIL    ?? 'superadmin@yopmail.com';
 const PASSWORD = process.env.SEED_SA_PASSWORD ?? 'SuperAdmin@123';
 
 async function seed() {
