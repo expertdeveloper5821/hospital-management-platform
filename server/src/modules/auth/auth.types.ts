@@ -1,6 +1,7 @@
 export interface LoginRequest {
   email:        string;
   password:     string;
+  tenantId?:    string;
   isSuperAdmin?: boolean;
 }
 
