@@ -1,6 +1,8 @@
 node_modules/
 dist/
+dist-test/
 .env
 coverage/
 *.js.map
 *.tsbuildinfo
+*-lock.json
