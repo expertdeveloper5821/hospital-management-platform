@@ -130,23 +130,30 @@
 **Purpose**: Manages inpatient admission lifecycle and bed registry.
 
 **Responsibilities**:
-- Maintain master bed registry (wards and beds pre-configured by Hospital Admin)
-- Create IPD admissions (ADMITTED status) with bed conflict detection
-- Record daily progress notes per admission
-- Discharge patients (DISCHARGED status, bed released)
-- Provide admitted patient list filterable by ward
-- Provide bed occupancy summary per ward
+- Maintain master bed registry — Hospital Admin pre-configures wards and beds per tenant
+- Create IPD admissions with unique admission ID and bed conflict detection — Receptionist
+- Reject occupied-bed assignment with descriptive error listing the occupant admission ID
+- Record daily progress notes per admission with doctor user ID and timestamp — Doctor
+- Discharge patients (DISCHARGED status, discharge date recorded, bed released) — Doctor
+- Provide admitted patient list filterable by ward — Doctor, Nurse, Manager, Hospital Admin, Receptionist
+- Provide bed occupancy summary per ward (total / occupied / available) — Manager, Hospital Admin
 
 **Interfaces**:
-- `POST /api/ipd/wards` — Hospital Admin creates ward
-- `POST /api/ipd/wards/:wardId/beds` — Hospital Admin adds beds to ward
-- `GET /api/ipd/wards` — list wards with bed availability
-- `POST /api/ipd/admissions` — Receptionist creates admission
-- `GET /api/ipd/admissions` — list active admissions (filter: ward)
-- `GET /api/ipd/admissions/:admissionId` — get admission details
-- `POST /api/ipd/admissions/:admissionId/notes` — Doctor adds progress note
-- `PATCH /api/ipd/admissions/:admissionId/discharge` — Doctor discharges patient
-- `GET /api/ipd/occupancy` — Manager views bed occupancy summary per ward
+
+| Method | Endpoint | Allowed Roles |
+|--------|----------|---------------|
+| `POST` | `/api/ipd/wards` | Hospital Admin |
+| `POST` | `/api/ipd/wards/:wardId/beds` | Hospital Admin |
+| `GET`  | `/api/ipd/wards` | Hospital Admin, Manager, Doctor, Nurse, Receptionist |
+| `GET`  | `/api/ipd/wards/:wardId/beds` | Hospital Admin, Manager, Doctor, Nurse, Receptionist |
+| `POST` | `/api/ipd/admissions` | Receptionist |
+| `GET`  | `/api/ipd/admissions` | Doctor, Nurse, Manager, Hospital Admin, Receptionist |
+| `GET`  | `/api/ipd/admissions/:admissionId` | Doctor, Nurse, Manager, Hospital Admin, Receptionist |
+| `POST` | `/api/ipd/admissions/:admissionId/notes` | Doctor |
+| `PATCH`| `/api/ipd/admissions/:admissionId/discharge` | Doctor |
+| `GET`  | `/api/ipd/occupancy` | Manager, Hospital Admin |
+
+**Bed conflict rule**: If a Receptionist attempts to assign an occupied bed, the service returns HTTP 409 with `{ occupantAdmissionId }` in the response body.
 
 ---
 
