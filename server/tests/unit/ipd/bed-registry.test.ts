@@ -3,7 +3,7 @@ jest.mock('../../../src/shared/services/audit.service');
 
 import * as fc from 'fast-check';
 import { ipdRepository }              from '../../../src/modules/ipd/ipd.repository';
-import { IpdService, BedOccupiedError } from '../../../src/modules/ipd/ipd.service';
+import { IPDService, BedOccupiedError } from '../../../src/modules/ipd/ipd.service';
 import { NotFoundError, ConflictError } from '../../../src/shared/middleware/error-handler';
 
 const mockRepo = ipdRepository as jest.Mocked<typeof ipdRepository>;
@@ -37,12 +37,12 @@ const makeBed = (overrides = {}) => ({
 
 // ─── Example-based tests ──────────────────────────────────────────────────────
 
-describe('IpdService — createWard', () => {
-  let service: IpdService;
+describe('IPDService — createWard', () => {
+  let service: IPDService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new IpdService();
+    service = new IPDService();
   });
 
   test('creates ward when name does not already exist', async () => {
@@ -78,12 +78,12 @@ describe('IpdService — createWard', () => {
   });
 });
 
-describe('IpdService — addBedsToWard', () => {
-  let service: IpdService;
+describe('IPDService — addBedsToWard', () => {
+  let service: IPDService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new IpdService();
+    service = new IPDService();
   });
 
   test('throws NotFoundError when ward does not exist', async () => {
@@ -131,12 +131,12 @@ describe('IpdService — addBedsToWard', () => {
   });
 });
 
-describe('IpdService — assertBedAvailable (bed conflict detection, FR-08.3 & FR-08.4)', () => {
-  let service: IpdService;
+describe('IPDService — assertBedAvailable (bed conflict detection, FR-08.3 & FR-08.4)', () => {
+  let service: IPDService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new IpdService();
+    service = new IPDService();
   });
 
   test('returns bed when it exists and is not occupied', async () => {
@@ -181,12 +181,12 @@ describe('IpdService — assertBedAvailable (bed conflict detection, FR-08.3 & F
   });
 });
 
-describe('IpdService — getOccupancySummary', () => {
-  let service: IpdService;
+describe('IPDService — getOccupancySummary', () => {
+  let service: IPDService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new IpdService();
+    service = new IPDService();
   });
 
   test('returns summary from repository', async () => {
@@ -210,7 +210,7 @@ describe('IpdService — getOccupancySummary', () => {
 
 // ─── PBT: occupancy invariant — total = occupied + available ─────────────────
 
-describe('IpdService — PBT: occupancy invariant', () => {
+describe('IPDService — PBT: occupancy invariant', () => {
   test('PBT: available always equals total minus occupied for any ward', async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -230,7 +230,7 @@ describe('IpdService — PBT: occupancy invariant', () => {
             available,
           }]);
 
-          const service2 = new IpdService();
+          const service2 = new IPDService();
           const [ward] = await service2.getOccupancySummary('t1');
 
           expect(ward.total).toBe(ward.occupied + ward.available);
