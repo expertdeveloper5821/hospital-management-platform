@@ -191,10 +191,14 @@ updateStatus(visitId: string, status: OPDStatus, completedAt?: Date): Promise<vo
 
 ```typescript
 // Ward & Bed Registry
-interface CreateWardInput { tenantId: string; wardName: string; totalBeds: number; }
+// Allowed roles: Hospital Admin creates; all clinical roles read
+interface CreateWardInput { tenantId: string; name: string; floor?: string; }
+interface AddBedsInput    { tenantId: string; wardId: string; bedNumbers: string[]; }
 createWard(input: CreateWardInput, createdBy: string): Promise<Ward>
-addBeds(wardId: string, bedNumbers: string[], tenantId: string): Promise<Ward>
+addBedsToWard(input: AddBedsInput, createdBy: string): Promise<Bed[]>
 listWards(tenantId: string): Promise<Ward[]>
+listBedsInWard(tenantId: string, wardId: string): Promise<Bed[]>
+assertBedAvailable(tenantId: string, wardId: string, bedNumber: string): Promise<Bed> // throws BedOccupiedError if occupied
 
 // Admissions
 interface CreateAdmissionInput {
