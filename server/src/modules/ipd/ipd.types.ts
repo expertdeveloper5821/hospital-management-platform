@@ -18,11 +18,15 @@ export interface ProgressNote {
 
 // ─── Zod Validation Schemas ───────────────────────────────────────────────────
 
+// wardId and bedId are MongoDB ObjectId strings (24-char hex) from U3-A models
+const mongoIdSchema = (field: string) =>
+  z.string().min(1, `${field} is required`);
+
 export const CreateAdmissionSchema = z.object({
-  patientId:        z.string().uuid('patientId must be a UUID'),
-  wardId:           z.string().uuid('wardId must be a UUID'),
-  bedId:            z.string().uuid('bedId must be a UUID'),
-  assignedDoctorId: z.string().uuid('assignedDoctorId must be a UUID'),
+  patientId:        z.string().min(1, 'patientId is required'),
+  wardId:           mongoIdSchema('wardId'),
+  bedId:            mongoIdSchema('bedId'),
+  assignedDoctorId: mongoIdSchema('assignedDoctorId'),
 });
 
 export type CreateAdmissionInput = z.infer<typeof CreateAdmissionSchema>;
@@ -37,7 +41,7 @@ export const AddProgressNoteSchema = z.object({
 export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
 
 export const ListAdmissionsQuerySchema = z.object({
-  wardId: z.string().uuid().optional(),
+  wardId: z.string().min(1).optional(),
   status: z.enum(['ADMITTED', 'DISCHARGED']).optional().default('ADMITTED'),
   page:   z.coerce.number().int().min(1).default(1),
   limit:  z.coerce.number().int().min(1).max(100).default(20),
@@ -60,12 +64,24 @@ export interface AdmissionResponse {
   progressNotes:    ProgressNote[];
 }
 
-export interface BedOccupancySummaryItem {
+// Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)
+export interface WardOccupancySummary {
   wardId:    string;
   wardName:  string;
-  total:     number;
-  occupied:  number;
-  available: number;
+  floor:     string | null;
+  total:     number;    // total beds in ward
+  occupied:  number;    // beds with isOccupied === true
+  available: number;    // total - occupied; invariant: total === occupied + available
+}
+
+// ─── U3-A Ward/Bed Request Types ──────────────────────────────────────────────
+export interface CreateWardRequest {
+  name:   string;
+  floor?: string;
+}
+
+export interface AddBedsRequest {
+  bedNumbers: string[];
 }
 
 // ─── Internal Types ───────────────────────────────────────────────────────────

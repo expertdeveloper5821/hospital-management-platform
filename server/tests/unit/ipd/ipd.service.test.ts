@@ -1,14 +1,10 @@
 jest.mock('../../../src/modules/ipd/ipd.repository');
-jest.mock('../../../src/modules/ipd/ward.repository');
-jest.mock('../../../src/modules/ipd/bed.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/shared/services/audit.service');
 
 import * as fc from 'fast-check';
 import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
-import { wardRepository }    from '../../../src/modules/ipd/ward.repository';
-import { bedRepository }     from '../../../src/modules/ipd/bed.repository';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { userRepository }    from '../../../src/modules/user/user.repository';
 import { IPDService }        from '../../../src/modules/ipd/ipd.service';
@@ -17,29 +13,29 @@ import { AppError, NotFoundError } from '../../../src/shared/middleware/error-ha
 import { UserRole }          from '../../../src/shared/types/common.types';
 
 const mockIpdRepo     = ipdRepository     as jest.Mocked<typeof ipdRepository>;
-const mockWardRepo    = wardRepository    as jest.Mocked<typeof wardRepository>;
-const mockBedRepo     = bedRepository     as jest.Mocked<typeof bedRepository>;
 const mockPatientRepo = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockUserRepo    = userRepository    as jest.Mocked<typeof userRepository>;
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const TENANT_ID = 'tenant-001';
-const DOCTOR_ID = 'doctor-001';
-const RECEPT_ID = 'recept-001';
+const DOCTOR_ID = '6a05ca8a86f53faa64a75a08';
+const RECEPT_ID = '6b06db9b97g64bbb75b86b19';
 
 const BASE_WARD = {
-  wardId:   'ward-001',
-  wardName: 'General Ward',
+  _id:      'ward-001',
+  name:     'General Ward',
+  floor:    null,
   tenantId: TENANT_ID,
 };
 
 const BASE_BED = {
-  bedId:      'bed-001',
-  wardId:     'ward-001',
-  bedNumber:  'G-01',
-  isOccupied: false,
-  tenantId:   TENANT_ID,
+  _id:                'bed-001',
+  wardId:             'ward-001',
+  bedNumber:          'G-01',
+  isOccupied:         false,
+  currentAdmissionId: null,
+  tenantId:           TENANT_ID,
 };
 
 const BASE_PATIENT = {
@@ -51,7 +47,6 @@ const BASE_PATIENT = {
 
 const BASE_DOCTOR = {
   _id:      DOCTOR_ID,
-  userId:   DOCTOR_ID,
   role:     UserRole.DOCTOR,
   tenantId: TENANT_ID,
 };
@@ -92,12 +87,12 @@ describe('IPDService — example-based', () => {
 
     beforeEach(() => {
       mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
-      mockWardRepo.findById.mockResolvedValue(BASE_WARD as never);
-      mockBedRepo.findById.mockResolvedValue(BASE_BED as never);
+      mockIpdRepo.findWardById.mockResolvedValue(BASE_WARD as never);
+      mockIpdRepo.findBedById.mockResolvedValue(BASE_BED as never);
       mockIpdRepo.findActiveAdmissionByBed.mockResolvedValue(null);
       mockUserRepo.findById.mockResolvedValue(BASE_DOCTOR as never);
       mockIpdRepo.save.mockResolvedValue(BASE_ADMISSION as never);
-      mockBedRepo.setOccupied.mockResolvedValue(undefined as never);
+      mockIpdRepo.updateBedOccupancy.mockResolvedValue({ ...BASE_BED, isOccupied: true } as never);
     });
 
     test('creates admission and marks bed occupied on success', async () => {
@@ -105,7 +100,9 @@ describe('IPDService — example-based', () => {
 
       expect(result.admissionId).toBe('adm-uuid-001');
       expect(result.status).toBe(AdmissionStatus.ADMITTED);
-      expect(mockBedRepo.setOccupied).toHaveBeenCalledWith('bed-001', true, TENANT_ID);
+      expect(mockIpdRepo.updateBedOccupancy).toHaveBeenCalledWith(
+        TENANT_ID, 'bed-001', true, expect.any(String),
+      );
       expect(mockIpdRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           patientId: 'PAT-00001',
@@ -138,14 +135,14 @@ describe('IPDService — example-based', () => {
     });
 
     test('throws 404 when ward not found', async () => {
-      mockWardRepo.findById.mockResolvedValue(null);
+      mockIpdRepo.findWardById.mockResolvedValue(null);
 
       await expect(service.createAdmission(validInput, TENANT_ID, RECEPT_ID))
         .rejects.toThrow(NotFoundError);
     });
 
     test('throws 400 when bed does not belong to specified ward', async () => {
-      mockBedRepo.findById.mockResolvedValue({
+      mockIpdRepo.findBedById.mockResolvedValue({
         ...BASE_BED,
         wardId: 'different-ward',
       } as never);
@@ -222,18 +219,18 @@ describe('IPDService — example-based', () => {
     test('sets status to DISCHARGED and releases bed', async () => {
       const dischargedAdmission = {
         ...BASE_ADMISSION,
-        status:       AdmissionStatus.DISCHARGED,
+        status:        AdmissionStatus.DISCHARGED,
         dischargeDate: new Date(),
       };
       mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
       mockIpdRepo.updateStatus.mockResolvedValue(dischargedAdmission as never);
-      mockBedRepo.setOccupied.mockResolvedValue(undefined as never);
+      mockIpdRepo.updateBedOccupancy.mockResolvedValue({ ...BASE_BED, isOccupied: false } as never);
 
       const result = await service.dischargePatient('adm-uuid-001', TENANT_ID, DOCTOR_ID);
 
       expect(result.status).toBe(AdmissionStatus.DISCHARGED);
       expect(result.dischargeDate).not.toBeNull();
-      expect(mockBedRepo.setOccupied).toHaveBeenCalledWith('bed-001', false, TENANT_ID);
+      expect(mockIpdRepo.updateBedOccupancy).toHaveBeenCalledWith(TENANT_ID, 'bed-001', false, null);
     });
 
     test('throws 400 when patient is already discharged', async () => {
@@ -246,7 +243,7 @@ describe('IPDService — example-based', () => {
         expect.objectContaining({ statusCode: 400, message: expect.stringContaining('already discharged') }),
       );
       expect(mockIpdRepo.updateStatus).not.toHaveBeenCalled();
-      expect(mockBedRepo.setOccupied).not.toHaveBeenCalled();
+      expect(mockIpdRepo.updateBedOccupancy).not.toHaveBeenCalled();
     });
 
     test('throws 404 when admission not found', async () => {
@@ -261,11 +258,15 @@ describe('IPDService — example-based', () => {
   // ── getBedOccupancySummary ────────────────────────────────────────────────────
   describe('getBedOccupancySummary', () => {
     test('returns correct total/occupied/available per ward', async () => {
-      mockWardRepo.listWards.mockResolvedValue([BASE_WARD] as never);
-      mockBedRepo.findByWard.mockResolvedValue([
-        { ...BASE_BED, isOccupied: true },
-        { ...BASE_BED, bedId: 'bed-002', isOccupied: false },
-        { ...BASE_BED, bedId: 'bed-003', isOccupied: false },
+      mockIpdRepo.getOccupancySummary.mockResolvedValue([
+        {
+          wardId:    'ward-001',
+          wardName:  'General Ward',
+          floor:     null,
+          total:     3,
+          occupied:  1,
+          available: 2,
+        },
       ] as never);
 
       const result = await service.getBedOccupancySummary(TENANT_ID);
@@ -339,8 +340,6 @@ describe('IPDService — PBT: bed occupancy invariant', () => {
         fc.constantFrom(AdmissionStatus.ADMITTED, AdmissionStatus.DISCHARGED),
         (status) => {
           const isAdmitted = status === AdmissionStatus.ADMITTED;
-          // First call: only ADMITTED can transition to DISCHARGED
-          // Second call on DISCHARGED: must be rejected (status 400)
           if (!isAdmitted) {
             expect(status).toBe(AdmissionStatus.DISCHARGED);
           }
