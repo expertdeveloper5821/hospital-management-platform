@@ -12,6 +12,7 @@ import tenantRouter from './modules/tenant/tenant.routes';
 import userRouter    from './modules/user/user.routes';
 import patientRouter from './modules/patient/patient.routes';
 import opdRouter     from './modules/opd/opd.routes';
+import ipdRouter     from './modules/ipd/ipd.routes';
 
 const app = express();
 
@@ -64,6 +65,7 @@ app.use('/api/tenants',     tenantRouter);
 app.use('/api/users',       userRouter);
 app.use('/api/patients',    patientRouter);
 app.use('/api/opd',         opdRouter);
+app.use('/api/ipd',         ipdRouter);
 
 // ─── 404 handler (APP-08) ─────────────────────────────────────────────────────
 app.use((_req, _res, next) => {

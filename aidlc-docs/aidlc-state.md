@@ -53,11 +53,11 @@
   - [ ] Infrastructure Design
   - [ ] Code Generation
 - [ ] Per-Unit Loop — Unit 3: IPD
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
+  - [x] Functional Design — COMPLETED (U3-B: domain-entities, business-logic-model, business-rules)
+  - [x] NFR Requirements — COMPLETED (U3-B: nfr-requirements)
+  - [x] NFR Design — COMPLETED (U3-B: nfr-design-patterns, logical-components)
+  - [x] Infrastructure Design — COMPLETED (U3-B: infrastructure-design)
+  - [x] Code Generation — COMPLETED (U3-B: ipd.types, ipd.model, ipd.repository, ipd.service, ipd.controller, ipd.routes, unit+integration+PBT tests)
 - [ ] Per-Unit Loop — Unit 4: Lab
   - [ ] Functional Design
   - [ ] NFR Requirements
@@ -89,6 +89,6 @@
 
 ## Current Status
 - **Lifecycle Phase**: CONSTRUCTION
-- **Current Stage**: Unit 1: Foundation — Code Generation — Part 1: Planning
-- **Next Stage**: Code Generation Part 2: Generation
-- **Status**: Creating code generation plan
+- **Current Stage**: Unit 3: IPD — U3-B: Admission Lifecycle — COMPLETED
+- **Next Stage**: U3-A (Bed Registry) merge + integration test run; then Unit 4
+- **Status**: U3-B all stages done; awaiting U3-A from team collaboration partner

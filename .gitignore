@@ -5,4 +5,4 @@ dist-test/
 coverage/
 *.js.map
 *.tsbuildinfo
-*-lock.json
+*package-lock.json
