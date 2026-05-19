@@ -58,13 +58,13 @@
   - [x] NFR Design — COMPLETED (U3-B: nfr-design-patterns, logical-components)
   - [x] Infrastructure Design — COMPLETED (U3-B: infrastructure-design)
   - [x] Code Generation — COMPLETED (U3-B: ipd.types, ipd.model, ipd.repository, ipd.service, ipd.controller, ipd.routes, unit+integration+PBT tests)
-- [ ] Per-Unit Loop — Unit 4: Lab
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
-- [ ] Per-Unit Loop — Unit 5: Inventory
+- [ ] Per-Unit Loop — Unit 4: Lab & Inventory
+  - [x] Functional Design — COMPLETED (inline with code generation)
+  - [x] NFR Requirements — COMPLETED (inline with code generation)
+  - [x] NFR Design — COMPLETED (inline with code generation)
+  - [x] Infrastructure Design — COMPLETED (inline with code generation)
+  - [x] Code Generation — COMPLETED (U4-A: notification model+repo+service; U4-B: lab types/models/repo/service/controller/routes; U4-C: inventory types/model/repo/service/controller/routes; unit+integration+PBT tests)
+- [ ] Per-Unit Loop — Unit 5: Payments
   - [ ] Functional Design
   - [ ] NFR Requirements
   - [ ] NFR Design
@@ -89,6 +89,6 @@
 
 ## Current Status
 - **Lifecycle Phase**: CONSTRUCTION
-- **Current Stage**: Unit 3: IPD — U3-B: Admission Lifecycle — COMPLETED
-- **Next Stage**: U3-A (Bed Registry) merge + integration test run; then Unit 4
-- **Status**: U3-B all stages done; awaiting U3-A from team collaboration partner
+- **Current Stage**: Unit 4: Lab & Inventory — COMPLETED
+- **Next Stage**: Unit 5: Payments
+- **Status**: U4-A (Notification stub), U4-B (Lab module), U4-C (Inventory module) all done; unit + integration + PBT tests written

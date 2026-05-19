@@ -31,6 +31,7 @@ export interface AppConfig {
     accessKeyId:     string;
     secretAccessKey: string;
     s3BucketName:    string;
+    endpoint?:       string;
   };
   corsOrigins:  string[];
   rateLimit: {
@@ -61,6 +62,7 @@ const config: AppConfig = {
     accessKeyId:     process.env.AWS_ACCESS_KEY_ID!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
     s3BucketName:    process.env.S3_BUCKET_NAME!,
+    endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')

@@ -12,12 +12,17 @@ class S3Service {
 
   constructor() {
     // S3-05: AWS credentials from config — NEVER hardcoded (SECURITY-12)
+    // forcePathStyle is required for LocalStack (and any custom-endpoint S3-compatible store).
     this.client = new S3Client({
       region: config.aws.region,
       credentials: {
         accessKeyId:     config.aws.accessKeyId,
         secretAccessKey: config.aws.secretAccessKey,
       },
+      ...(config.aws.endpoint && {
+        endpoint:       config.aws.endpoint,
+        forcePathStyle: true,
+      }),
     });
     this.bucket = config.aws.s3BucketName;
   }
