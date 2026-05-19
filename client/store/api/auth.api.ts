@@ -8,37 +8,51 @@ import type {
   ResetPasswordRequest,
   ApiSuccess,
   BrandingConfig,
+  UserRole,
 } from '../types';
 
+// JWT claims mirroring the server-side JWTPayload interface
+interface JwtClaims {
+  userId:       string;
+  email:        string;
+  role:         UserRole;
+  tenantId:     string | null;
+  isFirstLogin: boolean;
+}
+
+function decodeJwt(token: string): JwtClaims | null {
+  try {
+    const payload = token.split('.')[1];
+    return JSON.parse(atob(payload)) as JwtClaims;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Shared post-login side-effects ──────────────────────────────────────────
-async function handlePostLogin(
-  token:   string,
-  role:    string,
-  dispatch: Parameters<typeof baseApi.injectEndpoints>[0] extends never ? never : any,
-) {
+// Decodes the JWT rather than calling /me, so it works even when
+// isFirstLogin=true (the /me endpoint is blocked by requireFirstPasswordChange).
+async function handlePostLogin(token: string, dispatch: any) {
   dispatch(tokenReceived(token));
 
-  // Route /me to the correct endpoint based on role
-  const meEndpoint =
-    role === 'SUPER_ADMIN'
-      ? authApi.endpoints.getSuperAdminMe
-      : authApi.endpoints.getMe;
+  const claims = decodeJwt(token);
+  if (!claims) return;
 
-  const meResult = await dispatch(
-    (meEndpoint as typeof authApi.endpoints.getMe).initiate(undefined, { forceRefetch: true }),
-  );
+  dispatch(profileLoaded({
+    userId:       claims.userId,
+    email:        claims.email,
+    role:         claims.role,
+    tenantId:     claims.tenantId,
+    isFirstLogin: claims.isFirstLogin,
+  }));
 
-  if ('data' in meResult && meResult.data) {
-    dispatch(profileLoaded(meResult.data));
-
-    const { tenantId } = meResult.data;
-    if (tenantId) {
-      const brandingResult = await dispatch(
-        authApi.endpoints.getBranding.initiate(tenantId, { forceRefetch: true }),
-      );
-      if ('data' in brandingResult && brandingResult.data) {
-        dispatch(setBranding(brandingResult.data));
-      }
+  // Skip branding fetch on first login — user goes to /change-password anyway
+  if (!claims.isFirstLogin && claims.tenantId) {
+    const brandingResult = await dispatch(
+      authApi.endpoints.getBranding.initiate(claims.tenantId, { forceRefetch: true }),
+    );
+    if ('data' in brandingResult && brandingResult.data) {
+      dispatch(setBranding(brandingResult.data));
     }
   }
 }
@@ -53,7 +67,7 @@ export const authApi = baseApi.injectEndpoints({
       async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
         try {
           const { data } = await queryFulfilled;
-          await handlePostLogin(data.token, data.role, dispatch);
+          await handlePostLogin(data.token, dispatch);
         } catch {
           // mutation error is surfaced by the caller
         }
@@ -67,7 +81,7 @@ export const authApi = baseApi.injectEndpoints({
       async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
         try {
           const { data } = await queryFulfilled;
-          await handlePostLogin(data.token, data.role, dispatch);
+          await handlePostLogin(data.token, dispatch);
         } catch {
           // mutation error is surfaced by the caller
         }

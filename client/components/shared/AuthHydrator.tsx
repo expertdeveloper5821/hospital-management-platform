@@ -2,17 +2,27 @@
 
 import { useEffect } from 'react';
 import { useAppDispatch } from '@/store/hooks';
-import { tokenReceived, profileLoaded, setBranding } from '@/store/slices/auth.slice';
-import { TOKEN_STORAGE_KEY } from '@/store/slices/auth.slice';
+import { tokenReceived, profileLoaded, setBranding, TOKEN_STORAGE_KEY } from '@/store/slices/auth.slice';
 import { authApi } from '@/store/api/auth.api';
-import { UserRole } from '@/store/types';
+import type { UserRole } from '@/store/types';
 
-/**
- * Runs once on app mount. Reads the stored JWT from localStorage and
- * re-fetches the user profile + branding so state survives page refreshes.
- * If the token has expired the /me call will fail (401) and the user
- * stays logged out — no stale state is hydrated.
- */
+interface JwtClaims {
+  userId:       string;
+  email:        string;
+  role:         UserRole;
+  tenantId:     string | null;
+  isFirstLogin: boolean;
+  exp?:         number;
+}
+
+function decodeJwt(token: string): JwtClaims | null {
+  try {
+    return JSON.parse(atob(token.split('.')[1])) as JwtClaims;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthHydrator() {
   const dispatch = useAppDispatch();
 
@@ -20,44 +30,33 @@ export function AuthHydrator() {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
     if (!token) return;
 
-    // Optimistically mark as authenticated so guards don't flash redirect
-    dispatch(tokenReceived(token));
+    const claims = decodeJwt(token);
+    if (!claims) return;
 
-    // Re-fetch profile — determines which /me endpoint to use
-    // We don't know the role until we get a response, so try auth/me first;
-    // if the user is a super admin their JWT role is in the token itself.
-    // Decode role from JWT payload (base64, no crypto needed — just reading claims)
-    let role: string | undefined;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      role = payload.role as string;
-    } catch {
-      role = undefined;
+    // Reject expired tokens immediately (exp is in seconds)
+    if (claims.exp && claims.exp * 1000 < Date.now()) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      return;
     }
 
-    const meEndpoint =
-      role === UserRole.SUPER_ADMIN
-        ? authApi.endpoints.getSuperAdminMe
-        : authApi.endpoints.getMe;
+    dispatch(tokenReceived(token));
+    dispatch(profileLoaded({
+      userId:       claims.userId,
+      email:        claims.email,
+      role:         claims.role,
+      tenantId:     claims.tenantId,
+      isFirstLogin: claims.isFirstLogin,
+    }));
 
-    dispatch(
-      (meEndpoint as typeof authApi.endpoints.getMe).initiate(undefined, { forceRefetch: true }),
-    ).then((result) => {
-      if ('data' in result && result.data) {
-        dispatch(profileLoaded(result.data));
-
-        const { tenantId } = result.data;
-        if (tenantId) {
-          dispatch(
-            authApi.endpoints.getBranding.initiate(tenantId, { forceRefetch: true }),
-          ).then((brandingResult) => {
-            if ('data' in brandingResult && brandingResult.data) {
-              dispatch(setBranding(brandingResult.data));
-            }
-          });
+    if (!claims.isFirstLogin && claims.tenantId) {
+      dispatch(
+        authApi.endpoints.getBranding.initiate(claims.tenantId, { forceRefetch: true }),
+      ).then((result) => {
+        if ('data' in result && result.data) {
+          dispatch(setBranding(result.data));
         }
-      }
-    });
+      });
+    }
   }, [dispatch]);
 
   return null;

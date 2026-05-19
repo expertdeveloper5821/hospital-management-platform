@@ -16,20 +16,21 @@ import {
   CardContent,
   CardFooter,
 } from '@/components/ui/card';
-import { useLoginMutation } from '@/store/api/auth.api';
+import { ShieldCheck } from 'lucide-react';
+import { useSuperAdminLoginMutation } from '@/store/api/auth.api';
 import { useAppSelector } from '@/store/hooks';
+import { UserRole } from '@/store/types';
 
 const schema = z.object({
-  tenantId: z.string().min(1, 'Hospital ID is required'),
   email:    z.string().email('Invalid email address'),
   password: z.string().min(1, 'Password is required'),
 });
 
 type FormValues = z.infer<typeof schema>;
 
-export default function LoginPage() {
+export default function SuperAdminLoginPage() {
   const router = useRouter();
-  const [login, { isLoading, error }] = useLoginMutation();
+  const [superAdminLogin, { isLoading, error }] = useSuperAdminLoginMutation();
   const profile = useAppSelector((s) => s.auth.profile);
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
@@ -38,16 +39,18 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!profile) return;
-    if (profile.isFirstLogin) {
-      router.replace('/change-password');
-    } else {
-      router.replace('/dashboard');
+    if (profile.role === UserRole.SUPER_ADMIN) {
+      if (profile.isFirstLogin) {
+        router.replace('/change-password');
+      } else {
+        router.replace('/super-admin');
+      }
     }
   }, [profile, router]);
 
   async function onSubmit(values: FormValues) {
     try {
-      await login({ email: values.email, password: values.password, tenantId: values.tenantId }).unwrap();
+      await superAdminLogin({ email: values.email, password: values.password }).unwrap();
     } catch { /* error shown below */ }
   }
 
@@ -59,24 +62,15 @@ export default function LoginPage() {
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl">Hospital Sign In</CardTitle>
-        <CardDescription>Enter your hospital credentials to continue</CardDescription>
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          <CardTitle className="text-2xl">Platform Admin</CardTitle>
+        </div>
+        <CardDescription>Super Admin access only</CardDescription>
       </CardHeader>
 
       <form onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="tenantId">Hospital ID</Label>
-            <Input
-              id="tenantId"
-              placeholder="Your hospital tenant ID"
-              {...register('tenantId')}
-            />
-            {errors.tenantId && (
-              <p className="text-xs text-destructive">{errors.tenantId.message}</p>
-            )}
-          </div>
-
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input id="email" type="email" autoComplete="email" {...register('email')} />
@@ -110,16 +104,10 @@ export default function LoginPage() {
             {isLoading ? 'Signing in…' : 'Sign in'}
           </Button>
           <a
-            href="/forgot-password"
+            href="/login"
             className="text-sm text-muted-foreground hover:underline text-center"
           >
-            Forgot password?
-          </a>
-          <a
-            href="/super-admin/login"
-            className="text-sm text-muted-foreground hover:underline text-center"
-          >
-            Platform admin? Sign in here
+            Hospital staff? Sign in here
           </a>
         </CardFooter>
       </form>

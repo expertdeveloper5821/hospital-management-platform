@@ -2,7 +2,7 @@ import { baseApi } from './base.api';
 import type { ApiSuccess, PaginatedResult } from '../types';
 
 interface TenantSummary {
-  tenantId:   string;
+  _id:        string;
   name:       string;
   adminEmail: string;
   status:     string;

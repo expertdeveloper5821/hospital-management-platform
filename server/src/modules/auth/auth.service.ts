@@ -10,6 +10,7 @@ import { addToDenylist } from '../../shared/middleware/token-denylist';
 import {
   UnauthorizedError,
   NotFoundError,
+  ValidationError,
   AppError,
 } from '../../shared/middleware/error-handler';
 import { LoginRequest, LoginResponse } from './auth.types';
@@ -123,6 +124,9 @@ export class AuthService {
 
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) throw new UnauthorizedError('Current password is incorrect');
+
+    const isSame = await bcrypt.compare(newPassword, user.passwordHash);
+    if (isSame) throw new ValidationError('New password must be different from the current password');
 
     const newHash = await bcrypt.hash(newPassword, config.bcryptRounds);
     await authRepository.recordPasswordChange(userId, newHash);
