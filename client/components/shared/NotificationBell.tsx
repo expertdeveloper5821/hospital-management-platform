@@ -5,13 +5,22 @@ import { Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { markAllRead, markRead } from '@/store/slices/notification.slice';
+import { useGetUnreadCountQuery } from '@/store/api/notification.api';
 import type { NotificationMessage } from '@/store/types';
 
 export function NotificationBell() {
   const [panelOpen, setPanelOpen] = useState(false);
-  const dispatch      = useAppDispatch();
-  const messages      = useAppSelector((s) => s.notification.messages);
-  const unreadCount   = useAppSelector((s) => s.notification.unreadCount);
+  const dispatch    = useAppDispatch();
+  const messages    = useAppSelector((s) => s.notification.messages);
+  const isAuth      = useAppSelector((s) => s.auth.isAuthenticated);
+
+  // Unread count from in-memory slice (WebSocket-driven) takes precedence;
+  // the API query seeds the initial count on mount / after page refresh.
+  const wsUnreadCount = useAppSelector((s) => s.notification.unreadCount);
+  const { data: apiUnreadCount } = useGetUnreadCountQuery(undefined, {
+    skip: !isAuth,
+  });
+  const unreadCount = wsUnreadCount > 0 ? wsUnreadCount : (apiUnreadCount ?? 0);
 
   function handleMarkAllRead() {
     dispatch(markAllRead());

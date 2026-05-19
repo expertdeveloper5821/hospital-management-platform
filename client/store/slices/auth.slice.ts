@@ -1,17 +1,19 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { MeResponse, BrandingConfig } from '../types';
 
+const TOKEN_KEY = 'hms_token';
+
 interface AuthState {
-  token:          string | null;
-  profile:        MeResponse | null; // populated from GET /api/auth/me after login
-  branding:       BrandingConfig | null;
+  token:           string | null;
+  profile:         MeResponse | null;
+  branding:        BrandingConfig | null;
   isAuthenticated: boolean;
 }
 
 const initialState: AuthState = {
-  token:          null,
-  profile:        null,
-  branding:       null,
+  token:           null,
+  profile:         null,
+  branding:        null,
   isAuthenticated: false,
 };
 
@@ -19,10 +21,13 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    // Called after login succeeds — stores token; profile populated by profileLoaded
     tokenReceived(state, action: PayloadAction<string>) {
       state.token          = action.payload;
       state.isAuthenticated = true;
+      // Persist so page-refresh does not force re-login
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(TOKEN_KEY, action.payload);
+      }
     },
     profileLoaded(state, action: PayloadAction<MeResponse>) {
       state.profile = action.payload;
@@ -40,9 +45,14 @@ const authSlice = createSlice({
       state.profile        = null;
       state.branding       = null;
       state.isAuthenticated = false;
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(TOKEN_KEY);
+      }
     },
   },
 });
+
+export const TOKEN_STORAGE_KEY = TOKEN_KEY;
 
 export const {
   tokenReceived,

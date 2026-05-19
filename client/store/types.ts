@@ -27,13 +27,13 @@ export interface LoginApiResponse {
   isFirstLogin: boolean;
 }
 
-/** Shape returned by GET /api/auth/me — full resolved profile */
+/** Shape returned by GET /api/auth/me or GET /api/super-admin/me */
 export interface MeResponse {
-  userId:       string;
-  email:        string;
-  role:         UserRole;
-  tenantId:     string | null;
-  isFirstLogin: boolean;
+  userId:        string;
+  email:         string;
+  role:          UserRole;
+  tenantId:      string | null;
+  isFirstLogin?: boolean; // absent for SUPER_ADMIN (no first-login requirement)
 }
 
 export interface LoginRequest {

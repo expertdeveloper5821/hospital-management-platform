@@ -58,6 +58,14 @@ export function Sidebar() {
     >
       {/* Branding header */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-accent/40 shrink-0">
+        {branding?.logoUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding.logoUrl}
+            alt={displayName}
+            className="h-8 w-8 rounded object-contain shrink-0"
+          />
+        )}
         <span className="font-bold text-lg truncate">{displayName}</span>
       </div>
 
