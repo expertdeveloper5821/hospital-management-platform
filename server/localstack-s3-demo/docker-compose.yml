@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  localstack:
+    container_name: localstack
+
+    image: localstack/localstack:3.0
+
+    ports:
+      - "4566:4566"
+
+    environment:
+      - DEBUG=1
+
+    volumes:
+      - "./localstack-data:/var/lib/localstack"

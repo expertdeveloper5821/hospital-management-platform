@@ -90,6 +90,12 @@ export function errorHandler(
   if (err instanceof AppError) {
     statusCode = err.statusCode;
     message    = err.message;
+  } else if (err.name === 'MulterError') {
+    const multerCode = (err as Error & { code?: string }).code;
+    statusCode = multerCode === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    message    = multerCode === 'LIMIT_FILE_SIZE'
+      ? 'Uploaded file exceeds the maximum allowed size for this report type'
+      : `File upload error: ${err.message}`;
   } else if (MONGO_NETWORK_ERRORS.has(err.name)) {
     statusCode = 503;
     message    = 'Database temporarily unavailable — please retry shortly';
