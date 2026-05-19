@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -48,14 +48,15 @@ export default function LoginPage() {
     }
   }
 
-  // Redirect once profile is loaded (side effect of loginMutation onQueryStarted)
-  if (profile) {
+  // Redirect once profile is loaded (populated by auth.api onQueryStarted after login)
+  useEffect(() => {
+    if (!profile) return;
     if (profile.isFirstLogin) {
       router.replace('/change-password');
     } else {
       router.replace('/dashboard');
     }
-  }
+  }, [profile, router]);
 
   const apiError =
     error && 'data' in error

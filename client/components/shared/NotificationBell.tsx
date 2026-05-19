@@ -8,7 +8,6 @@ import { markAllRead, markRead } from '@/store/slices/notification.slice';
 import type { NotificationMessage } from '@/store/types';
 
 export function NotificationBell() {
-  const [open]        = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const dispatch      = useAppDispatch();
   const messages      = useAppSelector((s) => s.notification.messages);
