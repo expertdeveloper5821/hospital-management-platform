@@ -22,3 +22,6 @@ process.env.CORS_ORIGINS            = 'http://localhost:3001';
 process.env.RATE_LIMIT_WINDOW_MS    = '900000';
 process.env.RATE_LIMIT_MAX_REQUESTS = '1000';
 process.env.FRONTEND_URL            = 'http://localhost:3001';
+process.env.RAZORPAY_KEY_ID         = 'rzp_test_key_id';
+process.env.RAZORPAY_KEY_SECRET     = 'rzp_test_key_secret';
+process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp_test_webhook_secret_32chars!';
