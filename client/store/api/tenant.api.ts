@@ -64,6 +64,8 @@ export const tenantApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
     }),
 
+    // PATCH /:tenantId/branding — sends FormData when a logo file is included,
+    // plain JSON otherwise (backend accepts both text fields).
     updateBranding: build.mutation<{ message: string }, { tenantId: string } & UpdateBrandingRequest>({
       query: ({ tenantId, logo, ...fields }) => {
         if (logo) {
@@ -79,6 +81,7 @@ export const tenantApi = baseApi.injectEndpoints({
       invalidatesTags: ['Tenant'],
     }),
 
+    // GET /:tenantId/branding
     getBranding: build.query<BrandingDetail, string>({
       query: (tenantId) => `/api/tenants/${tenantId}/branding`,
       transformResponse: (raw: ApiSuccess<BrandingDetail>) => raw.data,

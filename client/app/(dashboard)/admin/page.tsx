@@ -145,7 +145,11 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
 
 function BrandingTab({ tenantId }: { tenantId: string }) {
   const dispatch = useAppDispatch();
+
+  // GET /:tenantId/branding — loads current branding on mount
   const { data: branding, isLoading } = useGetBrandingQuery(tenantId);
+
+  // PATCH /:tenantId/branding — saves display name, primary color, and optional logo
   const [updateBranding, { isLoading: saving }] = useUpdateBrandingMutation();
 
   const [displayName,  setDisplayName]  = useState('');
@@ -181,6 +185,7 @@ function BrandingTab({ tenantId }: { tenantId: string }) {
     setError(null);
     setSuccess(null);
     try {
+      // Single PATCH call — sends FormData when a logo is selected, JSON otherwise
       await updateBranding({
         tenantId,
         displayName:  displayName.trim(),
@@ -208,7 +213,6 @@ function BrandingTab({ tenantId }: { tenantId: string }) {
   }
 
   const currentLogo = logoPreview ?? branding?.logoUrl ?? null;
-  const isBusy = saving;
 
   return (
     <form onSubmit={handleSave} className="max-w-lg space-y-6">
@@ -234,7 +238,7 @@ function BrandingTab({ tenantId }: { tenantId: string }) {
               variant="outline"
               size="sm"
               onClick={() => fileRef.current?.click()}
-              disabled={isBusy}
+              disabled={saving}
             >
               <Upload className="h-4 w-4 mr-2" />
               {logoFile ? 'Change File' : 'Upload Logo'}
@@ -302,8 +306,8 @@ function BrandingTab({ tenantId }: { tenantId: string }) {
       )}
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={isBusy}>
-          {isBusy ? 'Saving…' : 'Save Branding'}
+        <Button type="submit" disabled={saving}>
+          {saving ? 'Saving…' : 'Save Branding'}
         </Button>
       </div>
     </form>
