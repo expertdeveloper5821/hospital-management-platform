@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useChangePasswordMutation } from '@/store/api/auth.api';
 import { useAppDispatch } from '@/store/hooks';
-import { setFirstLoginDone } from '@/store/slices/auth.slice';
+import { tokenReceived, setFirstLoginDone } from '@/store/slices/auth.slice';
 
 const schema = z
   .object({
@@ -42,10 +42,12 @@ export default function ChangePasswordPage() {
 
   async function onSubmit(values: Form) {
     try {
-      await changePassword({
+      const { token } = await changePassword({
         currentPassword: values.currentPassword,
         newPassword:     values.newPassword,
       }).unwrap();
+      // Replace the old JWT (which had isFirstLogin: true) with the fresh one
+      dispatch(tokenReceived(token));
       dispatch(setFirstLoginDone());
       router.replace('/dashboard');
     } catch {

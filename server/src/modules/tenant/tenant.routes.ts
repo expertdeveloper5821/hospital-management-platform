@@ -11,8 +11,11 @@ import {
   approveTenant,
   deactivateTenant,
   resendInvite,
+  completeTenantSetup,
   getBranding,
   updateBranding,
+  uploadLogo,
+  logoUpload,
 } from './tenant.controller';
 
 const router = Router();
@@ -36,10 +39,11 @@ router.patch('/:tenantId/deactivate',   authenticateJWT, requireFirstPasswordCha
 router.post('/:tenantId/resend-invite', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), resendInvite);
 
 // Public — invite consumption (rate-limited, no auth)
-router.post('/setup', publicRateLimiter, getBranding); // placeholder — full setup in completeTenantSetup
+router.post('/setup', publicRateLimiter, completeTenantSetup);
 
 // Branding — accessible by Hospital Admin within their tenant
-router.get('/:tenantId/branding',   getBranding);
-router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), updateBranding);
+router.get('/:tenantId/branding',        getBranding);
+router.patch('/:tenantId/branding',      authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), updateBranding);
+router.post('/:tenantId/branding/logo',  authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), logoUpload, uploadLogo);
 
 export default router;

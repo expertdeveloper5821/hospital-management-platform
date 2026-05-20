@@ -56,13 +56,15 @@ export async function changePassword(req: Request, res: Response, next: NextFunc
     const body = changePasswordSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
-    await authService.changePassword(
+    const { token } = await authService.changePassword(
       req.user!.userId,
       req.user!.tenantId,
+      req.user!.role,
+      req.user!.email,
       body.data.currentPassword,
       body.data.newPassword,
     );
-    res.status(200).json({ status: 'success', data: { message: 'Password changed successfully' } });
+    res.status(200).json({ status: 'success', data: { message: 'Password changed successfully', token } });
   } catch (err) { next(err); }
 }
 

@@ -25,6 +25,12 @@ interface UpdateBrandingRequest {
   primaryColor?: string;
 }
 
+interface BrandingDetail {
+  logoUrl?:     string | null;
+  displayName:  string;
+  primaryColor: string;
+}
+
 export const tenantApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
@@ -66,6 +72,22 @@ export const tenantApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
       invalidatesTags: ['Tenant'],
     }),
+
+    getBranding: build.query<BrandingDetail, string>({
+      query: (tenantId) => `/api/tenants/${tenantId}/branding`,
+      transformResponse: (raw: ApiSuccess<BrandingDetail>) => raw.data,
+      providesTags: ['Tenant'],
+    }),
+
+    uploadLogo: build.mutation<{ message: string }, { tenantId: string; file: File }>({
+      query: ({ tenantId, file }) => {
+        const body = new FormData();
+        body.append('logo', file);
+        return { url: `/api/tenants/${tenantId}/branding/logo`, method: 'POST', body };
+      },
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Tenant'],
+    }),
   }),
 });
 
@@ -76,4 +98,6 @@ export const {
   useDeactivateTenantMutation,
   useResendInviteMutation,
   useUpdateBrandingMutation,
+  useGetBrandingQuery,
+  useUploadLogoMutation,
 } = tenantApi;

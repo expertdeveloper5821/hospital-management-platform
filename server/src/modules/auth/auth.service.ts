@@ -116,9 +116,11 @@ export class AuthService {
   async changePassword(
     userId: string,
     tenantId: string | null,
+    role: UserRole,
+    email: string,
     currentPassword: string,
     newPassword: string,
-  ): Promise<void> {
+  ): Promise<{ token: string }> {
     const user = await authRepository.findUserById(userId);
     if (!user) throw new NotFoundError('User not found');
 
@@ -138,6 +140,14 @@ export class AuthService {
       userId,
       tenantId,
     });
+
+    // Issue a fresh JWT with isFirstLogin: false so the client can access
+    // protected routes immediately without requiring a re-login.
+    const payload: JWTPayload = { userId, tenantId, role, email, isFirstLogin: false };
+    const token = jwt.sign(payload, config.jwtSecret, {
+      expiresIn: config.jwtExpiry as jwt.SignOptions['expiresIn'],
+    });
+    return { token };
   }
 
   async forgotPassword(email: string, tenantId: string): Promise<void> {

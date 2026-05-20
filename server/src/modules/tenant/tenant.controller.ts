@@ -1,7 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import multer from 'multer';
 import { tenantService } from './tenant.service';
 import { ValidationError } from '../../shared/middleware/error-handler';
+
+export const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 2 * 1024 * 1024 }, // 2 MB — enforced again server-side
+  fileFilter(_req, file, cb) {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    cb(null, allowed.includes(file.mimetype));
+  },
+}).single('logo');
 
 const createTenantSchema = z.object({
   name:       z.string().min(1).max(200),
@@ -63,6 +73,19 @@ export async function resendInvite(req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 }
 
+export async function completeTenantSetup(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = z.object({
+      token:    z.string().min(1),
+      password: z.string().min(8).max(128),
+    }).safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const result = await tenantService.completeTenantSetup(body.data.token, body.data.password);
+    res.status(201).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
 export async function getBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const branding = await tenantService.getBranding(req.params.tenantId);
@@ -77,10 +100,24 @@ export async function updateBranding(req: Request, res: Response, next: NextFunc
     await tenantService.updateBranding(
       req.params.tenantId,
       body.data,
-      undefined, // logo buffer handled via multipart in a real implementation
+      undefined,
       undefined,
       req.user!.userId,
     );
     res.status(200).json({ status: 'success', data: { message: 'Branding updated' } });
+  } catch (err) { next(err); }
+}
+
+export async function uploadLogo(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.file) throw new ValidationError('No logo file provided');
+    await tenantService.updateBranding(
+      req.params.tenantId,
+      {},
+      req.file.buffer,
+      req.file.mimetype,
+      req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: { message: 'Logo uploaded' } });
   } catch (err) { next(err); }
 }
