@@ -23,6 +23,13 @@ interface CreateTenantRequest {
 interface UpdateBrandingRequest {
   displayName?:  string;
   primaryColor?: string;
+  logo?:         File;
+}
+
+interface BrandingDetail {
+  logoUrl?:     string | null;
+  displayName:  string;
+  primaryColor: string;
 }
 
 export const tenantApi = baseApi.injectEndpoints({
@@ -58,13 +65,24 @@ export const tenantApi = baseApi.injectEndpoints({
     }),
 
     updateBranding: build.mutation<{ message: string }, { tenantId: string } & UpdateBrandingRequest>({
-      query: ({ tenantId, ...body }) => ({
-        url:    `/api/tenants/${tenantId}/branding`,
-        method: 'PATCH',
-        body,
-      }),
+      query: ({ tenantId, logo, ...fields }) => {
+        if (logo) {
+          const body = new FormData();
+          body.append('logo', logo);
+          if (fields.displayName)  body.append('displayName',  fields.displayName);
+          if (fields.primaryColor) body.append('primaryColor', fields.primaryColor);
+          return { url: `/api/tenants/${tenantId}/branding`, method: 'PATCH', body };
+        }
+        return { url: `/api/tenants/${tenantId}/branding`, method: 'PATCH', body: fields };
+      },
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
       invalidatesTags: ['Tenant'],
+    }),
+
+    getBranding: build.query<BrandingDetail, string>({
+      query: (tenantId) => `/api/tenants/${tenantId}/branding`,
+      transformResponse: (raw: ApiSuccess<BrandingDetail>) => raw.data,
+      providesTags: ['Tenant'],
     }),
   }),
 });
@@ -76,4 +94,5 @@ export const {
   useDeactivateTenantMutation,
   useResendInviteMutation,
   useUpdateBrandingMutation,
+  useGetBrandingQuery,
 } = tenantApi;

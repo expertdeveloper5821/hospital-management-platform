@@ -125,9 +125,9 @@ export const authApi = baseApi.injectEndpoints({
     }),
 
     // ── Password management ───────────────────────────────────────────────────
-    changePassword: build.mutation<{ message: string }, ChangePasswordRequest>({
+    changePassword: build.mutation<{ message: string; token: string }, ChangePasswordRequest>({
       query: (body) => ({ url: '/api/auth/change-password', method: 'POST', body }),
-      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      transformResponse: (raw: ApiSuccess<{ message: string; token: string }>) => raw.data,
     }),
 
     forgotPassword: build.mutation<{ message: string }, ForgotPasswordRequest>({
@@ -138,6 +138,17 @@ export const authApi = baseApi.injectEndpoints({
     resetPassword: build.mutation<{ message: string }, ResetPasswordRequest>({
       query: (body) => ({ url: '/api/auth/reset-password', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+    }),
+
+    completeSetup: build.mutation<{ jwtToken: string }, { token: string; password: string }>({
+      query: (body) => ({ url: '/api/tenants/setup', method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<{ jwtToken: string }>) => raw.data,
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled;
+          await handlePostLogin(data.jwtToken, dispatch);
+        } catch { /* error surfaced by caller */ }
+      },
     }),
   }),
 });
@@ -152,4 +163,5 @@ export const {
   useChangePasswordMutation,
   useForgotPasswordMutation,
   useResetPasswordMutation,
+  useCompleteSetupMutation,
 } = authApi;
