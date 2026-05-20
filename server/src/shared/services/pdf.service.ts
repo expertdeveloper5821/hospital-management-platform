@@ -15,6 +15,19 @@ export interface MedicalCardData {
   primaryColor:            string;
 }
 
+export interface ReceiptData {
+  receiptNumber:    string;
+  patientName:      string;
+  patientId:        string;
+  paymentDate:      Date;
+  amountInr:        number;
+  paymentMethod:    string;
+  description:      string;
+  hospitalName:     string;
+  hospitalLogoUrl?: string;
+  primaryColor:     string;
+}
+
 export interface GeneratePDFOptions {
   compress?: boolean; // default true; false in tests for text-searchable streams
 }
@@ -191,6 +204,110 @@ export class PdfService {
 
       // Row 7 — Allergies (blank)
       drawField('Allergies: ', '', M, y, R);
+
+      doc.end();
+    });
+  }
+
+  // ─── U5-A-01: Payment Receipt PDF ────────────────────────────────────────────
+  generateReceipt(data: ReceiptData, options: GeneratePDFOptions = {}): Promise<Buffer> {
+    const { compress = true } = options;
+    return new Promise((resolve, reject) => {
+      // A5 portrait: 419 × 595 pt
+      const doc = new PDFDocument({
+        size:    [419, 595],
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
+        compress,
+        info: {
+          Title:        `Receipt - ${data.receiptNumber}`,
+          Author:       data.hospitalName,
+          Subject:      'Payment Receipt',
+          CreationDate: data.paymentDate,
+        },
+      });
+
+      const chunks: Buffer[] = [];
+      doc.on('data',  (c: Buffer) => chunks.push(c));
+      doc.on('end',   () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const W  = doc.page.width;   // 419
+      const H  = doc.page.height;  // 595
+      const M  = 24;
+      const CW = W - M * 2;        // 371
+      const [pr, pg, pb] = hexToRgb(data.primaryColor);
+
+      // ── Background + border ──────────────────────────────────────────────────
+      doc.rect(0, 0, W, H).fill('white');
+      doc.rect(1, 1, W - 2, H - 2).strokeColor('#DDDDDD').lineWidth(0.5).stroke();
+
+      // ── Header band ──────────────────────────────────────────────────────────
+      doc.rect(0, 0, W, 56).fill([pr, pg, pb]);
+      doc.fillColor('white').fontSize(14).font('Helvetica-Bold')
+        .text(data.hospitalName, M, 15, { width: CW - 90, lineBreak: false });
+      doc.fontSize(9).font('Helvetica')
+        .text('PAYMENT RECEIPT', W - M - 95, 22, { width: 90, align: 'right', lineBreak: false });
+
+      // ── Receipt # and Date ────────────────────────────────────────────────────
+      let y = 72;
+      doc.fillColor('#555555').fontSize(8).font('Helvetica-Bold')
+        .text('Receipt #:', M, y, { lineBreak: false, continued: true });
+      doc.font('Helvetica').fillColor('#111111')
+        .text(` ${data.receiptNumber}`, { lineBreak: false });
+
+      const dateStr = formatDate(data.paymentDate);
+      doc.fillColor('#555555').fontSize(8).font('Helvetica-Bold')
+        .text('Date:', W - M - 120, y, { width: 115, align: 'right', lineBreak: false, continued: true });
+      doc.font('Helvetica').fillColor('#111111')
+        .text(` ${dateStr}`, { lineBreak: false });
+
+      // ── Divider ───────────────────────────────────────────────────────────────
+      y += 20;
+      doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#EEEEEE').lineWidth(1).stroke();
+
+      // ── Patient info ──────────────────────────────────────────────────────────
+      y += 14;
+      const LW = 110;
+
+      const row = (label: string, value: string, rowY: number): void => {
+        doc.fillColor('#777777').fontSize(8).font('Helvetica-Bold')
+          .text(label, M, rowY, { width: LW, lineBreak: false });
+        doc.fillColor('#111111').fontSize(8).font('Helvetica')
+          .text(value, M + LW, rowY, { width: CW - LW, lineBreak: false });
+      };
+
+      row('Patient Name:', data.patientName, y);  y += 18;
+      row('Patient ID:',   data.patientId,   y);
+
+      // ── Divider ───────────────────────────────────────────────────────────────
+      y += 22;
+      doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#EEEEEE').lineWidth(1).stroke();
+
+      // ── Payment info ──────────────────────────────────────────────────────────
+      y += 14;
+      row('Description:',     data.description,   y);  y += 18;
+      row('Payment Method:',  data.paymentMethod, y);
+
+      // ── Amount highlight box ──────────────────────────────────────────────────
+      y += 34;
+      const BOX_H = 52;
+      doc.rect(M, y, CW, BOX_H).fill([pr, pg, pb]);
+
+      const amountStr = new Intl.NumberFormat('en-IN', {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      }).format(data.amountInr);
+
+      doc.fillColor('white').fontSize(8).font('Helvetica')
+        .text('AMOUNT PAID (INR)', M + 10, y + 10, { width: CW - 20, lineBreak: false });
+      doc.fontSize(22).font('Helvetica-Bold')
+        .text(`₹ ${amountStr}`, M + 10, y + 22, { width: CW - 20, align: 'right', lineBreak: false });
+
+      // ── Footer ────────────────────────────────────────────────────────────────
+      y = H - 44;
+      doc.moveTo(M, y).lineTo(W - M, y).strokeColor('#EEEEEE').lineWidth(1).stroke();
+      y += 12;
+      doc.fillColor('#AAAAAA').fontSize(8).font('Helvetica')
+        .text('Thank you for your payment.', M, y, { width: CW, align: 'center', lineBreak: false });
 
       doc.end();
     });

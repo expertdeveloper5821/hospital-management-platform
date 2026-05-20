@@ -12,7 +12,12 @@ import tenantRouter from './modules/tenant/tenant.routes';
 import userRouter    from './modules/user/user.routes';
 import patientRouter from './modules/patient/patient.routes';
 import opdRouter     from './modules/opd/opd.routes';
-import ipdRouter     from './modules/ipd/ipd.routes';
+import ipdRouter       from './modules/ipd/ipd.routes';
+import labRouter          from './modules/lab/lab.routes';
+import inventoryRouter    from './modules/inventory/inventory.routes';
+import notificationRouter from './modules/notification/notification.routes';
+import paymentRouter      from './modules/payment/payment.routes';
+import webhookRouter      from './modules/payment/payment.webhook.routes';
 
 const app = express();
 
@@ -37,6 +42,9 @@ app.use(cors({
   methods:        ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
 }));
+
+// ─── Webhook route (before JSON parser — needs raw Buffer body for HMAC) ─────
+app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRouter);
 
 // ─── Body parser (APP-03) ─────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -67,6 +75,10 @@ app.use('/api/users',       userRouter);
 app.use('/api/patients',    patientRouter);
 app.use('/api/opd',         opdRouter);
 app.use('/api/ipd',         ipdRouter);
+app.use('/api/lab',           labRouter);
+app.use('/api/inventory',     inventoryRouter);
+app.use('/api/notifications', notificationRouter);
+app.use('/api/payments',     paymentRouter);
 
 // ─── 404 handler (APP-08) ─────────────────────────────────────────────────────
 app.use((_req, _res, next) => {

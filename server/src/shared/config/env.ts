@@ -31,11 +31,17 @@ export interface AppConfig {
     accessKeyId:     string;
     secretAccessKey: string;
     s3BucketName:    string;
+    endpoint?:       string;
   };
   corsOrigins:  string[];
   rateLimit: {
     windowMs:    number;
     maxRequests: number;
+  };
+  razorpay: {
+    keyId:         string;
+    keySecret:     string;
+    webhookSecret: string;
   };
 }
 
@@ -61,6 +67,7 @@ const config: AppConfig = {
     accessKeyId:     process.env.AWS_ACCESS_KEY_ID!,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
     s3BucketName:    process.env.S3_BUCKET_NAME!,
+    endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')
@@ -69,6 +76,11 @@ const config: AppConfig = {
   rateLimit: {
     windowMs:    parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '900000', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? '100', 10),
+  },
+  razorpay: {
+    keyId:         process.env.RAZORPAY_KEY_ID      ?? '',
+    keySecret:     process.env.RAZORPAY_KEY_SECRET   ?? '',
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? '',
   },
 };
 
