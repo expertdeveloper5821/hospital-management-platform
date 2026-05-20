@@ -1,8 +1,12 @@
 jest.mock('../../../src/modules/notification/notification.repository');
 jest.mock('../../../src/modules/user/user.repository');
+jest.mock('../../../src/shared/services/websocket.service', () => ({
+  pushToUser: jest.fn(),
+}));
 
 import { notificationRepository } from '../../../src/modules/notification/notification.repository';
 import { userRepository }         from '../../../src/modules/user/user.repository';
+import { pushToUser }             from '../../../src/shared/services/websocket.service';
 import { NotificationService }    from '../../../src/modules/notification/notification.service';
 import { INotification }          from '../../../src/modules/notification/notification.model';
 import { UserRole }               from '../../../src/shared/types/common.types';
@@ -70,6 +74,28 @@ describe('sendNotification', () => {
     expect(mockNotifRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ entityType: null, entityId: null }),
     );
+  });
+
+  test('calls pushToUser with saved notification after DB write (U6-A-04)', async () => {
+    const notif = makeNotification({ notificationId: 'notif-ws-01' });
+    mockNotifRepo.save.mockResolvedValue(notif);
+
+    await service.sendNotification(USER, TENANT, 'Test Title', 'Test message body');
+
+    expect(pushToUser).toHaveBeenCalledWith(
+      USER,
+      expect.objectContaining({ type: 'notification', data: notif }),
+    );
+  });
+
+  test('still returns the notification even if pushToUser is a no-op (offline user)', async () => {
+    const notif = makeNotification();
+    mockNotifRepo.save.mockResolvedValue(notif);
+    (pushToUser as jest.Mock).mockImplementation(() => { /* offline — no-op */ });
+
+    const result = await service.sendNotification(USER, TENANT, 'T', 'M');
+
+    expect(result.notificationId).toBe('notif-001');
   });
 });
 

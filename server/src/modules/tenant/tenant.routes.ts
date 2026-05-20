@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import config from '../../shared/config/env';
 import { authenticateJWT } from '../../shared/middleware/authenticate-jwt';
@@ -14,6 +15,18 @@ import {
   getBranding,
   updateBranding,
 } from './tenant.controller';
+
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPEG and PNG images are allowed'));
+    }
+  },
+});
 
 const router = Router();
 
@@ -40,6 +53,6 @@ router.post('/setup', publicRateLimiter, getBranding); // placeholder — full s
 
 // Branding — accessible by Hospital Admin within their tenant
 router.get('/:tenantId/branding',   getBranding);
-router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), updateBranding);
+router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), logoUpload.single('logo'), updateBranding);
 
 export default router;
