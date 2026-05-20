@@ -48,7 +48,7 @@ export function Sidebar() {
   const displayName = branding?.displayName ?? 'HMS';
 
   async function handleLogout() {
-    await logout();
+    await logout({ isSuperAdmin: profile?.role === 'SUPER_ADMIN' });
   }
 
   return (

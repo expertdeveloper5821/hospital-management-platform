@@ -7,16 +7,17 @@ import {
   useDeactivateTenantMutation,
   useResendInviteMutation,
 } from '@/store/api/tenant.api';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Building2, RefreshCw, CheckCircle, XCircle, Mail } from 'lucide-react';
+import { Building2, RefreshCw, CheckCircle, XCircle, Mail, Plus } from 'lucide-react';
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status) {
-    case 'ACTIVE':   return 'default';
-    case 'PENDING':  return 'secondary';
-    case 'INACTIVE': return 'destructive';
-    default:         return 'outline';
+    case 'ACTIVE':               return 'default';
+    case 'PENDING_VERIFICATION': return 'secondary';
+    case 'INACTIVE':             return 'destructive';
+    default:                     return 'outline';
   }
 }
 
@@ -29,8 +30,8 @@ export default function SuperAdminPage() {
   const [deactivateTenant, { isLoading: deactivating }] = useDeactivateTenantMutation();
   const [resendInvite,     { isLoading: resending    }] = useResendInviteMutation();
 
-  const tenants   = data?.data ?? [];
-  const total     = data?.total ?? 0;
+  const tenants    = data?.data ?? [];
+  const total      = data?.total ?? 0;
   const totalPages = Math.ceil(total / limit);
 
   const isBusy = approving || deactivating || resending;
@@ -45,10 +46,18 @@ export default function SuperAdminPage() {
             Manage hospital tenants — {total} total
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          <Link href="/super-admin/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4 mr-2" />
+              Onboard Hospital
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Table */}
@@ -87,18 +96,20 @@ export default function SuperAdminPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      {tenant.status === 'PENDING' && (
+                      {tenant.status === 'PENDING_VERIFICATION' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          disabled={isBusy}
+                          onClick={() => approveTenant(tenant._id)}
+                        >
+                          <CheckCircle className="h-3.5 w-3.5 mr-1 text-green-500" />
+                          Approve
+                        </Button>
+                      )}
+                      {tenant.status === 'ACTIVE' && (
                         <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs"
-                            disabled={isBusy}
-                            onClick={() => approveTenant(tenant._id)}
-                          >
-                            <CheckCircle className="h-3.5 w-3.5 mr-1 text-green-500" />
-                            Approve
-                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -107,21 +118,19 @@ export default function SuperAdminPage() {
                             onClick={() => resendInvite(tenant._id)}
                           >
                             <Mail className="h-3.5 w-3.5 mr-1" />
-                            Resend
+                            Resend Invite
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                            disabled={isBusy}
+                            onClick={() => deactivateTenant(tenant._id)}
+                          >
+                            <XCircle className="h-3.5 w-3.5 mr-1" />
+                            Deactivate
                           </Button>
                         </>
-                      )}
-                      {tenant.status === 'ACTIVE' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                          disabled={isBusy}
-                          onClick={() => deactivateTenant(tenant._id)}
-                        >
-                          <XCircle className="h-3.5 w-3.5 mr-1" />
-                          Deactivate
-                        </Button>
                       )}
                     </div>
                   </td>
