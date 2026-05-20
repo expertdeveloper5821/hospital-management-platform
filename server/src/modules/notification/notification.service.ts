@@ -1,8 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { notificationRepository } from './notification.repository';
-import { userRepository } from '../user/user.repository';
-import { INotification } from './notification.model';
-import { UserRole } from '../../shared/types/common.types';
+import { userRepository }         from '../user/user.repository';
+import { INotification }          from './notification.model';
+import { UserRole }               from '../../shared/types/common.types';
+import { pushToUser }             from '../../shared/services/websocket.service';
 
 export class NotificationService {
   async sendNotification(
@@ -13,7 +14,7 @@ export class NotificationService {
     entityType: string | null = null,
     entityId:   string | null = null,
   ): Promise<INotification> {
-    return notificationRepository.save({
+    const notification = await notificationRepository.save({
       notificationId: uuidv4(),
       userId,
       tenantId,
@@ -23,6 +24,9 @@ export class NotificationService {
       entityId,
       isRead: false,
     });
+    // U6-A-04: Real-time push — no-op if user is offline
+    pushToUser(userId, { type: 'notification', data: notification });
+    return notification;
   }
 
   // Fans out to all active users in the given role (up to 200 per page).

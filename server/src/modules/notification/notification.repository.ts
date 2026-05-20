@@ -13,8 +13,10 @@ export class NotificationRepository {
     limit     = 20,
   ): Promise<INotification[]> {
     assertDbConnected();
+    // U6-B-01: history capped at last 30 days (FR-N-04)
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     return NotificationModel
-      .find({ tenantId, userId })
+      .find({ tenantId, userId, createdAt: { $gte: since } })
       .sort({ createdAt: -1 })
       .limit(limit);
   }

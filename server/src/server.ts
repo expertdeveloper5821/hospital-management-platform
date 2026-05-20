@@ -62,7 +62,7 @@ async function start(): Promise<void> {
 
   // 2. Start HTTP server
   httpServer = http.createServer(app);
-  httpServer.listen(config.port, () => {
+  httpServer.listen(config.port, '0.0.0.0',() => {
     console.log(JSON.stringify({
       level:     'info',
       event:     'server_started',

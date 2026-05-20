@@ -18,6 +18,7 @@ import inventoryRouter    from './modules/inventory/inventory.routes';
 import notificationRouter from './modules/notification/notification.routes';
 import paymentRouter      from './modules/payment/payment.routes';
 import webhookRouter      from './modules/payment/payment.webhook.routes';
+import auditRouter        from './modules/audit/audit.routes';
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use('/api/lab',           labRouter);
 app.use('/api/inventory',     inventoryRouter);
 app.use('/api/notifications', notificationRouter);
 app.use('/api/payments',     paymentRouter);
+app.use('/api/audit',        auditRouter);
 
 // ─── 404 handler (APP-08) ─────────────────────────────────────────────────────
 app.use((_req, _res, next) => {
