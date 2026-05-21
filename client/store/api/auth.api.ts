@@ -140,7 +140,7 @@ export const authApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
     }),
 
-    completeSetup: build.mutation<{ jwtToken: string }, { token: string; password: string }>({
+    completeSetup: build.mutation<{ jwtToken: string }, { token: string; name: string; password: string }>({
       query: (body) => ({ url: '/api/tenants/setup', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<{ jwtToken: string }>) => raw.data,
       async onQueryStarted(_arg, { dispatch, queryFulfilled }) {

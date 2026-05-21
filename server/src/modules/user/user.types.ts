@@ -10,6 +10,11 @@ export interface UpdateRoleRequest {
   role: UserRole;
 }
 
+export interface UpdateProfileRequest {
+  name?:  string;
+  email?: string;
+}
+
 export interface UserResponse {
   userId:      string;
   email:       string;

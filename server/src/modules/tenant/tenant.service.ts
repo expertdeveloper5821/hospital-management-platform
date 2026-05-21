@@ -1,12 +1,16 @@
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { tenantRepository } from './tenant.repository';
+import { userRepository } from '../user/user.repository';
 import { ITenant } from './tenant.model';
 import { emailService } from '../../shared/services/email.service';
 import { s3Service } from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
 import { tenantCache } from '../../shared/config/tenant-cache';
-import { TenantStatus, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
+import config from '../../shared/config/env';
+import { TenantStatus, AuditEntityType, UserRole, JWTPayload, PaginatedResult } from '../../shared/types/common.types';
+import { NotFoundError, ConflictError, ValidationError, UnauthorizedError } from '../../shared/middleware/error-handler';
 import { CreateTenantRequest, UpdateBrandingRequest, BrandingConfig } from './tenant.types';
 
 const INVITE_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
@@ -103,6 +107,48 @@ export class TenantService {
       userId:     superAdminId,
       tenantId:   null,
       newValue:   { event: 'invite_resent' },
+    });
+  }
+
+  async completeTenantSetup(token: string, name: string, password: string): Promise<string> {
+    const tenant = await tenantRepository.consumeInviteToken(token);
+    if (!tenant) throw new UnauthorizedError('Invalid or expired invite token');
+
+    const existing = await userRepository.findByEmail(tenant._id.toString(), tenant.adminEmail);
+    if (existing) throw new ConflictError('Hospital admin account already set up. Please log in.');
+
+    const passwordHash = await bcrypt.hash(password, config.bcryptRounds);
+
+    const user = await userRepository.save({
+      tenantId:            tenant._id.toString(),
+      email:               tenant.adminEmail,
+      name,
+      passwordHash,
+      role:                UserRole.HOSPITAL_ADMIN,
+      isActive:            true,
+      isFirstLogin:        false,
+      failedLoginAttempts: 0,
+    });
+
+    await auditService.log({
+      entityType: AuditEntityType.USER_ACCOUNT,
+      entityId:   user._id.toString(),
+      action:     'CREATE',
+      userId:     user._id.toString(),
+      tenantId:   tenant._id.toString(),
+      newValue:   { email: tenant.adminEmail, role: UserRole.HOSPITAL_ADMIN },
+    });
+
+    const payload: JWTPayload = {
+      userId:       user._id.toString(),
+      tenantId:     tenant._id.toString(),
+      role:         UserRole.HOSPITAL_ADMIN,
+      email:        tenant.adminEmail,
+      isFirstLogin: false,
+    };
+
+    return jwt.sign(payload, config.jwtSecret, {
+      expiresIn: config.jwtExpiry as jwt.SignOptions['expiresIn'],
     });
   }
 

@@ -63,6 +63,22 @@ export async function resendInvite(req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 }
 
+const completeSetupSchema = z.object({
+  token:    z.string().min(1),
+  name:     z.string().min(1).max(200),
+  password: z.string().min(8).max(128),
+});
+
+export async function completeTenantSetup(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = completeSetupSchema.safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const jwtToken = await tenantService.completeTenantSetup(body.data.token, body.data.name, body.data.password);
+    res.status(201).json({ status: 'success', data: { jwtToken } });
+  } catch (err) { next(err); }
+}
+
 export async function getBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const branding = await tenantService.getBranding(req.params.tenantId);

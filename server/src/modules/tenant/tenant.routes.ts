@@ -12,6 +12,7 @@ import {
   approveTenant,
   deactivateTenant,
   resendInvite,
+  completeTenantSetup,
   getBranding,
   updateBranding,
 } from './tenant.controller';
@@ -49,7 +50,7 @@ router.patch('/:tenantId/deactivate',   authenticateJWT, requireFirstPasswordCha
 router.post('/:tenantId/resend-invite', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), resendInvite);
 
 // Public — invite consumption (rate-limited, no auth)
-router.post('/setup', publicRateLimiter, getBranding); // placeholder — full setup in completeTenantSetup
+router.post('/setup', publicRateLimiter, completeTenantSetup);
 
 // Branding — accessible by Hospital Admin within their tenant
 router.get('/:tenantId/branding',   getBranding);

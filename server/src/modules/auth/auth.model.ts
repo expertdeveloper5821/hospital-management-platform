@@ -32,6 +32,7 @@ export const SuperAdminModel = mongoose.model<ISuperAdmin>('SuperAdmin', SuperAd
 export interface IUser extends Document {
   tenantId:            string;
   email:               string;
+  name:                string;
   passwordHash:        string;
   role:                UserRole;
   isActive:            boolean;
@@ -48,6 +49,7 @@ const UserSchema = new Schema<IUser>(
   {
     tenantId:            { type: String, required: true, index: true },
     email:               { type: String, required: true, lowercase: true, trim: true },
+    name:                { type: String, required: true, trim: true },
     passwordHash:        { type: String, required: true },
     role:                { type: String, required: true, enum: Object.values(UserRole) },
     isActive:            { type: Boolean, default: true },

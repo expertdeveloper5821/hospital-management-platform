@@ -13,6 +13,7 @@ import { useCompleteSetupMutation } from '@/store/api/auth.api';
 
 const schema = z
   .object({
+    name:            z.string().min(1, 'Name is required').max(200),
     password:        z.string().min(8, 'Minimum 8 characters'),
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
@@ -39,7 +40,7 @@ function SetupForm() {
   async function onSubmit(values: Form) {
     if (!token) return;
     try {
-      await completeSetup({ token, password: values.password }).unwrap();
+      await completeSetup({ token, name: values.name, password: values.password }).unwrap();
       router.replace('/dashboard');
     } catch { /* error displayed below */ }
   }
@@ -76,6 +77,19 @@ function SetupForm() {
       {!isSuccess && (
         <form onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Your name</Label>
+              <Input
+                id="name"
+                placeholder="Full name"
+                autoComplete="name"
+                {...register('name')}
+              />
+              {errors.name && (
+                <p className="text-xs text-destructive">{errors.name.message}</p>
+              )}
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
