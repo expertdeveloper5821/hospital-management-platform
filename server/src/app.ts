@@ -30,14 +30,15 @@ app.use(helmet());
 
 // ─── CORS (SECURITY-08: restricted to CORS_ORIGINS) ──────────────────────────
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., server-to-server, curl)
-    if (!origin || config.corsOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  // (origin, callback) => {
+  //   // Allow requests with no origin (e.g., server-to-server, curl)
+  //   if (!origin || config.corsOrigins.includes(origin)) {
+  //     callback(null, true);
+  //   } else {
+  //     callback(new Error('Not allowed by CORS'));
+  //   }
+  // },
+  origin: true,
   credentials:    true,
   methods:        ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
