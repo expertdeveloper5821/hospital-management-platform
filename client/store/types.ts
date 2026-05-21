@@ -193,6 +193,98 @@ export interface OPDPatientHistory {
   limit: number;
 }
 
+// ─── Lab ──────────────────────────────────────────────────────────────────────
+
+export type LabRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface PathologyRequestResponse {
+  requestId:   string;
+  patientId:   string;
+  tenantId:    string;
+  requestedBy: string;
+  testType:    string;
+  status:      LabRequestStatus;
+  notes:       string | null;
+  reportUrl:   string | null;
+  requestedAt: string;
+  updatedAt:   string;
+}
+
+export interface RadiologyRequestResponse {
+  requestId:   string;
+  patientId:   string;
+  tenantId:    string;
+  requestedBy: string;
+  imagingType: string;
+  status:      LabRequestStatus;
+  notes:       string | null;
+  reportUrl:   string | null;
+  requestedAt: string;
+  updatedAt:   string;
+}
+
+export interface CreatePathologyRequest {
+  patientId: string;
+  testType:  string;
+  notes?:    string;
+}
+
+export interface CreateRadiologyRequest {
+  patientId:   string;
+  imagingType: string;
+  notes?:      string;
+}
+
+export interface LabListResult<T> {
+  data:       T[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+export interface InventoryItemResponse {
+  itemId:            string;
+  tenantId:          string;
+  name:              string;
+  category:          string;
+  unit:              string;
+  quantity:          number;
+  lowStockThreshold: number;
+  description:       string | null;
+  isLowStock:        boolean;
+  createdAt:         string;
+  updatedAt:         string;
+}
+
+export interface CreateInventoryItemRequest {
+  name:              string;
+  category:          string;
+  unit:              string;
+  quantity:          number;
+  lowStockThreshold: number;
+  description?:      string;
+}
+
+export interface UpdateStockRequest {
+  quantityChange: number;
+  reason:         string;
+}
+
+export interface UpdateThresholdRequest {
+  lowStockThreshold: number;
+}
+
+export interface InventoryListResult {
+  data:       InventoryItemResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 export interface ApiSuccess<T> {
