@@ -6,7 +6,7 @@ import { s3Service } from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
 import { tenantCache } from '../../shared/config/tenant-cache';
 import { TenantStatus, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { NotFoundError, ConflictError, ValidationError, AppError } from '../../shared/middleware/error-handler';
+import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateTenantRequest, UpdateBrandingRequest, BrandingConfig } from './tenant.types';
 
 const INVITE_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
@@ -109,7 +109,12 @@ export class TenantService {
   async getBranding(tenantId: string): Promise<BrandingConfig> {
     const tenant = await tenantRepository.findById(tenantId);
     if (!tenant) throw new NotFoundError('Tenant not found');
-    return tenant.branding;
+
+    const branding = { ...tenant.branding };
+    if (branding.logoUrl) {
+      branding.logoUrl = await s3Service.getPresignedUrl(branding.logoUrl, 86400);
+    }
+    return branding;
   }
 
   async updateBranding(

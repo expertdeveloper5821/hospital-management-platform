@@ -92,88 +92,256 @@ export interface NotificationMessage {
 
 // ─── Patient ──────────────────────────────────────────────────────────────────
 
+export type Gender     = 'MALE' | 'FEMALE' | 'OTHER';
+export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+
 export interface PatientResponse {
   patientId:              string;
   fullName:               string;
   dateOfBirth:            string;
-  gender:                 'MALE' | 'FEMALE' | 'OTHER';
+  gender:                 Gender;
   mobileNumber:           string;
   address:                string;
   aadhaarNumber:          string | null;
   emergencyContactName:   string | null;
   emergencyContactMobile: string | null;
-  bloodGroup:             string | null;
+  bloodGroup:             BloodGroup | null;
   tenantId:               string;
   createdAt:              string;
   updatedAt:              string;
 }
 
-// ─── IPD ──────────────────────────────────────────────────────────────────────
-
-export interface WardResponse {
-  wardId:    string;
-  name:      string;
-  floor:     string | null;
-  tenantId:  string;
-  createdAt: string;
+export interface CreatePatientRequest {
+  fullName:               string;
+  dateOfBirth:            string; // YYYY-MM-DD
+  gender:                 Gender;
+  mobileNumber:           string;
+  address:                string;
+  aadhaarNumber?:         string;
+  emergencyContactName?:  string;
+  emergencyContactMobile?: string;
+  bloodGroup?:            BloodGroup;
+  forceCreate?:           boolean;
 }
 
-export interface BedResponse {
-  bedId:              string;
-  wardId:             string;
-  bedNumber:          string;
-  isOccupied:         boolean;
-  currentAdmissionId: string | null;
-  tenantId:           string;
-  createdAt:          string;
+export interface UpdatePatientRequest {
+  fullName?:               string;
+  dateOfBirth?:            string;
+  gender?:                 Gender;
+  mobileNumber?:           string;
+  address?:                string;
+  aadhaarNumber?:          string;
+  emergencyContactName?:   string;
+  emergencyContactMobile?: string;
+  bloodGroup?:             BloodGroup;
 }
 
-export interface ProgressNote {
-  noteId:    string;
-  doctorId:  string;
-  note:      string;
-  timestamp: string;
+export interface PatientSearchResult {
+  data:  PatientResponse[];
+  total: number;
+  page:  number;
+  limit: number;
 }
 
-export interface AdmissionResponse {
-  admissionId:      string;
-  patientId:        string;
-  wardId:           string;
-  wardName:         string;
-  bedId:            string;
-  bedNumber:        string;
-  assignedDoctorId: string;
-  status:           'ADMITTED' | 'DISCHARGED';
-  admissionDate:    string;
-  dischargeDate:    string | null;
-  progressNotes:    ProgressNote[];
+// ─── OPD ──────────────────────────────────────────────────────────────────────
+
+export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+
+export interface OPDVisitResponse {
+  visitId:        string;
+  tenantId:       string;
+  patientId:      string;
+  doctorId:       string | null;
+  visitDate:      string;
+  queueNumber:    number;
+  status:         OPDVisitStatus;
+  chiefComplaint: string;
+  diagnosis:      string | null;
+  prescription:   string | null;
+  notes:          string | null;
+  createdAt:      string;
+  updatedAt:      string;
 }
 
-export interface WardOccupancySummary {
-  wardId:    string;
-  wardName:  string;
-  floor:     string | null;
-  total:     number;
-  occupied:  number;
-  available: number;
+export interface CreateOPDVisitRequest {
+  patientId:      string;
+  chiefComplaint: string;
+  doctorId?:      string;
+  visitDate?:     string; // YYYY-MM-DD
+  notes?:         string;
 }
 
-export interface CreateAdmissionRequest {
-  patientId:        string;
-  wardId:           string;
-  bedId:            string;
-  assignedDoctorId: string;
+export interface UpdateOPDVisitRequest {
+  chiefComplaint?: string;
+  doctorId?:       string;
+  visitDate?:      string;
+  diagnosis?:      string;
+  prescription?:   string;
+  notes?:          string;
 }
 
-export interface AddProgressNoteRequest {
-  note: string;
+export interface CompleteOPDVisitRequest {
+  diagnosis:     string;
+  prescription?: string;
+  notes?:        string;
 }
 
-export interface ListAdmissionsQuery {
-  wardId?: string;
-  status?: 'ADMITTED' | 'DISCHARGED';
-  page?:   number;
-  limit?:  number;
+export interface OPDPatientHistory {
+  data:  OPDVisitResponse[];
+  total: number;
+  page:  number;
+  limit: number;
+}
+
+// ─── Lab ──────────────────────────────────────────────────────────────────────
+
+export type LabRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface PathologyRequestResponse {
+  requestId:   string;
+  patientId:   string;
+  tenantId:    string;
+  requestedBy: string;
+  testType:    string;
+  status:      LabRequestStatus;
+  notes:       string | null;
+  reportUrl:   string | null;
+  requestedAt: string;
+  updatedAt:   string;
+}
+
+export interface RadiologyRequestResponse {
+  requestId:   string;
+  patientId:   string;
+  tenantId:    string;
+  requestedBy: string;
+  imagingType: string;
+  status:      LabRequestStatus;
+  notes:       string | null;
+  reportUrl:   string | null;
+  requestedAt: string;
+  updatedAt:   string;
+}
+
+export interface CreatePathologyRequest {
+  patientId: string;
+  testType:  string;
+  notes?:    string;
+}
+
+export interface CreateRadiologyRequest {
+  patientId:   string;
+  imagingType: string;
+  notes?:      string;
+}
+
+export interface LabListResult<T> {
+  data:       T[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Inventory ────────────────────────────────────────────────────────────────
+
+export interface InventoryItemResponse {
+  itemId:            string;
+  tenantId:          string;
+  name:              string;
+  category:          string;
+  unit:              string;
+  quantity:          number;
+  lowStockThreshold: number;
+  description:       string | null;
+  isLowStock:        boolean;
+  createdAt:         string;
+  updatedAt:         string;
+}
+
+export interface CreateInventoryItemRequest {
+  name:              string;
+  category:          string;
+  unit:              string;
+  quantity:          number;
+  lowStockThreshold: number;
+  description?:      string;
+}
+
+export interface UpdateStockRequest {
+  quantityChange: number;
+  reason:         string;
+}
+
+export interface UpdateThresholdRequest {
+  lowStockThreshold: number;
+}
+
+export interface InventoryListResult {
+  data:       InventoryItemResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Payment ──────────────────────────────────────────────────────────────────
+
+export type PaymentMethod = 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
+export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+
+export interface PaymentResponse {
+  paymentId:         string;
+  tenantId:          string;
+  patientId:         string;
+  amount:            number;
+  paymentMethod:     PaymentMethod;
+  description:       string;
+  status:            PaymentStatus;
+  receiptUrl:        string | null;
+  razorpayOrderId:   string | null;
+  razorpayPaymentId: string | null;
+  createdBy:         string;
+  createdAt:         string;
+  updatedAt:         string;
+}
+
+export interface CreateManualPaymentRequest {
+  patientId:     string;
+  amount:        number;
+  paymentMethod: 'CASH' | 'CHEQUE';
+  description:   string;
+}
+
+export interface CreateRazorpayOrderRequest {
+  patientId:     string;
+  amount:        number;
+  paymentMethod: 'UPI' | 'CARD';
+  description:   string;
+}
+
+export interface RazorpayOrderResponse {
+  paymentId:       string;
+  razorpayOrderId: string;
+  amountPaise:     number;
+  currency:        string;
+  keyId:           string;
+}
+
+export interface PaymentSummaryResponse {
+  CASH:   number;
+  CHEQUE: number;
+  UPI:    number;
+  CARD:   number;
+  total:  number;
+}
+
+export interface PaymentListResult {
+  data:       PaymentResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
 }
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
