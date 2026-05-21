@@ -77,8 +77,8 @@ export async function updateBranding(req: Request, res: Response, next: NextFunc
     await tenantService.updateBranding(
       req.params.tenantId,
       body.data,
-      undefined, // logo buffer handled via multipart in a real implementation
-      undefined,
+      req.file?.buffer,
+      req.file?.mimetype,
       req.user!.userId,
     );
     res.status(200).json({ status: 'success', data: { message: 'Branding updated' } });
