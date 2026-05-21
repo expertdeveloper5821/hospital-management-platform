@@ -83,11 +83,14 @@ export interface UserResponse {
 // ─── Notifications ────────────────────────────────────────────────────────────
 
 export interface NotificationMessage {
-  id:        string;
-  message:   string;
-  type:      string;
-  timestamp: string;
-  read:      boolean;
+  id:          string;
+  title:       string;
+  message:     string;
+  type:        string;
+  entityType?: string | null;
+  entityId?:   string | null;
+  timestamp:   string;
+  read:        boolean;
 }
 
 // ─── Patient ──────────────────────────────────────────────────────────────────
@@ -338,6 +341,43 @@ export interface PaymentSummaryResponse {
 
 export interface PaymentListResult {
   data:       PaymentResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Audit ────────────────────────────────────────────────────────────────────
+
+export const AuditEntityTypes = [
+  'PATIENT',
+  'OPD_VISIT',
+  'IPD_ADMISSION',
+  'PATHOLOGY_REQUEST',
+  'RADIOLOGY_REQUEST',
+  'INVENTORY_ITEM',
+  'PAYMENT_RECORD',
+  'USER_ACCOUNT',
+  'TENANT',
+  'AUTH',
+] as const;
+
+export type AuditEntityType = typeof AuditEntityTypes[number];
+
+export interface AuditLogEntry {
+  auditId:        string;
+  entityType:     string;
+  entityId:       string;
+  action:         string;
+  userId:         string;
+  tenantId:       string | null;
+  previousValue?: Record<string, unknown>;
+  newValue?:      Record<string, unknown>;
+  timestamp:      string;
+}
+
+export interface AuditListResult {
+  data:       AuditLogEntry[];
   total:      number;
   page:       number;
   limit:      number;

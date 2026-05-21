@@ -6,7 +6,6 @@
 
 import { store } from '@/store';
 import { messageReceived, setConnected } from '@/store/slices/notification.slice';
-import type { NotificationMessage } from '@/store/types';
 
 const WS_BASE = (process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:5000').replace(/\/$/, '');
 
@@ -57,8 +56,32 @@ class WebSocketClient {
 
     this.socket.onmessage = (event: MessageEvent) => {
       try {
-        const payload = JSON.parse(event.data as string) as NotificationMessage;
-        store.dispatch(messageReceived(payload));
+        const envelope = JSON.parse(event.data as string) as {
+          type: string;
+          data?: {
+            notificationId: string;
+            title:          string;
+            message:        string;
+            entityType:     string | null;
+            entityId:       string | null;
+            isRead:         boolean;
+            createdAt:      string;
+          };
+        };
+        if (envelope.type === 'notification' && envelope.data) {
+          const n = envelope.data;
+          store.dispatch(messageReceived({
+            id:         n.notificationId,
+            title:      n.title,
+            message:    n.message,
+            type:       'notification',
+            entityType: n.entityType,
+            entityId:   n.entityId,
+            timestamp:  n.createdAt ?? new Date().toISOString(),
+            read:       n.isRead,
+          }));
+        }
+        // 'connected' frame is handled by onopen → setConnected(true); skip here
       } catch {
         // Ignore malformed frames
       }

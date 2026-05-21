@@ -9,16 +9,18 @@ import type { NotificationMessage } from '../types';
 
 const msg1: NotificationMessage = {
   id:        'n-1',
+  title:     'Lab Report Ready',
   message:   'Lab report ready',
-  type:      'LAB_REPORT',
+  type:      'notification',
   timestamp: '2026-05-19T10:00:00Z',
   read:      false,
 };
 
 const msg2: NotificationMessage = {
   id:        'n-2',
+  title:     'Low Stock Alert',
   message:   'Low stock alert',
-  type:      'INVENTORY_ALERT',
+  type:      'notification',
   timestamp: '2026-05-19T11:00:00Z',
   read:      false,
 };
