@@ -285,6 +285,65 @@ export interface InventoryListResult {
   totalPages: number;
 }
 
+// ─── Payment ──────────────────────────────────────────────────────────────────
+
+export type PaymentMethod = 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
+export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+
+export interface PaymentResponse {
+  paymentId:         string;
+  tenantId:          string;
+  patientId:         string;
+  amount:            number;
+  paymentMethod:     PaymentMethod;
+  description:       string;
+  status:            PaymentStatus;
+  receiptUrl:        string | null;
+  razorpayOrderId:   string | null;
+  razorpayPaymentId: string | null;
+  createdBy:         string;
+  createdAt:         string;
+  updatedAt:         string;
+}
+
+export interface CreateManualPaymentRequest {
+  patientId:     string;
+  amount:        number;
+  paymentMethod: 'CASH' | 'CHEQUE';
+  description:   string;
+}
+
+export interface CreateRazorpayOrderRequest {
+  patientId:     string;
+  amount:        number;
+  paymentMethod: 'UPI' | 'CARD';
+  description:   string;
+}
+
+export interface RazorpayOrderResponse {
+  paymentId:       string;
+  razorpayOrderId: string;
+  amountPaise:     number;
+  currency:        string;
+  keyId:           string;
+}
+
+export interface PaymentSummaryResponse {
+  CASH:   number;
+  CHEQUE: number;
+  UPI:    number;
+  CARD:   number;
+  total:  number;
+}
+
+export interface PaymentListResult {
+  data:       PaymentResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 export interface ApiSuccess<T> {
