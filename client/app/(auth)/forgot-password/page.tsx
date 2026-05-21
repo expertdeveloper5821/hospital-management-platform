@@ -30,7 +30,7 @@ export default function ForgotPasswordPage() {
     try {
       await forgotPassword({ email: values.email, tenantId: values.tenantId }).unwrap();
     } catch {
-      // always show success message to avoid email enumeration (FR-05.8)
+      // Errors (e.g. setup-not-complete) are surfaced via RTK Query's `error` state below
     }
   }
 
@@ -75,9 +75,10 @@ export default function ForgotPasswordPage() {
             </div>
 
             {error && !isSuccess && (
-              <p className="text-sm text-muted-foreground bg-muted px-3 py-2 rounded-md">
-                {/* Always show generic message — never reveal whether email exists */}
-                If that email exists, a reset link has been sent.
+              <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                {'data' in error
+                  ? (error.data as { message?: string })?.message ?? 'Something went wrong. Please try again.'
+                  : 'Something went wrong. Please try again.'}
               </p>
             )}
           </CardContent>

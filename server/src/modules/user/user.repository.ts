@@ -1,6 +1,6 @@
 import { UserModel, IUser } from './user.model';
 import { UserRole, PaginatedResult } from '../../shared/types/common.types';
-import { ListUsersFilters } from './user.types';
+import { ListUsersFilters, UpdateProfileRequest } from './user.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
 export class UserRepository {
@@ -55,6 +55,14 @@ export class UserRepository {
   async setActive(tenantId: string, userId: string, isActive: boolean): Promise<void> {
     assertDbConnected();
     await UserModel.findOneAndUpdate({ _id: userId, tenantId }, { isActive });
+  }
+
+  async updateProfile(tenantId: string, userId: string, data: UpdateProfileRequest): Promise<IUser | null> {
+    assertDbConnected();
+    const update: Partial<IUser> = {};
+    if (data.name)  update.name  = data.name;
+    if (data.email) update.email = data.email.toLowerCase();
+    return UserModel.findOneAndUpdate({ _id: userId, tenantId }, update, { new: true });
   }
 }
 

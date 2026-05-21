@@ -7,7 +7,7 @@ import { emailService } from '../../shared/services/email.service';
 import { auditService } from '../../shared/services/audit.service';
 import { UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
 import { ConflictError, NotFoundError } from '../../shared/middleware/error-handler';
-import { CreateUserRequest, ListUsersFilters } from './user.types';
+import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest } from './user.types';
 
 export class UserService {
   async createUser(tenantId: string, data: CreateUserRequest, createdBy: string): Promise<IUser> {
@@ -22,6 +22,7 @@ export class UserService {
     const user = await userRepository.save({
       tenantId,
       email:        data.email,
+      name:         data.name,
       passwordHash,
       role:         data.role,
       isActive:     true,
@@ -115,6 +116,36 @@ export class UserService {
     const user = await userRepository.findById(tenantId, userId);
     if (!user) throw new NotFoundError('User not found');
     return user;
+  }
+
+  async updateUserProfile(
+    tenantId: string,
+    userId: string,
+    data: UpdateProfileRequest,
+    requestedBy: string,
+  ): Promise<IUser> {
+    const user = await userRepository.findById(tenantId, userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    if (data.email && data.email.toLowerCase() !== user.email) {
+      const conflict = await userRepository.findByEmail(tenantId, data.email);
+      if (conflict) throw new ConflictError('A user with this email already exists in this tenant');
+    }
+
+    const updated = await userRepository.updateProfile(tenantId, userId, data);
+    if (!updated) throw new NotFoundError('User not found');
+
+    await auditService.log({
+      entityType:    AuditEntityType.USER_ACCOUNT,
+      entityId:      userId,
+      action:        'UPDATE',
+      userId:        requestedBy,
+      tenantId,
+      previousValue: { name: user.name, email: user.email },
+      newValue:      data as Record<string, unknown>,
+    });
+
+    return updated;
   }
 }
 

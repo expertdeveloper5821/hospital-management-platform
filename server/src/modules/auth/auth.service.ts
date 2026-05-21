@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import config from '../../shared/config/env';
 import { JWTPayload, UserRole, AuditEntityType } from '../../shared/types/common.types';
 import { authRepository } from './auth.repository';
+import { tenantRepository } from '../tenant/tenant.repository';
 import { emailService } from '../../shared/services/email.service';
 import { auditService } from '../../shared/services/audit.service';
 import { addToDenylist } from '../../shared/middleware/token-denylist';
@@ -142,8 +143,18 @@ export class AuthService {
 
   async forgotPassword(email: string, tenantId: string): Promise<void> {
     const user = await authRepository.findUserByEmail(tenantId, email);
-    // FR-05.8: Always return success — never reveal whether email exists
-    if (!user) return;
+
+    if (!user) {
+      // Detect setup-not-completed: tenant exists with this adminEmail but no user record yet
+      const tenant = await tenantRepository.findById(tenantId);
+      if (tenant && tenant.adminEmail === email.toLowerCase()) {
+        throw new ValidationError(
+          'Your account setup is not complete. Please check your email for the setup link, or ask your administrator to resend it.',
+        );
+      }
+      // FR-05.8: For all other cases never reveal whether the email exists
+      return;
+    }
 
     const token  = crypto.randomBytes(32).toString('hex');
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
