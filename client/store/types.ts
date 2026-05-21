@@ -90,6 +90,109 @@ export interface NotificationMessage {
   read:      boolean;
 }
 
+// ─── Patient ──────────────────────────────────────────────────────────────────
+
+export type Gender     = 'MALE' | 'FEMALE' | 'OTHER';
+export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+
+export interface PatientResponse {
+  patientId:              string;
+  fullName:               string;
+  dateOfBirth:            string;
+  gender:                 Gender;
+  mobileNumber:           string;
+  address:                string;
+  aadhaarNumber:          string | null;
+  emergencyContactName:   string | null;
+  emergencyContactMobile: string | null;
+  bloodGroup:             BloodGroup | null;
+  tenantId:               string;
+  createdAt:              string;
+  updatedAt:              string;
+}
+
+export interface CreatePatientRequest {
+  fullName:               string;
+  dateOfBirth:            string; // YYYY-MM-DD
+  gender:                 Gender;
+  mobileNumber:           string;
+  address:                string;
+  aadhaarNumber?:         string;
+  emergencyContactName?:  string;
+  emergencyContactMobile?: string;
+  bloodGroup?:            BloodGroup;
+  forceCreate?:           boolean;
+}
+
+export interface UpdatePatientRequest {
+  fullName?:               string;
+  dateOfBirth?:            string;
+  gender?:                 Gender;
+  mobileNumber?:           string;
+  address?:                string;
+  aadhaarNumber?:          string;
+  emergencyContactName?:   string;
+  emergencyContactMobile?: string;
+  bloodGroup?:             BloodGroup;
+}
+
+export interface PatientSearchResult {
+  data:  PatientResponse[];
+  total: number;
+  page:  number;
+  limit: number;
+}
+
+// ─── OPD ──────────────────────────────────────────────────────────────────────
+
+export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+
+export interface OPDVisitResponse {
+  visitId:        string;
+  tenantId:       string;
+  patientId:      string;
+  doctorId:       string | null;
+  visitDate:      string;
+  queueNumber:    number;
+  status:         OPDVisitStatus;
+  chiefComplaint: string;
+  diagnosis:      string | null;
+  prescription:   string | null;
+  notes:          string | null;
+  createdAt:      string;
+  updatedAt:      string;
+}
+
+export interface CreateOPDVisitRequest {
+  patientId:      string;
+  chiefComplaint: string;
+  doctorId?:      string;
+  visitDate?:     string; // YYYY-MM-DD
+  notes?:         string;
+}
+
+export interface UpdateOPDVisitRequest {
+  chiefComplaint?: string;
+  doctorId?:       string;
+  visitDate?:      string;
+  diagnosis?:      string;
+  prescription?:   string;
+  notes?:          string;
+}
+
+export interface CompleteOPDVisitRequest {
+  diagnosis:     string;
+  prescription?: string;
+  notes?:        string;
+}
+
+export interface OPDPatientHistory {
+  data:  OPDVisitResponse[];
+  total: number;
+  page:  number;
+  limit: number;
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 export interface ApiSuccess<T> {
