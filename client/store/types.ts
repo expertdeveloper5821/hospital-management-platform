@@ -90,6 +90,92 @@ export interface NotificationMessage {
   read:      boolean;
 }
 
+// ─── Patient ──────────────────────────────────────────────────────────────────
+
+export interface PatientResponse {
+  patientId:              string;
+  fullName:               string;
+  dateOfBirth:            string;
+  gender:                 'MALE' | 'FEMALE' | 'OTHER';
+  mobileNumber:           string;
+  address:                string;
+  aadhaarNumber:          string | null;
+  emergencyContactName:   string | null;
+  emergencyContactMobile: string | null;
+  bloodGroup:             string | null;
+  tenantId:               string;
+  createdAt:              string;
+  updatedAt:              string;
+}
+
+// ─── IPD ──────────────────────────────────────────────────────────────────────
+
+export interface WardResponse {
+  wardId:    string;
+  name:      string;
+  floor:     string | null;
+  tenantId:  string;
+  createdAt: string;
+}
+
+export interface BedResponse {
+  bedId:              string;
+  wardId:             string;
+  bedNumber:          string;
+  isOccupied:         boolean;
+  currentAdmissionId: string | null;
+  tenantId:           string;
+  createdAt:          string;
+}
+
+export interface ProgressNote {
+  noteId:    string;
+  doctorId:  string;
+  note:      string;
+  timestamp: string;
+}
+
+export interface AdmissionResponse {
+  admissionId:      string;
+  patientId:        string;
+  wardId:           string;
+  wardName:         string;
+  bedId:            string;
+  bedNumber:        string;
+  assignedDoctorId: string;
+  status:           'ADMITTED' | 'DISCHARGED';
+  admissionDate:    string;
+  dischargeDate:    string | null;
+  progressNotes:    ProgressNote[];
+}
+
+export interface WardOccupancySummary {
+  wardId:    string;
+  wardName:  string;
+  floor:     string | null;
+  total:     number;
+  occupied:  number;
+  available: number;
+}
+
+export interface CreateAdmissionRequest {
+  patientId:        string;
+  wardId:           string;
+  bedId:            string;
+  assignedDoctorId: string;
+}
+
+export interface AddProgressNoteRequest {
+  note: string;
+}
+
+export interface ListAdmissionsQuery {
+  wardId?: string;
+  status?: 'ADMITTED' | 'DISCHARGED';
+  page?:   number;
+  limit?:  number;
+}
+
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 export interface ApiSuccess<T> {
