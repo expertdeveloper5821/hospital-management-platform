@@ -1,6 +1,21 @@
 import { baseApi } from './base.api';
 import type { ApiSuccess, UserResponse, UserRole, PaginatedResult } from '../types';
 
+// The server returns raw Mongoose docs: _id instead of userId, no name field.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normaliseUser(u: any): UserResponse {
+  return {
+    userId:       u.userId ?? u._id ?? '',
+    email:        u.email  ?? '',
+    name:         typeof u.name === 'string' ? u.name : '',
+    role:         u.role,
+    isActive:     u.isActive     ?? true,
+    isFirstLogin: u.isFirstLogin ?? false,
+    tenantId:     u.tenantId     ?? '',
+    createdAt:    u.createdAt    ?? '',
+  };
+}
+
 interface CreateUserRequest {
   email: string;
   name:  string;
@@ -17,13 +32,18 @@ export const userApi = baseApi.injectEndpoints({
         if (isActive != null) params.set('isActive', String(isActive));
         return `/api/users?${params}`;
       },
-      transformResponse: (raw: ApiSuccess<PaginatedResult<UserResponse>>) => raw.data,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      transformResponse: (raw: any) => ({
+        ...(raw.data as PaginatedResult<UserResponse>),
+        data: (raw.data.data as unknown[]).map(normaliseUser),
+      }),
       providesTags: ['User'],
     }),
 
     getUserById: build.query<UserResponse, string>({
       query: (userId) => `/api/users/${userId}`,
-      transformResponse: (raw: ApiSuccess<UserResponse>) => raw.data,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      transformResponse: (raw: any) => normaliseUser(raw.data),
       providesTags: ['User'],
     }),
 

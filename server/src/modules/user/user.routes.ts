@@ -12,7 +12,7 @@ const router = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
 
 router.post('/',                          ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), createUser);
-router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR, UserRole.MANAGER), listUsers);
+router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER), listUsers);
 router.get('/:userId',                    ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR, UserRole.MANAGER), getUserById);
 router.patch('/:userId/role',             ...protect, requireRole(UserRole.HOSPITAL_ADMIN), updateUserRole);
 router.patch('/:userId/deactivate',       ...protect, requireRole(UserRole.HOSPITAL_ADMIN), deactivateUser);

@@ -89,6 +89,6 @@
 
 ## Current Status
 - **Lifecycle Phase**: CONSTRUCTION
-- **Current Stage**: Unit 4: Lab & Inventory — COMPLETED
-- **Next Stage**: Unit 5: Payments
-- **Status**: U4-A (Notification stub), U4-B (Lab module), U4-C (Inventory module) all done; unit + integration + PBT tests written
+- **Current Stage**: Unit 7: Frontend — IN PROGRESS
+- **Next Stage**: Remaining U7 subunits (U7-E, U7-F, U7-G)
+- **Status**: U7-A (Foundation Shell), U7-B (Admin Panels), U7-D (IPD) complete; U7-C (Patient+OPD placeholder), U7-E/F/G stubs present
