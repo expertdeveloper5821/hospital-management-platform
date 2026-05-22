@@ -2,6 +2,14 @@ import { Router, Request, Response } from 'express';
 
 const router = Router();
 
+router.get('/', (_req: Request, res: Response) => {
+  res.status(200).json({
+    status:    'ok',
+    uptime:    process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 /**
  * GET /health — process-level health check (no auth required).
  * SRV-03: Returns uptime and timestamp for load balancer / orchestrator checks.
