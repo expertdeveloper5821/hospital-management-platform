@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import multer from 'multer';
+import multer, { FileFilterCallback } from 'multer';
 import rateLimit from 'express-rate-limit';
 import config from '../../shared/config/env';
 import { authenticateJWT } from '../../shared/middleware/authenticate-jwt';
@@ -20,7 +20,7 @@ import {
 const logoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
       cb(null, true);
     } else {
