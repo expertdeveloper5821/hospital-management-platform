@@ -14,11 +14,12 @@ import {
   CreditCard,
   FileText,
   LogOut,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getNavItems } from '@/lib/rbac-nav';
-import { useAppSelector, useAppDispatch } from '@/store/hooks';
+import { useAppSelector } from '@/store/hooks';
 import { useLogoutMutation } from '@/store/api/auth.api';
 import type { UserRole } from '@/store/types';
 
@@ -35,9 +36,12 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'file-text':        FileText,
 };
 
-export function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
-  const dispatch = useAppDispatch();
   const profile  = useAppSelector((s) => s.auth.profile);
   const branding = useAppSelector((s) => s.auth.branding);
   const [logout] = useLogoutMutation();
@@ -66,7 +70,16 @@ export function Sidebar() {
             className="h-8 w-8 rounded object-contain shrink-0"
           />
         )}
-        <span className="font-bold text-lg truncate">{displayName}</span>
+        <span className="font-bold text-lg truncate flex-1">{displayName}</span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="md:hidden p-1.5 rounded-md text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+            aria-label="Close navigation"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* Nav */}
@@ -78,6 +91,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onClose}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 isActive

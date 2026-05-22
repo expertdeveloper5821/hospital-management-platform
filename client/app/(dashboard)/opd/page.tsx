@@ -64,13 +64,14 @@ const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED']
 interface VisitPanelProps {
   visit:   OPDVisitResponse;
   onClose: () => void;
+  onUpdate: (updated: OPDVisitResponse) => void;
   canEdit: boolean;    // DOCTOR, NURSE, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
   canCancel: boolean;  // RECEPTIONIST, NURSE, DOCTOR, HOSPITAL_ADMIN
   doctorName: (id: string | null) => string;
 }
 
-function VisitPanel({ visit, onClose, canEdit, canComplete, canCancel, doctorName }: VisitPanelProps) {
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorName }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
@@ -95,7 +96,8 @@ function VisitPanel({ visit, onClose, canEdit, canComplete, canCancel, doctorNam
     e.preventDefault();
     setError('');
     try {
-      await updateVisit({ visitId: visit.visitId, ...form }).unwrap();
+      const updated = await updateVisit({ visitId: visit.visitId, ...form }).unwrap();
+      onUpdate(updated); // reflect changes immediately without waiting for cache refetch
       setMode('view');
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to update visit.');
@@ -573,24 +575,27 @@ export default function OPDPage() {
       {/* Filters */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Label htmlFor="filterDate" className="shrink-0 text-sm">Date</Label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_auto]  sm:items-center">
+            {/* Date */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="filterDate" className="shrink-0 text-sm w-14 sm:w-auto">Date</Label>
               <Input
                 id="filterDate"
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="w-40"
+                className="flex-1 sm:w-40 sm:flex-none"
               />
             </div>
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Label htmlFor="filterDoc" className="shrink-0 text-sm">Doctor</Label>
+
+            {/* Doctor */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="filterDoc" className="shrink-0 text-sm w-14 sm:w-auto">Doctor</Label>
               <select
                 id="filterDoc"
                 value={filterDoctor}
                 onChange={(e) => setFilterDoctor(e.target.value)}
-                className="flex h-10 w-full max-w-xs rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">All Doctors</option>
                 {doctors.map((d) => (
@@ -598,7 +603,9 @@ export default function OPDPage() {
                 ))}
               </select>
             </div>
-            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+
+            {/* Refresh */}
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="w-fit">
               <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
             </Button>
           </div>
@@ -639,8 +646,10 @@ export default function OPDPage() {
                     >
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{v.queueNumber}</td>
                       <td className="px-4 py-3">
-                        <p className="font-medium">{v.patientId}</p>
-                        <p className="text-xs text-muted-foreground">{formatDate(v.visitDate)}</p>
+                        <p className="font-medium">{v.fullName ?? v.patientId}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {v.patientId} · {formatDate(v.visitDate)}
+                        </p>
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground max-w-xs truncate">
                         {v.chiefComplaint}
@@ -670,6 +679,7 @@ export default function OPDPage() {
         <VisitPanel
           visit={selectedVisit}
           onClose={() => setSelectedVisit(null)}
+          onUpdate={(updated) => setSelectedVisit(updated)}
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}

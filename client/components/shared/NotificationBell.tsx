@@ -100,8 +100,16 @@ export function NotificationBell() {
 
       {/* Slide-out notification panel (FC-11) */}
       {panelOpen && (
+        <>
+          {/* Mobile backdrop */}
+          <div
+            className="fixed inset-0 bg-black/20 z-40 sm:hidden"
+            onClick={() => setPanelOpen(false)}
+            aria-hidden="true"
+          />
         <div
-          className="absolute right-0 top-11 z-50 w-96 rounded-xl border bg-card shadow-xl flex flex-col"
+          className="fixed left-2 right-2 top-[4.5rem] z-50 rounded-xl border bg-card shadow-xl flex flex-col
+                     sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-96"
           role="dialog"
           aria-label="Notifications"
           aria-modal="false"
@@ -143,7 +151,7 @@ export function NotificationBell() {
           </div>
 
           {/* Notification list */}
-          <ul className="max-h-[460px] overflow-y-auto divide-y" role="list">
+          <ul className="max-h-[55vh] sm:max-h-[460px] overflow-y-auto divide-y" role="list">
             {isFetching && notifications.length === 0 && (
               <li className="px-4 py-8 text-center text-sm text-muted-foreground">
                 Loading…
@@ -207,6 +215,7 @@ export function NotificationBell() {
             </div>
           )}
         </div>
+        </>
       )}
     </div>
   );

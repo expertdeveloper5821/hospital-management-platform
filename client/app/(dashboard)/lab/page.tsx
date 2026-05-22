@@ -49,7 +49,7 @@ function statusVariant(s: LabRequestStatus): 'default' | 'secondary' | 'outline'
 }
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '',            label: 'All Statuses' },
+  { value: '',            label: 'All Status' },
   { value: 'PENDING',     label: 'Pending' },
   { value: 'IN_PROGRESS', label: 'In Progress' },
   { value: 'COMPLETED',   label: 'Completed' },
@@ -545,7 +545,10 @@ function RequestsTable({ type, canCreate, canUpload }: RequestsTableProps) {
                         onClick={() => setSelected(r)}
                       >
                         <td className="px-4 py-3 font-medium max-w-xs truncate">{label}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{r.patientId}</td>
+                        <td className="px-4 py-3">
+                          <p className="text-sm font-medium">{r.fullName}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{r.patientId}</p>
+                        </td>
                         <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs">
                           {formatDate(r.requestedAt)}
                         </td>

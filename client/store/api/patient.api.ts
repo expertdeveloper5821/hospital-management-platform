@@ -69,6 +69,7 @@ export const patientApi = baseApi.injectEndpoints({
 
 export const {
   useSearchPatientsQuery,
+  useLazySearchPatientsQuery,
   useGetPatientByIdQuery,
   useCreatePatientMutation,
   useUpdatePatientMutation,

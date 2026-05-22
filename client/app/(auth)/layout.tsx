@@ -12,6 +12,10 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   const profile  = useAppSelector((s) => s.auth.profile);
 
   useEffect(() => {
+    // /setup is a one-time invite link — skip auth redirect so any session holder
+    // (e.g. super admin) doesn't get bounced away from a tenant's setup page.
+    if (pathname === '/setup') return;
+
     if (!isAuth || !profile) return;
 
     if (profile.isFirstLogin) {
@@ -31,7 +35,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   }, [isAuth, profile, pathname, router]);
 
   // Already logged in → render nothing while the redirect fires (prevents flash)
-  if (isAuth && profile) {
+  // Exception: /setup must always render — it's a one-time invite link, not a login page
+  if (pathname !== '/setup' && isAuth && profile) {
     const needsPasswordChange = profile.isFirstLogin;
     const onChangePassword    = pathname === '/change-password';
     if (!needsPasswordChange || !onChangePassword) return null;

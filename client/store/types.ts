@@ -154,6 +154,7 @@ export interface OPDVisitResponse {
   visitId:        string;
   tenantId:       string;
   patientId:      string;
+  fullName?:      string | null;
   doctorId:       string | null;
   visitDate:      string;
   queueNumber:    number;
@@ -203,6 +204,7 @@ export type LabRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
 export interface PathologyRequestResponse {
   requestId:   string;
   patientId:   string;
+  fullName:    string;
   tenantId:    string;
   requestedBy: string;
   testType:    string;
@@ -216,6 +218,7 @@ export interface PathologyRequestResponse {
 export interface RadiologyRequestResponse {
   requestId:   string;
   patientId:   string;
+  fullName:    string;
   tenantId:    string;
   requestedBy: string;
   imagingType: string;
@@ -297,6 +300,7 @@ export interface PaymentResponse {
   paymentId:         string;
   tenantId:          string;
   patientId:         string;
+  fullName?:         string | null;
   amount:            number;
   paymentMethod:     PaymentMethod;
   description:       string;

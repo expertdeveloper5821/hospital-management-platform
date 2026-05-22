@@ -59,20 +59,20 @@ export default function NewTenantPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <Link href="/super-admin" className="text-muted-foreground hover:text-foreground transition-colors">
+    <div className="max-w-2xl mx-auto space-y-4 sm:space-y-6">
+      <div className="flex items-start gap-3">
+        <Link href="/super-admin" className="text-muted-foreground hover:text-foreground transition-colors mt-1 shrink-0">
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Onboard New Hospital</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Onboard New Hospital</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Create a new tenant record. Status starts as PENDING_VERIFICATION.
           </p>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-6 space-y-6">
+      <form onSubmit={handleSubmit} className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
         {/* Basic info */}
         <div className="space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">

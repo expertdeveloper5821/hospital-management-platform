@@ -35,6 +35,7 @@ import { cn } from '@/lib/utils';
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+const MOBILE_RE = /^\+?[0-9]{7,15}$/;
 
 function genderLabel(g: Gender) {
   return g.charAt(0) + g.slice(1).toLowerCase();
@@ -47,6 +48,13 @@ function formatDate(iso: string) {
 function calcAge(dob: string) {
   const diff = Date.now() - new Date(dob).getTime();
   return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
+}
+
+function sanitizeMobile(value: string) {
+  const cleaned = value.replace(/[^\d+]/g, '');
+  return cleaned.startsWith('+')
+    ? `+${cleaned.slice(1).replace(/\+/g, '')}`.slice(0, 16)
+    : cleaned.replace(/\+/g, '').slice(0, 15);
 }
 
 // ─── Register / Edit Modal ────────────────────────────────────────────────────
@@ -90,6 +98,15 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     setError('');
     setDuplicateInfo(null);
 
+    if (!MOBILE_RE.test(form.mobileNumber)) {
+      setError('Enter a valid mobile number using digits only, with an optional leading +.');
+      return;
+    }
+    if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
+      setError('Enter a valid emergency contact mobile number using digits only, with an optional leading +.');
+      return;
+    }
+
     try {
       if (mode === 'edit' && initial) {
         const body: UpdatePatientRequest = {
@@ -130,6 +147,14 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
   async function handleForceCreate() {
     setError('');
+    if (!MOBILE_RE.test(form.mobileNumber)) {
+      setError('Enter a valid mobile number using digits only, with an optional leading +.');
+      return;
+    }
+    if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
+      setError('Enter a valid emergency contact mobile number using digits only, with an optional leading +.');
+      return;
+    }
     try {
       const body: CreatePatientRequest = {
         ...form,
@@ -204,6 +229,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
                 id="dob"
                 type="date"
                 value={form.dateOfBirth}
+                max={new Date().toISOString().substring(0, 10)}
                 onChange={(e) => set('dateOfBirth', e.target.value)}
                 required
               />
@@ -228,8 +254,12 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               <Label htmlFor="mobile">Mobile Number *</Label>
               <Input
                 id="mobile"
+                type="tel"
+                inputMode="tel"
+                pattern="\+?[0-9]{7,15}"
+                maxLength={16}
                 value={form.mobileNumber}
-                onChange={(e) => set('mobileNumber', e.target.value)}
+                onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
                 placeholder="+91XXXXXXXXXX"
                 required
               />
@@ -295,8 +325,12 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
                 <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
                 <Input
                   id="ecMobile"
+                  type="tel"
+                  inputMode="tel"
+                  pattern="\+?[0-9]{7,15}"
+                  maxLength={16}
                   value={form.emergencyContactMobile ?? ''}
-                  onChange={(e) => set('emergencyContactMobile', e.target.value)}
+                  onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
                   placeholder="+91XXXXXXXXXX"
                 />
               </div>
