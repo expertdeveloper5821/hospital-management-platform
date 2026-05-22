@@ -13,6 +13,16 @@ export class PatientRepository {
     return PatientModel.findOne({ tenantId, patientId });
   }
 
+  async findNamesByPatientIds(tenantId: string, patientIds: string[]): Promise<Map<string, string>> {
+    assertDbConnected();
+    const patients = await PatientModel.find(
+      { tenantId, patientId: { $in: patientIds } },
+    ).select('patientId fullName').lean();
+    const map = new Map<string, string>();
+    for (const p of patients) map.set(p.patientId, (p as IPatient).fullName);
+    return map;
+  }
+
   async search(
     tenantId: string,
     q: string | undefined,

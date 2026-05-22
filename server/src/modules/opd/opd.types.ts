@@ -34,3 +34,20 @@ export interface CompleteOPDVisitRequest {
   prescription?: string;
   notes?:        string;
 }
+
+export interface OPDVisitResponse {
+  visitId:        string;
+  tenantId:       string;
+  patientId:      string;
+  fullName?:      string;
+  doctorId:       string | null;
+  visitDate:      Date;
+  queueNumber:    number;
+  status:         OPDVisitStatus;
+  chiefComplaint: string;
+  diagnosis:      string | null;
+  prescription:   string | null;
+  notes:          string | null;
+  createdAt:      Date;
+  updatedAt:      Date;
+}

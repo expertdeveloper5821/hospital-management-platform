@@ -5,6 +5,7 @@ import { LabRequestStatus } from './lab.types';
 export interface IPathologyRequest extends Document {
   requestId:   string;
   patientId:   string;
+  name?:       string;
   tenantId:    string;
   requestedBy: string;
   testType:    string;

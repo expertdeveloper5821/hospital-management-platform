@@ -35,10 +35,13 @@ async function resolveReceiptUrl(s3Key: string | null): Promise<string | null> {
 }
 
 async function toResponse(doc: IPayment): Promise<PaymentResponse> {
+  const patient = await patientRepository.findByPatientId(doc.tenantId, doc.patientId);
+
   return {
     paymentId:         doc.paymentId,
     tenantId:          doc.tenantId,
     patientId:         doc.patientId,
+    fullName:          patient?.fullName ?? doc.fullName ?? null,
     amount:            doc.amount,
     paymentMethod:     doc.paymentMethod,
     description:       doc.description,
@@ -101,15 +104,16 @@ export class PaymentService {
     const payment = await paymentRepository.save({
       paymentId,
       tenantId,
-      patientId:    input.patientId,
-      amount:       input.amount,
+      patientId:     input.patientId,
+      fullName:      patient.fullName,
+      amount:        input.amount,
       paymentMethod: input.paymentMethod,
-      description:  input.description,
-      status:       PaymentStatus.COMPLETED,
-      receiptS3Key: s3Key,
+      description:   input.description,
+      status:        PaymentStatus.COMPLETED,
+      receiptS3Key:  s3Key,
       razorpayOrderId:   null,
       razorpayPaymentId: null,
-      createdBy:    userId,
+      createdBy:     userId,
     });
 
     try {
@@ -150,15 +154,16 @@ export class PaymentService {
     await paymentRepository.save({
       paymentId,
       tenantId,
-      patientId:      input.patientId,
-      amount:         input.amount,
-      paymentMethod:  input.paymentMethod,
-      description:    input.description,
-      status:         PaymentStatus.PENDING,
-      receiptS3Key:   null,
-      razorpayOrderId: order.id,
+      patientId:         input.patientId,
+      fullName:          patient.fullName,
+      amount:            input.amount,
+      paymentMethod:     input.paymentMethod,
+      description:       input.description,
+      status:            PaymentStatus.PENDING,
+      receiptS3Key:      null,
+      razorpayOrderId:   order.id,
       razorpayPaymentId: null,
-      createdBy:      userId,
+      createdBy:         userId,
     });
 
     return {

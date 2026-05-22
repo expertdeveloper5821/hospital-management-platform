@@ -24,6 +24,8 @@ import {
   ConflictError,
   NotFoundError,
 } from '../../shared/middleware/error-handler';
+import { PatientModel } from '../../../src/modules/patient/patient.model';
+
 
 // ─── BedOccupiedError (standalone — NOT inside IPDService) ───────────────────
 export class BedOccupiedError extends Error {
@@ -39,10 +41,11 @@ export class BedOccupiedError extends Error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function toResponse(doc: IIPDAdmission): AdmissionResponse {
+function toResponse(doc: IIPDAdmission, fullName: string | null = null): AdmissionResponse {
   return {
     admissionId:      doc.admissionId,
     patientId:        doc.patientId,
+    fullName,
     wardId:           doc.wardId,
     wardName:         doc.wardName,
     bedId:            doc.bedId,
@@ -141,7 +144,7 @@ export class IPDService {
       });
     } catch { /* swallow — audit failure must not block primary response */ }
 
-    return toResponse(admission);
+    return toResponse(admission, patient.fullName);
   }
 
   async addProgressNote(
@@ -167,7 +170,8 @@ export class IPDService {
     const updated = await ipdRepository.appendProgressNote(admissionId, tenantId, progressNote);
     if (!updated) throw new NotFoundError('Admission not found');
 
-    return toResponse(updated);
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return toResponse(updated, patient?.fullName ?? null);
   }
 
   async dischargePatient(
@@ -213,7 +217,8 @@ export class IPDService {
       });
     } catch { /* swallow */ }
 
-    return toResponse(updated);
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return toResponse(updated, patient?.fullName ?? null);
   }
 
   async listAdmissions(
@@ -221,7 +226,23 @@ export class IPDService {
     query:    ListAdmissionsQuery,
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const result = await ipdRepository.findActiveAdmissions(tenantId, query);
-    return { ...result, data: result.data.map(toResponse) };
+    const admissions = result.data;
+
+    const patientIds = admissions.map(a => a.patientId);
+
+    const patients = await PatientModel.find({
+      tenantId,
+      patientId: { $in: patientIds },
+    }).lean();
+
+    const map = new Map(patients.map(p => [p.patientId, p.fullName]));
+
+    return {
+      ...result,
+      data: result.data.map((admission) =>
+        toResponse(admission, map.get(admission.patientId) ?? null),
+      ),
+    };
   }
 
   async getBedOccupancySummary(tenantId: string): Promise<WardOccupancySummary[]> {

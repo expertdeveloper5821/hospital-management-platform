@@ -19,12 +19,18 @@ import {
 
 const router  = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
+const ADMIN_ROLES = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN];
 
 // POST /api/ipd/admissions — Receptionist creates admission + assigns bed
 router.post(
   '/admissions',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST),
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.ADMIN,
+    UserRole.HOSPITAL_ADMIN,
+    UserRole.NURSE,
+     ...ADMIN_ROLES),
   createAdmission,
 );
 
@@ -37,7 +43,7 @@ router.get(
     UserRole.DOCTOR,
     UserRole.NURSE,
     UserRole.MANAGER,
-    UserRole.ADMIN,
+    ...ADMIN_ROLES,
   ),
   listAdmissions,
 );
@@ -66,7 +72,7 @@ router.get(
     UserRole.MANAGER,
     UserRole.DOCTOR,
     UserRole.NURSE,
-    UserRole.ADMIN,
+    ...ADMIN_ROLES,
     UserRole.RECEPTIONIST,
   ),
   getBedOccupancySummary,
@@ -74,7 +80,7 @@ router.get(
 
 // All clinical roles need ward/bed visibility to select beds during admission
 const WARD_READERS = [
-  UserRole.HOSPITAL_ADMIN,
+  ...ADMIN_ROLES,
   UserRole.MANAGER,
   UserRole.DOCTOR,
   UserRole.NURSE,
@@ -83,7 +89,7 @@ const WARD_READERS = [
 
 // Admission readers — AC6: Nurse/Doctor; + Manager/Admin/Receptionist for lookup (U3-B)
 const ADMISSION_READERS = [
-  UserRole.HOSPITAL_ADMIN,
+  ...ADMIN_ROLES,
   UserRole.MANAGER,
   UserRole.DOCTOR,
   UserRole.NURSE,
@@ -93,7 +99,10 @@ const ADMISSION_READERS = [
 // ─── Ward routes ──────────────────────────────────────────────────────────────
 router.post('/wards',
   ...protect,
-  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireRole(...ADMIN_ROLES,
+  UserRole.RECEPTIONIST,
+  UserRole.MANAGER,
+  ),
   createWard,
 );
 
@@ -106,7 +115,10 @@ router.get('/wards',
 // ─── Bed routes ───────────────────────────────────────────────────────────────
 router.post('/wards/:wardId/beds',
   ...protect,
-  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireRole(...ADMIN_ROLES,
+    UserRole.RECEPTIONIST,
+    UserRole.MANAGER,
+  ),
   addBeds,
 );
 
@@ -119,7 +131,7 @@ router.get('/wards/:wardId/beds',
 // ─── Occupancy summary — Manager + Hospital Admin (FR-08.8) ──────────────────
 router.get('/occupancy',
   ...protect,
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(...ADMIN_ROLES, UserRole.MANAGER),
   getOccupancySummary,
 );
 

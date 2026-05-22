@@ -5,6 +5,7 @@ export interface IPayment extends Document {
   paymentId:          string;
   tenantId:           string;
   patientId:          string;
+  fullName:           string;
   amount:             number;
   paymentMethod:      PaymentMethod;
   description:        string;
@@ -22,6 +23,7 @@ const PaymentSchema = new Schema<IPayment>(
     paymentId:         { type: String, required: true, unique: true },
     tenantId:          { type: String, required: true, index: true },
     patientId:         { type: String, required: true },
+    fullName:          { type: String, required: false },
     amount:            { type: Number, required: true, min: 0.01 },
     paymentMethod:     { type: String, required: true, enum: Object.values(PaymentMethod) },
     description:       { type: String, required: true, trim: true },

@@ -14,19 +14,20 @@ import {
 
 const router  = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
+const ADMIN_ROLES = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN];
 
 // Clinical roles that can read patient data
 const READERS = [
   UserRole.RECEPTIONIST,
   UserRole.NURSE,
-  UserRole.HOSPITAL_ADMIN,
+  ...ADMIN_ROLES,
   UserRole.MANAGER,
   UserRole.DOCTOR,
 ];
 
 router.post('/',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, ...ADMIN_ROLES),
   createPatient,
 );
 
@@ -52,7 +53,7 @@ router.get('/:patientId',
 
 router.patch('/:patientId',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, ...ADMIN_ROLES),
   updatePatient,
 );
 
