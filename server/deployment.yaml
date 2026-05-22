@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hmp
+spec:
+  selector:
+    matchLabels:
+      app: hmp
+  template:
+    metadata:
+      labels:
+        app: hmp
+    spec:
+      containers:
+      - name: hmp
+        image: gcr.io/google-sample
+        # resources:
+        #   limits:
+        #     memory: "128Mi"
+        #     cpu: "500m"
+        ports:
+        - name: port
+          containerPort: 3000

@@ -41,11 +41,11 @@
 
 ### 🟢 CONSTRUCTION PHASE
 - [ ] Per-Unit Loop — Unit 1: Foundation
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
+  - [x] Functional Design — COMPLETED
+  - [x] NFR Requirements — COMPLETED
+  - [x] NFR Design — COMPLETED
+  - [x] Infrastructure Design — COMPLETED
+  - [x] Code Generation — COMPLETED
 - [ ] Per-Unit Loop — Unit 2: Patient & OPD
   - [ ] Functional Design
   - [ ] NFR Requirements
@@ -53,18 +53,18 @@
   - [ ] Infrastructure Design
   - [ ] Code Generation
 - [ ] Per-Unit Loop — Unit 3: IPD
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
-- [ ] Per-Unit Loop — Unit 4: Lab
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
-- [ ] Per-Unit Loop — Unit 5: Inventory
+  - [x] Functional Design — COMPLETED (U3-B: domain-entities, business-logic-model, business-rules)
+  - [x] NFR Requirements — COMPLETED (U3-B: nfr-requirements)
+  - [x] NFR Design — COMPLETED (U3-B: nfr-design-patterns, logical-components)
+  - [x] Infrastructure Design — COMPLETED (U3-B: infrastructure-design)
+  - [x] Code Generation — COMPLETED (U3-B: ipd.types, ipd.model, ipd.repository, ipd.service, ipd.controller, ipd.routes, unit+integration+PBT tests)
+- [ ] Per-Unit Loop — Unit 4: Lab & Inventory
+  - [x] Functional Design — COMPLETED (inline with code generation)
+  - [x] NFR Requirements — COMPLETED (inline with code generation)
+  - [x] NFR Design — COMPLETED (inline with code generation)
+  - [x] Infrastructure Design — COMPLETED (inline with code generation)
+  - [x] Code Generation — COMPLETED (U4-A: notification model+repo+service; U4-B: lab types/models/repo/service/controller/routes; U4-C: inventory types/model/repo/service/controller/routes; unit+integration+PBT tests)
+- [ ] Per-Unit Loop — Unit 5: Payments
   - [ ] Functional Design
   - [ ] NFR Requirements
   - [ ] NFR Design
@@ -88,7 +88,7 @@
 - [ ] Operations — PLACEHOLDER
 
 ## Current Status
-- **Lifecycle Phase**: INCEPTION
-- **Current Stage**: Units Generation — Complete
-- **Next Stage**: CONSTRUCTION PHASE — Unit 1: Foundation (Functional Design)
-- **Status**: Awaiting user approval to proceed
+- **Lifecycle Phase**: CONSTRUCTION
+- **Current Stage**: Unit 7: Frontend — IN PROGRESS
+- **Next Stage**: Remaining U7 subunits (U7-E, U7-F, U7-G)
+- **Status**: U7-A (Foundation Shell), U7-B (Admin Panels), U7-D (IPD) complete; U7-C (Patient+OPD placeholder), U7-E/F/G stubs present
