@@ -662,7 +662,11 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   const [discharge, { isLoading: discharging }] = useDischargePatientMutation();
 
-  const canAdmit     = role === UserRole.RECEPTIONIST;
+  const canAdmit     = [
+    UserRole.RECEPTIONIST,
+    UserRole.HOSPITAL_ADMIN,
+    UserRole.ADMIN,
+  ].includes(role);
   const canProgress  = role === UserRole.DOCTOR;
   const canDischarge = role === UserRole.DOCTOR;
 
@@ -686,17 +690,16 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Patient ID search */}
-          <div className="relative">
+          <div className="relative flex-1 min-w-[160px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
               placeholder="Filter by patient ID…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
-              className="h-9 pl-8 w-52 text-sm"
+              className="h-9 pl-8 text-sm w-full"
             />
           </div>
 
@@ -728,14 +731,14 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
         </div>
 
         {canAdmit && (
-          <Button size="sm" onClick={() => setShowNew(true)}>
+          <Button size="sm" onClick={() => setShowNew(true)} className="shrink-0">
             <PlusCircle className="h-4 w-4 mr-2" />
             New Admission
           </Button>
         )}
       </div>
 
-      {/* Table */}
+      {/* Content */}
       <div className="rounded-lg border bg-card overflow-hidden">
         {isLoading ? (
           <div className="py-20 text-center text-sm text-muted-foreground">Loading admissions…</div>
@@ -745,94 +748,155 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
             {searchQ ? 'No admissions match your search.' : 'No admissions found.'}
           </div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient ID</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Ward / Bed</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Doctor</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Dates</th>
-                <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
+          <>
+            {/* Mobile card list — below md */}
+            <div className="divide-y md:hidden">
               {admissions.map((a) => (
-                <tr key={a.admissionId} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3">
-                    <span className="font-mono text-xs">{a.patientId}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{a.wardName}</div>
-                    <div className="text-xs text-muted-foreground">Bed {a.bedNumber}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-medium">
-                      {doctorMap[a.assignedDoctorId] ?? '—'}
+                <div key={a.admissionId} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">
+                        {(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}
+                      </p>
+                      <p className="font-mono text-xs text-muted-foreground mt-0.5">{a.patientId}</p>
+                      <p className="font-medium mt-0.5">{a.wardName} · Bed {a.bedNumber}</p>
+                      <p className="text-xs text-muted-foreground">{doctorMap[a.assignedDoctorId] ?? '—'}</p>
                     </div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {a.assignedDoctorId.slice(0, 8)}…
+                    <div className="shrink-0 flex flex-col items-end gap-1">
+                      <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'} className="text-xs">
+                        {a.status}
+                      </Badge>
+                      {a.progressNotes.length > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          {a.progressNotes.length} note{a.progressNotes.length !== 1 ? 's' : ''}
+                        </span>
+                      )}
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'}>
-                      {a.status}
-                    </Badge>
-                    {a.progressNotes.length > 0 && (
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {a.progressNotes.length} note{a.progressNotes.length !== 1 ? 's' : ''}
-                      </div>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    In: {new Date(a.admissionDate).toLocaleDateString()}
+                    {a.dischargeDate ? (
+                      <span className="ml-3 text-green-600">Out: {new Date(a.dischargeDate).toLocaleDateString()}</span>
+                    ) : (
+                      <span className="ml-3 text-amber-600">
+                        {Math.floor((Date.now() - new Date(a.admissionDate).getTime()) / 86400000)}d stay
+                      </span>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    <div>In: {new Date(a.admissionDate).toLocaleDateString()}</div>
-                    {a.dischargeDate
-                      ? <div className="text-green-600">Out: {new Date(a.dischargeDate).toLocaleDateString()}</div>
-                      : <div className="text-amber-600">
-                          {Math.floor((Date.now() - new Date(a.admissionDate).getTime()) / 86400000)}d stay
-                        </div>
-                    }
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      {/* Notes — viewable by all, addable by doctors */}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setNotesFor(a)}>
+                      Notes
+                      {a.progressNotes.length > 0 && (
+                        <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">
+                          {a.progressNotes.length}
+                        </span>
+                      )}
+                    </Button>
+                    {canDischarge && a.status === 'ADMITTED' && (
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => setNotesFor(a)}
+                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                        onClick={() => setDischargeFor(a)}
                       >
-                        Notes
-                        {a.progressNotes.length > 0 && (
-                          <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">
-                            {a.progressNotes.length}
-                          </span>
-                        )}
+                        Discharge
                       </Button>
-
-                      {/* Discharge — doctors only, admitted patients only */}
-                      {canDischarge && a.status === 'ADMITTED' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                          onClick={() => setDischargeFor(a)}
-                        >
-                          Discharge
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                    )}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+
+            {/* Desktop table — md and above */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-muted/50">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Ward / Bed</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Doctor</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Dates</th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {admissions.map((a) => (
+                    <tr key={a.admissionId} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">
+                          {(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}
+                        </div>
+                        <div className="font-mono text-xs text-muted-foreground mt-0.5">{a.patientId}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{a.wardName}</div>
+                        <div className="text-xs text-muted-foreground">Bed {a.bedNumber}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-medium">{doctorMap[a.assignedDoctorId] ?? '—'}</div>
+                        <div className="text-xs text-muted-foreground font-mono">{a.assignedDoctorId.slice(0, 8)}…</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'}>
+                          {a.status}
+                        </Badge>
+                        {a.progressNotes.length > 0 && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {a.progressNotes.length} note{a.progressNotes.length !== 1 ? 's' : ''}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        <div>In: {new Date(a.admissionDate).toLocaleDateString()}</div>
+                        {a.dischargeDate
+                          ? <div className="text-green-600">Out: {new Date(a.dischargeDate).toLocaleDateString()}</div>
+                          : <div className="text-amber-600">
+                              {Math.floor((Date.now() - new Date(a.admissionDate).getTime()) / 86400000)}d stay
+                            </div>
+                        }
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setNotesFor(a)}
+                          >
+                            Notes
+                            {a.progressNotes.length > 0 && (
+                              <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">
+                                {a.progressNotes.length}
+                              </span>
+                            )}
+                          </Button>
+                          {canDischarge && a.status === 'ADMITTED' && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                              onClick={() => setDischargeFor(a)}
+                            >
+                              Discharge
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && !searchQ && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
           <span>Page {page} of {totalPages} — {total} admissions</span>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
@@ -1052,27 +1116,28 @@ export default function IPDPage() {
   if (!role) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">IPD — In-Patient Department</h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">IPD — In-Patient</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Manage admissions, ward beds, progress notes, and occupancy.
         </p>
       </div>
 
-      <div className="flex gap-1 border-b">
+      {/* Tabs — scrollable on narrow screens */}
+      <div className="flex gap-1 border-b overflow-x-auto">
         {tabs.map(({ key, label, Icon }) => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
             className={[
-              'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
+              'flex items-center gap-2 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0',
               activeTab === key
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
             ].join(' ')}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-4 w-4 shrink-0" />
             {label}
           </button>
         ))}

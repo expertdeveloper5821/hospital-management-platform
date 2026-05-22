@@ -28,7 +28,7 @@ export class PatientRepository {
           $or: [
             { patientId:    { $regex: q, $options: 'i' } },
             { fullName:     { $regex: q, $options: 'i' } },
-            { mobileNumber: q },
+            { mobileNumber: { $regex: q, $options: 'i' } },
           ],
         }
       : { tenantId };

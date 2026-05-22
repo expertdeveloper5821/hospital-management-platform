@@ -38,13 +38,13 @@ function truncate(str: string, len = 20): string {
 }
 
 const ACTION_COLORS: Record<string, string> = {
-  CREATE:         'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
-  UPDATE:         'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
-  DELETE:         'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
-  LOGIN:          'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
-  LOGOUT:         'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-  LOCKOUT:        'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
-  PASSWORD_RESET: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  CREATE:         'bg-emerald-600 text-white',
+  UPDATE:         'bg-blue-600 text-white',
+  DELETE:         'bg-red-600 text-white',
+  LOGIN:          'bg-violet-600 text-white',
+  LOGOUT:         'bg-slate-500 text-white',
+  LOCKOUT:        'bg-orange-600 text-white',
+  PASSWORD_RESET: 'bg-amber-500 text-white',
 };
 
 const LIMIT = 25;
@@ -130,13 +130,13 @@ export default function AuditPage() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <FileText className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+          <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground shrink-0" aria-hidden="true" />
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Audit Logs</h1>
             <p className="text-sm text-muted-foreground">
               Append-only record of all critical entity operations
             </p>
@@ -147,7 +147,7 @@ export default function AuditPage() {
           size="sm"
           onClick={() => refetch()}
           disabled={isFetching}
-          className="gap-2"
+          className="gap-2 self-start sm:self-auto"
         >
           <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} aria-hidden="true" />
           Refresh
@@ -271,45 +271,19 @@ export default function AuditPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity Type</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Action</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">User ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Timestamp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!isFetching && logs.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
-                      No audit logs found for the selected filters.
-                    </td>
-                  </tr>
-                )}
+          {!isFetching && logs.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              No audit logs found for the selected filters.
+            </p>
+          )}
+
+          {logs.length > 0 && (
+            <>
+              {/* Mobile card list — below md */}
+              <div className="divide-y md:hidden">
                 {logs.map((log) => (
-                  <tr
-                    key={log.auditId}
-                    className="border-b last:border-0 hover:bg-muted/30 transition-colors"
-                  >
-                    {/* Entity Type */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
-                        {log.entityType.replace(/_/g, ' ')}
-                      </span>
-                    </td>
-
-                    {/* Entity ID */}
-                    <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.entityId}>
-                      {truncate(log.entityId, 16)}
-                    </td>
-
-                    {/* Action */}
-                    <td className="px-4 py-3 whitespace-nowrap">
+                  <div key={log.auditId} className="px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
                       <span
                         className={cn(
                           'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
@@ -318,22 +292,74 @@ export default function AuditPage() {
                       >
                         {log.action}
                       </span>
-                    </td>
-
-                    {/* User ID */}
-                    <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.userId}>
-                      {truncate(log.userId, 16)}
-                    </td>
-
-                    {/* Timestamp */}
-                    <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground">
-                      {formatDate(log.timestamp)}
-                    </td>
-                  </tr>
+                      <Badge variant="outline" className="text-xs font-normal">
+                        {log.entityType.replace(/_/g, ' ')}
+                      </Badge>
+                    </div>
+                    <div className="space-y-0.5">
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Entity: </span>
+                        <span className="font-mono" title={log.entityId}>{truncate(log.entityId, 20)}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">User: </span>
+                        <span className="font-mono" title={log.userId}>{truncate(log.userId, 20)}</span>
+                      </p>
+                      <p className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</p>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+
+              {/* Desktop table — md and above */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity Type</th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity ID</th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Action</th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">User ID</th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logs.map((log) => (
+                      <tr
+                        key={log.auditId}
+                        className="border-b last:border-0 hover:bg-muted/30 transition-colors"
+                      >
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
+                            {log.entityType.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.entityId}>
+                          {truncate(log.entityId, 16)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span
+                            className={cn(
+                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
+                              ACTION_COLORS[log.action] ?? 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {log.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.userId}>
+                          {truncate(log.userId, 16)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground">
+                          {formatDate(log.timestamp)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (
