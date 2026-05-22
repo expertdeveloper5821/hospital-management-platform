@@ -74,7 +74,7 @@ class S3Service {
         // the presigner's client constraint incompatible with the S3Client instance at
         // compile time even though the runtime object is valid.
         this.client as unknown as Parameters<typeof getSignedUrl>[0],
-        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }) as unknown as Parameters<typeof getSignedUrl>[1],
         { expiresIn: expirySeconds },
       );
     } catch (err) {

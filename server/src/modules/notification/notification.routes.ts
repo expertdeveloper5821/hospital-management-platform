@@ -1,8 +1,8 @@
-import express, { Router } from 'express';
+import express from 'express';
 import { authenticateJWT, scopeTenant } from '../../shared/middleware';
 import { getNotifications, getUnreadCount, markRead } from './notification.controller';
 
-const router: Router = express.Router();
+const router = express.Router();
 
 router.use(authenticateJWT, scopeTenant);
 
