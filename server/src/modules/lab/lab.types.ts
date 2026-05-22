@@ -49,7 +49,7 @@ export type ListLabRequestsQuery = z.infer<typeof ListLabRequestsQuerySchema>;
 export interface PathologyRequestResponse {
   requestId:   string;
   patientId:   string;
-  patientName: string;
+  fullName?:       string;
   tenantId:    string;
   requestedBy: string;
   testType:    string;
@@ -63,7 +63,7 @@ export interface PathologyRequestResponse {
 export interface RadiologyRequestResponse {
   requestId:   string;
   patientId:   string;
-  patientName: string;
+  fullName?:   string;
   tenantId:    string;
   requestedBy: string;
   imagingType: string;

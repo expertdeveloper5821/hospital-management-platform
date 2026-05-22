@@ -11,14 +11,19 @@ import {
   CreateOPDVisitRequest,
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
+  OPDVisitResponse,
 } from './opd.types';
+
+function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { fullName?: string } {
+  return Object.assign(visit, { fullName });
+}
 
 export class OPDService {
   async createVisit(
     tenantId:  string,
     data:      CreateOPDVisitRequest,
     createdBy: string,
-  ): Promise<IOPDVisit> {
+  ): Promise<IOPDVisit & { fullName?: string }> {
     const patient = await patientRepository.findByPatientId(tenantId, data.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
@@ -51,7 +56,7 @@ export class OPDService {
       newValue:   { visitId, patientId: data.patientId, status: OPDVisitStatus.OPEN },
     });
 
-    return visit;
+    return withFullName(visit, patient.fullName);
   }
 
   async updateVisit(
@@ -59,7 +64,7 @@ export class OPDService {
     visitId:   string,
     data:      UpdateOPDVisitRequest,
     updatedBy: string,
-  ): Promise<IOPDVisit> {
+  ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
 
@@ -112,7 +117,8 @@ export class OPDService {
       newValue,
     });
 
-    return updated;
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return withFullName(updated, patient?.fullName);
   }
 
   async completeVisit(
@@ -120,7 +126,7 @@ export class OPDService {
     visitId:     string,
     data:        CompleteOPDVisitRequest,
     completedBy: string,
-  ): Promise<IOPDVisit> {
+  ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
 
@@ -148,14 +154,15 @@ export class OPDService {
       newValue:      { status: OPDVisitStatus.COMPLETED, diagnosis: data.diagnosis },
     });
 
-    return updated;
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return withFullName(updated, patient?.fullName);
   }
 
   async cancelVisit(
     tenantId:    string,
     visitId:     string,
     cancelledBy: string,
-  ): Promise<IOPDVisit> {
+  ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
 
@@ -178,25 +185,35 @@ export class OPDService {
       newValue:      { status: OPDVisitStatus.CANCELLED },
     });
 
-    return updated;
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return withFullName(updated, patient?.fullName);
   }
 
   async getQueue(
     tenantId: string,
     date?:     string,
     doctorId?: string,
-  ): Promise<IOPDVisit[]> {
+  ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
-    const visits = await opdRepository.findByDate(tenantId, visitDate, doctorId);
-    return visits.filter(
-      (v) => v.status === OPDVisitStatus.OPEN || v.status === OPDVisitStatus.IN_PROGRESS,
+    const visits = (await opdRepository.findByDate(tenantId, visitDate, doctorId))
+      .filter((visit) =>
+        visit.status === OPDVisitStatus.OPEN || visit.status === OPDVisitStatus.IN_PROGRESS,
+      );
+
+    const patientIds = [...new Set(visits.map((v) => v.patientId))];
+    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds)
+      ?? new Map<string, string>();
+
+    return visits.map((v) =>
+      withFullName(v, nameMap.get(v.patientId) ?? v.fullName ?? v.patientId),
     );
   }
 
-  async getVisitById(tenantId: string, visitId: string): Promise<IOPDVisit> {
+  async getVisitById(tenantId: string, visitId: string): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
-    return visit;
+    const patient = await patientRepository.findByPatientId(tenantId, visit.patientId);
+    return withFullName(visit, patient?.fullName);
   }
 
   async getPatientHistory(
@@ -204,10 +221,31 @@ export class OPDService {
     patientId: string,
     page:      number,
     limit:     number,
-  ): Promise<PaginatedResult<IOPDVisit>> {
+  ): Promise<PaginatedResult<OPDVisitResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
-    return opdRepository.findByPatient(tenantId, patientId, page, limit);
+
+    const result = await opdRepository.findByPatient(tenantId, patientId, page, limit);
+
+    return {
+      ...result,
+      data: result.data.map((visit) => ({
+        visitId:        visit.visitId,
+        tenantId:       visit.tenantId,
+        patientId:      visit.patientId,
+        fullName:       patient.fullName,
+        doctorId:       visit.doctorId,
+        visitDate:      visit.visitDate,
+        queueNumber:    visit.queueNumber,
+        status:         visit.status,
+        chiefComplaint: visit.chiefComplaint,
+        diagnosis:      visit.diagnosis,
+        prescription:   visit.prescription,
+        notes:          visit.notes,
+        createdAt:      visit.createdAt,
+        updatedAt:      visit.updatedAt,
+      })),
+    };
   }
 }
 

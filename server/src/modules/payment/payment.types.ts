@@ -68,6 +68,7 @@ export interface PaymentResponse {
   paymentId:         string;
   tenantId:          string;
   patientId:         string;
+  fullName:          string | null;
   amount:            number;
   paymentMethod:     PaymentMethod;
   description:       string;

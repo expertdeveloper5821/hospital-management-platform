@@ -42,6 +42,7 @@ function toResponse(v: IOPDVisit) {
     visitId:        v.visitId,
     tenantId:       v.tenantId,
     patientId:      v.patientId,
+    fullName:       v.fullName,
     doctorId:       v.doctorId,
     visitDate:      v.visitDate,
     queueNumber:    v.queueNumber,
@@ -71,7 +72,10 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     if (!query.success) throw new ValidationError('Invalid query params');
 
     const visits = await opdService.getQueue(req.user!.tenantId!, query.data.date, query.data.doctorId);
-    res.status(200).json({ status: 'success', data: visits.map(toResponse) });
+    res.status(200).json({
+      status: 'success',
+      data: visits.map((v) => toResponse(v)),
+    });
   } catch (err) { next(err); }
 }
 

@@ -73,7 +73,15 @@ async function seedTenant(name = 'Test Hospital') {
 
 async function seedUser(tenantId: string, email: string, role: UserRole, isFirstLogin = false) {
   const passwordHash = await bcrypt.hash('TestPass123!', 1);
-  return UserModel.create({ tenantId, email, passwordHash, role, isActive: true, isFirstLogin });
+  return UserModel.create({
+    tenantId,
+    email,
+    name: email.split('@')[0],
+    passwordHash,
+    role,
+    isActive: true,
+    isFirstLogin,
+  });
 }
 
 function tokenFor(userId: string, tenantId: string, role: UserRole) {
@@ -146,6 +154,19 @@ describe('POST /api/patients', () => {
     const tenant = await seedTenant();
     const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
     const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send(VALID_PATIENT_BODY);
+
+    expect(res.status).toBe(201);
+  });
+
+  test('201 — Admin can register a patient', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin-role@h.com', UserRole.ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.ADMIN);
 
     const res = await request(app)
       .post('/api/patients')
@@ -316,6 +337,30 @@ describe('GET /api/patients', () => {
     expect(res.status).toBe(200);
   });
 
+  test('200 — Receptionist can see patients created by Admin in the same tenant', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin-role@h.com', UserRole.ADMIN);
+    const adminToken = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.ADMIN);
+    const receptionist = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const receptionistToken = tokenFor(receptionist._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const createRes = await request(app)
+      .post('/api/patients')
+      .set(bearer(adminToken))
+      .send(VALID_PATIENT_BODY);
+
+    expect(createRes.status).toBe(201);
+
+    const listRes = await request(app)
+      .get('/api/patients')
+      .query({ q: createRes.body.data.patientId })
+      .set(bearer(receptionistToken));
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.total).toBe(1);
+    expect(listRes.body.data.data[0].patientId).toBe(createRes.body.data.patientId);
+  });
+
   test('401 — unauthenticated', async () => {
     const res = await request(app).get('/api/patients');
     expect(res.status).toBe(401);
@@ -395,6 +440,22 @@ describe('PATCH /api/patients/:patientId', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.bloodGroup).toBe('A+');
+  });
+
+  test('200 — Admin can update patient', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin-role@h.com', UserRole.ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.ADMIN);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-UPD00003' });
+
+    const res = await request(app)
+      .patch('/api/patients/PAT-UPD00003')
+      .set(bearer(token))
+      .send({ address: 'Admin Updated Address' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.address).toBe('Admin Updated Address');
   });
 
   test('404 — update on non-existent patientId', async () => {

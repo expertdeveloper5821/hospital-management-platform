@@ -53,6 +53,7 @@ export type ListAdmissionsQuery = z.infer<typeof ListAdmissionsQuerySchema>;
 export interface AdmissionResponse {
   admissionId:      string;
   patientId:        string;
+  fullName:         string | null;
   wardId:           string;
   wardName:         string;
   bedId:            string;

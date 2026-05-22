@@ -5,6 +5,7 @@ export interface IOPDVisit extends Document {
   visitId:        string;
   tenantId:       string;
   patientId:      string;
+  fullName?:      string;
   doctorId:       string | null;
   visitDate:      Date;
   queueNumber:    number;
@@ -22,6 +23,7 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
     visitId:        { type: String, required: true, unique: true },
     tenantId:       { type: String, required: true, index: true },
     patientId:      { type: String, required: true },
+    fullName:       { type: String, required: false },
     doctorId:       { type: String, default: null },
     visitDate:      { type: Date,   required: true },
     queueNumber:    { type: Number, required: true },

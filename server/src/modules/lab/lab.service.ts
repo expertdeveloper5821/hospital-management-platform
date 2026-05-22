@@ -28,10 +28,19 @@ async function resolveReportUrl(s3Key: string | null): Promise<string | null> {
   return s3Service.getPresignedUrl(s3Key, REPORT_URL_EXPIRY_SECONDS);
 }
 
-async function toPathologyResponse(doc: IPathologyRequest): Promise<PathologyRequestResponse> {
+async function getPatientFullName(tenantId: string, patientId: string): Promise<string | undefined> {
+  const patient = await patientRepository.findByPatientId(tenantId, patientId);
+  return patient?.fullName;
+}
+
+async function toPathologyResponse(
+  doc: IPathologyRequest,
+  fullName?: string,
+): Promise<PathologyRequestResponse> {
   return {
     requestId:   doc.requestId,
     patientId:   doc.patientId,
+    fullName:    fullName ?? await getPatientFullName(doc.tenantId, doc.patientId),
     tenantId:    doc.tenantId,
     requestedBy: doc.requestedBy,
     testType:    doc.testType,
@@ -43,10 +52,14 @@ async function toPathologyResponse(doc: IPathologyRequest): Promise<PathologyReq
   };
 }
 
-async function toRadiologyResponse(doc: IRadiologyRequest): Promise<RadiologyRequestResponse> {
+async function toRadiologyResponse(
+  doc: IRadiologyRequest,
+  fullName?: string,
+): Promise<RadiologyRequestResponse> {
   return {
     requestId:   doc.requestId,
     patientId:   doc.patientId,
+    fullName:    fullName ?? await getPatientFullName(doc.tenantId, doc.patientId),
     tenantId:    doc.tenantId,
     requestedBy: doc.requestedBy,
     imagingType: doc.imagingType,
@@ -175,7 +188,11 @@ export class LabService {
     query:    ListLabRequestsQuery,
   ): Promise<PaginatedResult<PathologyRequestResponse>> {
     const result = await labRepository.findPathologyByPatient(tenantId, query);
-    const data   = await Promise.all(result.data.map(toPathologyResponse));
+    const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
+    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
+    const data = await Promise.all(
+      result.data.map((doc) => toPathologyResponse(doc, nameMap.get(doc.patientId))),
+    );
     return { ...result, data };
   }
 
@@ -290,7 +307,11 @@ export class LabService {
     query:    ListLabRequestsQuery,
   ): Promise<PaginatedResult<RadiologyRequestResponse>> {
     const result = await labRepository.findRadiologyByPatient(tenantId, query);
-    const data   = await Promise.all(result.data.map(toRadiologyResponse));
+    const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
+    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
+    const data = await Promise.all(
+      result.data.map((doc) => toRadiologyResponse(doc, nameMap.get(doc.patientId))),
+    );
     return { ...result, data };
   }
 }
