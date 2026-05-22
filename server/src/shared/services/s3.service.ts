@@ -73,7 +73,7 @@ class S3Service {
         // Render can resolve duplicate Smithy type packages during install, which makes
         // the presigner's client constraint incompatible with the S3Client instance at
         // compile time even though the runtime object is valid.
-        this.client as Parameters<typeof getSignedUrl>[0],
+        this.client as unknown as Parameters<typeof getSignedUrl>[0],
         new GetObjectCommand({ Bucket: this.bucket, Key: key }),
         { expiresIn: expirySeconds },
       );
