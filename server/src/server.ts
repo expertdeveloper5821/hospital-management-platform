@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import app from './app';
 import config from './shared/config/env';
 import { connectDatabase, disconnectDatabase } from './shared/config/database';
+import { emailService } from './shared/services/email.service';
 import { initWebSocketServer } from './shared/services/websocket.service';
 
 let httpServer: http.Server;
@@ -74,6 +75,9 @@ async function start(): Promise<void> {
 
   // 3. Attach WebSocket server (SRV-02)
   initWebSocketServer(httpServer);
+
+  // 4. Verify SMTP configuration after startup so provider/network issues show in logs early.
+  void emailService.verifyConnection();
 }
 
 start().catch((err) => {

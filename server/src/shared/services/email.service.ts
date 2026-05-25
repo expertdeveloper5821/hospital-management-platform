@@ -48,11 +48,53 @@ class EmailService {
       host:   config.smtp.host,
       port:   config.smtp.port,
       secure: config.smtp.port === 465,
+      requireTLS: config.smtp.port === 587,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 20_000,
       auth: {
         user: config.smtp.user,
         pass: config.smtp.pass, // SECURITY-03: never logged
       },
     });
+  }
+
+  async verifyConnection(): Promise<void> {
+    try {
+      await this.transporter.verify();
+      console.log(JSON.stringify({
+        level: 'info',
+        event: 'smtp_verified',
+        host: config.smtp.host,
+        port: config.smtp.port,
+        user: config.smtp.user,
+        from: config.smtp.from,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (err) {
+      const smtpError = err as Error & {
+        code?: string;
+        command?: string;
+        response?: string;
+        responseCode?: number;
+      };
+
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'smtp_verify_failed',
+        host: config.smtp.host,
+        port: config.smtp.port,
+        user: config.smtp.user,
+        from: config.smtp.from,
+        message: smtpError.message,
+        code: smtpError.code,
+        command: smtpError.command,
+        response: smtpError.response,
+        responseCode: smtpError.responseCode,
+        stack: smtpError.stack,
+        timestamp: new Date().toISOString(),
+      }));
+    }
   }
 
   async sendInviteEmail(to: string, inviteLink: string): Promise<void> {
@@ -84,7 +126,6 @@ class EmailService {
     }
 
     try {
-
       await this.transporter.verify();
       await this.transporter.sendMail({
         from:    config.smtp.from,
@@ -93,6 +134,13 @@ class EmailService {
         html,
       });
     } catch (err) {
+      const smtpError = err as Error & {
+        code?: string;
+        command?: string;
+        response?: string;
+        responseCode?: number;
+      };
+
       // EMAIL-04: Log error without exposing SMTP credentials (SECURITY-03)
       console.error(JSON.stringify({
         level:         'error',
@@ -100,7 +148,16 @@ class EmailService {
         correlationId: getCorrelationId(),
         template,
         to:            data.to,
-        message:       (err as Error).message,
+        host:          config.smtp.host,
+        port:          config.smtp.port,
+        user:          config.smtp.user,
+        from:          config.smtp.from,
+        message:       smtpError.message,
+        code:          smtpError.code,
+        command:       smtpError.command,
+        response:      smtpError.response,
+        responseCode:  smtpError.responseCode,
+        stack:         smtpError.stack,
         timestamp:     new Date().toISOString(),
       }));
       
