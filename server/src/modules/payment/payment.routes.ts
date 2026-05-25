@@ -1,4 +1,4 @@
-import express, { Router } from 'express';
+import express from 'express';
 import {
   authenticateJWT,
   scopeTenant,
@@ -13,7 +13,7 @@ import {
   getPaymentSummary,
 } from './payment.controller';
 
-const router: Router = express.Router();
+const router = express.Router();
 
 router.use(authenticateJWT, scopeTenant);
 

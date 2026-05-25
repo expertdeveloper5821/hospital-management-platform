@@ -34,6 +34,7 @@ export interface AppConfig {
     endpoint?:       string;
   };
   corsOrigins:  string[];
+  allowedOrigins: string[];
   rateLimit: {
     windowMs:    number;
     maxRequests: number;
@@ -43,6 +44,13 @@ export interface AppConfig {
     keySecret:     string;
     webhookSecret: string;
   };
+}
+
+function parseEnvList(value?: string): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
 }
 
 const config: AppConfig = {

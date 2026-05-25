@@ -662,11 +662,10 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   const [discharge, { isLoading: discharging }] = useDischargePatientMutation();
 
-  const canAdmit     = [
-    UserRole.RECEPTIONIST,
-    UserRole.HOSPITAL_ADMIN,
-    UserRole.ADMIN,
-  ].includes(role);
+  const canAdmit =
+    role === UserRole.RECEPTIONIST ||
+    role === UserRole.HOSPITAL_ADMIN ||
+    role === UserRole.ADMIN;
   const canProgress  = role === UserRole.DOCTOR;
   const canDischarge = role === UserRole.DOCTOR;
 

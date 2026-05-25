@@ -1,4 +1,4 @@
-import express, { Router } from 'express';
+import express from 'express';
 import multer from 'multer';
 import {
   authenticateJWT,
@@ -18,7 +18,7 @@ import {
   uploadRadiologyReport,
 } from './lab.controller';
 
-const router: Router = express.Router();
+const router = express.Router();
 
 router.use(authenticateJWT, scopeTenant);
 

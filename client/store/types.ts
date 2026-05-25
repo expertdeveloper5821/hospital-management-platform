@@ -1,5 +1,5 @@
 // Mirrors server contracts — kept in sync manually with server/src/shared/types and module types
-
+ 
 export const UserRole = {
   SUPER_ADMIN:     'SUPER_ADMIN',
   HOSPITAL_ADMIN:  'HOSPITAL_ADMIN',
@@ -14,11 +14,11 @@ export const UserRole = {
   ADMIN:           'ADMIN',
   STAFF:           'STAFF',
 } as const;
-
+ 
 export type UserRole = typeof UserRole[keyof typeof UserRole];
-
+ 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-
+ 
 /** Shape returned by POST /api/auth/login */
 export interface LoginApiResponse {
   token:        string;
@@ -26,7 +26,7 @@ export interface LoginApiResponse {
   role:         UserRole;
   isFirstLogin: boolean;
 }
-
+ 
 /** Shape returned by GET /api/auth/me or GET /api/super-admin/me */
 export interface MeResponse {
   userId:        string;
@@ -35,40 +35,40 @@ export interface MeResponse {
   tenantId:      string | null;
   isFirstLogin?: boolean; // absent for SUPER_ADMIN (no first-login requirement)
 }
-
+ 
 export interface LoginRequest {
   email:        string;
   password:     string;
   tenantId?:    string;
   isSuperAdmin?: boolean;
 }
-
+ 
 export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword:     string;
 }
-
+ 
 export interface ForgotPasswordRequest {
   email:    string;
   tenantId: string; // required by backend schema
 }
-
+ 
 export interface ResetPasswordRequest {
   token:       string;
   newPassword: string;
 }
-
+ 
 // ─── Tenant / Branding ────────────────────────────────────────────────────────
-
+ 
 /** Shape returned by GET /api/tenants/:tenantId/branding */
 export interface BrandingConfig {
   logoUrl?:     string | null; // S3 presigned URL or key, may be absent
   displayName:  string;        // tenant display name
   primaryColor: string;        // hex e.g. #1A73E8
 }
-
+ 
 // ─── Users ────────────────────────────────────────────────────────────────────
-
+ 
 export interface UserResponse {
   userId:       string;
   email:        string;
@@ -79,9 +79,9 @@ export interface UserResponse {
   tenantId:     string;
   createdAt:    string;
 }
-
+ 
 // ─── Notifications ────────────────────────────────────────────────────────────
-
+ 
 export interface NotificationMessage {
   id:          string;
   title:       string;
@@ -92,12 +92,12 @@ export interface NotificationMessage {
   timestamp:   string;
   read:        boolean;
 }
-
+ 
 // ─── Patient ──────────────────────────────────────────────────────────────────
-
+ 
 export type Gender     = 'MALE' | 'FEMALE' | 'OTHER';
 export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
-
+ 
 export interface PatientResponse {
   patientId:              string;
   fullName:               string;
@@ -113,7 +113,7 @@ export interface PatientResponse {
   createdAt:              string;
   updatedAt:              string;
 }
-
+ 
 export interface CreatePatientRequest {
   fullName:               string;
   dateOfBirth:            string; // YYYY-MM-DD
@@ -126,7 +126,7 @@ export interface CreatePatientRequest {
   bloodGroup?:            BloodGroup;
   forceCreate?:           boolean;
 }
-
+ 
 export interface UpdatePatientRequest {
   fullName?:               string;
   dateOfBirth?:            string;
@@ -138,18 +138,18 @@ export interface UpdatePatientRequest {
   emergencyContactMobile?: string;
   bloodGroup?:             BloodGroup;
 }
-
+ 
 export interface PatientSearchResult {
   data:  PatientResponse[];
   total: number;
   page:  number;
   limit: number;
 }
-
+ 
 // ─── OPD ──────────────────────────────────────────────────────────────────────
-
+ 
 export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
-
+ 
 export interface OPDVisitResponse {
   visitId:        string;
   tenantId:       string;
@@ -166,7 +166,7 @@ export interface OPDVisitResponse {
   createdAt:      string;
   updatedAt:      string;
 }
-
+ 
 export interface CreateOPDVisitRequest {
   patientId:      string;
   chiefComplaint: string;
@@ -174,7 +174,7 @@ export interface CreateOPDVisitRequest {
   visitDate?:     string; // YYYY-MM-DD
   notes?:         string;
 }
-
+ 
 export interface UpdateOPDVisitRequest {
   chiefComplaint?: string;
   doctorId?:       string;
@@ -183,24 +183,24 @@ export interface UpdateOPDVisitRequest {
   prescription?:   string;
   notes?:          string;
 }
-
+ 
 export interface CompleteOPDVisitRequest {
   diagnosis:     string;
   prescription?: string;
   notes?:        string;
 }
-
+ 
 export interface OPDPatientHistory {
   data:  OPDVisitResponse[];
   total: number;
   page:  number;
   limit: number;
 }
-
+ 
 // ─── Lab ──────────────────────────────────────────────────────────────────────
-
+ 
 export type LabRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
-
+ 
 export interface PathologyRequestResponse {
   requestId:   string;
   patientId:   string;
@@ -214,7 +214,7 @@ export interface PathologyRequestResponse {
   requestedAt: string;
   updatedAt:   string;
 }
-
+ 
 export interface RadiologyRequestResponse {
   requestId:   string;
   patientId:   string;
@@ -228,19 +228,19 @@ export interface RadiologyRequestResponse {
   requestedAt: string;
   updatedAt:   string;
 }
-
+ 
 export interface CreatePathologyRequest {
   patientId: string;
   testType:  string;
   notes?:    string;
 }
-
+ 
 export interface CreateRadiologyRequest {
   patientId:   string;
   imagingType: string;
   notes?:      string;
 }
-
+ 
 export interface LabListResult<T> {
   data:       T[];
   total:      number;
@@ -248,9 +248,89 @@ export interface LabListResult<T> {
   limit:      number;
   totalPages: number;
 }
-
+ 
+// ─── IPD ──────────────────────────────────────────────────────────────────────
+ 
+export type AdmissionStatus = 'ADMITTED' | 'DISCHARGED';
+ 
+export interface WardResponse {
+  wardId:    string;
+  name:      string;
+  floor:     string | null;
+  tenantId:  string;
+  createdAt: string;
+}
+ 
+export interface BedResponse {
+  bedId:              string;
+  wardId:             string;
+  bedNumber:          string;
+  isOccupied:         boolean;
+  currentAdmissionId: string | null;
+  tenantId:           string;
+  createdAt:          string;
+}
+ 
+export interface ProgressNote {
+  noteId:    string;
+  doctorId:  string;
+  note:      string;
+  timestamp: string;
+}
+ 
+export interface AdmissionResponse {
+  admissionId:      string;
+  patientId:        string;
+  fullName:         string | null;
+  wardId:           string;
+  wardName:         string;
+  bedId:            string;
+  bedNumber:        string;
+  assignedDoctorId: string;
+  status:           AdmissionStatus;
+  admissionDate:    string;
+  dischargeDate:    string | null;
+  progressNotes:    ProgressNote[];
+}
+ 
+export interface WardOccupancySummary {
+  wardId:    string;
+  wardName:  string;
+  floor:     string | null;
+  total:     number;
+  occupied:  number;
+  available: number;
+}
+ 
+export interface CreateAdmissionRequest {
+  patientId:        string;
+  wardId:           string;
+  bedId:            string;
+  assignedDoctorId: string;
+}
+ 
+export interface AddProgressNoteRequest {
+  note: string;
+}
+ 
+export interface ListAdmissionsQuery {
+  wardId?: string;
+  status?: AdmissionStatus;
+  page?:   number;
+  limit?:  number;
+}
+ 
+export interface CreateWardRequest {
+  name:   string;
+  floor?: string;
+}
+ 
+export interface AddBedsRequest {
+  bedNumbers: string[];
+}
+ 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-
+ 
 export interface InventoryItemResponse {
   itemId:            string;
   tenantId:          string;
@@ -264,7 +344,7 @@ export interface InventoryItemResponse {
   createdAt:         string;
   updatedAt:         string;
 }
-
+ 
 export interface CreateInventoryItemRequest {
   name:              string;
   category:          string;
@@ -273,16 +353,16 @@ export interface CreateInventoryItemRequest {
   lowStockThreshold: number;
   description?:      string;
 }
-
+ 
 export interface UpdateStockRequest {
   quantityChange: number;
   reason:         string;
 }
-
+ 
 export interface UpdateThresholdRequest {
   lowStockThreshold: number;
 }
-
+ 
 export interface InventoryListResult {
   data:       InventoryItemResponse[];
   total:      number;
@@ -290,12 +370,12 @@ export interface InventoryListResult {
   limit:      number;
   totalPages: number;
 }
-
+ 
 // ─── Payment ──────────────────────────────────────────────────────────────────
-
+ 
 export type PaymentMethod = 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
-
+ 
 export interface PaymentResponse {
   paymentId:         string;
   tenantId:          string;
@@ -312,21 +392,21 @@ export interface PaymentResponse {
   createdAt:         string;
   updatedAt:         string;
 }
-
+ 
 export interface CreateManualPaymentRequest {
   patientId:     string;
   amount:        number;
   paymentMethod: 'CASH' | 'CHEQUE';
   description:   string;
 }
-
+ 
 export interface CreateRazorpayOrderRequest {
   patientId:     string;
   amount:        number;
   paymentMethod: 'UPI' | 'CARD';
   description:   string;
 }
-
+ 
 export interface RazorpayOrderResponse {
   paymentId:       string;
   razorpayOrderId: string;
@@ -334,7 +414,7 @@ export interface RazorpayOrderResponse {
   currency:        string;
   keyId:           string;
 }
-
+ 
 export interface PaymentSummaryResponse {
   CASH:   number;
   CHEQUE: number;
@@ -342,7 +422,7 @@ export interface PaymentSummaryResponse {
   CARD:   number;
   total:  number;
 }
-
+ 
 export interface PaymentListResult {
   data:       PaymentResponse[];
   total:      number;
@@ -350,9 +430,9 @@ export interface PaymentListResult {
   limit:      number;
   totalPages: number;
 }
-
+ 
 // ─── Audit ────────────────────────────────────────────────────────────────────
-
+ 
 export const AuditEntityTypes = [
   'PATIENT',
   'OPD_VISIT',
@@ -365,9 +445,9 @@ export const AuditEntityTypes = [
   'TENANT',
   'AUTH',
 ] as const;
-
+ 
 export type AuditEntityType = typeof AuditEntityTypes[number];
-
+ 
 export interface AuditLogEntry {
   auditId:        string;
   entityType:     string;
@@ -379,7 +459,7 @@ export interface AuditLogEntry {
   newValue?:      Record<string, unknown>;
   timestamp:      string;
 }
-
+ 
 export interface AuditListResult {
   data:       AuditLogEntry[];
   total:      number;
@@ -387,20 +467,20 @@ export interface AuditListResult {
   limit:      number;
   totalPages: number;
 }
-
+ 
 // ─── Shared ───────────────────────────────────────────────────────────────────
-
+ 
 export interface ApiSuccess<T> {
   status: 'success';
   data:   T;
 }
-
+ 
 export interface ApiError {
   status:   'error';
   message:  string;
   details?: Record<string, unknown>;
 }
-
+ 
 export interface PaginatedResult<T> {
   data:       T[];
   total:      number;
