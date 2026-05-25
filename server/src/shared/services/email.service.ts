@@ -84,41 +84,71 @@ class EmailService {
     });
   }
 
-  async verifyConnection(): Promise<void> {
-    try {
-      await this.transporter.verify();
-      console.log(JSON.stringify({
-        level: 'info',
-        event: 'smtp_verified',
-        host: config.smtp.host,
-        port: config.smtp.port,
-        user: config.smtp.user,
-        from: config.smtp.from,
-        timestamp: new Date().toISOString(),
-      }));
-    } catch (err) {
-      const smtpError = err as Error & {
-        code?: string;
-        command?: string;
-        response?: string;
-        responseCode?: number;
-      };
+  async verifyConnection(maxAttempts = 4, baseDelayMs = 2_000): Promise<void> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.transporter.verify();
+        console.log(JSON.stringify({
+          level: 'info',
+          event: 'smtp_verified',
+          host: config.smtp.host,
+          port: config.smtp.port,
+          user: config.smtp.user,
+          from: config.smtp.from,
+          attempt,
+          timestamp: new Date().toISOString(),
+        }));
+        return;
+      } catch (err) {
+        const smtpError = err as Error & {
+          code?: string;
+          command?: string;
+          response?: string;
+          responseCode?: number;
+        };
 
-      console.error(JSON.stringify({
-        level: 'error',
-        event: 'smtp_verify_failed',
-        host: config.smtp.host,
-        port: config.smtp.port,
-        user: config.smtp.user,
-        from: config.smtp.from,
-        message: smtpError.message,
-        code: smtpError.code,
-        command: smtpError.command,
-        response: smtpError.response,
-        responseCode: smtpError.responseCode,
-        stack: smtpError.stack,
-        timestamp: new Date().toISOString(),
-      }));
+        const isTransient =
+          smtpError.code === 'EDNS' ||
+          smtpError.code === 'ECONNREFUSED' ||
+          smtpError.code === 'ETIMEDOUT' ||
+          smtpError.code === 'ENOTFOUND';
+
+        const isLastAttempt = attempt === maxAttempts;
+
+        if (isLastAttempt || !isTransient) {
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'smtp_verify_failed',
+            host: config.smtp.host,
+            port: config.smtp.port,
+            user: config.smtp.user,
+            from: config.smtp.from,
+            message: smtpError.message,
+            code: smtpError.code,
+            command: smtpError.command,
+            response: smtpError.response,
+            responseCode: smtpError.responseCode,
+            stack: smtpError.stack,
+            attempt,
+            timestamp: new Date().toISOString(),
+          }));
+          return;
+        }
+
+        const delayMs = baseDelayMs * 2 ** (attempt - 1);
+        console.log(JSON.stringify({
+          level: 'warn',
+          event: 'smtp_verify_retry',
+          host: config.smtp.host,
+          port: config.smtp.port,
+          code: smtpError.code,
+          message: smtpError.message,
+          attempt,
+          nextAttemptInMs: delayMs,
+          timestamp: new Date().toISOString(),
+        }));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
   }
 
