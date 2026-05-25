@@ -20,8 +20,9 @@ function inviteHtml(inviteLink: string): string {
 <p>If you did not request this, please ignore this email.</p>`;
 }
 
-function welcomeHtml(tempPassword: string): string {
+function welcomeHtml(tempPassword: string, tenantId: string): string {
   return `<p>Your HMS account has been created.</p>
+<p>Tenant ID: <strong>${tenantId}</strong></p>
 <p>Temporary password: <strong>${tempPassword}</strong></p>
 <p>You will be required to change your password on first login.</p>`;
 }
@@ -118,8 +119,8 @@ class EmailService {
     await this.sendTemplatedEmail('invite', { to, inviteLink });
   }
 
-  async sendWelcomeEmail(to: string, tempPassword: string): Promise<void> {
-    await this.sendTemplatedEmail('welcome', { to, tempPassword });
+  async sendWelcomeEmail(to: string, tempPassword: string, tenantId: string): Promise<void> {
+    await this.sendTemplatedEmail('welcome', { to, tempPassword, tenantId });
   }
 
   async sendAccountLockEmail(to: string): Promise<void> {
@@ -137,7 +138,7 @@ class EmailService {
     let html: string;
     switch (template) {
       case 'invite':         html = inviteHtml(data.inviteLink!);         break;
-      case 'welcome':        html = welcomeHtml(data.tempPassword!);      break;
+      case 'welcome':        html = welcomeHtml(data.tempPassword!, data.tenantId!); break;
       case 'account-lock':   html = accountLockHtml();                    break;
       case 'password-reset': html = passwordResetHtml(data.resetLink!);   break;
     }
