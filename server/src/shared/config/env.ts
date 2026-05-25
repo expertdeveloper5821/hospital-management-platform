@@ -70,7 +70,7 @@ const config: AppConfig = {
     s3BucketName:    process.env.S3_BUCKET_NAME!,
     endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
-  allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '')
+  allowedOrigins: (process.env.allowedOrigins ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
