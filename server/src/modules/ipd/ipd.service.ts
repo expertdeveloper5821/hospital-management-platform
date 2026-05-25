@@ -24,7 +24,7 @@ import {
   ConflictError,
   NotFoundError,
 } from '../../shared/middleware/error-handler';
-import { PatientModel } from '../../../src/modules/patient/patient.model';
+import { PatientModel } from '../patient/patient.model';
 
 
 // ─── BedOccupiedError (standalone — NOT inside IPDService) ───────────────────
