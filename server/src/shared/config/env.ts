@@ -46,6 +46,13 @@ export interface AppConfig {
   };
 }
 
+function parseEnvList(value?: string): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
 const config: AppConfig = {
   port:             parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv:          (process.env.NODE_ENV ?? 'development') as AppConfig['nodeEnv'],
@@ -70,14 +77,14 @@ const config: AppConfig = {
     s3BucketName:    process.env.S3_BUCKET_NAME!,
     endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
-  allowedOrigins: (process.env.allowedOrigins ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-  corsOrigins: (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  allowedOrigins: Array.from(
+    new Set([
+      ...parseEnvList(process.env.allowedOrigins),
+      ...parseEnvList(process.env.CORS_ORIGINS),
+      ...parseEnvList(process.env.FRONTEND_URL),
+    ]),
+  ),
+  corsOrigins: parseEnvList(process.env.CORS_ORIGINS),
   rateLimit: {
     windowMs:    parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '900000', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? '100', 10),

@@ -39,52 +39,49 @@ app.use(
 );
 
 // CORS CONFIG
-const allowedOrigins = config.allowedOrigins || [];
-
-console.log('✅ Allowed Origins:', allowedOrigins);
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin
-      // (mobile apps, Postman, curl, server-to-server)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      // Check allowed origins
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      console.error(`❌ CORS Blocked Origin: ${origin}`);
-
-      return callback(
-        new Error(`CORS blocked for origin: ${origin}`)
-      );
-    },
-
-    credentials: true,
-
-    methods: [
-      'GET',
-      'POST',
-      'PUT',
-      'PATCH',
-      'DELETE',
-      'OPTIONS',
-    ],
-
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'X-Correlation-ID',
-    ],
-  })
+const normalizedAllowedOrigins = (config.allowedOrigins || []).map((origin) =>
+  origin.replace(/\/+$/, '')
 );
 
+console.log('Allowed Origins:', normalizedAllowedOrigins);
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin
+    // (mobile apps, Postman, curl, server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = origin.replace(/\/+$/, '');
+
+    if (normalizedAllowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+
+    console.error(`CORS blocked for origin: ${origin}`);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+  ],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Correlation-ID',
+  ],
+};
+
+app.use(cors(corsOptions));
+
 // Handle preflight requests
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 // WEBHOOK ROUTE
 // Must be BEFORE express.json()
@@ -118,7 +115,7 @@ const publicRateLimiter = rateLimit({
     res.status(429).json({
       status: 'error',
       message:
-        'Too many requests — please try again later',
+        'Too many requests - please try again later',
     });
   },
 });
