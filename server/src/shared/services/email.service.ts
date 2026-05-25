@@ -38,6 +38,31 @@ function passwordResetHtml(resetLink: string): string {
 <p>If you did not request this, please ignore this email.</p>`;
 }
 
+function getSmtpFailureMessage(error: {
+  message: string;
+  response?: string;
+}): string {
+  const details = `${error.message} ${error.response ?? ''}`.toLowerCase();
+
+  if (details.includes('from') && details.includes('invalid')) {
+    return 'Email delivery is misconfigured. SMTP_FROM must be a valid sender email address.';
+  }
+
+  if (details.includes('enotfound') || details.includes('getaddrinfo')) {
+    return 'Unable to resolve the SMTP host. Check your DNS or internet connection and retry.';
+  }
+
+  if (details.includes('verify a domain') || details.includes('resend.dev')) {
+    return 'Email delivery is blocked by Resend. Use a verified sender domain, or test only with your own Resend account address.';
+  }
+
+  if (details.includes('auth') || details.includes('invalid login')) {
+    return 'Unable to authenticate with the SMTP provider. Recheck SMTP_USER and SMTP_PASS.';
+  }
+
+  return 'Unable to send email. Please check SMTP configuration and retry.';
+}
+
 // ─── EmailService ─────────────────────────────────────────────────────────────
 class EmailService {
   private transporter: Transporter;
@@ -126,13 +151,26 @@ class EmailService {
     }
 
     try {
-      await this.transporter.verify();
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from:    config.smtp.from,
         to:      data.to,
         subject: SUBJECTS[template],
         html,
       });
+
+      console.log(JSON.stringify({
+        level:         'info',
+        event:         'smtp_sent',
+        correlationId: getCorrelationId(),
+        template,
+        to:            data.to,
+        messageId:     info.messageId,
+        accepted:      info.accepted,
+        rejected:      info.rejected,
+        pending:       info.pending,
+        response:      info.response,
+        timestamp:     new Date().toISOString(),
+      }));
     } catch (err) {
       const smtpError = err as Error & {
         code?: string;
@@ -162,7 +200,7 @@ class EmailService {
       }));
       
       throw new AppError(
-        'Unable to send email. Please check SMTP configuration and retry.',
+        getSmtpFailureMessage(smtpError),
         500,
       );
     }
