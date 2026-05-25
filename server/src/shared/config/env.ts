@@ -34,6 +34,7 @@ export interface AppConfig {
     endpoint?:       string;
   };
   corsOrigins:  string[];
+  allowedOrigins: string[];
   rateLimit: {
     windowMs:    number;
     maxRequests: number;
@@ -69,6 +70,10 @@ const config: AppConfig = {
     s3BucketName:    process.env.S3_BUCKET_NAME!,
     endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
+  allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   corsOrigins: (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((s) => s.trim())

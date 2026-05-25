@@ -29,7 +29,6 @@ import auditRouter from './modules/audit/audit.routes';
 
 const app = express();
 
-=───────────────────────────────────────────────────────
 app.set('trust proxy', 1);
 
 // SECURITY HEADERS
