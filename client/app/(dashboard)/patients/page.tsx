@@ -29,13 +29,14 @@ import {
   ChevronRight,
   Pencil,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const MOBILE_RE = /^\+?[0-9]{7,15}$/;
+const MOBILE_RE   = /^\+?[0-9]{7,15}$/;
+const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
+const AADHAAR_RE  = /^\d{12}$/;
 
 function genderLabel(g: Gender) {
   return g.charAt(0) + g.slice(1).toLowerCase();
@@ -55,6 +56,66 @@ function sanitizeMobile(value: string) {
   return cleaned.startsWith('+')
     ? `+${cleaned.slice(1).replace(/\+/g, '')}`.slice(0, 16)
     : cleaned.replace(/\+/g, '').slice(0, 15);
+}
+
+type PatientFormErrors = Partial<Record<string, string>>;
+
+function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
+  const errors: PatientFormErrors = {};
+
+  const name = form.fullName.trim();
+  if (!name) {
+    errors.fullName = 'Full name is required.';
+  } else if (name.length < 2) {
+    errors.fullName = 'Name must be at least 2 characters.';
+  } else if (name.length > 100) {
+    errors.fullName = 'Name must be 100 characters or fewer.';
+  } else if (!NAME_RE.test(name)) {
+    errors.fullName = 'Name can only contain letters, spaces, dots, hyphens, and apostrophes.';
+  }
+
+  if (!form.dateOfBirth) {
+    errors.dateOfBirth = 'Date of birth is required.';
+  } else {
+    const dob   = new Date(form.dateOfBirth);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ageYears = (today.getTime() - dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    if (dob >= today) {
+      errors.dateOfBirth = 'Date of birth must be in the past.';
+    } else if (ageYears > 150) {
+      errors.dateOfBirth = 'Please enter a valid date of birth.';
+    }
+  }
+
+  if (!form.mobileNumber) {
+    errors.mobileNumber = 'Mobile number is required.';
+  } else if (!MOBILE_RE.test(form.mobileNumber)) {
+    errors.mobileNumber = 'Enter a valid mobile number (7–15 digits, optional leading +).';
+  }
+
+  const addr = form.address.trim();
+  if (!addr) {
+    errors.address = 'Address is required.';
+  } else if (addr.length < 10) {
+    errors.address = 'Address must be at least 10 characters.';
+  } else if (addr.length > 300) {
+    errors.address = 'Address must be 300 characters or fewer.';
+  }
+
+  if (form.aadhaarNumber && !AADHAAR_RE.test(form.aadhaarNumber)) {
+    errors.aadhaarNumber = 'Aadhaar must be exactly 12 digits.';
+  }
+
+  if (form.emergencyContactName && form.emergencyContactName.trim().length < 2) {
+    errors.emergencyContactName = 'Name must be at least 2 characters.';
+  }
+
+  if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
+    errors.emergencyContactMobile = 'Enter a valid mobile number (7–15 digits, optional leading +).';
+  }
+
+  return errors;
 }
 
 // ─── Register / Edit Modal ────────────────────────────────────────────────────
@@ -80,32 +141,43 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     forceCreate:            false,
   });
 
+  const [touched,       setTouched]       = useState<Partial<Record<string, boolean>>>({});
+  const [submitted,     setSubmitted]     = useState(false);
   const [duplicateInfo, setDuplicateInfo] = useState<{ existingPatientId: string } | null>(null);
-  const [error, setError]   = useState('');
+  const [apiError,      setApiError]      = useState('');
 
   const [createPatient, { isLoading: creating }] = useCreatePatientMutation();
   const [updatePatient, { isLoading: updating }] = useUpdatePatientMutation();
   const isLoading = creating || updating;
 
+  const errors   = validatePatientForm(form);
+  const hasErrors = Object.keys(errors).length > 0;
+
   function set(field: keyof CreatePatientRequest, value: string | boolean | undefined) {
     setForm((f) => ({ ...f, [field]: value }));
-    setError('');
+    setApiError('');
     setDuplicateInfo(null);
+  }
+
+  function touch(field: string) {
+    setTouched((t) => ({ ...t, [field]: true }));
+  }
+
+  function fe(field: string): string | undefined {
+    return (submitted || touched[field]) ? errors[field] : undefined;
+  }
+
+  function inputClass(field: string) {
+    return fe(field) ? 'border-destructive focus-visible:ring-destructive' : '';
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setSubmitted(true);
+    setApiError('');
     setDuplicateInfo(null);
 
-    if (!MOBILE_RE.test(form.mobileNumber)) {
-      setError('Enter a valid mobile number using digits only, with an optional leading +.');
-      return;
-    }
-    if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
-      setError('Enter a valid emergency contact mobile number using digits only, with an optional leading +.');
-      return;
-    }
+    if (hasErrors) return;
 
     try {
       if (mode === 'edit' && initial) {
@@ -115,7 +187,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           gender:                 form.gender,
           mobileNumber:           form.mobileNumber,
           address:                form.address,
-          aadhaarNumber:          form.aadhaarNumber   || undefined,
+          aadhaarNumber:          form.aadhaarNumber          || undefined,
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
           bloodGroup:             form.bloodGroup,
@@ -140,21 +212,14 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
       if (payload?.data?.isDuplicateWarning) {
         setDuplicateInfo({ existingPatientId: payload.data.existingPatientId });
       } else {
-        setError(payload?.message ?? 'Something went wrong. Please try again.');
+        setApiError(payload?.message ?? 'Something went wrong. Please try again.');
       }
     }
   }
 
   async function handleForceCreate() {
-    setError('');
-    if (!MOBILE_RE.test(form.mobileNumber)) {
-      setError('Enter a valid mobile number using digits only, with an optional leading +.');
-      return;
-    }
-    if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
-      setError('Enter a valid emergency contact mobile number using digits only, with an optional leading +.');
-      return;
-    }
+    setApiError('');
+    if (hasErrors) return;
     try {
       const body: CreatePatientRequest = {
         ...form,
@@ -168,7 +233,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
       onSuccess?.(result);
       onClose();
     } catch (err: any) {
-      setError(err?.data?.message ?? 'Something went wrong.');
+      setApiError(err?.data?.message ?? 'Something went wrong.');
     }
   }
 
@@ -184,7 +249,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
           {/* Duplicate warning */}
           {duplicateInfo && (
             <div className="flex gap-3 rounded-md border border-yellow-400 bg-yellow-50 p-4 text-sm text-yellow-800">
@@ -206,24 +271,27 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
             </div>
           )}
 
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+          {apiError && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{apiError}</p>
           )}
 
           {/* Required fields */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2 space-y-1.5">
+            <div className="sm:col-span-2 space-y-1">
               <Label htmlFor="fullName">Full Name *</Label>
               <Input
                 id="fullName"
                 value={form.fullName}
                 onChange={(e) => set('fullName', e.target.value)}
+                onBlur={() => touch('fullName')}
                 placeholder="Enter full name"
-                required
+                aria-invalid={!!fe('fullName')}
+                className={inputClass('fullName')}
               />
+              {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="dob">Date of Birth *</Label>
               <Input
                 id="dob"
@@ -231,18 +299,20 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
                 value={form.dateOfBirth}
                 max={new Date().toISOString().substring(0, 10)}
                 onChange={(e) => set('dateOfBirth', e.target.value)}
-                required
+                onBlur={() => touch('dateOfBirth')}
+                aria-invalid={!!fe('dateOfBirth')}
+                className={inputClass('dateOfBirth')}
               />
+              {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="gender">Gender *</Label>
               <select
                 id="gender"
                 value={form.gender}
                 onChange={(e) => set('gender', e.target.value as Gender)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                required
               >
                 {GENDERS.map((g) => (
                   <option key={g} value={g}>{genderLabel(g)}</option>
@@ -250,22 +320,24 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               </select>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="mobile">Mobile Number *</Label>
               <Input
                 id="mobile"
                 type="tel"
                 inputMode="tel"
-                pattern="\+?[0-9]{7,15}"
                 maxLength={16}
                 value={form.mobileNumber}
                 onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
+                onBlur={() => touch('mobileNumber')}
                 placeholder="+91XXXXXXXXXX"
-                required
+                aria-invalid={!!fe('mobileNumber')}
+                className={inputClass('mobileNumber')}
               />
+              {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               <Label htmlFor="bloodGroup">Blood Group</Label>
               <select
                 id="bloodGroup"
@@ -280,17 +352,19 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               </select>
             </div>
 
-            <div className="sm:col-span-2 space-y-1.5">
+            <div className="sm:col-span-2 space-y-1">
               <Label htmlFor="address">Address *</Label>
               <textarea
                 id="address"
                 value={form.address}
                 onChange={(e) => set('address', e.target.value)}
+                onBlur={() => touch('address')}
                 placeholder="Full address"
                 rows={2}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                required
+                aria-invalid={!!fe('address')}
+                className={`flex w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none ${fe('address') ? 'border-destructive focus:ring-destructive' : 'border-input'}`}
               />
+              {fe('address') && <p className="text-xs text-destructive">{fe('address')}</p>}
             </div>
           </div>
 
@@ -300,39 +374,51 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               Optional details (Aadhaar, emergency contact)
             </summary>
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="aadhaar">Aadhaar Number</Label>
                 <Input
                   id="aadhaar"
                   value={form.aadhaarNumber ?? ''}
-                  onChange={(e) => set('aadhaarNumber', e.target.value)}
+                  onChange={(e) => set('aadhaarNumber', e.target.value.replace(/\D/g, '').slice(0, 12))}
+                  onBlur={() => touch('aadhaarNumber')}
                   placeholder="12-digit Aadhaar"
                   maxLength={12}
+                  inputMode="numeric"
+                  aria-invalid={!!fe('aadhaarNumber')}
+                  className={inputClass('aadhaarNumber')}
                 />
+                {fe('aadhaarNumber') && <p className="text-xs text-destructive">{fe('aadhaarNumber')}</p>}
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="ecName">Emergency Contact Name</Label>
                 <Input
                   id="ecName"
                   value={form.emergencyContactName ?? ''}
                   onChange={(e) => set('emergencyContactName', e.target.value)}
+                  onBlur={() => touch('emergencyContactName')}
                   placeholder="Contact name"
+                  aria-invalid={!!fe('emergencyContactName')}
+                  className={inputClass('emergencyContactName')}
                 />
+                {fe('emergencyContactName') && <p className="text-xs text-destructive">{fe('emergencyContactName')}</p>}
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
                 <Input
                   id="ecMobile"
                   type="tel"
                   inputMode="tel"
-                  pattern="\+?[0-9]{7,15}"
                   maxLength={16}
                   value={form.emergencyContactMobile ?? ''}
                   onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
+                  onBlur={() => touch('emergencyContactMobile')}
                   placeholder="+91XXXXXXXXXX"
+                  aria-invalid={!!fe('emergencyContactMobile')}
+                  className={inputClass('emergencyContactMobile')}
                 />
+                {fe('emergencyContactMobile') && <p className="text-xs text-destructive">{fe('emergencyContactMobile')}</p>}
               </div>
             </div>
           </details>
@@ -447,7 +533,6 @@ export default function PatientsPage() {
   const totalPages  = data ? Math.ceil(data.total / 20) : 1;
 
   const canRegister = role === 'RECEPTIONIST' || role === 'NURSE' || role === 'HOSPITAL_ADMIN';
-  const canEdit     = role === 'RECEPTIONIST' || role === 'HOSPITAL_ADMIN';
 
   return (
     <div className="space-y-6">
