@@ -14,7 +14,7 @@ import {
   ValidationError,
   AppError,
 } from '../../shared/middleware/error-handler';
-import { LoginRequest, LoginResponse } from './auth.types';
+import { LoginRequest, LoginResponse, ChangePasswordResponse } from './auth.types';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS   = 15 * 60 * 1000; // 15 minutes
@@ -119,7 +119,7 @@ export class AuthService {
     tenantId: string | null,
     currentPassword: string,
     newPassword: string,
-  ): Promise<void> {
+  ): Promise<ChangePasswordResponse> {
     const user = await authRepository.findUserById(userId);
     if (!user) throw new NotFoundError('User not found');
 
@@ -139,6 +139,13 @@ export class AuthService {
       userId,
       tenantId,
     });
+
+    // Issue a fresh token so the client's isFirstLogin flag is immediately updated
+    const payload: JWTPayload = { userId, tenantId, role: user.role, email: user.email, isFirstLogin: false };
+    const token = jwt.sign(payload, config.jwtSecret, {
+      expiresIn: config.jwtExpiry as jwt.SignOptions['expiresIn'],
+    });
+    return { token };
   }
 
   async forgotPassword(email: string, tenantId: string): Promise<void> {

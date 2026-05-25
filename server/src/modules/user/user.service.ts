@@ -30,7 +30,7 @@ export class UserService {
     });
 
     // Send welcome email — fails the operation if SMTP is unavailable (Answer C2=A)
-    await emailService.sendWelcomeEmail(data.email, tempPassword);
+    await emailService.sendWelcomeEmail(data.email, tempPassword, tenantId);
 
     await auditService.log({
       entityType: AuditEntityType.USER_ACCOUNT,

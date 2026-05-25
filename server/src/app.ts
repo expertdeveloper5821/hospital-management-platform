@@ -4,6 +4,10 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
 import config from './shared/config/env';
+import {
+  isAllowedOrigin,
+  normalizeOrigin,
+} from './shared/utils/cors';
 
 import { requestLogger } from './shared/middleware/request-logger';
 import {

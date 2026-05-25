@@ -1,4 +1,4 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 import config from '../config/env';
 import { AppError } from '../middleware/error-handler';
 import { getCorrelationId } from '../config/request-context';
@@ -20,8 +20,9 @@ function inviteHtml(inviteLink: string): string {
 <p>If you did not request this, please ignore this email.</p>`;
 }
 
-function welcomeHtml(tempPassword: string): string {
+function welcomeHtml(tempPassword: string, tenantId: string): string {
   return `<p>Your HMS account has been created.</p>
+<p>Tenant ID: <strong>${tenantId}</strong></p>
 <p>Temporary password: <strong>${tempPassword}</strong></p>
 <p>You will be required to change your password on first login.</p>`;
 }
@@ -38,29 +39,88 @@ function passwordResetHtml(resetLink: string): string {
 <p>If you did not request this, please ignore this email.</p>`;
 }
 
+function getResendFailureMessage(error: { message: string; name: string }): string {
+  const details = `${error.message} ${error.name}`.toLowerCase();
+
+  if (details.includes('api key') || details.includes('unauthorized') || details.includes('403')) {
+    return 'Email delivery failed: invalid Resend API key. Check SMTP_PASS in your environment.';
+  }
+
+  if (details.includes('verify') || details.includes('domain') || details.includes('from')) {
+    return 'Email delivery is blocked by Resend. Use a verified sender domain.';
+  }
+
+  if (details.includes('rate') || details.includes('429')) {
+    return 'Email rate limit reached. Please wait before sending more emails.';
+  }
+
+  return 'Unable to send email. Please check email configuration and retry.';
+}
+
 // ─── EmailService ─────────────────────────────────────────────────────────────
 class EmailService {
-  private transporter: Transporter;
+  private client: Resend;
 
   constructor() {
-    // EMAIL-02: SMTP credentials from config — NEVER hardcoded
-    this.transporter = nodemailer.createTransport({
-      host:   config.smtp.host,
-      port:   config.smtp.port,
-      secure: config.smtp.port === 465,
-      auth: {
-        user: config.smtp.user,
-        pass: config.smtp.pass, // SECURITY-03: never logged
-      },
-    });
+    this.client = new Resend(config.smtp.pass);
+  }
+
+  async verifyConnection(maxAttempts = 4, baseDelayMs = 2_000): Promise<void> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // Resend has no explicit verify(); a domains list call confirms API key validity.
+        const { error } = await this.client.domains.list();
+        if (error) throw new Error(error.message);
+
+        console.log(JSON.stringify({
+          level: 'info',
+          event: 'smtp_verified',
+          provider: 'resend-http',
+          from: config.smtp.from,
+          attempt,
+          timestamp: new Date().toISOString(),
+        }));
+        return;
+      } catch (err) {
+        const resendError = err as Error & { statusCode?: number };
+        const isTransient = !resendError.statusCode || resendError.statusCode >= 500;
+        const isLastAttempt = attempt === maxAttempts;
+
+        if (isLastAttempt || !isTransient) {
+          console.error(JSON.stringify({
+            level: 'error',
+            event: 'smtp_verify_failed',
+            provider: 'resend-http',
+            from: config.smtp.from,
+            message: resendError.message,
+            statusCode: resendError.statusCode,
+            attempt,
+            timestamp: new Date().toISOString(),
+          }));
+          return;
+        }
+
+        const delayMs = baseDelayMs * 2 ** (attempt - 1);
+        console.log(JSON.stringify({
+          level: 'warn',
+          event: 'smtp_verify_retry',
+          provider: 'resend-http',
+          message: resendError.message,
+          attempt,
+          nextAttemptInMs: delayMs,
+          timestamp: new Date().toISOString(),
+        }));
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
   async sendInviteEmail(to: string, inviteLink: string): Promise<void> {
     await this.sendTemplatedEmail('invite', { to, inviteLink });
   }
 
-  async sendWelcomeEmail(to: string, tempPassword: string): Promise<void> {
-    await this.sendTemplatedEmail('welcome', { to, tempPassword });
+  async sendWelcomeEmail(to: string, tempPassword: string, tenantId: string): Promise<void> {
+    await this.sendTemplatedEmail('welcome', { to, tempPassword, tenantId });
   }
 
   async sendAccountLockEmail(to: string): Promise<void> {
@@ -78,34 +138,47 @@ class EmailService {
     let html: string;
     switch (template) {
       case 'invite':         html = inviteHtml(data.inviteLink!);         break;
-      case 'welcome':        html = welcomeHtml(data.tempPassword!);      break;
+      case 'welcome':        html = welcomeHtml(data.tempPassword!, data.tenantId!); break;
       case 'account-lock':   html = accountLockHtml();                    break;
       case 'password-reset': html = passwordResetHtml(data.resetLink!);   break;
     }
 
-    try {
-      await this.transporter.sendMail({
-        from:    config.smtp.from,
-        to:      data.to,
-        subject: SUBJECTS[template],
-        html,
-      });
-    } catch (err) {
-      // EMAIL-04: Log error without exposing SMTP credentials (SECURITY-03)
+    const { data: result, error } = await this.client.emails.send({
+      from:    config.smtp.from,
+      to:      data.to,
+      subject: SUBJECTS[template],
+      html,
+    });
+
+    if (error) {
+      const resendError = error as Error & { statusCode?: number };
+
       console.error(JSON.stringify({
         level:         'error',
         event:         'smtp_failure',
         correlationId: getCorrelationId(),
+        provider:      'resend-http',
         template,
         to:            data.to,
-        message:       (err as Error).message,
+        from:          config.smtp.from,
+        message:       resendError.message,
+        statusCode:    resendError.statusCode,
         timestamp:     new Date().toISOString(),
       }));
-      throw new AppError(
-        'Unable to send email. Please check SMTP configuration and retry.',
-        500,
-      );
+
+      throw new AppError(getResendFailureMessage(resendError), 500);
     }
+
+    console.log(JSON.stringify({
+      level:         'info',
+      event:         'smtp_sent',
+      correlationId: getCorrelationId(),
+      provider:      'resend-http',
+      template,
+      to:            data.to,
+      messageId:     result?.id,
+      timestamp:     new Date().toISOString(),
+    }));
   }
 }
 

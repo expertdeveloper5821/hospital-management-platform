@@ -78,16 +78,10 @@ describe('env config — example-based', () => {
     expect(config.corsOrigins).toContain('http://localhost:3001');
   });
 
-  test('smtp.port is parsed as a number', () => {
-    expect(typeof config.smtp.port).toBe('number');
-    expect(config.smtp.port).toBe(587);
-  });
-
   test('smtp has all required string fields', () => {
-    expect(typeof config.smtp.host).toBe('string');
-    expect(typeof config.smtp.user).toBe('string');
+    expect(typeof config.smtp.pass).toBe('string');
     expect(typeof config.smtp.from).toBe('string');
-    expect(config.smtp.host.length).toBeGreaterThan(0);
+    expect(config.smtp.from.length).toBeGreaterThan(0);
   });
 
   test('aws has all required fields', () => {

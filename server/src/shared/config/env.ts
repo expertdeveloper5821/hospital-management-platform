@@ -13,6 +13,7 @@ export interface AppConfig {
   port:             number;
   nodeEnv:          'development' | 'production' | 'test';
   mongodbUri:       string;
+  mongodbFallbackUri?: string;
   jwtSecret:        string;
   jwtExpiry:        string;
   inviteJwtSecret:  string;
@@ -20,9 +21,6 @@ export interface AppConfig {
   resetTokenExpiry: string;
   bcryptRounds:     number;
   smtp: {
-    host: string;
-    port: number;
-    user: string;
     pass: string;
     from: string;
   };
@@ -53,10 +51,33 @@ function parseEnvList(value?: string): string[] {
     .filter(Boolean);
 }
 
+function isValidEmailAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function isValidEmailFrom(value?: string): boolean {
+  if (!value) return false;
+
+  const trimmed = value.trim();
+  const match = trimmed.match(/<([^<>]+)>$/);
+  const address = match ? match[1].trim() : trimmed;
+
+  return isValidEmailAddress(address);
+}
+
+const smtpFrom = process.env.SMTP_FROM?.trim() ?? '';
+
+if (!isValidEmailFrom(smtpFrom)) {
+  throw new Error(
+    'Invalid SMTP_FROM: expected an email address like "alerts@example.com" or "HMS <alerts@example.com>".',
+  );
+}
+
 const config: AppConfig = {
   port:             parseInt(process.env.PORT ?? '3000', 10),
   nodeEnv:          (process.env.NODE_ENV ?? 'development') as AppConfig['nodeEnv'],
   mongodbUri:       process.env.MONGODB_URI!,
+  mongodbFallbackUri: process.env.MONGODB_FALLBACK_URI || undefined,
   jwtSecret:        process.env.JWT_SECRET!,
   jwtExpiry:        process.env.JWT_EXPIRY ?? '8h',
   inviteJwtSecret:  process.env.INVITE_JWT_SECRET!,
@@ -64,11 +85,8 @@ const config: AppConfig = {
   resetTokenExpiry: process.env.RESET_TOKEN_EXPIRY ?? '1h',
   bcryptRounds:     parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10),
   smtp: {
-    host: process.env.SMTP_HOST!,
-    port: parseInt(process.env.SMTP_PORT ?? '587', 10),
-    user: process.env.SMTP_USER!,
     pass: process.env.SMTP_PASS!,
-    from: process.env.SMTP_FROM!,
+    from: smtpFrom,
   },
   aws: {
     region:          process.env.AWS_REGION!,
@@ -79,6 +97,7 @@ const config: AppConfig = {
   },
   allowedOrigins: Array.from(
     new Set([
+      ...parseEnvList(process.env.ALLOWED_ORIGINS),
       ...parseEnvList(process.env.allowedOrigins),
       ...parseEnvList(process.env.CORS_ORIGINS),
       ...parseEnvList(process.env.FRONTEND_URL),

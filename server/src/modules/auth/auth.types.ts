@@ -17,6 +17,10 @@ export interface ChangePasswordRequest {
   newPassword:     string;
 }
 
+export interface ChangePasswordResponse {
+  token: string;
+}
+
 export interface ForgotPasswordRequest {
   email: string;
 }
