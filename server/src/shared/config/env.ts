@@ -21,9 +21,6 @@ export interface AppConfig {
   resetTokenExpiry: string;
   bcryptRounds:     number;
   smtp: {
-    host: string;
-    port: number;
-    user: string;
     pass: string;
     from: string;
   };
@@ -68,12 +65,7 @@ function isValidEmailFrom(value?: string): boolean {
   return isValidEmailAddress(address);
 }
 
-const smtpPort = parseInt(process.env.SMTP_PORT ?? '587', 10);
 const smtpFrom = process.env.SMTP_FROM?.trim() ?? '';
-
-if (!Number.isFinite(smtpPort)) {
-  throw new Error('Invalid SMTP_PORT: expected a numeric value.');
-}
 
 if (!isValidEmailFrom(smtpFrom)) {
   throw new Error(
@@ -93,9 +85,6 @@ const config: AppConfig = {
   resetTokenExpiry: process.env.RESET_TOKEN_EXPIRY ?? '1h',
   bcryptRounds:     parseInt(process.env.BCRYPT_ROUNDS ?? '12', 10),
   smtp: {
-    host: process.env.SMTP_HOST!,
-    port: smtpPort,
-    user: process.env.SMTP_USER!,
     pass: process.env.SMTP_PASS!,
     from: smtpFrom,
   },
