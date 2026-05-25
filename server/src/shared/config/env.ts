@@ -69,10 +69,15 @@ const config: AppConfig = {
     s3BucketName:    process.env.S3_BUCKET_NAME!,
     endpoint:        process.env.AWS_ENDPOINT || undefined,
   },
-  corsOrigins: (process.env.CORS_ORIGINS ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  allowedOrigins: Array.from(
+    new Set([
+      ...parseEnvList(process.env.ALLOWED_ORIGINS),
+      ...parseEnvList(process.env.allowedOrigins),
+      ...parseEnvList(process.env.CORS_ORIGINS),
+      ...parseEnvList(process.env.FRONTEND_URL),
+    ]),
+  ),
+  corsOrigins: parseEnvList(process.env.CORS_ORIGINS),
   rateLimit: {
     windowMs:    parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '900000', 10),
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? '100', 10),

@@ -3,6 +3,11 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import config from './shared/config/env';
+import {
+  isAllowedOrigin,
+  normalizeOrigin,
+} from './shared/utils/cors';
+
 import { requestLogger } from './shared/middleware/request-logger';
 import { errorHandler, NotFoundError } from './shared/middleware/error-handler';
 import healthRouter from './shared/routes/health.routes';
@@ -28,29 +33,90 @@ app.set('trust proxy', 1);
 // ─── Security headers (SECURITY-04) ──────────────────────────────────────────
 app.use(helmet());
 
-// ─── CORS (SECURITY-08: restricted to CORS_ORIGINS) ──────────────────────────
-app.use(cors({
-  // (origin, callback) => {
-  //   // Allow requests with no origin (e.g., server-to-server, curl)
-  //   if (!origin || config.corsOrigins.includes(origin)) {
-  //     callback(null, true);
-  //   } else {
-  //     callback(new Error('Not allowed by CORS'));
-  //   }
-  // },
-  origin: true,
-  credentials:    true,
-  methods:        ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
-}));
+// CORS CONFIG
+const normalizedAllowedOrigins = (config.allowedOrigins || []).map(normalizeOrigin);
 
 // ─── Webhook route (before JSON parser — needs raw Buffer body for HMAC) ─────
 app.use('/api/webhooks', express.raw({ type: 'application/json' }), webhookRouter);
 
-// ─── Body parser (APP-03) ─────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }));
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
 
-// ─── Request logger (APP-04) ──────────────────────────────────────────────────
+  if (origin && isAllowedOrigin(origin, normalizedAllowedOrigins)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Correlation-ID'
+    );
+    res.header(
+      'Access-Control-Allow-Methods',
+      'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+    );
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin
+    // (mobile apps, Postman, curl, server-to-server)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (isAllowedOrigin(normalizedOrigin, normalizedAllowedOrigins)) {
+      return callback(null, true);
+    }
+
+    console.error(`CORS blocked for origin: ${origin}`);
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS',
+  ],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Correlation-ID',
+  ],
+};
+
+app.use(cors(corsOptions));
+
+// Handle preflight requests
+app.options('*', cors(corsOptions));
+
+// WEBHOOK ROUTE
+// Must be BEFORE express.json()
+app.use(
+  '/api/webhooks',
+  express.raw({ type: 'application/json' }),
+  webhookRouter
+);
+
+// BODY PARSER
+app.use(
+  express.json({
+    limit: '10mb',
+  })
+);
+
+// REQUEST LOGGER
 app.use(requestLogger);
 
 // ─── Public rate limiter for non-auth public endpoints (D2=B) ────────────────

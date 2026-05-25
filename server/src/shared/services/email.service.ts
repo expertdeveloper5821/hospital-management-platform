@@ -84,6 +84,8 @@ class EmailService {
     }
 
     try {
+
+      await this.transporter.verify();
       await this.transporter.sendMail({
         from:    config.smtp.from,
         to:      data.to,
@@ -101,6 +103,7 @@ class EmailService {
         message:       (err as Error).message,
         timestamp:     new Date().toISOString(),
       }));
+      
       throw new AppError(
         'Unable to send email. Please check SMTP configuration and retry.',
         500,
