@@ -39,6 +39,7 @@ jest.mock('../../../src/shared/middleware/token-denylist');
 import { authRepository } from '../../../src/modules/auth/auth.repository';
 import { emailService } from '../../../src/shared/services/email.service';
 import { AuthService } from '../../../src/modules/auth/auth.service';
+import bcrypt from 'bcryptjs';
 
 const mockAuthRepo   = authRepository as jest.Mocked<typeof authRepository>;
 const mockEmailSvc   = emailService   as jest.Mocked<typeof emailService>;
@@ -67,5 +68,25 @@ describe('AuthService — example-based', () => {
     const decoded = service.validateJWT(token);
     expect(decoded.userId).toBe('u1');
     expect(decoded.role).toBe(UserRole.DOCTOR);
+  });
+
+  test('changePassword returns a fresh JWT with isFirstLogin: false', async () => {
+    const hashedCurrent = await bcrypt.hash('OldPass1!', 10);
+    mockAuthRepo.findUserById.mockResolvedValue({
+      _id:          { toString: () => 'u1' },
+      email:        'doc@h.com',
+      role:         UserRole.DOCTOR,
+      tenantId:     't1',
+      passwordHash: hashedCurrent,
+      isFirstLogin: true,
+    } as never);
+    mockAuthRepo.recordPasswordChange.mockResolvedValue(undefined);
+
+    const result = await service.changePassword('u1', 't1', 'OldPass1!', 'NewPass2@');
+
+    expect(result).toHaveProperty('token');
+    const decoded = service.validateJWT(result.token);
+    expect(decoded.isFirstLogin).toBe(false);
+    expect(decoded.userId).toBe('u1');
   });
 });
