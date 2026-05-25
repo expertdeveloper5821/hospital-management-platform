@@ -361,15 +361,21 @@ interface PatientDetailPanelProps {
 
 function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProps) {
   const [downloadCard, { isLoading: downloading }] = useDownloadMedicalCardMutation();
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function handleDownload() {
+    setDownloadError(null);
     const result = await downloadCard(patient.patientId);
     if ('data' in result && result.data) {
       const a = document.createElement('a');
       a.href = result.data;
       a.download = `medical-card-${patient.patientId}.pdf`;
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(result.data);
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(result.data!), 100);
+    } else {
+      setDownloadError('Failed to download medical card. Please try again.');
     }
   }
 
@@ -407,6 +413,13 @@ function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProp
           {row('EC Mobile',     patient.emergencyContactMobile)}
           {row('Registered',    formatDate(patient.createdAt))}
         </div>
+
+        {downloadError && (
+          <div className="mx-5 mb-0 flex items-center gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {downloadError}
+          </div>
+        )}
 
         <div className="shrink-0 flex gap-3 p-5 border-t">
           <Button variant="outline" className="flex-1" onClick={onEdit}>
