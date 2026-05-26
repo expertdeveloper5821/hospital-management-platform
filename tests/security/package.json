@@ -1,0 +1,22 @@
+{
+  "name": "security",
+  "version": "1.0.0",
+  "description": "Selenium-based Penetration Testing Suite for HMS",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha *.test.js",
+    "test:auth": "mocha auth_bypass.test.js",
+    "test:rbac": "mocha rbac_violation.test.js",
+    "test:xss": "mocha xss_injection.test.js",
+    "test:isolation": "mocha tenant_isolation.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "chai": "^6.2.2",
+    "mocha": "^11.7.6",
+    "selenium-webdriver": "^4.44.0"
+  }
+}

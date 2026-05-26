@@ -328,6 +328,52 @@ describe('GET /api/patients', () => {
     expect(res.body.data.total).toBe(1);
   });
 
+  test('400 — rejects NoSQL operator payloads in patient search query', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ 'q[$ne]': 'Ravi' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(400);
+  });
+
+  test('200 — SQL-style quote payload is treated as plain text in patient search', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-RAVI0001', fullName: 'Ravi Kumar', mobileNumber: '1111111111' });
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ q: "' OR '1'='1" })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('200 — regex metacharacters do not broaden patient search results', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-RAVI0001', fullName: 'Ravi Kumar', mobileNumber: '1111111111' });
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-PRIY0001', fullName: 'Priya Singh', mobileNumber: '2222222222' });
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ q: '.*' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(0);
+  });
+
   test('200 — Doctor can search patients', async () => {
     const tenant = await seedTenant();
     const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);

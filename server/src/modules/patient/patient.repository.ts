@@ -2,6 +2,10 @@ import { PatientModel, IPatient } from './patient.model';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class PatientRepository {
   async findByMobile(tenantId: string, mobileNumber: string): Promise<IPatient | null> {
     assertDbConnected();
@@ -31,14 +35,15 @@ export class PatientRepository {
   ): Promise<PaginatedResult<IPatient>> {
     assertDbConnected();
     const skip = (page - 1) * limit;
+    const safeQuery = q ? escapeRegex(q) : undefined;
 
-    const query: Record<string, unknown> = q
+    const query: Record<string, unknown> = safeQuery
       ? {
           tenantId,
           $or: [
-            { patientId:    { $regex: q, $options: 'i' } },
-            { fullName:     { $regex: q, $options: 'i' } },
-            { mobileNumber: { $regex: q, $options: 'i' } },
+            { patientId:    { $regex: safeQuery, $options: 'i' } },
+            { fullName:     { $regex: safeQuery, $options: 'i' } },
+            { mobileNumber: { $regex: safeQuery, $options: 'i' } },
           ],
         }
       : { tenantId };
