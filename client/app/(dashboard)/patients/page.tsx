@@ -7,8 +7,9 @@ import {
   useUpdatePatientMutation,
   useDownloadMedicalCardMutation,
 } from '@/store/api/patient.api';
+import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useAppSelector } from '@/store/hooks';
-import type { PatientResponse, Gender, BloodGroup, CreatePatientRequest, UpdatePatientRequest } from '@/store/types';
+import type { PatientResponse, Gender, BloodGroup, CreatePatientRequest, UpdatePatientRequest, OPDVisitResponse } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +29,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Pencil,
+  ClipboardList,
+  Stethoscope,
 } from 'lucide-react';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -116,6 +119,15 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
   }
 
   return errors;
+}
+
+// ─── OPD status helpers ───────────────────────────────────────────────────────
+
+function visitStatusVariant(s: OPDVisitResponse['status']): 'default' | 'secondary' | 'outline' | 'destructive' {
+  if (s === 'OPEN')        return 'default';
+  if (s === 'IN_PROGRESS') return 'secondary';
+  if (s === 'COMPLETED')   return 'outline';
+  return 'destructive';
 }
 
 // ─── Register / Edit Modal ────────────────────────────────────────────────────
@@ -446,8 +458,19 @@ interface PatientDetailPanelProps {
 }
 
 function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProps) {
+  const [tab,           setTab]           = useState<'details' | 'history'>('details');
+  const [historyPage,   setHistoryPage]   = useState(1);
   const [downloadCard, { isLoading: downloading }] = useDownloadMedicalCardMutation();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const { data: historyData, isLoading: historyLoading } = useGetOPDPatientHistoryQuery(
+    { patientId: patient.patientId, page: historyPage, limit: 10 },
+    { skip: tab !== 'history' },
+  );
+
+  const visits      = historyData?.data  ?? [];
+  const totalVisits = historyData?.total ?? 0;
+  const totalPages  = Math.ceil(totalVisits / 10) || 1;
 
   async function handleDownload() {
     setDownloadError(null);
@@ -478,6 +501,7 @@ function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProp
         className="relative flex flex-col h-full w-full max-w-md bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="flex items-center justify-between p-5 border-b shrink-0">
           <div>
             <p className="text-xs text-muted-foreground">{patient.patientId}</p>
@@ -488,16 +512,93 @@ function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProp
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {row('Date of Birth', `${formatDate(patient.dateOfBirth)} (${calcAge(patient.dateOfBirth)} yrs)`)}
-          {row('Gender',        genderLabel(patient.gender))}
-          {row('Mobile',        patient.mobileNumber)}
-          {row('Blood Group',   patient.bloodGroup)}
-          {row('Aadhaar',       patient.aadhaarNumber)}
-          {row('Address',       patient.address)}
-          {row('EC Name',       patient.emergencyContactName)}
-          {row('EC Mobile',     patient.emergencyContactMobile)}
-          {row('Registered',    formatDate(patient.createdAt))}
+        {/* Tabs */}
+        <div className="flex border-b shrink-0">
+          {(['details', 'history'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={[
+                'flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium border-b-2 transition-colors',
+                tab === t
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              ].join(' ')}
+            >
+              {t === 'details'
+                ? <><Pencil className="h-3.5 w-3.5" /> Details</>
+                : <><ClipboardList className="h-3.5 w-3.5" /> OPD History</>}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto">
+          {tab === 'details' && (
+            <div className="p-5 space-y-1">
+              {row('Date of Birth', `${formatDate(patient.dateOfBirth)} (${calcAge(patient.dateOfBirth)} yrs)`)}
+              {row('Gender',        genderLabel(patient.gender))}
+              {row('Mobile',        patient.mobileNumber)}
+              {row('Blood Group',   patient.bloodGroup)}
+              {row('Aadhaar',       patient.aadhaarNumber)}
+              {row('Address',       patient.address)}
+              {row('EC Name',       patient.emergencyContactName)}
+              {row('EC Mobile',     patient.emergencyContactMobile)}
+              {row('Registered',    formatDate(patient.createdAt))}
+            </div>
+          )}
+
+          {tab === 'history' && (
+            <div className="p-5 space-y-3">
+              {historyLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-10">Loading history…</p>
+              ) : visits.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Stethoscope className="h-8 w-8 mb-2 opacity-30" />
+                  <p className="text-sm">No OPD visits recorded.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">{totalVisits} visit{totalVisits !== 1 ? 's' : ''} total</p>
+                  {visits.map((v) => (
+                    <div key={v.visitId} className="rounded-lg border bg-card p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {new Date(v.visitDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            <span className="ml-2 text-xs text-muted-foreground font-normal">Queue #{v.queueNumber}</span>
+                          </p>
+                        </div>
+                        <Badge variant={visitStatusVariant(v.status)} className="text-xs shrink-0">
+                          {v.status.replace('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        <p><span className="font-medium text-foreground">Complaint:</span> {v.chiefComplaint}</p>
+                        {v.diagnosis    && <p><span className="font-medium text-foreground">Diagnosis:</span> {v.diagnosis}</p>}
+                        {v.prescription && <p><span className="font-medium text-foreground">Prescription:</span> {v.prescription}</p>}
+                        {v.notes        && <p><span className="font-medium text-foreground">Notes:</span> {v.notes}</p>}
+                      </div>
+                    </div>
+                  ))}
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs text-muted-foreground">Page {historyPage} of {totalPages}</span>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" disabled={historyPage <= 1} onClick={() => setHistoryPage((p) => p - 1)}>
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="outline" disabled={historyPage >= totalPages} onClick={() => setHistoryPage((p) => p + 1)}>
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {downloadError && (

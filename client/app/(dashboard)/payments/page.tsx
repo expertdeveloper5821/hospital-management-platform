@@ -906,7 +906,9 @@ export default function PaymentsPage() {
             value={dateFrom}
             max={today}
             onChange={(e) => {
-              setDateFrom(e.target.value);
+              const val = e.target.value;
+              setDateFrom(val);
+              if (dateTo && val > dateTo) setDateTo('');
               setPage(1);
             }}
             className="h-9 w-40"
@@ -918,6 +920,7 @@ export default function PaymentsPage() {
           <Input
             type="date"
             value={dateTo}
+            min={dateFrom || undefined}
             max={today}
             onChange={(e) => {
               setDateTo(e.target.value);

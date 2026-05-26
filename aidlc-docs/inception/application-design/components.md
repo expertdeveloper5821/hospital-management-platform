@@ -386,7 +386,8 @@
 ### FC-10: Payment Module UI
 
 **Purpose**: Payment recording form (manual + Razorpay flow), receipt download, payment list (filterable), payment summary report.  
-**State**: Redux RTK Query — payment endpoints
+**State**: Redux RTK Query — payment endpoints  
+**Date filter validation**: The "To Date" picker is disabled until a "From Date" is selected, and its minimum selectable date is constrained to the selected "From Date". If the user changes "From Date" to a value after the current "To Date", the "To Date" is automatically cleared.
 
 ---
 

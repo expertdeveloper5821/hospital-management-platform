@@ -1,4 +1,10 @@
 import { baseApi } from './base.api';
+
+// The backend Zod schema requires full ISO datetime strings (z.string().datetime({ offset: true })).
+// HTML date inputs produce plain YYYY-MM-DD strings, so we convert here before sending.
+function toStartOfDay(date: string) { return new Date(date + 'T00:00:00').toISOString(); }
+function toEndOfDay(date: string)   { return new Date(date + 'T23:59:59.999').toISOString(); }
+
 import type {
   ApiSuccess,
   PaymentResponse,
@@ -18,8 +24,8 @@ export const paymentApi = baseApi.injectEndpoints({
     >({
       query: ({ dateFrom, dateTo, paymentMethod, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
-        if (dateFrom)       params.set('dateFrom',       dateFrom);
-        if (dateTo)         params.set('dateTo',         dateTo);
+        if (dateFrom)       params.set('dateFrom',       toStartOfDay(dateFrom));
+        if (dateTo)         params.set('dateTo',         toEndOfDay(dateTo));
         if (paymentMethod)  params.set('paymentMethod',  paymentMethod);
         params.set('page',  String(page));
         params.set('limit', String(limit));
@@ -51,8 +57,8 @@ export const paymentApi = baseApi.injectEndpoints({
     >({
       query: ({ dateFrom, dateTo } = {}) => {
         const params = new URLSearchParams();
-        if (dateFrom) params.set('dateFrom', dateFrom);
-        if (dateTo)   params.set('dateTo',   dateTo);
+        if (dateFrom) params.set('dateFrom', toStartOfDay(dateFrom));
+        if (dateTo)   params.set('dateTo',   toEndOfDay(dateTo));
         return `/api/payments/summary?${params.toString()}`;
       },
       transformResponse: (raw: ApiSuccess<PaymentSummaryResponse>) => raw.data,

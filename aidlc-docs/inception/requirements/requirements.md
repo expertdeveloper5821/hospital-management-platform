@@ -164,7 +164,7 @@
 3. When a Doctor marks an OPD visit as complete, the OPD_Service SHALL set the visit status to `COMPLETED` and record the completion timestamp.
 4. The OPD_Service SHALL allow a Receptionist or Manager to view the OPD queue for the current day, filtered by Doctor.
 5. If a Doctor attempts to update an OPD visit with status `COMPLETED`, the OPD_Service SHALL reject the update and return a descriptive error.
-6. The OPD_Service SHALL allow a Doctor or Manager to retrieve the full visit history for a patient within the same Tenant.
+6. The OPD_Service SHALL allow a Hospital Admin, Receptionist, Nurse, Manager, or Doctor to retrieve the full visit history for a patient within the same Tenant. The history SHALL be accessible from the Patient detail panel as an "OPD History" tab, paginated at 10 visits per page, and SHALL display visit date, queue number, status, chief complaint, diagnosis, prescription, and notes for each visit.
 
 ---
 
@@ -232,7 +232,7 @@
 2. When a Finance_Manager or Receptionist submits a payment record for a patient, the Payment_Service SHALL create a payment record with a unique payment ID, patient ID, amount (in INR), payment method (Cash, Card, UPI, Cheque), description, and timestamp.
 3. When a payment record is created, the Payment_Service SHALL generate a receipt as a downloadable PDF (using PDFKit) containing: hospital logo, hospital name, receipt number, patient name, patient ID, payment date, amount in INR, payment method, and description.
 4. The Payment_Service SHALL apply the Tenant's branding (logo and hospital name) to every generated receipt.
-5. The Payment_Service SHALL allow a Finance_Manager or Manager to view all payment records for a Tenant, filterable by date range and payment method.
+5. The Payment_Service SHALL allow a Finance_Manager or Manager to view all payment records for a Tenant, filterable by date range and payment method. The date range filter SHALL enforce that the "To Date" cannot be set to a date before the "From Date"; selecting a "From Date" later than the current "To Date" SHALL automatically clear the "To Date".
 6. If a Finance_Manager or Receptionist submits a payment with an amount of zero or a negative value, the Payment_Service SHALL reject the submission and return a descriptive error.
 7. The Payment_Service SHALL allow a Finance_Manager or Receptionist to retrieve a previously generated receipt PDF by payment ID (served via AWS S3 pre-signed URL).
 8. When a Finance_Manager generates a payment summary report for a date range, the Payment_Service SHALL return the total amount collected, broken down by payment method, for that date range within the same Tenant.
