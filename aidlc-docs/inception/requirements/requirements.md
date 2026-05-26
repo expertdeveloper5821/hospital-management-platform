@@ -177,7 +177,7 @@
 3. The IPD_Service SHALL prevent assigning a bed that is already occupied by another active admission within the same Tenant.
 4. If a Receptionist attempts to assign an occupied bed, the IPD_Service SHALL return a descriptive error listing the bed's current occupant admission ID.
 5. When a Doctor records a daily progress note for an admitted patient, the IPD_Service SHALL store the note with the Doctor's user ID and timestamp.
-6. When a Doctor discharges a patient, the IPD_Service SHALL set the admission status to `DISCHARGED`, record the discharge date, and release the bed for future assignments.
+6. When a Doctor, Hospital Admin, Admin, or Receptionist discharges a patient, the IPD_Service SHALL set the admission status to `DISCHARGED`, record the discharge date, and release the bed for future assignments.
 7. The IPD_Service SHALL allow a Nurse or Doctor to view all currently admitted patients within the same Tenant, filterable by ward.
 8. The IPD_Service SHALL allow a Manager to view a summary of bed occupancy per ward, showing total beds, occupied beds, and available beds.
 

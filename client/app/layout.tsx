@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { ReduxProvider } from '@/components/shared/ReduxProvider';
 import { AuthHydrator } from '@/components/shared/AuthHydrator';
+import { Toaster } from '@/components/shared/Toaster';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ReduxProvider>
           <AuthHydrator />
           {children}
+          <Toaster />
         </ReduxProvider>
       </body>
     </html>

@@ -76,12 +76,15 @@
   - [ ] NFR Design
   - [ ] Infrastructure Design
   - [ ] Code Generation
-- [ ] Per-Unit Loop — Unit 7: Notifications & Audit
-  - [ ] Functional Design
-  - [ ] NFR Requirements
-  - [ ] NFR Design
-  - [ ] Infrastructure Design
-  - [ ] Code Generation
+- [x] Per-Unit Loop — Unit 7: Frontend
+  - [x] U7-A: Foundation Shell — COMPLETED (Next.js scaffold, Redux, auth slices, layout, sidebar, route guards)
+  - [x] U7-B: Admin Panels — COMPLETED (Super Admin Console FC-03, Hospital Admin Panel FC-04) — branch `feature/u7-B`
+  - [x] U7-C: Patient + OPD — COMPLETED (Patient Management FC-05, OPD Module UI FC-06) — branch `feature/u7-C`
+  - [x] U7-D: IPD — COMPLETED — branch `feature/u7-D`
+  - [x] U7-E: Lab + Inventory — COMPLETED (Lab Module FC-08, Inventory Module FC-09) — branch `feature/U7-E`
+  - [x] U7-F: Payments — COMPLETED (Payments Module FC-10) — branch `feature/U7-E`
+  - [x] U7-G: Notifications + Audit — COMPLETED (Notifications Panel FC-11, Audit Log Viewer FC-12) — branch `feature/U7-G`
+  - [x] Toast System + Form Validations — COMPLETED — branch `toastify` (2026-05-25)
 - [ ] Build and Test — EXECUTE
 
 ### 🟡 OPERATIONS PHASE
@@ -89,6 +92,7 @@
 
 ## Current Status
 - **Lifecycle Phase**: CONSTRUCTION
-- **Current Stage**: Unit 7: Frontend — IN PROGRESS
-- **Next Stage**: Remaining U7 subunits (U7-E, U7-F, U7-G)
-- **Status**: U7-A (Foundation Shell), U7-B (Admin Panels), U7-D (IPD) complete; U7-C (Patient+OPD placeholder), U7-E/F/G stubs present
+- **Current Stage**: Post-construction enhancements — branch `toastify`
+- **Next Stage**: Build and Test
+- **Status**: All U7 subunits complete. Branch `toastify` adds: global toast infrastructure (`lib/toast.ts`, `Toaster.tsx`, `base.api.ts` auto-toast layer), form validations on Onboard Hospital and Register Patient forms, and a backend bug fix in `approveTenant` (status no longer set ACTIVE when invite email fails).
+- **Plan docs**: `u7-b-admin-panels-code-generation-plan.md`, `u7-c-patient-opd-code-generation-plan.md`, `u7-e-lab-inventory-code-generation-plan.md`, `u7-g-notifications-audit-code-generation-plan.md`, `u7-frontend-infrastructure-plan.md`
