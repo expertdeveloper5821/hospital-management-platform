@@ -4,7 +4,8 @@
 **Stage**: Code Generation  
 **Status**: COMPLETE  
 **Branch**: `feature/u7-C`  
-**Date**: 2026-05-21
+**Date**: 2026-05-21  
+**Post-construction enhancements**: branch `toastify`, 2026-05-25
 
 ---
 
@@ -82,7 +83,7 @@
    - **View mode** — shows all visit fields + action buttons.
    - **Edit mode** — editable form for complaint, diagnosis, prescription, notes. Calls `PATCH /api/opd/visits/:id`.
    - **Complete mode** — final diagnosis form. Calls `PATCH /api/opd/visits/:id/complete`. Requires diagnosis.
-   - **Cancel** — confirm dialog, calls `PATCH /api/opd/visits/:id/cancel`.
+   - **Cancel** — modal confirmation dialog (not native browser confirm) with "Keep Visit" and "Yes, Cancel Visit" buttons; calls `PATCH /api/opd/visits/:id/cancel` on confirm.
 5. **New Visit modal** — patient typeahead search (debounced), doctor dropdown, date picker, chief complaint. Calls `POST /api/opd/visits`.
 6. **RBAC**:
    - Create visit: RECEPTIONIST, NURSE, HOSPITAL_ADMIN, DOCTOR
@@ -111,3 +112,30 @@ The following details were added during implementation and are documented here f
 3. **`queueNumber` field** — the backend assigns an auto-incremented queue number per visit per day. Displayed in the queue table as the `#` column.
 
 4. **Patient search uses `q` query param** — the `GET /api/patients` endpoint uses `?q=` (not `name=`, `mobile=`, or `patientId=`). The server does unified search across all three fields with one param.
+
+---
+
+## Post-Construction Enhancements (branch `toastify`, 2026-05-25)
+
+### Register / Edit Patient form validations
+**File**: `client/app/(dashboard)/patients/page.tsx` — `PatientFormModal` component
+
+Added `validatePatientForm()` pure function; replaced single banner error with per-field inline errors.
+
+| Field | Rule |
+|---|---|
+| Full Name | Required, 2–100 chars, letters/spaces/dots/hyphens/apostrophes only (`/^[a-zA-Z\s.\-']+$/`) |
+| Date of Birth | Required, must be in the past, under 150 years ago |
+| Mobile Number | Required, `/^\+?[0-9]{7,15}$/` |
+| Address | Required, 10–300 chars |
+| Aadhaar (optional) | If filled: exactly 12 digits (`/^\d{12}$/`); input restricted to digits only |
+| Emergency Contact Name (optional) | If filled: min 2 chars |
+| Emergency Contact Mobile (optional) | If filled: same mobile regex |
+
+**UX behaviour**:
+- Errors appear on blur per field; all surface on submit attempt
+- Submit blocked until all errors resolved; `handleForceCreate` also respects validation
+- Removed duplicate inline mobile checks from `handleSubmit` and `handleForceCreate` — consolidated into `validatePatientForm()`
+- `noValidate` on `<form>` suppresses browser native popups
+- API errors in separate `apiError` state; duplicate-warning banner unchanged
+- Removed unused `cn` import and unused `canEdit` variable

@@ -85,8 +85,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     prescription: visit.prescription ?? '',
     notes:        visit.notes        ?? '',
   });
-  const [mode,  setMode]  = useState<'view' | 'edit' | 'complete'>('view');
-  const [error, setError] = useState('');
+  const [mode,              setMode]              = useState<'view' | 'edit' | 'complete'>('view');
+  const [error,             setError]             = useState('');
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
@@ -119,13 +120,14 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     }
   }
 
-  async function handleCancel() {
-    if (!confirm('Cancel this visit?')) return;
+  async function handleCancelConfirm() {
     setError('');
     try {
       await cancelVisit(visit.visitId).unwrap();
+      setShowCancelConfirm(false);
       onClose();
     } catch (err: any) {
+      setShowCancelConfirm(false);
       setError(err?.data?.message ?? 'Failed to cancel visit.');
     }
   }
@@ -281,7 +283,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   </Button>
                 )}
                 {canCancel && (
-                  <Button variant="destructive" size="sm" onClick={handleCancel} disabled={cancelling}>
+                  <Button variant="destructive" size="sm" onClick={() => setShowCancelConfirm(true)} disabled={cancelling}>
                     <XCircle className="h-4 w-4 mr-1" />
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
@@ -307,6 +309,30 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           </div>
         )}
       </div>
+
+      {showCancelConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h2 className="font-semibold">Cancel Visit?</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This will mark the visit as <span className="font-medium text-foreground">CANCELLED</span>. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowCancelConfirm(false)} disabled={cancelling}>
+                Keep Visit
+              </Button>
+              <Button variant="destructive" onClick={handleCancelConfirm} disabled={cancelling}>
+                {cancelling ? 'Cancelling…' : 'Yes, Cancel Visit'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
