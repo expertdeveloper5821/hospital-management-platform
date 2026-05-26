@@ -135,6 +135,30 @@ describe('POST /api/auth/login', () => {
 
     expect(res.status).toBe(400);
   });
+
+  test('400 — rejects NoSQL operator payloads in login body', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({
+        email: { $ne: 'sa@hms.com' },
+        password: { $gt: '' },
+        isSuperAdmin: true,
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('400 — rejects SQL-style quote payload in email field', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({
+        email: "sa@hms.com' OR '1'='1",
+        password: 'Secret123!',
+        isSuperAdmin: true,
+      });
+
+    expect(res.status).toBe(400);
+  });
 });
 
 // ─── POST /api/auth/logout ────────────────────────────────────────────────────
