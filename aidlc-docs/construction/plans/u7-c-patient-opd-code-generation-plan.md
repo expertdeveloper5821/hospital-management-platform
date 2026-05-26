@@ -83,7 +83,7 @@
    - **View mode** — shows all visit fields + action buttons.
    - **Edit mode** — editable form for complaint, diagnosis, prescription, notes. Calls `PATCH /api/opd/visits/:id`.
    - **Complete mode** — final diagnosis form. Calls `PATCH /api/opd/visits/:id/complete`. Requires diagnosis.
-   - **Cancel** — confirm dialog, calls `PATCH /api/opd/visits/:id/cancel`.
+   - **Cancel** — modal confirmation dialog (not native browser confirm) with "Keep Visit" and "Yes, Cancel Visit" buttons; calls `PATCH /api/opd/visits/:id/cancel` on confirm.
 5. **New Visit modal** — patient typeahead search (debounced), doctor dropdown, date picker, chief complaint. Calls `POST /api/opd/visits`.
 6. **RBAC**:
    - Create visit: RECEPTIONIST, NURSE, HOSPITAL_ADMIN, DOCTOR
