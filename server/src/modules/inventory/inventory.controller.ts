@@ -7,8 +7,12 @@ import {
   UpdateThresholdSchema,
   ListInventoryQuerySchema,
 } from './inventory.types';
+import { uuidSchema } from '../../shared/utils/validation';
+import { ValidationError } from '../../shared/middleware/error-handler';
 
-const itemIdSchema = z.string().uuid('itemId must be a valid UUID');
+const itemIdParamSchema = z.object({
+  itemId: uuidSchema,
+});
 
 export async function createInventoryItem(
   req: Request,
@@ -18,12 +22,7 @@ export async function createInventoryItem(
   try {
     const parsed = CreateInventoryItemSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        status:  'error',
-        message: 'Validation failed',
-        details: parsed.error.flatten().fieldErrors,
-      });
-      return;
+      throw new ValidationError('Validation failed', { errors: parsed.error.flatten().fieldErrors });
     }
     const result = await inventoryService.createItem(
       parsed.data,
@@ -42,12 +41,7 @@ export async function listInventoryItems(
   try {
     const parsed = ListInventoryQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      res.status(400).json({
-        status:  'error',
-        message: 'Invalid query parameters',
-        details: parsed.error.flatten().fieldErrors,
-      });
-      return;
+      throw new ValidationError('Invalid query parameters', { errors: parsed.error.flatten().fieldErrors });
     }
     const result = await inventoryService.listItems(
       req.user!.tenantId as string,
@@ -63,12 +57,8 @@ export async function getInventoryItem(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const id = itemIdSchema.safeParse(req.params['itemId']);
-    if (!id.success) {
-      res.status(400).json({ status: 'error', message: 'Invalid itemId format' });
-      return;
-    }
-    const result = await inventoryService.getItemById(id.data, req.user!.tenantId as string);
+    const { itemId } = itemIdParamSchema.parse(req.params);
+    const result = await inventoryService.getItemById(itemId, req.user!.tenantId as string);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -79,22 +69,13 @@ export async function updateStock(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const id = itemIdSchema.safeParse(req.params['itemId']);
-    if (!id.success) {
-      res.status(400).json({ status: 'error', message: 'Invalid itemId format' });
-      return;
-    }
+    const { itemId } = itemIdParamSchema.parse(req.params);
     const parsed = UpdateStockSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        status:  'error',
-        message: 'Validation failed',
-        details: parsed.error.flatten().fieldErrors,
-      });
-      return;
+      throw new ValidationError('Validation failed', { errors: parsed.error.flatten().fieldErrors });
     }
     const result = await inventoryService.updateStock(
-      id.data,
+      itemId,
       req.user!.tenantId as string,
       req.user!.userId,
       parsed.data,
@@ -109,22 +90,13 @@ export async function updateThreshold(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const id = itemIdSchema.safeParse(req.params['itemId']);
-    if (!id.success) {
-      res.status(400).json({ status: 'error', message: 'Invalid itemId format' });
-      return;
-    }
+    const { itemId } = itemIdParamSchema.parse(req.params);
     const parsed = UpdateThresholdSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({
-        status:  'error',
-        message: 'Validation failed',
-        details: parsed.error.flatten().fieldErrors,
-      });
-      return;
+      throw new ValidationError('Validation failed', { errors: parsed.error.flatten().fieldErrors });
     }
     const result = await inventoryService.updateThreshold(
-      id.data,
+      itemId,
       req.user!.tenantId as string,
       req.user!.userId,
       parsed.data,

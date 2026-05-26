@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { patientService, DuplicateWarningError } from './patient.service';
 import { IPatient } from './patient.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
@@ -30,12 +31,6 @@ const updatePatientSchema = z.object({
   emergencyContactName:   z.string().min(1).max(200).optional(),
   emergencyContactMobile: z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
   bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
-});
-
-const searchSchema = z.object({
-  q:     z.string().max(100).optional(),
-  page:  z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 function toResponse(p: IPatient) {
@@ -92,18 +87,20 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
 
 export async function getPatient(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const patient = await patientService.getPatientById(req.user!.tenantId!, req.params.patientId);
+    const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
+    const patient = await patientService.getPatientById(req.user!.tenantId!, patientId);
     res.status(200).json({ status: 'success', data: toResponse(patient) });
   } catch (err) { next(err); }
 }
 
 export async function updatePatient(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
     const body = updatePatientSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
     const patient = await patientService.updatePatient(
       req.user!.tenantId!,
-      req.params.patientId,
+      patientId,
       body.data,
       req.user!.userId,
     );
@@ -113,10 +110,11 @@ export async function updatePatient(req: Request, res: Response, next: NextFunct
 
 export async function getMedicalCard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const pdf = await patientService.generateMedicalCard(req.user!.tenantId!, req.params.patientId);
+    const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
+    const pdf = await patientService.generateMedicalCard(req.user!.tenantId!, patientId);
     res.set({
       'Content-Type':        'application/pdf',
-      'Content-Disposition': `attachment; filename="medical-card-${req.params.patientId}.pdf"`,
+      'Content-Disposition': `attachment; filename="medical-card-${patientId}.pdf"`,
       'Content-Length':      String(pdf.length),
     });
     res.end(pdf);
