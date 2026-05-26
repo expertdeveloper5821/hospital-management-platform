@@ -514,7 +514,7 @@ export default function InventoryPage() {
   const lowStockCount = items.filter((i) => i.isLowStock).length;
 
   const canManage = ['HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
-  const canView   = ['HOSPITAL_ADMIN', 'MANAGER', 'DOCTOR', 'NURSE'].includes(role ?? '');
+  const canView   = ['HOSPITAL_ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
 
   function handleCategoryFilter() {
     setCategoryFilter(categoryInput.trim());
