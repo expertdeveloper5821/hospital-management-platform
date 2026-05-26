@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { tenantService } from './tenant.service';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { objectIdSchema, paginationSchema } from '../../shared/utils/validation';
 
 const createTenantSchema = z.object({
   name:       z.string().min(1).max(200),
@@ -19,9 +20,8 @@ const updateBrandingSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
 });
 
-const paginationSchema = z.object({
-  page:  z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+const tenantIdParamSchema = z.object({
+  tenantId: objectIdSchema,
 });
 
 export async function createTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -44,21 +44,24 @@ export async function listTenants(req: Request, res: Response, next: NextFunctio
 
 export async function approveTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    await tenantService.approveTenant(req.params.tenantId, req.user!.userId);
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    await tenantService.approveTenant(tenantId, req.user!.userId);
     res.status(200).json({ status: 'success', data: { message: 'Tenant approved' } });
   } catch (err) { next(err); }
 }
 
 export async function deactivateTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    await tenantService.deactivateTenant(req.params.tenantId, req.user!.userId);
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    await tenantService.deactivateTenant(tenantId, req.user!.userId);
     res.status(200).json({ status: 'success', data: { message: 'Tenant deactivated' } });
   } catch (err) { next(err); }
 }
 
 export async function resendInvite(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    await tenantService.resendInvite(req.params.tenantId, req.user!.userId);
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    await tenantService.resendInvite(tenantId, req.user!.userId);
     res.status(200).json({ status: 'success', data: { message: 'Invite resent' } });
   } catch (err) { next(err); }
 }
@@ -81,17 +84,19 @@ export async function completeTenantSetup(req: Request, res: Response, next: Nex
 
 export async function getBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const branding = await tenantService.getBranding(req.params.tenantId);
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    const branding = await tenantService.getBranding(tenantId);
     res.status(200).json({ status: 'success', data: branding });
   } catch (err) { next(err); }
 }
 
 export async function updateBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
     const body = updateBrandingSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
     await tenantService.updateBranding(
-      req.params.tenantId,
+      tenantId,
       body.data,
       req.file?.buffer,
       req.file?.mimetype,

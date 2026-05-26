@@ -43,15 +43,15 @@ export class TenantService {
     if (!tenant) throw new NotFoundError('Tenant not found');
     if (tenant.status === TenantStatus.ACTIVE) throw new ConflictError('Tenant is already active');
 
-    await tenantRepository.updateStatus(tenantId, TenantStatus.ACTIVE);
-
-    // Generate invite token and send email
+    // Generate invite token and save invite token first
     const token  = crypto.randomBytes(32).toString('hex');
     const expiry = new Date(Date.now() + INVITE_EXPIRY_MS);
     await tenantRepository.saveInviteToken(tenantId, token, expiry);
 
     const inviteLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/setup?token=${token}`;
     await emailService.sendInviteEmail(tenant.adminEmail, inviteLink);
+
+    await tenantRepository.updateStatus(tenantId, TenantStatus.ACTIVE);
 
     tenantCache.invalidate(tenantId);
 
@@ -100,6 +100,7 @@ export class TenantService {
     const inviteLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/setup?token=${token}`;
     await emailService.sendInviteEmail(tenant.adminEmail, inviteLink);
 
+    // Only log audit if email sending succeeded
     await auditService.log({
       entityType: AuditEntityType.TENANT,
       entityId:   tenantId,
