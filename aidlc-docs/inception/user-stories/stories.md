@@ -307,7 +307,7 @@ Given I am authenticated as a Doctor and viewing an active IPD admission
 When I record a daily progress note
 Then the note is stored with my user ID and the current timestamp
 
-Given I am authenticated as a Doctor
+Given I am authenticated as a Doctor, Hospital Admin, Admin, or Receptionist
 When I discharge a patient
 Then the admission status changes to DISCHARGED, the discharge date is recorded, and the bed is released
 ```

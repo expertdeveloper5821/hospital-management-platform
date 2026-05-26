@@ -134,7 +134,7 @@
 - Create IPD admissions with unique admission ID and bed conflict detection — Receptionist
 - Reject occupied-bed assignment with descriptive error listing the occupant admission ID
 - Record daily progress notes per admission with doctor user ID and timestamp — Doctor
-- Discharge patients (DISCHARGED status, discharge date recorded, bed released) — Doctor
+- Discharge patients (DISCHARGED status, discharge date recorded, bed released) — Doctor, Hospital Admin, Admin, Receptionist
 - Provide admitted patient list filterable by ward — Doctor, Nurse, Manager, Hospital Admin, Receptionist
 - Provide bed occupancy summary per ward (total / occupied / available) — Manager, Hospital Admin
 
@@ -150,7 +150,7 @@
 | `GET`  | `/api/ipd/admissions` | Doctor, Nurse, Manager, Hospital Admin, Receptionist |
 | `GET`  | `/api/ipd/admissions/:admissionId` | Doctor, Nurse, Manager, Hospital Admin, Receptionist |
 | `POST` | `/api/ipd/admissions/:admissionId/notes` | Doctor |
-| `PATCH`| `/api/ipd/admissions/:admissionId/discharge` | Doctor |
+| `PATCH`| `/api/ipd/admissions/:admissionId/discharge` | Doctor, Hospital Admin, Admin, Receptionist |
 | `GET`  | `/api/ipd/occupancy` | Manager, Hospital Admin |
 
 **Bed conflict rule**: If a Receptionist attempts to assign an occupied bed, the service returns HTTP 409 with `{ occupantAdmissionId }` in the response body.

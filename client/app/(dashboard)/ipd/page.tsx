@@ -667,7 +667,11 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
   const canProgress  = role === UserRole.DOCTOR;
-  const canDischarge = role === UserRole.DOCTOR;
+  const canDischarge =
+    role === UserRole.DOCTOR ||
+    role === UserRole.HOSPITAL_ADMIN ||
+    role === UserRole.ADMIN ||
+    role === UserRole.RECEPTIONIST;
 
   // Client-side filter by patientId prefix
   const allAdmissions = data?.data ?? [];

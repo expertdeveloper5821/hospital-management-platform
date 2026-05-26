@@ -56,11 +56,16 @@ router.post(
   addProgressNote,
 );
 
-// PATCH /api/ipd/admissions/:admissionId/discharge — Doctor discharges patient
+// PATCH /api/ipd/admissions/:admissionId/discharge — Doctor/Admin/Receptionist discharges patient
 router.patch(
   '/admissions/:admissionId/discharge',
   ...protect,
-  requireRole(UserRole.DOCTOR),
+  requireRole(
+    UserRole.DOCTOR,
+    UserRole.HOSPITAL_ADMIN,
+    UserRole.ADMIN,
+    UserRole.RECEPTIONIST,
+  ),
   dischargePatient,
 );
 
