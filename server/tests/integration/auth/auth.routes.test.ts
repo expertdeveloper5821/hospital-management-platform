@@ -72,7 +72,7 @@ async function seedTenant() {
 
 async function seedUser(tenantId: string, email: string, role: UserRole, isFirstLogin = false) {
   const passwordHash = await bcrypt.hash('UserPass123!', 1);
-  return UserModel.create({ tenantId, email, passwordHash, role, isActive: true, isFirstLogin });
+  return UserModel.create({ tenantId, email, name: email.split('@')[0], passwordHash, role, isActive: true, isFirstLogin });
 }
 
 function signToken(userId: string, role: UserRole, tenantId: string | null, isFirstLogin = false) {

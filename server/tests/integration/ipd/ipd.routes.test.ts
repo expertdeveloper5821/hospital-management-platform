@@ -56,19 +56,28 @@ beforeEach(async () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function toId(doc: mongoose.Document): string {
+  return (doc._id as mongoose.Types.ObjectId).toString();
+}
+
 async function seedTenant() {
   return TenantModel.create({
-    tenantId: 'tenant-int-001',
-    name:     'Integration Hospital',
-    status:   TenantStatus.ACTIVE,
-    branding: { displayName: 'Integration Hospital', primaryColor: '#000', logoUrl: null },
+    name:      'Integration Hospital',
+    status:    TenantStatus.ACTIVE,
     adminEmail: 'admin@inttest.com',
+    onboardingDocuments: {
+      registrationCertificate: 's3-key-1',
+      gstNumber:               'GST123',
+      panCard:                 's3-key-2',
+      addressProof:            's3-key-3',
+    },
+    branding: { displayName: 'Integration Hospital', primaryColor: '#000', logoUrl: null },
   });
 }
 
 async function seedUser(role: UserRole, tenantId: string) {
   return UserModel.create({
-    userId:       `user-${role.toLowerCase()}-001`,
+    name:         `Test ${role}`,
     tenantId,
     email:        `${role.toLowerCase()}@inttest.com`,
     passwordHash: '$2a$12$hashedpwd',
@@ -80,7 +89,7 @@ async function seedUser(role: UserRole, tenantId: string) {
 
 async function seedPatient(tenantId: string) {
   return PatientModel.create({
-    patientId:    'PAT-INT001',
+    patientId:    'PAT-INT00001',
     tenantId,
     fullName:     'Test Patient',
     dateOfBirth:  new Date('1985-01-01'),
@@ -92,15 +101,13 @@ async function seedPatient(tenantId: string) {
 
 async function seedWard(tenantId: string) {
   return WardModel.create({
-    wardId:   'ward-int-001',
-    wardName: 'General Ward',
+    name:     'General Ward',
     tenantId,
   });
 }
 
 async function seedBed(wardId: string, tenantId: string, isOccupied = false) {
   return BedModel.create({
-    bedId:      'bed-int-001',
     wardId,
     bedNumber:  'G-01',
     isOccupied,
@@ -121,20 +128,20 @@ function makeToken(userId: string, tenantId: string, role: UserRole) {
 describe('POST /api/ipd/admissions', () => {
   test('creates admission with status ADMITTED and assigns bed', async () => {
     const tenant  = await seedTenant();
-    const patient = await seedPatient(tenant.tenantId);
-    const ward    = await seedWard(tenant.tenantId);
-    const bed     = await seedBed(ward.wardId, tenant.tenantId);
-    const doctor  = await seedUser(UserRole.DOCTOR, tenant.tenantId);
-    const token   = makeToken('recept-001', tenant.tenantId, UserRole.RECEPTIONIST);
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const token   = makeToken('recept-001', toId(tenant), UserRole.RECEPTIONIST);
 
     const res = await request(app)
       .post('/api/ipd/admissions')
       .set('Authorization', `Bearer ${token}`)
       .send({
         patientId:        patient.patientId,
-        wardId:           ward.wardId,
-        bedId:            bed.bedId,
-        assignedDoctorId: doctor.userId,
+        wardId:           toId(ward),
+        bedId:            toId(bed),
+        assignedDoctorId: toId(doctor),
       });
 
     expect(res.status).toBe(201);
@@ -143,42 +150,42 @@ describe('POST /api/ipd/admissions', () => {
     expect(res.body.data.bedNumber).toBe('G-01');
 
     // Bed should now be occupied
-    const updatedBed = await BedModel.findOne({ bedId: bed.bedId });
+    const updatedBed = await BedModel.findById(bed._id);
     expect(updatedBed?.isOccupied).toBe(true);
   });
 
   test('returns 409 with occupant admissionId when bed is already occupied', async () => {
     const tenant  = await seedTenant();
-    const patient = await seedPatient(tenant.tenantId);
-    const ward    = await seedWard(tenant.tenantId);
-    const bed     = await seedBed(ward.wardId, tenant.tenantId, true);
-    const doctor  = await seedUser(UserRole.DOCTOR, tenant.tenantId);
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant), true);
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
 
     // Pre-existing ADMITTED admission for this bed
     await IPDAdmissionModel.create({
       admissionId:      'existing-adm-001',
       patientId:        patient.patientId,
-      wardId:           ward.wardId,
-      wardName:         ward.wardName,
-      bedId:            bed.bedId,
+      wardId:           toId(ward),
+      wardName:         ward.name,
+      bedId:            toId(bed),
       bedNumber:        bed.bedNumber,
-      assignedDoctorId: doctor.userId,
+      assignedDoctorId: toId(doctor),
       status:           AdmissionStatus.ADMITTED,
       admissionDate:    new Date(),
       dischargeDate:    null,
       progressNotes:    [],
-      tenantId:         tenant.tenantId,
+      tenantId:         toId(tenant),
     });
 
-    const token = makeToken('recept-001', tenant.tenantId, UserRole.RECEPTIONIST);
+    const token = makeToken('recept-001', toId(tenant), UserRole.RECEPTIONIST);
     const res = await request(app)
       .post('/api/ipd/admissions')
       .set('Authorization', `Bearer ${token}`)
       .send({
         patientId:        patient.patientId,
-        wardId:           ward.wardId,
-        bedId:            bed.bedId,
-        assignedDoctorId: doctor.userId,
+        wardId:           toId(ward),
+        bedId:            toId(bed),
+        assignedDoctorId: toId(doctor),
       });
 
     expect(res.status).toBe(409);
@@ -187,7 +194,7 @@ describe('POST /api/ipd/admissions', () => {
 
   test('returns 403 when non-RECEPTIONIST attempts to create admission', async () => {
     const tenant = await seedTenant();
-    const token  = makeToken('doctor-001', tenant.tenantId, UserRole.DOCTOR);
+    const token  = makeToken('doctor-001', toId(tenant), UserRole.DOCTOR);
 
     const res = await request(app)
       .post('/api/ipd/admissions')
@@ -203,10 +210,13 @@ describe('POST /api/ipd/admissions', () => {
   });
 });
 
+const ADM_PROG_ID       = 'a1000000-0000-0000-0000-000000000001';
+const ADM_DISCHARGED_ID = 'a1000000-0000-0000-0000-000000000002';
+
 describe('POST /api/ipd/admissions/:admissionId/progress-notes', () => {
   async function createAdmission(tenantId: string, patientId: string, wardId: string, bedId: string, doctorId: string) {
     return IPDAdmissionModel.create({
-      admissionId:      'adm-prog-001',
+      admissionId:      ADM_PROG_ID,
       patientId,
       wardId,
       wardName:         'General Ward',
@@ -223,49 +233,49 @@ describe('POST /api/ipd/admissions/:admissionId/progress-notes', () => {
 
   test('adds progress note to ADMITTED admission', async () => {
     const tenant  = await seedTenant();
-    const patient = await seedPatient(tenant.tenantId);
-    const ward    = await seedWard(tenant.tenantId);
-    const bed     = await seedBed(ward.wardId, tenant.tenantId);
-    const doctor  = await seedUser(UserRole.DOCTOR, tenant.tenantId);
-    await createAdmission(tenant.tenantId, patient.patientId, ward.wardId, bed.bedId, doctor.userId);
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
+    await createAdmission(toId(tenant), patient.patientId, toId(ward), toId(bed), toId(doctor));
 
-    const token = makeToken(doctor.userId, tenant.tenantId, UserRole.DOCTOR);
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
-      .post('/api/ipd/admissions/adm-prog-001/progress-notes')
+      .post(`/api/ipd/admissions/${ADM_PROG_ID}/progress-notes`)
       .set('Authorization', `Bearer ${token}`)
       .send({ note: 'Patient is stable, vitals normal.' });
 
     expect(res.status).toBe(201);
     expect(res.body.data.progressNotes).toHaveLength(1);
     expect(res.body.data.progressNotes[0].note).toBe('Patient is stable, vitals normal.');
-    expect(res.body.data.progressNotes[0].doctorId).toBe(doctor.userId);
+    expect(res.body.data.progressNotes[0].doctorId).toBe(toId(doctor));
   });
 
   test('returns 400 when adding note to DISCHARGED admission', async () => {
     const tenant  = await seedTenant();
-    const patient = await seedPatient(tenant.tenantId);
-    const ward    = await seedWard(tenant.tenantId);
-    const bed     = await seedBed(ward.wardId, tenant.tenantId);
-    const doctor  = await seedUser(UserRole.DOCTOR, tenant.tenantId);
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
 
     await IPDAdmissionModel.create({
-      admissionId:      'adm-discharged-001',
+      admissionId:      ADM_DISCHARGED_ID,
       patientId:        patient.patientId,
-      wardId:           ward.wardId,
+      wardId:           toId(ward),
       wardName:         'General Ward',
-      bedId:            bed.bedId,
+      bedId:            toId(bed),
       bedNumber:        'G-01',
-      assignedDoctorId: doctor.userId,
+      assignedDoctorId: toId(doctor),
       status:           AdmissionStatus.DISCHARGED,
       admissionDate:    new Date(),
       dischargeDate:    new Date(),
       progressNotes:    [],
-      tenantId:         tenant.tenantId,
+      tenantId:         toId(tenant),
     });
 
-    const token = makeToken(doctor.userId, tenant.tenantId, UserRole.DOCTOR);
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
-      .post('/api/ipd/admissions/adm-discharged-001/progress-notes')
+      .post(`/api/ipd/admissions/${ADM_DISCHARGED_ID}/progress-notes`)
       .set('Authorization', `Bearer ${token}`)
       .send({ note: 'Should fail' });
 
@@ -273,32 +283,35 @@ describe('POST /api/ipd/admissions/:admissionId/progress-notes', () => {
   });
 });
 
+const ADM_TO_DISCHARGE_ID  = 'b2000000-0000-0000-0000-000000000001';
+const ADM_ALREADY_DIS_ID   = 'b2000000-0000-0000-0000-000000000002';
+
 describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
   test('sets DISCHARGED status and releases bed', async () => {
     const tenant  = await seedTenant();
-    const patient = await seedPatient(tenant.tenantId);
-    const ward    = await seedWard(tenant.tenantId);
-    const bed     = await seedBed(ward.wardId, tenant.tenantId, true);
-    const doctor  = await seedUser(UserRole.DOCTOR, tenant.tenantId);
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant), true);
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
 
     await IPDAdmissionModel.create({
-      admissionId:      'adm-to-discharge',
+      admissionId:      ADM_TO_DISCHARGE_ID,
       patientId:        patient.patientId,
-      wardId:           ward.wardId,
-      wardName:         ward.wardName,
-      bedId:            bed.bedId,
+      wardId:           toId(ward),
+      wardName:         ward.name,
+      bedId:            toId(bed),
       bedNumber:        bed.bedNumber,
-      assignedDoctorId: doctor.userId,
+      assignedDoctorId: toId(doctor),
       status:           AdmissionStatus.ADMITTED,
       admissionDate:    new Date(),
       dischargeDate:    null,
       progressNotes:    [],
-      tenantId:         tenant.tenantId,
+      tenantId:         toId(tenant),
     });
 
-    const token = makeToken(doctor.userId, tenant.tenantId, UserRole.DOCTOR);
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
-      .patch('/api/ipd/admissions/adm-to-discharge/discharge')
+      .patch(`/api/ipd/admissions/${ADM_TO_DISCHARGE_ID}/discharge`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
@@ -306,32 +319,32 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
     expect(res.body.data.dischargeDate).not.toBeNull();
 
     // Bed must be released
-    const updatedBed = await BedModel.findOne({ bedId: bed.bedId });
+    const updatedBed = await BedModel.findById(bed._id);
     expect(updatedBed?.isOccupied).toBe(false);
   });
 
   test('returns 400 when discharging an already-discharged patient', async () => {
     const tenant = await seedTenant();
-    const doctor = await seedUser(UserRole.DOCTOR, tenant.tenantId);
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
 
     await IPDAdmissionModel.create({
-      admissionId:      'adm-already-dis',
-      patientId:        'PAT-INT001',
-      wardId:           'ward-int-001',
+      admissionId:      ADM_ALREADY_DIS_ID,
+      patientId:        'PAT-INT00001',
+      wardId:           'ward-placeholder',
       wardName:         'General Ward',
-      bedId:            'bed-int-001',
+      bedId:            'bed-placeholder',
       bedNumber:        'G-01',
-      assignedDoctorId: doctor.userId,
+      assignedDoctorId: toId(doctor),
       status:           AdmissionStatus.DISCHARGED,
       admissionDate:    new Date(),
       dischargeDate:    new Date(),
       progressNotes:    [],
-      tenantId:         tenant.tenantId,
+      tenantId:         toId(tenant),
     });
 
-    const token = makeToken(doctor.userId, tenant.tenantId, UserRole.DOCTOR);
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
-      .patch('/api/ipd/admissions/adm-already-dis/discharge')
+      .patch(`/api/ipd/admissions/${ADM_ALREADY_DIS_ID}/discharge`)
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(400);
@@ -341,14 +354,14 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
 describe('GET /api/ipd/bed-occupancy', () => {
   test('returns occupancy summary with total === occupied + available per ward', async () => {
     const tenant = await seedTenant();
-    const ward   = await seedWard(tenant.tenantId);
+    const ward   = await seedWard(toId(tenant));
     await BedModel.create([
-      { bedId: 'b1', wardId: ward.wardId, bedNumber: 'G-01', isOccupied: true,  tenantId: tenant.tenantId },
-      { bedId: 'b2', wardId: ward.wardId, bedNumber: 'G-02', isOccupied: false, tenantId: tenant.tenantId },
-      { bedId: 'b3', wardId: ward.wardId, bedNumber: 'G-03', isOccupied: false, tenantId: tenant.tenantId },
+      { wardId: toId(ward), bedNumber: 'G-01', isOccupied: true,  tenantId: toId(tenant) },
+      { wardId: toId(ward), bedNumber: 'G-02', isOccupied: false, tenantId: toId(tenant) },
+      { wardId: toId(ward), bedNumber: 'G-03', isOccupied: false, tenantId: toId(tenant) },
     ]);
 
-    const token = makeToken('manager-001', tenant.tenantId, UserRole.MANAGER);
+    const token = makeToken('manager-001', toId(tenant), UserRole.MANAGER);
     const res   = await request(app)
       .get('/api/ipd/bed-occupancy')
       .set('Authorization', `Bearer ${token}`);
@@ -368,24 +381,24 @@ describe('GET /api/ipd/bed-occupancy', () => {
 describe('GET /api/ipd/admissions', () => {
   test('returns paginated ADMITTED admissions filtered by ward', async () => {
     const tenant = await seedTenant();
-    const doctor = await seedUser(UserRole.DOCTOR, tenant.tenantId);
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
 
     await IPDAdmissionModel.create([
       {
         admissionId: 'a1', patientId: 'p1', wardId: 'ward-int-001', wardName: 'General Ward',
-        bedId: 'b1', bedNumber: 'G-01', assignedDoctorId: doctor.userId,
+        bedId: 'b1', bedNumber: 'G-01', assignedDoctorId: toId(doctor),
         status: AdmissionStatus.ADMITTED, admissionDate: new Date(),
-        dischargeDate: null, progressNotes: [], tenantId: tenant.tenantId,
+        dischargeDate: null, progressNotes: [], tenantId: toId(tenant),
       },
       {
         admissionId: 'a2', patientId: 'p2', wardId: 'ward-int-002', wardName: 'ICU',
-        bedId: 'b2', bedNumber: 'I-01', assignedDoctorId: doctor.userId,
+        bedId: 'b2', bedNumber: 'I-01', assignedDoctorId: toId(doctor),
         status: AdmissionStatus.ADMITTED, admissionDate: new Date(),
-        dischargeDate: null, progressNotes: [], tenantId: tenant.tenantId,
+        dischargeDate: null, progressNotes: [], tenantId: toId(tenant),
       },
     ]);
 
-    const token = makeToken('nurse-001', tenant.tenantId, UserRole.NURSE);
+    const token = makeToken('nurse-001', toId(tenant), UserRole.NURSE);
     const res   = await request(app)
       .get('/api/ipd/admissions?wardId=ward-int-001')
       .set('Authorization', `Bearer ${token}`);

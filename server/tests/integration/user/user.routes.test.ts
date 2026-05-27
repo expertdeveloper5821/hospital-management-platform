@@ -71,7 +71,7 @@ async function seedUser(
   isFirstLogin = false,
 ) {
   const passwordHash = await bcrypt.hash('TestPass123!', 1);
-  return UserModel.create({ tenantId, email, passwordHash, role, isActive: true, isFirstLogin });
+  return UserModel.create({ tenantId, email, name: email.split('@')[0], passwordHash, role, isActive: true, isFirstLogin });
 }
 
 function tokenFor(userId: string, tenantId: string, role: UserRole) {

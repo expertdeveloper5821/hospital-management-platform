@@ -449,7 +449,7 @@ describe('GET /api/patients/:patientId', () => {
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
 
-    const res = await request(app).get('/api/patients/PAT-MISSING').set(bearer(token));
+    const res = await request(app).get('/api/patients/PAT-NOTFOUND').set(bearer(token));
     expect(res.status).toBe(404);
   });
 });
@@ -510,7 +510,7 @@ describe('PATCH /api/patients/:patientId', () => {
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
 
     const res = await request(app)
-      .patch('/api/patients/PAT-MISSING')
+      .patch('/api/patients/PAT-NOTFOUND')
       .set(bearer(token))
       .send({ fullName: 'Ghost' });
 
@@ -593,7 +593,7 @@ describe('GET /api/patients/:patientId/medical-card', () => {
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
 
     const res = await request(app)
-      .get('/api/patients/PAT-MISSING/medical-card')
+      .get('/api/patients/PAT-NOTFOUND/medical-card')
       .set(bearer(token));
 
     expect(res.status).toBe(404);

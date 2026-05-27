@@ -53,7 +53,7 @@ beforeEach(async () => {
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
 
   const user = await UserModel.create({
-    tenantId, email: 'doctor@notif.com', passwordHash: 'x',
+    tenantId, email: 'doctor@notif.com', name: 'Notif Doctor', passwordHash: 'x',
     role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
   });
   userId = (user._id as mongoose.Types.ObjectId).toString();

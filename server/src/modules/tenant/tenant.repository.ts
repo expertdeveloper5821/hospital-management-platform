@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { TenantModel, ITenant } from './tenant.model';
 import { TenantStatus, PaginatedResult } from '../../shared/types/common.types';
 import { BrandingConfig } from './tenant.types';
@@ -6,6 +7,7 @@ import { assertDbConnected } from '../../shared/utils/db-guard';
 export class TenantRepository {
   async findById(tenantId: string): Promise<ITenant | null> {
     assertDbConnected();
+    if (!mongoose.isValidObjectId(tenantId)) return null;
     return TenantModel.findById(tenantId);
   }
 
