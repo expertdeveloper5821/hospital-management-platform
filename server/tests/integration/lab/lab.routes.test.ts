@@ -69,19 +69,19 @@ beforeEach(async () => {
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
 
   const doctor = await UserModel.create({
-    tenantId, email: 'doctor@test.com', passwordHash: 'x',
+    tenantId, email: 'doctor@test.com', name: 'Lab Doctor', passwordHash: 'x',
     role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
   });
   doctorId = (doctor._id as mongoose.Types.ObjectId).toString();
 
   const pathologist = await UserModel.create({
-    tenantId, email: 'pathologist@test.com', passwordHash: 'x',
+    tenantId, email: 'pathologist@test.com', name: 'Lab Pathologist', passwordHash: 'x',
     role: UserRole.PATHOLOGIST, isActive: true, isFirstLogin: false,
   });
   const pathologistId = (pathologist._id as mongoose.Types.ObjectId).toString();
 
   const radiologist = await UserModel.create({
-    tenantId, email: 'radiologist@test.com', passwordHash: 'x',
+    tenantId, email: 'radiologist@test.com', name: 'Lab Radiologist', passwordHash: 'x',
     role: UserRole.RADIOLOGIST, isActive: true, isFirstLogin: false,
   });
   const radiologistId = (radiologist._id as mongoose.Types.ObjectId).toString();

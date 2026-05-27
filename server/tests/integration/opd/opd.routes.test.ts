@@ -70,7 +70,7 @@ async function seedTenant(name = 'Test Hospital') {
 
 async function seedUser(tenantId: string, email: string, role: UserRole) {
   const passwordHash = await bcrypt.hash('TestPass123!', 1);
-  return UserModel.create({ tenantId, email, passwordHash, role, isActive: true, isFirstLogin: false });
+  return UserModel.create({ tenantId, email, name: email.split('@')[0], passwordHash, role, isActive: true, isFirstLogin: false });
 }
 
 function tokenFor(userId: string, tenantId: string, role: UserRole) {

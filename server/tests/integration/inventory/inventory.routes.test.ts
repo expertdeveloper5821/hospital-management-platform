@@ -66,15 +66,15 @@ beforeEach(async () => {
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
 
   const admin = await UserModel.create({
-    tenantId, email: 'admin@inv.com', passwordHash: 'x',
+    tenantId, email: 'admin@inv.com', name: 'Inv Admin', passwordHash: 'x',
     role: UserRole.HOSPITAL_ADMIN, isActive: true, isFirstLogin: false,
   });
   const manager = await UserModel.create({
-    tenantId, email: 'manager@inv.com', passwordHash: 'x',
+    tenantId, email: 'manager@inv.com', name: 'Inv Manager', passwordHash: 'x',
     role: UserRole.MANAGER, isActive: true, isFirstLogin: false,
   });
   const doctor = await UserModel.create({
-    tenantId, email: 'doctor@inv.com', passwordHash: 'x',
+    tenantId, email: 'doctor@inv.com', name: 'Inv Doctor', passwordHash: 'x',
     role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
   });
 

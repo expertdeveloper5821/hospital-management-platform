@@ -98,15 +98,15 @@ beforeEach(async () => {
   patientId = patient.patientId;
 
   const receptionist = await UserModel.create({
-    tenantId, email: 'receptionist@test.com', passwordHash: 'x',
+    tenantId, email: 'receptionist@test.com', name: 'Pay Receptionist', passwordHash: 'x',
     role: UserRole.RECEPTIONIST, isActive: true, isFirstLogin: false,
   });
   const manager = await UserModel.create({
-    tenantId, email: 'manager@test.com', passwordHash: 'x',
+    tenantId, email: 'manager@test.com', name: 'Pay Manager', passwordHash: 'x',
     role: UserRole.MANAGER, isActive: true, isFirstLogin: false,
   });
   const finance = await UserModel.create({
-    tenantId, email: 'finance@test.com', passwordHash: 'x',
+    tenantId, email: 'finance@test.com', name: 'Pay Finance', passwordHash: 'x',
     role: UserRole.FINANCE_MANAGER, isActive: true, isFirstLogin: false,
   });
 
