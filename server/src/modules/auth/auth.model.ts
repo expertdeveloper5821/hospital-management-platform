@@ -70,5 +70,6 @@ const UserSchema = new Schema<IUser>(
 UserSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 UserSchema.index({ tenantId: 1, role: 1 });
 UserSchema.index({ tenantId: 1, isActive: 1 });
+UserSchema.index({ tenantId: 1, role: 1, isActive: 1 });
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);

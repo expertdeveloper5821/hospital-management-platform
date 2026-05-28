@@ -64,11 +64,24 @@ export const userApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
     }),
 
-    listUsers: build.query<PaginatedResult<UserResponse>, { role?: UserRole; isActive?: boolean; page?: number; limit?: number }>({
-      query: ({ page = 1, limit = 20, role, isActive } = {}) => {
+    listUsers: build.query<PaginatedResult<UserResponse>, {
+      role?:      UserRole;
+      isActive?:  boolean;
+      status?:    'ACTIVE' | 'INACTIVE';
+      search?:    string;
+      sortBy?:    'name' | 'createdAt' | 'role';
+      sortOrder?: 'asc' | 'desc';
+      page?:      number;
+      limit?:     number;
+    }>({
+      query: ({ page = 1, limit = 20, role, isActive, status, search, sortBy, sortOrder } = {}) => {
         const params = new URLSearchParams({ page: String(page), limit: String(limit) });
         if (role)             params.set('role', role);
         if (isActive != null) params.set('isActive', String(isActive));
+        if (status)           params.set('status', status);
+        if (search)           params.set('search', search);
+        if (sortBy)           params.set('sortBy', sortBy);
+        if (sortOrder)        params.set('sortOrder', sortOrder);
         return `/api/users?${params}`;
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

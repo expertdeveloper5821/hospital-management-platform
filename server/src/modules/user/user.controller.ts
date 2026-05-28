@@ -5,7 +5,6 @@ import { s3Service } from '../../shared/services/s3.service';
 import { UserRole } from '../../shared/types/common.types';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { objectIdSchema, paginationSchema } from '../../shared/utils/validation';
-
 const PROFILE_IMAGE_URL_EXPIRY = 86400; // 24 h
 
 async function resolveProfileImageUrl(key: string | null | undefined): Promise<string | null> {
@@ -29,9 +28,15 @@ const updateRoleSchema = z.object({
   role: z.enum(Object.values(UserRole) as [string, ...string[]]),
 });
 
+const SORT_BY_VALUES = ['name', 'createdAt', 'role'] as const;
+
 const userListSchema = paginationSchema.extend({
-  role:     z.enum(Object.values(UserRole) as [string, ...string[]]).optional(),
-  isActive: z.coerce.boolean().optional(),
+  role:      z.enum(Object.values(UserRole) as [string, ...string[]]).optional(),
+  isActive:  z.coerce.boolean().optional(),
+  status:    z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  search:    z.string().min(1).max(100).optional(),
+  sortBy:    z.enum(SORT_BY_VALUES).optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
 const userIdParamSchema = z.object({
@@ -179,9 +184,33 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
   try {
     const query = userListSchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
-    const { page, limit, role, isActive } = query.data;
-    const result = await userService.listUsers(req.user!.tenantId!, { role: role as UserRole | undefined, isActive }, page, limit);
-    res.status(200).json({ status: 'success', data: result });
+    const { page, limit, role, isActive, status, search, sortBy, sortOrder } = query.data;
+
+    // `status` (ACTIVE/INACTIVE) takes precedence over legacy `isActive` boolean
+    let resolvedIsActive: boolean | undefined = isActive;
+    if (status !== undefined) resolvedIsActive = status === 'ACTIVE';
+
+    // Clamp limit per FR-E04.4.2 (paginationSchema already caps at 100, but make explicit)
+    const clampedLimit = Math.min(limit, 100);
+
+    const result = await userService.listUsers(
+      req.user!.tenantId!,
+      {
+        role:      role as UserRole | undefined,
+        isActive:  resolvedIsActive,
+        search,
+        sortBy:    sortBy as 'name' | 'createdAt' | 'role' | undefined,
+        sortOrder: sortOrder as 'asc' | 'desc' | undefined,
+      },
+      page,
+      clampedLimit,
+    );
+
+    const responseData = clampedLimit < limit
+      ? { ...result, warning: 'limit clamped to 100' }
+      : result;
+
+    res.status(200).json({ status: 'success', data: responseData });
   } catch (err) { next(err); }
 }
 

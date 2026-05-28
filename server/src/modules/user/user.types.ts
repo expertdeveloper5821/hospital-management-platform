@@ -37,7 +37,13 @@ export interface UserResponse {
   createdAt:   Date;
 }
 
+export type SortByField   = 'name' | 'createdAt' | 'role';
+export type SortOrderDir = 'asc' | 'desc';
+
 export interface ListUsersFilters {
-  role?:     UserRole;
-  isActive?: boolean;
+  role?:      UserRole;
+  isActive?:  boolean;
+  search?:    string;
+  sortBy?:    SortByField;
+  sortOrder?: SortOrderDir;
 }
