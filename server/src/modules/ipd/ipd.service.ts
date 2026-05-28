@@ -147,6 +147,13 @@ export class IPDService {
     return toResponse(admission, patient.fullName);
   }
 
+  async getAdmissionById(admissionId: string, tenantId: string): Promise<AdmissionResponse> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+    const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
+    return toResponse(admission, patient?.fullName ?? null);
+  }
+
   async addProgressNote(
     admissionId: string,
     input:       AddProgressNoteInput,

@@ -4,12 +4,16 @@ import { scopeTenant } from '../../shared/middleware/scope-tenant';
 import { requireRole } from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
 import { UserRole } from '../../shared/types/common.types';
-import { createUser, listUsers, getUserById, updateUserRole, deactivateUser, updateUserProfile } from './user.controller';
+import { createUser, listUsers, getUserById, updateUserRole, deactivateUser, updateUserProfile, getMyProfile, updateMyProfile } from './user.controller';
 
 const router = Router();
 
 // All user routes require authentication + tenant scope + first-password-change
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
+
+// /me routes — no requireRole; any authenticated user can read/update their own profile
+router.get('/me',                         ...protect, getMyProfile);
+router.patch('/me/profile',               ...protect, updateMyProfile);
 
 router.post('/',                          ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), createUser);
 router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER), listUsers);

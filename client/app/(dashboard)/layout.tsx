@@ -1,20 +1,37 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/shared/Sidebar';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { BrandingProvider } from '@/components/shared/BrandingProvider';
+import { SearchOverlay } from '@/components/header/SearchOverlay';
+import { ProfileDropdown } from '@/components/header/ProfileDropdown';
+import { MobileNav } from '@/components/layout/MobileNav';
 import { useAppSelector } from '@/store/hooks';
 import { wsClient } from '@/lib/websocket-client';
-import { Menu } from 'lucide-react';
+import { Menu, Search } from 'lucide-react';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router  = useRouter();
   const token   = useAppSelector((s) => s.auth.token);
   const profile = useAppSelector((s) => s.auth.profile);
   const isAuth  = useAppSelector((s) => s.auth.isAuthenticated);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [searchOpen,   setSearchOpen]   = useState(false);
+
+  // Ctrl+K / Cmd+K global shortcut
+  const handleGlobalKey = useCallback((e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      setSearchOpen((v) => !v);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleGlobalKey);
+    return () => document.removeEventListener('keydown', handleGlobalKey);
+  }, [handleGlobalKey]);
 
   // Guard — unauthenticated users go to login
   useEffect(() => {
@@ -49,22 +66,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <BrandingProvider>
       <div className="flex h-screen overflow-hidden">
-        {/* Mobile overlay */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-40 bg-black/50 md:hidden"
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
+        {/* Mobile drawer — hidden on md+; MobileNav handles backdrop + transition */}
+        <MobileNav open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-        {/* Sidebar — drawer on mobile, static on md+ */}
-        <div
-          className={`fixed inset-y-0 left-0 z-50 transition-transform duration-300 md:relative md:translate-x-0 ${
-            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-          } md:block`}
-        >
-          <Sidebar onClose={() => setSidebarOpen(false)} />
+        {/* Sidebar — static on md+ */}
+        <div className="hidden md:block shrink-0">
+          <Sidebar />
         </div>
 
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
@@ -76,9 +83,31 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="ml-auto">
+            {/* Header action bar */}
+            <div className="ml-auto flex items-center gap-2">
+              {/* Search trigger */}
+              <button
+                onClick={() => setSearchOpen(true)}
+                aria-label="Open search (Ctrl+K)"
+                className="hidden sm:flex items-center gap-2 h-8 rounded-md border bg-muted/50 px-3 text-xs text-muted-foreground hover:bg-muted transition-colors"
+              >
+                <Search className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Search…</span>
+                <kbd className="rounded border px-1 font-mono text-[10px] opacity-60">Ctrl K</kbd>
+              </button>
+              <button
+                onClick={() => setSearchOpen(true)}
+                aria-label="Open search"
+                className="sm:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Search className="h-5 w-5" aria-hidden="true" />
+              </button>
+
               <NotificationBell />
+              <ProfileDropdown />
             </div>
+
+            <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
           </header>
           <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
         </div>

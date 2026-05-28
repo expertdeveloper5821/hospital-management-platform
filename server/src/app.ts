@@ -31,6 +31,7 @@ import paymentRouter from './modules/payment/payment.routes';
 import webhookRouter from './modules/payment/payment.webhook.routes';
 import auditRouter from './modules/audit/audit.routes';
 import dashboardRouter from './modules/dashboard/dashboard.routes';
+import searchRouter    from './modules/search/search.routes';
 
 const app = express();
 
@@ -143,6 +144,7 @@ app.use('/api/notifications', notificationRouter);
 app.use('/api/payments', paymentRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/search',    searchRouter);
 
 // 404 HANDLER
 app.use((_req, _res, next) => {

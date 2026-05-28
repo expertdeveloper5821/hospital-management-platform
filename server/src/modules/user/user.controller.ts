@@ -24,6 +24,42 @@ const userIdParamSchema = z.object({
   userId: objectIdSchema,
 });
 
+// ─── /me handlers (no requireRole — all authenticated users) ─────────────────
+
+const meProfileSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200).trim(),
+});
+
+export async function getMyProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const user = await userService.getUserById(req.user!.tenantId!, req.user!.userId);
+    res.status(200).json({
+      status: 'success',
+      data: { userId: user._id, email: user.email, name: user.name, role: user.role, isActive: user.isActive },
+    });
+  } catch (err) { next(err); }
+}
+
+export async function updateMyProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = meProfileSchema.safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const user = await userService.updateUserProfile(
+      req.user!.tenantId!,
+      req.user!.userId,
+      { name: body.data.name },
+      req.user!.userId,
+    );
+    res.status(200).json({
+      status: 'success',
+      data: { userId: user._id, email: user.email, name: user.name, role: user.role },
+    });
+  } catch (err) { next(err); }
+}
+
+// ─── Admin / HR handlers ──────────────────────────────────────────────────────
+
 export async function createUser(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const body = createUserSchema.safeParse(req.body);
