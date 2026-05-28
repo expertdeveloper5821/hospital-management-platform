@@ -77,6 +77,24 @@ export async function createAdmission(
   }
 }
 
+export async function getAdmissionById(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const tenantId  = req.user!.tenantId as string;
+    const admission = await ipdService.getAdmissionById(idResult.data, tenantId);
+    res.status(200).json({ status: 'success', data: admission });
+  } catch (err) { next(err); }
+}
+
 export async function listAdmissions(
   req: Request,
   res: Response,

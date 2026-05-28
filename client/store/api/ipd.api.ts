@@ -48,6 +48,12 @@ export const ipdApi = baseApi.injectEndpoints({
 
     // ── Admissions ────────────────────────────────────────────────────────────
 
+    getAdmissionById: build.query<AdmissionResponse, string>({
+      query: (admissionId) => `/api/ipd/admissions/${admissionId}`,
+      transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
+      providesTags: ['IPD'],
+    }),
+
     listAdmissions: build.query<PaginatedResult<AdmissionResponse>, ListAdmissionsQuery>({
       query: (params) => ({
         url:    '/api/ipd/admissions',
@@ -99,6 +105,7 @@ export const ipdApi = baseApi.injectEndpoints({
 });
 
 export const {
+  useGetAdmissionByIdQuery,
   useListWardsQuery,
   useCreateWardMutation,
   useListBedsQuery,

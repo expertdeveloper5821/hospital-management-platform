@@ -7,6 +7,7 @@ import { UserRole }                   from '../../shared/types/common.types';
 import {
   createAdmission,
   listAdmissions,
+  getAdmissionById,
   addProgressNote,
   dischargePatient,
   getBedOccupancySummary,
@@ -46,6 +47,20 @@ router.get(
     ...ADMIN_ROLES,
   ),
   listAdmissions,
+);
+
+// GET /api/ipd/admissions/:admissionId — Get single admission by ID
+router.get(
+  '/admissions/:admissionId',
+  ...protect,
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.DOCTOR,
+    UserRole.NURSE,
+    UserRole.MANAGER,
+    ...ADMIN_ROLES,
+  ),
+  getAdmissionById,
 );
 
 // POST /api/ipd/admissions/:admissionId/progress-notes — Doctor records daily note

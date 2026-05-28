@@ -42,6 +42,10 @@ export interface AppConfig {
     keySecret:     string;
     webhookSecret: string;
   };
+  dashboard: {
+    cacheTtlSeconds:   number;
+    pollIntervalSeconds: number;
+  };
 }
 
 function parseEnvList(value?: string): string[] {
@@ -112,6 +116,10 @@ const config: AppConfig = {
     keyId:         process.env.RAZORPAY_KEY_ID      ?? '',
     keySecret:     process.env.RAZORPAY_KEY_SECRET   ?? '',
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? '',
+  },
+  dashboard: {
+    cacheTtlSeconds:    parseInt(process.env.DASHBOARD_CACHE_TTL_SECONDS    ?? '60', 10),
+    pollIntervalSeconds: parseInt(process.env.DASHBOARD_POLL_INTERVAL_SECONDS ?? '60', 10),
   },
 };
 

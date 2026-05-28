@@ -22,8 +22,28 @@ interface CreateUserRequest {
   role:  UserRole;
 }
 
+interface MyProfileResponse {
+  userId:   string;
+  email:    string;
+  name:     string;
+  role:     UserRole;
+  isActive: boolean;
+}
+
 export const userApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
+
+    getMyProfile: build.query<MyProfileResponse, void>({
+      query: () => '/api/users/me',
+      transformResponse: (raw: ApiSuccess<MyProfileResponse>) => raw.data,
+      providesTags: ['User'],
+    }),
+
+    updateMyProfile: build.mutation<MyProfileResponse, { name: string }>({
+      query: (body) => ({ url: '/api/users/me/profile', method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<MyProfileResponse>) => raw.data,
+      invalidatesTags: ['User'],
+    }),
 
     listUsers: build.query<PaginatedResult<UserResponse>, { role?: UserRole; isActive?: boolean; page?: number; limit?: number }>({
       query: ({ page = 1, limit = 20, role, isActive } = {}) => {
@@ -68,6 +88,8 @@ export const userApi = baseApi.injectEndpoints({
 });
 
 export const {
+  useGetMyProfileQuery,
+  useUpdateMyProfileMutation,
   useListUsersQuery,
   useGetUserByIdQuery,
   useCreateUserMutation,
