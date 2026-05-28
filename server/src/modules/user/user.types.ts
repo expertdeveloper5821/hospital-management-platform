@@ -15,6 +15,17 @@ export interface UpdateProfileRequest {
   email?: string;
 }
 
+export interface UpdateMyProfileRequest {
+  name?:           string;
+  phone?:          string | null;
+  profileImageUrl?: string | null;
+}
+
+export interface ChangeMyPasswordRequest {
+  currentPassword: string;
+  newPassword:     string;
+}
+
 export interface UserResponse {
   userId:      string;
   email:       string;

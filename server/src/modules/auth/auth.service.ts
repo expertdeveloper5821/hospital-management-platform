@@ -187,6 +187,40 @@ export class AuthService {
     });
   }
 
+  async changeSuperAdminPassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    currentToken: string,
+  ): Promise<void> {
+    const admin = await authRepository.findSuperAdminById(userId);
+    if (!admin) throw new NotFoundError('Super admin not found');
+
+    const isValid = await bcrypt.compare(currentPassword, admin.passwordHash);
+    if (!isValid) throw new UnauthorizedError('Current password is incorrect');
+
+    const isSame = await bcrypt.compare(newPassword, admin.passwordHash);
+    if (isSame) throw new ValidationError('New password must be different from the current password');
+
+    const newHash = await bcrypt.hash(newPassword, config.bcryptRounds);
+    await authRepository.recordSuperAdminPasswordChange(userId, newHash);
+
+    try {
+      const decoded = jwt.verify(currentToken, config.jwtSecret) as JWTPayload;
+      const expiryMs = ((decoded.exp ?? 0) * 1000) - Date.now();
+      if (expiryMs > 0) addToDenylist(currentToken, expiryMs);
+    } catch { /* already invalid */ }
+
+    await auditService.log({
+      entityType: AuditEntityType.AUTH,
+      entityId:   userId,
+      action:     'PASSWORD_RESET',
+      userId,
+      tenantId:   null,
+      newValue:   { field: 'password', changed: true },
+    });
+  }
+
   validateJWT(token: string): JWTPayload {
     try {
       return jwt.verify(token, config.jwtSecret) as JWTPayload;
