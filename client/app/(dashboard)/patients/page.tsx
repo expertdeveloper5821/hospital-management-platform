@@ -101,8 +101,8 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     errors.mobileNumber = 'Mobile number is required.';
   } else if (
     !MOBILE_RE.test(form.mobileNumber) ||
-    form.mobileNumber.length < 7 ||
-    form.mobileNumber.length > 15
+    form.mobileNumber.length < 9 ||
+    form.mobileNumber.length > 12
   ) {
     errors.mobileNumber = 'Enter a valid mobile number (7–15 characters, optional leading +).';
   }
