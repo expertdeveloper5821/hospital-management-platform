@@ -22,6 +22,14 @@ export class IPDRepository {
     return IPDAdmissionModel.findOne({ bedId, tenantId, status: 'ADMITTED' });
   }
 
+  async findActiveAdmissionByPatient(
+    patientId: string,
+    tenantId: string,
+  ): Promise<IIPDAdmission | null> {
+    assertDbConnected();
+    return IPDAdmissionModel.findOne({ patientId, tenantId, status: 'ADMITTED' });
+  }
+
   async findActiveAdmissions(
     tenantId: string,
     query: ListAdmissionsQuery,

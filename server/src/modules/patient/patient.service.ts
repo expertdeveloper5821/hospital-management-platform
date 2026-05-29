@@ -2,10 +2,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { patientRepository } from './patient.repository';
 import { IPatient } from './patient.model';
 import { tenantRepository } from '../tenant/tenant.repository';
+import { ipdRepository } from '../ipd/ipd.repository';
 import { pdfService } from '../../shared/services/pdf.service';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { NotFoundError } from '../../shared/middleware/error-handler';
+import { NotFoundError, ConflictError } from '../../shared/middleware/error-handler';
 import { CreatePatientRequest, UpdatePatientRequest } from './patient.types';
 
 // Thrown when a duplicate mobile is detected but forceCreate was not set.
@@ -115,6 +116,33 @@ export class PatientService {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
     return patient;
+  }
+
+  async deletePatient(
+    tenantId:  string,
+    patientId: string,
+    deletedBy: string,
+  ): Promise<void> {
+    const patient = await patientRepository.findByPatientId(tenantId, patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const activeAdmission = await ipdRepository.findActiveAdmissionByPatient(patientId, tenantId);
+    if (activeAdmission) {
+      throw new ConflictError(
+        'Patient has an active IPD admission. Discharge the patient before deletion.',
+      );
+    }
+
+    await patientRepository.softDelete(tenantId, patientId);
+
+    await auditService.log({
+      entityType: AuditEntityType.PATIENT,
+      entityId:   patientId,
+      action:     'DELETE',
+      userId:     deletedBy,
+      tenantId,
+      previousValue: { patientId, fullName: patient.fullName },
+    });
   }
 
   async searchPatients(

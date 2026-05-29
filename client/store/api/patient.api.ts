@@ -42,6 +42,12 @@ export const patientApi = baseApi.injectEndpoints({
       invalidatesTags: ['Patient'],
     }),
 
+    deletePatient: build.mutation<{ message: string }, string>({
+      query: (patientId) => ({ url: `/api/patients/${patientId}`, method: 'DELETE' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Patient'],
+    }),
+
     // Downloads the Medical Card PDF; returns a blob object URL for the <a> tag.
     // Uses queryFn because the endpoint returns a raw PDF, not JSON.
     downloadMedicalCard: build.mutation<string, string>({
@@ -73,5 +79,6 @@ export const {
   useGetPatientByIdQuery,
   useCreatePatientMutation,
   useUpdatePatientMutation,
+  useDeletePatientMutation,
   useDownloadMedicalCardMutation,
 } = patientApi;

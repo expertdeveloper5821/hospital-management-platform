@@ -53,9 +53,23 @@ export const opdApi = baseApi.injectEndpoints({
       invalidatesTags: ['OPD'],
     }),
 
-    getOPDPatientHistory: build.query<OPDPatientHistory, { patientId: string; page?: number; limit?: number }>({
-      query: ({ patientId, page = 1, limit = 20 }) =>
-        `/api/opd/patients/${patientId}/history?page=${page}&limit=${limit}`,
+    getOPDPatientHistory: build.query<OPDPatientHistory, {
+      patientId:  string;
+      page?:      number;
+      limit?:     number;
+      startDate?: string;
+      endDate?:   string;
+      status?:    'OPEN' | 'COMPLETED';
+      search?:    string;
+    }>({
+      query: ({ patientId, page = 1, limit = 10, startDate, endDate, status, search }) => {
+        const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+        if (startDate) params.set('startDate', startDate);
+        if (endDate)   params.set('endDate',   endDate);
+        if (status)    params.set('status',    status);
+        if (search)    params.set('search',    search);
+        return `/api/opd/patients/${patientId}/history?${params}`;
+      },
       transformResponse: (raw: ApiSuccess<OPDPatientHistory>) => raw.data,
       providesTags: ['OPD'],
     }),

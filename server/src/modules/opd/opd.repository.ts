@@ -1,6 +1,20 @@
 import { OPDVisitModel, IOPDVisit } from './opd.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
+import { OPDVisitStatus } from './opd.types';
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export interface OpdHistoryFilters {
+  page:       number;
+  limit:      number;
+  startDate?: string;
+  endDate?:   string;
+  status?:    OPDVisitStatus;
+  search?:    string;
+}
 
 export class OPDRepository {
   async findByVisitId(tenantId: string, visitId: string): Promise<IOPDVisit | null> {
@@ -31,12 +45,34 @@ export class OPDRepository {
   async findByPatient(
     tenantId: string,
     patientId: string,
-    page: number,
-    limit: number,
+    filters: OpdHistoryFilters,
   ): Promise<PaginatedResult<IOPDVisit>> {
     assertDbConnected();
+    const { page, limit, startDate, endDate, status, search } = filters;
     const skip = (page - 1) * limit;
-    const query = { tenantId, patientId };
+
+    const query: Record<string, unknown> = { tenantId, patientId };
+
+    if (startDate || endDate) {
+      const dateFilter: Record<string, Date> = {};
+      if (startDate) dateFilter['$gte'] = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        dateFilter['$lte'] = end;
+      }
+      query['visitDate'] = dateFilter;
+    }
+
+    if (status) query['status'] = status;
+
+    if (search) {
+      const safe = escapeRegex(search);
+      query['$or'] = [
+        { chiefComplaint: { $regex: safe, $options: 'i' } },
+        { diagnosis:      { $regex: safe, $options: 'i' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       OPDVisitModel.find(query).sort({ visitDate: -1 }).skip(skip).limit(limit).lean(),

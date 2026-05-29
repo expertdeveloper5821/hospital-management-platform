@@ -32,6 +32,7 @@ import app              from '../../../src/app';
 import { UserModel }    from '../../../src/modules/auth/auth.model';
 import { TenantModel }  from '../../../src/modules/tenant/tenant.model';
 import { PatientModel } from '../../../src/modules/patient/patient.model';
+import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { Gender, BloodGroup }     from '../../../src/modules/patient/patient.types';
 
@@ -601,6 +602,120 @@ describe('GET /api/patients/:patientId/medical-card', () => {
 
   test('401 — unauthenticated', async () => {
     const res = await request(app).get('/api/patients/PAT-TEST0001/medical-card');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── DELETE /api/patients/:patientId ──────────────────────────────────────────
+describe('DELETE /api/patients/:patientId', () => {
+  test('200 — Admin soft-deletes a patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid, { patientId: 'PAT-DEL00001' });
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.ADMIN);
+
+    const res = await request(app)
+      .delete('/api/patients/PAT-DEL00001')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/deleted/i);
+
+    const inDb = await PatientModel.findOne({ patientId: 'PAT-DEL00001' });
+    expect(inDb?.isDeleted).toBe(true);
+    expect(inDb?.deletedAt).toBeTruthy();
+  });
+
+  test('200 — Manager soft-deletes a patient', async () => {
+    const tenant  = await seedTenant();
+    const tid     = tenant._id.toString();
+    await seedPatient(tid, { patientId: 'PAT-DEL00002' });
+    const manager = await seedUser(tid, 'mgr@h.com', UserRole.MANAGER);
+    const token   = tokenFor(manager._id.toString(), tid, UserRole.MANAGER);
+
+    const res = await request(app)
+      .delete('/api/patients/PAT-DEL00002')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+  });
+
+  test('403 — Receptionist cannot delete a patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid, { patientId: 'PAT-DEL00003' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/patients/PAT-DEL00003')
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  test('404 — unknown patient returns 404', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const admin  = await seedUser(tid, 'admin@h.com', UserRole.ADMIN);
+    const token  = tokenFor(admin._id.toString(), tid, UserRole.ADMIN);
+
+    const res = await request(app)
+      .delete('/api/patients/PAT-NOTEXIST')
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('409 — patient with active IPD admission cannot be deleted', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid, { patientId: 'PAT-DEL00004' });
+    await IPDAdmissionModel.create({
+      admissionId:      'ADM-TEST0001',
+      tenantId:         tid,
+      patientId:        'PAT-DEL00004',
+      wardId:           'ward-1',
+      wardName:         'General Ward',
+      bedId:            'bed-1',
+      bedNumber:        'B-01',
+      assignedDoctorId: 'doc-1',
+      status:           'ADMITTED',
+      admissionDate:    new Date(),
+      progressNotes:    [],
+    });
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.ADMIN);
+
+    const res = await request(app)
+      .delete('/api/patients/PAT-DEL00004')
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/active IPD admission/i);
+  });
+
+  test('200 — soft-deleted patient no longer appears in search', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid, { patientId: 'PAT-DEL00005', fullName: 'Deleted Patient' });
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.ADMIN);
+
+    await request(app).delete('/api/patients/PAT-DEL00005').set(bearer(token));
+
+    const search = await request(app)
+      .get('/api/patients')
+      .query({ q: 'Deleted Patient' })
+      .set(bearer(token));
+
+    expect(search.status).toBe(200);
+    expect(search.body.data.data.map((p: { patientId: string }) => p.patientId)).not.toContain('PAT-DEL00005');
+  });
+
+  test('401 — unauthenticated', async () => {
+    const res = await request(app).delete('/api/patients/PAT-TEST0001');
     expect(res.status).toBe(401);
   });
 });

@@ -9,6 +9,7 @@ import {
   searchPatients,
   getPatient,
   updatePatient,
+  deletePatient,
   getMedicalCard,
 } from './patient.controller';
 
@@ -55,6 +56,12 @@ router.patch('/:patientId',
   ...protect,
   requireRole(UserRole.RECEPTIONIST, ...ADMIN_ROLES),
   updatePatient,
+);
+
+router.delete('/:patientId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER),
+  deletePatient,
 );
 
 export default router;

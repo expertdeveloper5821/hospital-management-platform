@@ -191,10 +191,11 @@ export interface CompleteOPDVisitRequest {
 }
  
 export interface OPDPatientHistory {
-  data:  OPDVisitResponse[];
-  total: number;
-  page:  number;
-  limit: number;
+  data:       OPDVisitResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
 }
  
 // ─── Lab ──────────────────────────────────────────────────────────────────────
