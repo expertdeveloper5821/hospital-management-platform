@@ -456,7 +456,7 @@ function StockHistoryDrawer({ item, onClose }: StockHistoryDrawerProps) {
                           <span className="font-medium">{String(entry.previousValue.quantity)} {item.unit}</span>
                         </div>
                       )}
-                      {entry.newValue.reason && (
+                      {Boolean(entry.newValue.reason) && (
                         <div className="flex items-start justify-between text-xs gap-2">
                           <span className="text-muted-foreground shrink-0">Reason</span>
                           <span className="font-medium text-right">{String(entry.newValue.reason)}</span>
