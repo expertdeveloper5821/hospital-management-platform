@@ -4,8 +4,11 @@ import { labService } from './lab.service';
 import {
   CreatePathologyRequestSchema,
   CreateRadiologyRequestSchema,
+  EditPathologyRequestSchema,
+  EditRadiologyRequestSchema,
   ListLabRequestsQuerySchema,
 } from './lab.types';
+import { UserRole } from '../../shared/types/common.types';
 
 const requestIdSchema = z.string().uuid('requestId must be a valid UUID');
 
@@ -141,5 +144,77 @@ export async function uploadRadiologyReport(
       req.file.mimetype,
     );
     res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── Edit & Delete — Pathology ────────────────────────────────────────────────
+
+export async function editPathologyRequest(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+    const parsed = EditPathologyRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await labService.editPathologyRequest(
+      id.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+export async function deletePathologyRequest(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+    await labService.deletePathologyRequest(
+      id.data, req.user!.tenantId as string, req.user!.userId, req.user!.role as UserRole,
+    );
+    res.status(200).json({ status: 'success', message: 'Pathology request deleted.' });
+  } catch (err) { next(err); }
+}
+
+// ─── Edit & Delete — Radiology ────────────────────────────────────────────────
+
+export async function editRadiologyRequest(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+    const parsed = EditRadiologyRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await labService.editRadiologyRequest(
+      id.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+export async function deleteRadiologyRequest(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+    await labService.deleteRadiologyRequest(
+      id.data, req.user!.tenantId as string, req.user!.userId, req.user!.role as UserRole,
+    );
+    res.status(200).json({ status: 'success', message: 'Radiology request deleted.' });
   } catch (err) { next(err); }
 }

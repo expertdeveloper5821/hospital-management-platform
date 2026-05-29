@@ -5,6 +5,8 @@ import type {
   RadiologyRequestResponse,
   CreatePathologyRequest,
   CreateRadiologyRequest,
+  EditPathologyRequest,
+  EditRadiologyRequest,
   LabListResult,
 } from '../types';
 
@@ -96,6 +98,38 @@ export const labApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<RadiologyRequestResponse>) => raw.data,
       invalidatesTags: ['Lab'],
     }),
+
+    // ─── Edit & Delete ────────────────────────────────────────────────────────
+
+    editPathologyRequest: build.mutation<
+      PathologyRequestResponse,
+      { requestId: string } & EditPathologyRequest
+    >({
+      query: ({ requestId, ...body }) => ({ url: `/api/lab/pathology/${requestId}`, method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<PathologyRequestResponse>) => raw.data,
+      invalidatesTags: ['Lab'],
+    }),
+
+    deletePathologyRequest: build.mutation<{ message: string }, string>({
+      query: (requestId) => ({ url: `/api/lab/pathology/${requestId}`, method: 'DELETE' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Lab'],
+    }),
+
+    editRadiologyRequest: build.mutation<
+      RadiologyRequestResponse,
+      { requestId: string } & EditRadiologyRequest
+    >({
+      query: ({ requestId, ...body }) => ({ url: `/api/lab/radiology/${requestId}`, method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<RadiologyRequestResponse>) => raw.data,
+      invalidatesTags: ['Lab'],
+    }),
+
+    deleteRadiologyRequest: build.mutation<{ message: string }, string>({
+      query: (requestId) => ({ url: `/api/lab/radiology/${requestId}`, method: 'DELETE' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Lab'],
+    }),
   }),
 });
 
@@ -104,8 +138,12 @@ export const {
   useGetPathologyRequestQuery,
   useCreatePathologyRequestMutation,
   useUploadPathologyReportMutation,
+  useEditPathologyRequestMutation,
+  useDeletePathologyRequestMutation,
   useListRadiologyRequestsQuery,
   useGetRadiologyRequestQuery,
   useCreateRadiologyRequestMutation,
   useUploadRadiologyReportMutation,
+  useEditRadiologyRequestMutation,
+  useDeleteRadiologyRequestMutation,
 } = labApi;

@@ -5,6 +5,8 @@ import {
   LabRequestStatus,
   CreatePathologyRequestInput,
   CreateRadiologyRequestInput,
+  EditPathologyRequestInput,
+  EditRadiologyRequestInput,
   ListLabRequestsQuery,
   PathologyRequestResponse,
   RadiologyRequestResponse,
@@ -16,7 +18,7 @@ import { notificationService } from '../notification/notification.service';
 import { s3Service }           from '../../shared/services/s3.service';
 import { auditService }        from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
-import { AppError, NotFoundError } from '../../shared/middleware/error-handler';
+import { AppError, NotFoundError, ForbiddenError } from '../../shared/middleware/error-handler';
 
 // Pre-signed URL expiry: 1 hour (3600 s) — short-lived per security baseline.
 const REPORT_URL_EXPIRY_SECONDS = 3600;
@@ -45,6 +47,7 @@ async function toPathologyResponse(
     requestedBy: doc.requestedBy,
     testType:    doc.testType,
     status:      doc.status,
+    priority:    doc.priority,
     notes:       doc.notes,
     reportUrl:   await resolveReportUrl(doc.reportS3Key),
     requestedAt: doc.requestedAt.toISOString(),
@@ -64,6 +67,7 @@ async function toRadiologyResponse(
     requestedBy: doc.requestedBy,
     imagingType: doc.imagingType,
     status:      doc.status,
+    priority:    doc.priority,
     notes:       doc.notes,
     reportUrl:   await resolveReportUrl(doc.reportS3Key),
     requestedAt: doc.requestedAt.toISOString(),
@@ -313,6 +317,150 @@ export class LabService {
       result.data.map((doc) => toRadiologyResponse(doc, nameMap.get(doc.patientId))),
     );
     return { ...result, data };
+  }
+
+  // ─── Edit & Delete — Pathology ────────────────────────────────────────────
+
+  async editPathologyRequest(
+    requestId: string,
+    tenantId:  string,
+    userId:    string,
+    input:     EditPathologyRequestInput,
+  ): Promise<PathologyRequestResponse> {
+    const doc = await labRepository.findPathologyById(requestId, tenantId);
+    if (!doc) throw new NotFoundError('Pathology request not found');
+    if (doc.status === LabRequestStatus.COMPLETED) {
+      throw new AppError('Cannot edit a completed pathology request', 409);
+    }
+
+    const editableKeys = ['testType', 'notes', 'priority', 'status'] as const;
+    const previousValue: Record<string, unknown> = {};
+    const updatePayload: Partial<Pick<typeof doc, 'testType' | 'notes' | 'priority' | 'status'>> = {};
+    for (const key of editableKeys) {
+      if (key in input) {
+        previousValue[key] = doc[key];
+        (updatePayload as Record<string, unknown>)[key] = (input as Record<string, unknown>)[key];
+      }
+    }
+
+    const updated = await labRepository.updatePathology(requestId, tenantId, updatePayload);
+    if (!updated) throw new NotFoundError('Pathology request not found');
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.PATHOLOGY_REQUEST,
+        entityId:      requestId,
+        action:        'UPDATE',
+        userId,
+        tenantId,
+        previousValue,
+        newValue:      updatePayload as Record<string, unknown>,
+      });
+    } catch { /* swallow */ }
+
+    return toPathologyResponse(updated);
+  }
+
+  async deletePathologyRequest(
+    requestId: string,
+    tenantId:  string,
+    userId:    string,
+    userRole:  UserRole,
+  ): Promise<void> {
+    const doc = await labRepository.findPathologyById(requestId, tenantId);
+    if (!doc) throw new NotFoundError('Pathology request not found');
+
+    if (doc.status === LabRequestStatus.COMPLETED) {
+      if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
+        throw new ForbiddenError('Only Hospital Admin or Manager can delete a completed pathology request');
+      }
+    }
+
+    const deleted = await labRepository.softDeletePathology(requestId, tenantId);
+    if (!deleted) throw new NotFoundError('Pathology request not found');
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.PATHOLOGY_REQUEST,
+        entityId:      requestId,
+        action:        'DELETE',
+        userId,
+        tenantId,
+        previousValue: { requestId, testType: doc.testType, status: doc.status, patientId: doc.patientId },
+      });
+    } catch { /* swallow */ }
+  }
+
+  // ─── Edit & Delete — Radiology ────────────────────────────────────────────
+
+  async editRadiologyRequest(
+    requestId: string,
+    tenantId:  string,
+    userId:    string,
+    input:     EditRadiologyRequestInput,
+  ): Promise<RadiologyRequestResponse> {
+    const doc = await labRepository.findRadiologyById(requestId, tenantId);
+    if (!doc) throw new NotFoundError('Radiology request not found');
+    if (doc.status === LabRequestStatus.COMPLETED) {
+      throw new AppError('Cannot edit a completed radiology request', 409);
+    }
+
+    const editableKeys = ['imagingType', 'notes', 'priority', 'status'] as const;
+    const previousValue: Record<string, unknown> = {};
+    const updatePayload: Partial<Pick<typeof doc, 'imagingType' | 'notes' | 'priority' | 'status'>> = {};
+    for (const key of editableKeys) {
+      if (key in input) {
+        previousValue[key] = doc[key];
+        (updatePayload as Record<string, unknown>)[key] = (input as Record<string, unknown>)[key];
+      }
+    }
+
+    const updated = await labRepository.updateRadiology(requestId, tenantId, updatePayload);
+    if (!updated) throw new NotFoundError('Radiology request not found');
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.RADIOLOGY_REQUEST,
+        entityId:      requestId,
+        action:        'UPDATE',
+        userId,
+        tenantId,
+        previousValue,
+        newValue:      updatePayload as Record<string, unknown>,
+      });
+    } catch { /* swallow */ }
+
+    return toRadiologyResponse(updated);
+  }
+
+  async deleteRadiologyRequest(
+    requestId: string,
+    tenantId:  string,
+    userId:    string,
+    userRole:  UserRole,
+  ): Promise<void> {
+    const doc = await labRepository.findRadiologyById(requestId, tenantId);
+    if (!doc) throw new NotFoundError('Radiology request not found');
+
+    if (doc.status === LabRequestStatus.COMPLETED) {
+      if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
+        throw new ForbiddenError('Only Hospital Admin or Manager can delete a completed radiology request');
+      }
+    }
+
+    const deleted = await labRepository.softDeleteRadiology(requestId, tenantId);
+    if (!deleted) throw new NotFoundError('Radiology request not found');
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.RADIOLOGY_REQUEST,
+        entityId:      requestId,
+        action:        'DELETE',
+        userId,
+        tenantId,
+        previousValue: { requestId, imagingType: doc.imagingType, status: doc.status, patientId: doc.patientId },
+      });
+    } catch { /* swallow */ }
   }
 }
 
