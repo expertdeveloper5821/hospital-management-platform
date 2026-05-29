@@ -15,6 +15,17 @@ export interface UpdateProfileRequest {
   email?: string;
 }
 
+export interface UpdateMyProfileRequest {
+  name?:           string;
+  phone?:          string | null;
+  profileImageUrl?: string | null;
+}
+
+export interface ChangeMyPasswordRequest {
+  currentPassword: string;
+  newPassword:     string;
+}
+
 export interface UserResponse {
   userId:      string;
   email:       string;
@@ -26,7 +37,13 @@ export interface UserResponse {
   createdAt:   Date;
 }
 
+export type SortByField   = 'name' | 'createdAt' | 'role';
+export type SortOrderDir = 'asc' | 'desc';
+
 export interface ListUsersFilters {
-  role?:     UserRole;
-  isActive?: boolean;
+  role?:      UserRole;
+  isActive?:  boolean;
+  search?:    string;
+  sortBy?:    SortByField;
+  sortOrder?: SortOrderDir;
 }

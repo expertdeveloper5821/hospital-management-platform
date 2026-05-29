@@ -22,12 +22,14 @@ interface CreateUserRequest {
   role:  UserRole;
 }
 
-interface MyProfileResponse {
-  userId:   string;
-  email:    string;
-  name:     string;
-  role:     UserRole;
-  isActive: boolean;
+export interface MyProfileResponse {
+  userId:          string;
+  email:           string;
+  name:            string;
+  phone:           string | null;
+  profileImageUrl: string | null;
+  role:            UserRole;
+  isActive:        boolean;
 }
 
 export const userApi = baseApi.injectEndpoints({
@@ -39,17 +41,47 @@ export const userApi = baseApi.injectEndpoints({
       providesTags: ['User'],
     }),
 
-    updateMyProfile: build.mutation<MyProfileResponse, { name: string }>({
+    updateMyProfile: build.mutation<MyProfileResponse, { name?: string; phone?: string | null }>({
       query: (body) => ({ url: '/api/users/me/profile', method: 'PATCH', body }),
       transformResponse: (raw: ApiSuccess<MyProfileResponse>) => raw.data,
       invalidatesTags: ['User'],
     }),
 
-    listUsers: build.query<PaginatedResult<UserResponse>, { role?: UserRole; isActive?: boolean; page?: number; limit?: number }>({
-      query: ({ page = 1, limit = 20, role, isActive } = {}) => {
+    uploadProfileImage: build.mutation<{ profileImageUrl: string }, FormData>({
+      query: (body) => ({
+        url:    '/api/users/me/profile-image',
+        method: 'POST',
+        body,
+        // Do not set Content-Type — browser/fetch sets multipart boundary automatically
+        formData: true,
+      }),
+      transformResponse: (raw: ApiSuccess<{ profileImageUrl: string }>) => raw.data,
+      invalidatesTags: ['User'],
+    }),
+
+    changeMyPassword: build.mutation<{ message: string }, { currentPassword: string; newPassword: string }>({
+      query: (body) => ({ url: '/api/users/me/password', method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+    }),
+
+    listUsers: build.query<PaginatedResult<UserResponse>, {
+      role?:      UserRole;
+      isActive?:  boolean;
+      status?:    'ACTIVE' | 'INACTIVE';
+      search?:    string;
+      sortBy?:    'name' | 'createdAt' | 'role';
+      sortOrder?: 'asc' | 'desc';
+      page?:      number;
+      limit?:     number;
+    }>({
+      query: ({ page = 1, limit = 20, role, isActive, status, search, sortBy, sortOrder } = {}) => {
         const params = new URLSearchParams({ page: String(page), limit: String(limit) });
         if (role)             params.set('role', role);
         if (isActive != null) params.set('isActive', String(isActive));
+        if (status)           params.set('status', status);
+        if (search)           params.set('search', search);
+        if (sortBy)           params.set('sortBy', sortBy);
+        if (sortOrder)        params.set('sortOrder', sortOrder);
         return `/api/users?${params}`;
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,6 +122,8 @@ export const userApi = baseApi.injectEndpoints({
 export const {
   useGetMyProfileQuery,
   useUpdateMyProfileMutation,
+  useUploadProfileImageMutation,
+  useChangeMyPasswordMutation,
   useListUsersQuery,
   useGetUserByIdQuery,
   useCreateUserMutation,

@@ -140,6 +140,11 @@ export const authApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
     }),
 
+    changeSuperAdminPassword: build.mutation<{ message: string }, { currentPassword: string; newPassword: string }>({
+      query: (body) => ({ url: '/api/super-admin/me/password', method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+    }),
+
     completeSetup: build.mutation<{ jwtToken: string }, { token: string; name: string; password: string }>({
       query: (body) => ({ url: '/api/tenants/setup', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<{ jwtToken: string }>) => raw.data,
@@ -164,4 +169,5 @@ export const {
   useForgotPasswordMutation,
   useResetPasswordMutation,
   useCompleteSetupMutation,
+  useChangeSuperAdminPasswordMutation,
 } = authApi;

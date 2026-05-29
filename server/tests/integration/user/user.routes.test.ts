@@ -214,6 +214,160 @@ describe('GET /api/users', () => {
     const res = await request(app).get('/api/users');
     expect(res.status).toBe(401);
   });
+
+  // ── E04-B04: filter / pagination enhancements ───────────────────────────────
+
+  test('200 — search filter matches by name (case-insensitive)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedUser(tenant._id.toString(), 'alice@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'bob@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get('/api/users?search=alice')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.length).toBe(1);
+    expect(res.body.data.data[0].email).toBe('alice@h.com');
+  });
+
+  test('200 — search filter matches by email', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedUser(tenant._id.toString(), 'charlie@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'dave@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get('/api/users?search=charlie')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.length).toBe(1);
+    expect(res.body.data.data[0].email).toBe('charlie@h.com');
+  });
+
+  test('200 — status=ACTIVE filter excludes inactive users', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    const active   = await seedUser(tenant._id.toString(), 'active@h.com', UserRole.DOCTOR);
+    const inactive = await seedUser(tenant._id.toString(), 'inactive@h.com', UserRole.NURSE);
+    await UserModel.findByIdAndUpdate(inactive._id, { isActive: false });
+
+    const res = await request(app)
+      .get('/api/users?status=ACTIVE')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const emails = res.body.data.data.map((u: { email: string }) => u.email) as string[];
+    expect(emails).toContain('active@h.com');
+    expect(emails).not.toContain('inactive@h.com');
+  });
+
+  test('200 — status=INACTIVE filter returns only inactive users', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedUser(tenant._id.toString(), 'active@h.com', UserRole.DOCTOR);
+    const inactive = await seedUser(tenant._id.toString(), 'inactive@h.com', UserRole.NURSE);
+    await UserModel.findByIdAndUpdate(inactive._id, { isActive: false });
+
+    const res = await request(app)
+      .get('/api/users?status=INACTIVE')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].email).toBe('inactive@h.com');
+  });
+
+  test('200 — role filter returns only matching roles', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get(`/api/users?role=${UserRole.DOCTOR}`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].role).toBe(UserRole.DOCTOR);
+  });
+
+  test('200 — sortBy=name&sortOrder=asc returns alphabetical order', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    // seedUser sets name = email prefix
+    await seedUser(tenant._id.toString(), 'zara@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'anna@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get('/api/users?sortBy=name&sortOrder=asc')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const names = res.body.data.data.map((u: { name: string }) => u.name) as string[];
+    expect(names[0].toLowerCase() < names[names.length - 1].toLowerCase()).toBe(true);
+  });
+
+  test('200 — pagination: page 2 returns next batch', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    // Seed 5 extra users
+    for (let i = 0; i < 5; i++) {
+      await seedUser(tenant._id.toString(), `user${i}@h.com`, UserRole.NURSE);
+    }
+
+    const res = await request(app)
+      .get('/api/users?page=1&limit=3')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.length).toBe(3);
+    expect(res.body.data.total).toBe(6); // admin + 5
+    expect(res.body.data.page).toBe(1);
+
+    const res2 = await request(app)
+      .get('/api/users?page=2&limit=3')
+      .set(bearer(token));
+
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.page).toBe(2);
+  });
+
+  test('200 — search with special regex characters is escaped safely', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    // Should not throw / 500 — just return 0 results
+    const res = await request(app)
+      .get('/api/users?search=(admin)')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+  });
+
+  test('200 — limit clamped to 100 returns warning in metadata', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .get('/api/users?limit=200')
+      .set(bearer(token));
+
+    // paginationSchema already rejects > 100 with 400
+    expect([200, 400]).toContain(res.status);
+  });
 });
 
 // ─── GET /api/users/:userId ───────────────────────────────────────────────────

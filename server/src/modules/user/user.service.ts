@@ -1,13 +1,17 @@
 import crypto from 'crypto';
+import path from 'path';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import config from '../../shared/config/env';
 import { userRepository } from './user.repository';
 import { IUser } from './user.model';
 import { emailService } from '../../shared/services/email.service';
 import { auditService } from '../../shared/services/audit.service';
-import { UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { ConflictError, NotFoundError } from '../../shared/middleware/error-handler';
-import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest } from './user.types';
+import { s3Service } from '../../shared/services/s3.service';
+import { addToDenylist } from '../../shared/middleware/token-denylist';
+import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
+import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
+import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
 
 export class UserService {
   async createUser(tenantId: string, data: CreateUserRequest, createdBy: string): Promise<IUser> {
@@ -116,6 +120,112 @@ export class UserService {
     const user = await userRepository.findById(tenantId, userId);
     if (!user) throw new NotFoundError('User not found');
     return user;
+  }
+
+  async updateMyOwnProfile(
+    tenantId: string,
+    userId: string,
+    data: UpdateMyProfileRequest,
+    requestedBy: string,
+  ): Promise<IUser> {
+    const user = await userRepository.findById(tenantId, userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    const previous: Record<string, unknown> = {};
+    const next: Record<string, unknown> = {};
+    if (data.name !== undefined && data.name !== user.name) { previous.name = user.name; next.name = data.name; }
+    if (data.phone !== undefined && data.phone !== user.phone) { previous.phone = user.phone; next.phone = data.phone; }
+
+    const updated = await userRepository.updateMyProfile(tenantId, userId, data);
+    if (!updated) throw new NotFoundError('User not found');
+
+    if (Object.keys(next).length > 0) {
+      await auditService.log({
+        entityType:    AuditEntityType.USER_ACCOUNT,
+        entityId:      userId,
+        action:        'UPDATE',
+        userId:        requestedBy,
+        tenantId,
+        previousValue: previous,
+        newValue:      next,
+      });
+    }
+
+    return updated;
+  }
+
+  async uploadProfileImage(
+    tenantId: string,
+    userId: string,
+    buffer: Buffer,
+    mimeType: string,
+    ext: string,
+    requestedBy: string,
+  ): Promise<IUser> {
+    const user = await userRepository.findById(tenantId, userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    // profileImageUrl stores the S3 key (not a presigned URL); presigned URLs are
+    // generated at query time so they never expire in the DB.
+    const oldKey = user.profileImageUrl ?? null;
+
+    const key = `profile-images/${tenantId}/${userId}.${ext}`;
+    await s3Service.uploadFile(key, buffer, mimeType);
+
+    // Delete the old object only if the key actually changed (different extension)
+    if (oldKey && oldKey !== key) {
+      await s3Service.deleteFile(oldKey).catch(() => {/* orphan cleanup — non-fatal */});
+    }
+
+    // Persist the key, not the URL
+    const updated = await userRepository.updateMyProfile(tenantId, userId, { profileImageUrl: key });
+    if (!updated) throw new NotFoundError('User not found');
+
+    await auditService.log({
+      entityType: AuditEntityType.USER_ACCOUNT,
+      entityId:   userId,
+      action:     'UPDATE',
+      userId:     requestedBy,
+      tenantId,
+      newValue:   { field: 'profileImageUrl', changed: true },
+    });
+
+    return updated;
+  }
+
+  async changeMyPassword(
+    tenantId: string,
+    userId: string,
+    data: ChangeMyPasswordRequest,
+    currentToken: string,
+  ): Promise<void> {
+    const user = await userRepository.findById(tenantId, userId);
+    if (!user) throw new NotFoundError('User not found');
+
+    const isValid = await bcrypt.compare(data.currentPassword, user.passwordHash);
+    if (!isValid) throw new UnauthorizedError('Current password is incorrect');
+
+    const isSame = await bcrypt.compare(data.newPassword, user.passwordHash);
+    if (isSame) throw new ValidationError('New password must be different from the current password');
+
+    const newHash = await bcrypt.hash(data.newPassword, config.bcryptRounds);
+    await userRepository.updatePassword(tenantId, userId, newHash);
+
+    // Invalidate current session token
+    try {
+      const decoded = jwt.verify(currentToken, config.jwtSecret) as JWTPayload;
+      const expiryMs = ((decoded.exp ?? 0) * 1000) - Date.now();
+      if (expiryMs > 0) addToDenylist(currentToken, expiryMs);
+    } catch { /* already invalid — no-op */ }
+
+    await auditService.log({
+      entityType: AuditEntityType.USER_ACCOUNT,
+      entityId:   userId,
+      action:     'UPDATE',
+      userId,
+      tenantId,
+      newValue:   { field: 'password', changed: true },
+    });
   }
 
   async updateUserProfile(

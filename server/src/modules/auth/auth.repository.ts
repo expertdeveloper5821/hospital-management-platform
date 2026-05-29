@@ -81,6 +81,11 @@ export class AuthRepository {
       resetTokenExpiry:    null,
     });
   }
+
+  async recordSuperAdminPasswordChange(userId: string, newHash: string): Promise<void> {
+    assertDbConnected();
+    await SuperAdminModel.findByIdAndUpdate(userId, { passwordHash: newHash });
+  }
 }
 
 export const authRepository = new AuthRepository();

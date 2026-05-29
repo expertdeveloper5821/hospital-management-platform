@@ -33,6 +33,8 @@ export interface IUser extends Document {
   tenantId: string;
   email: string;
   name: string;
+  phone: string | null;
+  profileImageUrl: string | null;
   passwordHash: string;
   role: UserRole;
   isActive: boolean;
@@ -50,6 +52,8 @@ const UserSchema = new Schema<IUser>(
     tenantId: { type: String, required: true, index: true },
     email: { type: String, required: true, lowercase: true, trim: true },
     name: { type: String, required: true, trim: true },
+    phone: { type: String, default: null, trim: true },
+    profileImageUrl: { type: String, default: null },
     passwordHash: { type: String, required: true },
     role: { type: String, required: true, enum: Object.values(UserRole) },
     isActive: { type: Boolean, default: true },
@@ -66,5 +70,6 @@ const UserSchema = new Schema<IUser>(
 UserSchema.index({ tenantId: 1, email: 1 }, { unique: true });
 UserSchema.index({ tenantId: 1, role: 1 });
 UserSchema.index({ tenantId: 1, isActive: 1 });
+UserSchema.index({ tenantId: 1, role: 1, isActive: 1 });
 
 export const UserModel = mongoose.model<IUser>('User', UserSchema);

@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import config from '../config/env';
 import { AppError } from '../middleware/error-handler';
@@ -59,6 +59,27 @@ class S3Service {
         timestamp:     new Date().toISOString(),
       }));
       throw new AppError('File upload failed. Please try again.', 500);
+    }
+  }
+
+  /**
+   * Delete a file from S3 by key. No-ops if the key does not exist.
+   */
+  async deleteFile(key: string): Promise<void> {
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch (err) {
+      console.error(JSON.stringify({
+        level:         'error',
+        event:         's3_delete_failure',
+        correlationId: getCorrelationId(),
+        key,
+        message:       (err as Error).message,
+        timestamp:     new Date().toISOString(),
+      }));
+      throw new AppError('File deletion failed. Please try again.', 500);
     }
   }
 
