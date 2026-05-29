@@ -104,7 +104,7 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     form.mobileNumber.length < 9 ||
     form.mobileNumber.length > 12
   ) {
-    errors.mobileNumber = 'Enter a valid mobile number (7–15 characters, optional leading +).';
+    errors.mobileNumber = 'Enter a valid mobile number (9–12 characters, optional leading +).';
   }
 
   const addr = form.address.trim();
