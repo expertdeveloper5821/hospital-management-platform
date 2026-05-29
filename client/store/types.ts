@@ -376,9 +376,17 @@ export interface UpdateStockRequest {
   quantityChange: number;
   reason:         string;
 }
- 
+
 export interface UpdateThresholdRequest {
   lowStockThreshold: number;
+}
+
+export interface UpdateInventoryItemRequest {
+  name?:              string;
+  category?:          string;
+  unit?:              string;
+  lowStockThreshold?: number;
+  description?:       string | null;
 }
  
 export interface InventoryListResult {

@@ -1,12 +1,14 @@
 import { InventoryItemModel, IInventoryItem } from './inventory.model';
-import { ListInventoryQuery } from './inventory.types';
+import { ListInventoryQuery, UpdateInventoryItemInput } from './inventory.types';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
+
+const NOT_DELETED = { isDeleted: { $ne: true } };
 
 export class InventoryRepository {
   async findById(itemId: string, tenantId: string): Promise<IInventoryItem | null> {
     assertDbConnected();
-    return InventoryItemModel.findOne({ itemId, tenantId });
+    return InventoryItemModel.findOne({ itemId, tenantId, ...NOT_DELETED });
   }
 
   async findAll(
@@ -16,7 +18,7 @@ export class InventoryRepository {
     assertDbConnected();
     const { category, lowStock, page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter: Record<string, unknown> = { tenantId };
+    const filter: Record<string, unknown> = { tenantId, ...NOT_DELETED };
     if (category) filter['category'] = category;
 
     let q = InventoryItemModel.find(filter);
@@ -29,14 +31,16 @@ export class InventoryRepository {
       });
     }
 
+    const countFilter = lowStock === true
+      ? {
+          ...filter,
+          $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
+        }
+      : filter;
+
     const [data, total] = await Promise.all([
       q.sort({ name: 1 }).skip(skip).limit(limit),
-      InventoryItemModel.countDocuments(lowStock === true
-        ? {
-            ...filter,
-            $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
-          }
-        : filter),
+      InventoryItemModel.countDocuments(countFilter),
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
@@ -56,7 +60,7 @@ export class InventoryRepository {
   ): Promise<IInventoryItem | null> {
     assertDbConnected();
     return InventoryItemModel.findOneAndUpdate(
-      { itemId, tenantId },
+      { itemId, tenantId, ...NOT_DELETED },
       { $inc: { quantity: quantityChange } },
       { new: true, runValidators: true },
     );
@@ -69,8 +73,30 @@ export class InventoryRepository {
   ): Promise<IInventoryItem | null> {
     assertDbConnected();
     return InventoryItemModel.findOneAndUpdate(
-      { itemId, tenantId },
+      { itemId, tenantId, ...NOT_DELETED },
       { $set: { lowStockThreshold } },
+      { new: true },
+    );
+  }
+
+  async updateMetadata(
+    itemId:   string,
+    tenantId: string,
+    updates:  Partial<UpdateInventoryItemInput>,
+  ): Promise<IInventoryItem | null> {
+    assertDbConnected();
+    return InventoryItemModel.findOneAndUpdate(
+      { itemId, tenantId, ...NOT_DELETED },
+      { $set: updates },
+      { new: true },
+    );
+  }
+
+  async softDelete(itemId: string, tenantId: string): Promise<IInventoryItem | null> {
+    assertDbConnected();
+    return InventoryItemModel.findOneAndUpdate(
+      { itemId, tenantId, ...NOT_DELETED },
+      { $set: { isDeleted: true, deletedAt: new Date() } },
       { new: true },
     );
   }

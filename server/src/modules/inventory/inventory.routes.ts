@@ -11,6 +11,9 @@ import {
   getInventoryItem,
   updateStock,
   updateThreshold,
+  updateInventoryItem,
+  deleteInventoryItem,
+  getStockHistory,
 } from './inventory.controller';
 
 const router = express.Router();
@@ -45,6 +48,24 @@ router.patch(
   '/:itemId/threshold',
   requireRole(UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   updateThreshold,
+);
+
+router.get(
+  '/:itemId/stock-history',
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  getStockHistory,
+);
+
+router.patch(
+  '/:itemId',
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  updateInventoryItem,
+);
+
+router.delete(
+  '/:itemId',
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  deleteInventoryItem,
 );
 
 export default router;

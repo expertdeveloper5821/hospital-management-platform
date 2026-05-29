@@ -23,6 +23,20 @@ export const UpdateStockSchema = z.object({
 
 export type UpdateStockInput = z.infer<typeof UpdateStockSchema>;
 
+// ─── Update Item Metadata ─────────────────────────────────────────────────────
+export const UpdateInventoryItemSchema = z.object({
+  name:              z.string().min(1).max(200).trim().optional(),
+  category:          z.string().min(1).max(100).trim().optional(),
+  unit:              z.string().min(1).max(50).trim().optional(),
+  lowStockThreshold: z.number().int().min(0).optional(),
+  description:       z.string().max(1000).trim().nullable().optional(),
+}).refine(
+  (data) => Object.values(data).some((v) => v !== undefined),
+  { message: 'At least one field must be provided' },
+);
+
+export type UpdateInventoryItemInput = z.infer<typeof UpdateInventoryItemSchema>;
+
 // ─── Update Threshold ─────────────────────────────────────────────────────────
 export const UpdateThresholdSchema = z.object({
   lowStockThreshold: z.number().int().min(0, 'Threshold cannot be negative'),

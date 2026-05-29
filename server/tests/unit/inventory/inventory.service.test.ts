@@ -199,3 +199,112 @@ describe('InventoryService — updateThreshold', () => {
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 });
+
+describe('InventoryService — updateMetadata', () => {
+  let service: InventoryService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new InventoryService();
+    mockNotifSvc.sendToRole = jest.fn().mockResolvedValue(undefined);
+  });
+
+  test('updates metadata fields and returns updated item', async () => {
+    const before  = makeItem({ name: 'Old Name', category: 'Old Cat' });
+    const updated = makeItem({ name: 'New Name', category: 'New Cat' });
+
+    mockRepo.findById        = jest.fn().mockResolvedValue(before);
+    mockRepo.updateMetadata  = jest.fn().mockResolvedValue(updated);
+
+    const result = await service.updateMetadata(
+      'item-001', TENANT, ADMIN,
+      { name: 'New Name', category: 'New Cat' },
+    );
+
+    expect(result.name).toBe('New Name');
+    expect(result.category).toBe('New Cat');
+    expect(mockRepo.updateMetadata).toHaveBeenCalledWith('item-001', TENANT, { name: 'New Name', category: 'New Cat' });
+  });
+
+  test('throws NotFoundError when item does not exist', async () => {
+    mockRepo.findById = jest.fn().mockResolvedValue(null);
+
+    await expect(
+      service.updateMetadata('no-item', TENANT, ADMIN, { name: 'X' }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    expect(mockRepo.updateMetadata).not.toHaveBeenCalled();
+  });
+
+  test('sends low-stock notification when raising threshold causes boundary crossing', async () => {
+    // Before: qty=50 threshold=20 (not low); After: qty=50 threshold=60 (now low)
+    const before  = makeItem({ quantity: 50, lowStockThreshold: 20 });
+    const updated = makeItem({ quantity: 50, lowStockThreshold: 60 });
+
+    mockRepo.findById        = jest.fn().mockResolvedValue(before);
+    mockRepo.updateMetadata  = jest.fn().mockResolvedValue(updated);
+
+    await service.updateMetadata('item-001', TENANT, ADMIN, { lowStockThreshold: 60 });
+
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'MANAGER',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+  });
+
+  test('does NOT send notification when item was already low-stock before update', async () => {
+    // Before: qty=10 threshold=20 (already low); After: qty=10 threshold=30 (still low)
+    const before  = makeItem({ quantity: 10, lowStockThreshold: 20 });
+    const updated = makeItem({ quantity: 10, lowStockThreshold: 30 });
+
+    mockRepo.findById        = jest.fn().mockResolvedValue(before);
+    mockRepo.updateMetadata  = jest.fn().mockResolvedValue(updated);
+
+    await service.updateMetadata('item-001', TENANT, ADMIN, { lowStockThreshold: 30 });
+
+    expect(mockNotifSvc.sendToRole).not.toHaveBeenCalled();
+  });
+
+  test('does NOT send notification when threshold is lowered', async () => {
+    const before  = makeItem({ quantity: 50, lowStockThreshold: 60 });
+    const updated = makeItem({ quantity: 50, lowStockThreshold: 10 });
+
+    mockRepo.findById        = jest.fn().mockResolvedValue(before);
+    mockRepo.updateMetadata  = jest.fn().mockResolvedValue(updated);
+
+    await service.updateMetadata('item-001', TENANT, ADMIN, { lowStockThreshold: 10 });
+
+    expect(mockNotifSvc.sendToRole).not.toHaveBeenCalled();
+  });
+});
+
+describe('InventoryService — softDelete', () => {
+  let service: InventoryService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new InventoryService();
+  });
+
+  test('soft-deletes an existing item', async () => {
+    mockRepo.findById   = jest.fn().mockResolvedValue(makeItem());
+    mockRepo.softDelete = jest.fn().mockResolvedValue(makeItem({ isDeleted: true }));
+
+    await expect(service.softDelete('item-001', TENANT, ADMIN)).resolves.toBeUndefined();
+    expect(mockRepo.softDelete).toHaveBeenCalledWith('item-001', TENANT);
+  });
+
+  test('throws NotFoundError when item does not exist', async () => {
+    mockRepo.findById = jest.fn().mockResolvedValue(null);
+
+    await expect(
+      service.softDelete('no-item', TENANT, ADMIN),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    expect(mockRepo.softDelete).not.toHaveBeenCalled();
+  });
+});
