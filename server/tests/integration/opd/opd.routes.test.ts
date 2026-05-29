@@ -648,4 +648,81 @@ describe('GET /api/opd/patients/:patientId/history', () => {
     const res = await request(app).get('/api/opd/patients/PAT-TEST0001/history');
     expect(res.status).toBe(401);
   });
+
+  test('200 — status filter returns only COMPLETED visits', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-OPEN0001', status: OPDVisitStatus.OPEN });
+    await OPDVisitModel.create({
+      visitId:        'OPD-DONE0001',
+      tenantId:       tid,
+      patientId:      'PAT-TEST0001',
+      doctorId:       null,
+      visitDate:      new Date('2026-03-01T00:00:00.000Z'),
+      queueNumber:    2,
+      status:         OPDVisitStatus.COMPLETED,
+      chiefComplaint: 'Cough',
+      diagnosis:      'Common cold',
+      prescription:   null,
+      notes:          null,
+    });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/history')
+      .query({ status: 'COMPLETED' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].status).toBe('COMPLETED');
+  });
+
+  test('200 — search filter matches chiefComplaint', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-SRCH0001' });
+    await OPDVisitModel.create({
+      visitId:        'OPD-SRCH0002',
+      tenantId:       tid,
+      patientId:      'PAT-TEST0001',
+      doctorId:       null,
+      visitDate:      new Date('2026-04-01T00:00:00.000Z'),
+      queueNumber:    2,
+      status:         OPDVisitStatus.OPEN,
+      chiefComplaint: 'Back pain',
+      diagnosis:      null,
+      prescription:   null,
+      notes:          null,
+    });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/history')
+      .query({ search: 'back pain' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].chiefComplaint).toBe('Back pain');
+  });
+
+  test('400 — startDate after endDate returns 400', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/history')
+      .query({ startDate: '2026-12-31', endDate: '2026-01-01' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(400);
+  });
 });

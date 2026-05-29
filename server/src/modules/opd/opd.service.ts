@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { opdRepository } from './opd.repository';
+import { opdRepository, OpdHistoryFilters } from './opd.repository';
 import { patientRepository } from '../patient/patient.repository';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
@@ -219,13 +219,12 @@ export class OPDService {
   async getPatientHistory(
     tenantId:  string,
     patientId: string,
-    page:      number,
-    limit:     number,
+    filters:   OpdHistoryFilters,
   ): Promise<PaginatedResult<OPDVisitResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const result = await opdRepository.findByPatient(tenantId, patientId, page, limit);
+    const result = await opdRepository.findByPatient(tenantId, patientId, filters);
 
     return {
       ...result,

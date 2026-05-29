@@ -108,6 +108,14 @@ export async function updatePatient(req: Request, res: Response, next: NextFunct
   } catch (err) { next(err); }
 }
 
+export async function deletePatient(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
+    await patientService.deletePatient(req.user!.tenantId!, patientId, req.user!.userId);
+    res.status(200).json({ status: 'success', message: 'Patient record deleted.' });
+  } catch (err) { next(err); }
+}
+
 export async function getMedicalCard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);

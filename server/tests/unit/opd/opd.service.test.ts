@@ -396,24 +396,48 @@ describe('OPDService — example-based', () => {
 
   // ── getPatientHistory ──────────────────────────────────────────────────────
   describe('getPatientHistory', () => {
+    const baseFilters = { page: 1, limit: 10 };
+
     test('returns paginated history for a valid patient', async () => {
       mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
-      const expected = { data: [makeVisit()], total: 1, page: 1, limit: 20, totalPages: 1 };
+      const expected = { data: [makeVisit()], total: 1, page: 1, limit: 10, totalPages: 1 };
       mockOpdRepo.findByPatient.mockResolvedValue(expected as never);
 
-      const result = await service.getPatientHistory('t1', 'PAT-ABCD1234', 1, 20);
+      const result = await service.getPatientHistory('t1', 'PAT-ABCD1234', baseFilters);
 
       expect(result.total).toBe(1);
-      expect(mockOpdRepo.findByPatient).toHaveBeenCalledWith('t1', 'PAT-ABCD1234', 1, 20);
+      expect(mockOpdRepo.findByPatient).toHaveBeenCalledWith('t1', 'PAT-ABCD1234', baseFilters);
     });
 
     test('throws NotFoundError when patient does not exist', async () => {
       mockPatientRepo.findByPatientId.mockResolvedValue(null);
 
-      await expect(service.getPatientHistory('t1', 'PAT-MISSING', 1, 20))
+      await expect(service.getPatientHistory('t1', 'PAT-MISSING', baseFilters))
         .rejects.toThrow(NotFoundError);
 
       expect(mockOpdRepo.findByPatient).not.toHaveBeenCalled();
+    });
+
+    test('passes startDate/endDate/status/search filters to repository', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      const expected = { data: [], total: 0, page: 1, limit: 10, totalPages: 0 };
+      mockOpdRepo.findByPatient.mockResolvedValue(expected as never);
+
+      const filters = { page: 1, limit: 10, startDate: '2026-01-01', endDate: '2026-03-31', status: 'COMPLETED' as const, search: 'fever' };
+      await service.getPatientHistory('t1', 'PAT-ABCD1234', filters);
+
+      expect(mockOpdRepo.findByPatient).toHaveBeenCalledWith('t1', 'PAT-ABCD1234', filters);
+    });
+
+    test('maps fullName from patient onto each visit in result', async () => {
+      const patientWithName = { ...BASE_PATIENT, fullName: 'Ravi Kumar' };
+      mockPatientRepo.findByPatientId.mockResolvedValue(patientWithName as never);
+      const visit = makeVisit();
+      mockOpdRepo.findByPatient.mockResolvedValue({ data: [visit], total: 1, page: 1, limit: 10, totalPages: 1 } as never);
+
+      const result = await service.getPatientHistory('t1', 'PAT-ABCD1234', baseFilters);
+
+      expect(result.data[0].fullName).toBe('Ravi Kumar');
     });
   });
 });

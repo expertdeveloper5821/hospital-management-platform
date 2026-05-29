@@ -32,10 +32,22 @@ const queueQuerySchema = z.object({
   doctorId: z.string().optional(),
 });
 
+const OPD_STATUS_VALUES = ['OPEN', 'COMPLETED'] as const;
+
 const historyQuerySchema = z.object({
-  page:  z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-});
+  page:      z.coerce.number().int().min(1).default(1),
+  limit:     z.coerce.number().int().min(1).max(50).default(10),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endDate:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  status:    z.enum(OPD_STATUS_VALUES).optional(),
+  search:    z.string().max(200).optional(),
+}).refine(
+  (data) => {
+    if (data.startDate && data.endDate) return data.startDate <= data.endDate;
+    return true;
+  },
+  { message: 'startDate must not be after endDate', path: ['startDate'] },
+);
 
 function toResponse(v: IOPDVisit) {
   return {
@@ -130,13 +142,13 @@ export async function cancelVisit(req: Request, res: Response, next: NextFunctio
 export async function getPatientHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const query = historyQuerySchema.safeParse(req.query);
-    if (!query.success) throw new ValidationError('Invalid query params');
+    if (!query.success) throw new ValidationError('Invalid query params', { errors: query.error.flatten() });
 
+    const { page, limit, startDate, endDate, status, search } = query.data;
     const result = await opdService.getPatientHistory(
       req.user!.tenantId!,
       req.params.patientId,
-      query.data.page,
-      query.data.limit,
+      { page, limit, startDate, endDate, status, search },
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

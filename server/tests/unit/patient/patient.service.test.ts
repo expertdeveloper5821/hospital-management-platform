@@ -1,18 +1,21 @@
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/tenant/tenant.repository');
+jest.mock('../../../src/modules/ipd/ipd.repository');
 jest.mock('../../../src/shared/services/audit.service');
 jest.mock('../../../src/shared/services/pdf.service');
 
 import * as fc from 'fast-check';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
+import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
 import { pdfService }        from '../../../src/shared/services/pdf.service';
 import { PatientService, DuplicateWarningError } from '../../../src/modules/patient/patient.service';
-import { NotFoundError }     from '../../../src/shared/middleware/error-handler';
+import { NotFoundError, ConflictError } from '../../../src/shared/middleware/error-handler';
 import { Gender, BloodGroup } from '../../../src/modules/patient/patient.types';
 
 const mockRepo      = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockTenantRepo = tenantRepository as jest.Mocked<typeof tenantRepository>;
+const mockIpdRepo   = ipdRepository    as jest.Mocked<typeof ipdRepository>;
 const mockPdfSvc    = pdfService        as jest.Mocked<typeof pdfService>;
 
 const BASE_PATIENT = {
@@ -209,6 +212,54 @@ describe('PatientService — example-based', () => {
 
       await expect(service.getPatientById('other-tenant', 'PAT-ABCD1234')).rejects.toThrow(NotFoundError);
       expect(mockRepo.findByPatientId).toHaveBeenCalledWith('other-tenant', 'PAT-ABCD1234');
+    });
+  });
+
+  // ── deletePatient ──────────────────────────────────────────────────────────
+  describe('deletePatient', () => {
+    test('soft-deletes patient when no active IPD admission', async () => {
+      mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
+      mockIpdRepo.findActiveAdmissionByPatient.mockResolvedValue(null);
+      mockRepo.softDelete.mockResolvedValue({ ...BASE_PATIENT, isDeleted: true } as never);
+
+      await expect(service.deletePatient('t1', 'PAT-ABCD1234', 'admin-1')).resolves.toBeUndefined();
+      expect(mockRepo.softDelete).toHaveBeenCalledWith('t1', 'PAT-ABCD1234');
+    });
+
+    test('throws NotFoundError when patient does not exist', async () => {
+      mockRepo.findByPatientId.mockResolvedValue(null);
+
+      await expect(service.deletePatient('t1', 'PAT-MISSING', 'admin-1')).rejects.toThrow(NotFoundError);
+      expect(mockRepo.softDelete).not.toHaveBeenCalled();
+    });
+
+    test('throws ConflictError when patient has active IPD admission', async () => {
+      mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
+      mockIpdRepo.findActiveAdmissionByPatient.mockResolvedValue({ admissionId: 'ADM-001', status: 'ADMITTED' } as never);
+
+      await expect(service.deletePatient('t1', 'PAT-ABCD1234', 'admin-1')).rejects.toThrow(ConflictError);
+      expect(mockRepo.softDelete).not.toHaveBeenCalled();
+    });
+
+    test('ConflictError message mentions active IPD admission', async () => {
+      mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
+      mockIpdRepo.findActiveAdmissionByPatient.mockResolvedValue({ admissionId: 'ADM-001', status: 'ADMITTED' } as never);
+
+      await expect(service.deletePatient('t1', 'PAT-ABCD1234', 'admin-1'))
+        .rejects.toMatchObject({ message: expect.stringContaining('active IPD admission') });
+    });
+
+    test('writes audit log entry on successful delete', async () => {
+      const { auditService } = jest.requireMock('../../../src/shared/services/audit.service');
+      mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
+      mockIpdRepo.findActiveAdmissionByPatient.mockResolvedValue(null);
+      mockRepo.softDelete.mockResolvedValue({ ...BASE_PATIENT, isDeleted: true } as never);
+
+      await service.deletePatient('t1', 'PAT-ABCD1234', 'admin-1');
+
+      expect(auditService.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'DELETE', entityId: 'PAT-ABCD1234', userId: 'admin-1' }),
+      );
     });
   });
 

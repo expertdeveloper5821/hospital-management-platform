@@ -6,6 +6,7 @@ import {
   useCreatePatientMutation,
   useUpdatePatientMutation,
   useDownloadMedicalCardMutation,
+  useDeletePatientMutation,
 } from '@/store/api/patient.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useAppSelector } from '@/store/hooks';
@@ -31,13 +32,18 @@ import {
   Pencil,
   ClipboardList,
   Stethoscope,
+  Trash2,
 } from 'lucide-react';
+import { toastSuccess } from '@/lib/toast';
+import { UserRole } from '@/store/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-const MOBILE_RE   = /^\+?[0-9]{7,15}$/;
+// Matches backend: z.string().min(7).max(15).regex(/^\+?[0-9]+$/)
+// Total length 7–15 chars; optional leading +; digits only.
+const MOBILE_RE   = /^\+?[0-9]+$/;
 const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
 const AADHAAR_RE  = /^\d{12}$/;
 
@@ -93,8 +99,12 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
 
   if (!form.mobileNumber) {
     errors.mobileNumber = 'Mobile number is required.';
-  } else if (!MOBILE_RE.test(form.mobileNumber)) {
-    errors.mobileNumber = 'Enter a valid mobile number (7–15 digits, optional leading +).';
+  } else if (
+    !MOBILE_RE.test(form.mobileNumber) ||
+    form.mobileNumber.length < 7 ||
+    form.mobileNumber.length > 15
+  ) {
+    errors.mobileNumber = 'Enter a valid mobile number (7–15 characters, optional leading +).';
   }
 
   const addr = form.address.trim();
@@ -114,8 +124,13 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     errors.emergencyContactName = 'Name must be at least 2 characters.';
   }
 
-  if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
-    errors.emergencyContactMobile = 'Enter a valid mobile number (7–15 digits, optional leading +).';
+  if (
+    form.emergencyContactMobile &&
+    (!MOBILE_RE.test(form.emergencyContactMobile) ||
+     form.emergencyContactMobile.length < 9 ||
+     form.emergencyContactMobile.length > 12)
+  ) {
+    errors.emergencyContactMobile = 'Enter a valid mobile number (9–12 characters, optional leading +).';
   }
 
   return errors;
@@ -144,11 +159,11 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     fullName:               initial?.fullName               ?? '',
     dateOfBirth:            initial?.dateOfBirth ? initial.dateOfBirth.substring(0, 10) : '',
     gender:                 initial?.gender                 ?? 'MALE',
-    mobileNumber:           initial?.mobileNumber           ?? '',
+    mobileNumber:           sanitizeMobile(initial?.mobileNumber ?? ''),
     address:                initial?.address                ?? '',
     aadhaarNumber:          initial?.aadhaarNumber          ?? '',
     emergencyContactName:   initial?.emergencyContactName   ?? '',
-    emergencyContactMobile: initial?.emergencyContactMobile ?? '',
+    emergencyContactMobile: sanitizeMobile(initial?.emergencyContactMobile ?? ''),
     bloodGroup:             initial?.bloodGroup             ?? undefined,
     forceCreate:            false,
   });
@@ -452,16 +467,37 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 // ─── Patient Detail Panel ─────────────────────────────────────────────────────
 
 interface PatientDetailPanelProps {
-  patient:  PatientResponse;
-  onClose:  () => void;
-  onEdit:   () => void;
+  patient:   PatientResponse;
+  onClose:   () => void;
+  onEdit:    () => void;
+  onDeleted: () => void;
 }
 
-function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProps) {
+function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDetailPanelProps) {
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const canDelete = role === UserRole.ADMIN || role === UserRole.MANAGER || role === UserRole.HOSPITAL_ADMIN;
+
   const [tab,           setTab]           = useState<'details' | 'history'>('details');
   const [historyPage,   setHistoryPage]   = useState(1);
   const [downloadCard, { isLoading: downloading }] = useDownloadMedicalCardMutation();
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const [deletePatient, { isLoading: isDeleting }] = useDeletePatientMutation();
+  const [showConfirm,   setShowConfirm]   = useState(false);
+  const [deleteError,   setDeleteError]   = useState<string | undefined>();
+
+  async function handleDelete() {
+    setDeleteError(undefined);
+    try {
+      await deletePatient(patient.patientId).unwrap();
+      toastSuccess('Patient record deleted.');
+      onDeleted();
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message
+        ?? 'Failed to delete patient.';
+      setDeleteError(msg);
+    }
+  }
 
   const { data: historyData, isLoading: historyLoading } = useGetOPDPatientHistoryQuery(
     { patientId: patient.patientId, page: historyPage, limit: 10 },
@@ -608,6 +644,27 @@ function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProp
           </div>
         )}
 
+        {/* Delete confirmation inline */}
+        {showConfirm && (
+          <div className="mx-5 mb-0 rounded-lg border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+            <p className="text-sm font-medium text-destructive">Delete this patient?</p>
+            <p className="text-xs text-muted-foreground">
+              This action cannot be undone. All clinical history will be archived.
+            </p>
+            {deleteError && (
+              <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{deleteError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" className="flex-1" onClick={() => { setShowConfirm(false); setDeleteError(undefined); }} disabled={isDeleting}>
+                Cancel
+              </Button>
+              <Button size="sm" variant="destructive" className="flex-1" onClick={handleDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting…' : 'Confirm Delete'}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="shrink-0 flex gap-3 p-5 border-t">
           <Button variant="outline" className="flex-1" onClick={onEdit}>
             <Pencil className="h-4 w-4 mr-2" />
@@ -617,6 +674,17 @@ function PatientDetailPanel({ patient, onClose, onEdit }: PatientDetailPanelProp
             <Download className="h-4 w-4 mr-2" />
             {downloading ? 'Downloading…' : 'Medical Card'}
           </Button>
+          {canDelete && (
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => { setShowConfirm(true); setDeleteError(undefined); }}
+              title="Delete Patient"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -783,6 +851,7 @@ export default function PatientsPage() {
           patient={selected}
           onClose={() => setSelected(null)}
           onEdit={() => setEditing(true)}
+          onDeleted={() => setSelected(null)}
         />
       )}
 
