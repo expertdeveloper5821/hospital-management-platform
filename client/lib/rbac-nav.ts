@@ -9,8 +9,9 @@ export interface NavItem {
 // Role → visible nav items mapping (derived from requirements RBAC matrix)
 const NAV_MAP: Record<UserRole, NavItem[]> = {
   SUPER_ADMIN: [
-    { label: 'Tenants',    href: '/super-admin', icon: 'building-2' },
-    { label: 'Audit Logs', href: '/audit',       icon: 'file-text'  },
+    { label: 'Tenants',           href: '/super-admin',                  icon: 'building-2' },
+    { label: 'Platform Settings', href: '/super-admin/platform-settings', icon: 'settings'   },
+    { label: 'Audit Logs',        href: '/audit',                        icon: 'file-text'  },
   ],
   HOSPITAL_ADMIN: [
     { label: 'Dashboard',  href: '/dashboard',  icon: 'layout-dashboard' },

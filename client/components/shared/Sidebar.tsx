@@ -13,6 +13,7 @@ import {
   Package,
   CreditCard,
   FileText,
+  Settings,
   LogOut,
   X,
   type LucideIcon,
@@ -21,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { getNavItems } from '@/lib/rbac-nav';
 import { useAppSelector } from '@/store/hooks';
 import { useLogoutMutation } from '@/store/api/auth.api';
+import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
 import type { UserRole } from '@/store/types';
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -34,6 +36,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'package':          Package,
   'credit-card':      CreditCard,
   'file-text':        FileText,
+  'settings':         Settings,
 };
 
 interface SidebarProps {
@@ -45,11 +48,18 @@ export function Sidebar({ onClose }: SidebarProps) {
   const profile  = useAppSelector((s) => s.auth.profile);
   const branding = useAppSelector((s) => s.auth.branding);
   const [logout] = useLogoutMutation();
+  const { data: platformSettings } = useGetPlatformSettingsQuery();
 
   if (!profile) return null;
 
-  const navItems = getNavItems(profile.role as UserRole);
-  const displayName = branding?.displayName ?? 'HMS';
+  const isSuperAdmin = profile.role === 'SUPER_ADMIN';
+  const navItems     = getNavItems(profile.role as UserRole);
+
+  // Super Admin has no tenant branding — fall back to platform settings
+  const headerLogoUrl  = isSuperAdmin ? platformSettings?.logoUrl    : branding?.logoUrl;
+  const headerTitle    = isSuperAdmin
+    ? (platformSettings?.platformTitle ?? 'HMS')
+    : (branding?.displayName ?? 'HMS');
 
   async function handleLogout() {
     await logout({ isSuperAdmin: profile?.role === 'SUPER_ADMIN' });
@@ -62,15 +72,15 @@ export function Sidebar({ onClose }: SidebarProps) {
     >
       {/* Branding header */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-accent/40 shrink-0">
-        {branding?.logoUrl && (
+        {headerLogoUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={branding.logoUrl}
-            alt={displayName}
-            className="h-8 w-8 rounded object-contain shrink-0"
+            src={headerLogoUrl}
+            alt={headerTitle}
+            className="h-16 w-16 rounded object-contain shrink-0"
           />
         )}
-        <span className="font-bold text-lg truncate flex-1">{displayName}</span>
+        <span className="font-bold text-lg truncate flex-1">{headerTitle}</span>
         {onClose && (
           <button
             onClick={onClose}
@@ -119,6 +129,18 @@ export function Sidebar({ onClose }: SidebarProps) {
           Sign out
         </button>
       </div>
+
+      {/* Platform logo — shown when set by Super Admin */}
+      {platformSettings?.logoUrl && (
+        <div className="shrink-0 border-t border-sidebar-accent/40 px-4 py-3 flex items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={platformSettings.logoUrl}
+            alt={platformSettings.platformTitle ?? 'Platform'}
+            className="h-12 w-auto max-w-[140px] object-contain opacity-80"
+          />
+        </div>
+      )}
     </aside>
   );
 }

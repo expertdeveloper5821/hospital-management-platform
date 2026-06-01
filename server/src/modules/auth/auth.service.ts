@@ -29,7 +29,9 @@ export class AuthService {
       : null;
 
     const user = !isSuperAdmin
-      ? await authRepository.findUserByEmail(inputTenantId ?? '', email)
+      ? inputTenantId
+        ? await authRepository.findUserByEmail(inputTenantId, email)
+        : await authRepository.findUserByEmailAnyTenant(email)
       : null;
 
     const record = account ?? user;

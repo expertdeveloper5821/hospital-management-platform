@@ -15,6 +15,10 @@ import {
   completeTenantSetup,
   getBranding,
   updateBranding,
+  getPlatformSettings,
+  updatePlatformTitle,
+  uploadPlatformLogo,
+  uploadPlatformFavicon,
 } from './tenant.controller';
 
 const logoUpload = multer({
@@ -27,6 +31,19 @@ const logoUpload = multer({
       cb(new Error('Only JPEG and PNG images are allowed'));
     }
   },
+});
+
+// Platform-settings uploads — permissive MIME filter; handler validates via magic bytes
+const platformLogoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, _file, cb) => cb(null, true),
+});
+
+const platformFaviconUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 },
+  fileFilter: (_req, _file, cb) => cb(null, true),
 });
 
 const router = Router();
@@ -55,5 +72,21 @@ router.post('/setup', publicRateLimiter, completeTenantSetup);
 // Branding — accessible by Hospital Admin within their tenant
 router.get('/:tenantId/branding',   getBranding);
 router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), logoUpload.single('logo'), updateBranding);
+
+// Platform settings — GET is public (rate-limited); PATCH + POST require Super Admin auth
+const platformSettingsRateLimiter = rateLimit({
+  windowMs:        60 * 1000,
+  max:             30,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  handler: (_req, res) => {
+    res.status(429).json({ status: 'error', message: 'Too many requests — please try again later' });
+  },
+});
+
+router.get('/platform-settings',         platformSettingsRateLimiter, getPlatformSettings);
+router.patch('/platform-settings',       authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), updatePlatformTitle);
+router.post('/platform-settings/logo',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), platformLogoUpload.single('logo'),    uploadPlatformLogo);
+router.post('/platform-settings/favicon', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), platformFaviconUpload.single('favicon'), uploadPlatformFavicon);
 
 export default router;
