@@ -101,6 +101,7 @@ export const baseApi = createApi({
     'Notification',
     'Audit',
     'Dashboard',
+    'PlatformSettings',
   ],
   endpoints: () => ({}),
 });

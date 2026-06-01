@@ -9,6 +9,7 @@ import { SearchOverlay } from '@/components/header/SearchOverlay';
 import { ProfileDropdown } from '@/components/header/ProfileDropdown';
 import { MobileNav } from '@/components/layout/MobileNav';
 import { useAppSelector } from '@/store/hooks';
+import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
 import { wsClient } from '@/lib/websocket-client';
 import { Menu, Search } from 'lucide-react';
 
@@ -19,6 +20,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isAuth  = useAppSelector((s) => s.auth.isAuthenticated);
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const [searchOpen,   setSearchOpen]   = useState(false);
+
+  const { data: platformSettings } = useGetPlatformSettingsQuery();
+
+  useEffect(() => {
+    if (!platformSettings) return;
+    if (platformSettings.platformTitle) {
+      document.title = platformSettings.platformTitle;
+    }
+    if (platformSettings.faviconUrl) {
+      let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.head.appendChild(link);
+      }
+      link.href = platformSettings.faviconUrl;
+    }
+  }, [platformSettings]);
 
   // Ctrl+K / Cmd+K global shortcut
   const handleGlobalKey = useCallback((e: KeyboardEvent) => {

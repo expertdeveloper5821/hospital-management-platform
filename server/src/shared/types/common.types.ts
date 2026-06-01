@@ -59,16 +59,17 @@ export interface ErrorResponse {
 
 // ─── AuditEntityType ──────────────────────────────────────────────────────────
 export const AuditEntityType = {
-  PATIENT:           'PATIENT',
-  OPD_VISIT:         'OPD_VISIT',
-  IPD_ADMISSION:     'IPD_ADMISSION',
-  PATHOLOGY_REQUEST: 'PATHOLOGY_REQUEST',
-  RADIOLOGY_REQUEST: 'RADIOLOGY_REQUEST',
-  INVENTORY_ITEM:    'INVENTORY_ITEM',
-  PAYMENT_RECORD:    'PAYMENT_RECORD',
-  USER_ACCOUNT:      'USER_ACCOUNT',
-  TENANT:            'TENANT',
-  AUTH:              'AUTH',
+  PATIENT:            'PATIENT',
+  OPD_VISIT:          'OPD_VISIT',
+  IPD_ADMISSION:      'IPD_ADMISSION',
+  PATHOLOGY_REQUEST:  'PATHOLOGY_REQUEST',
+  RADIOLOGY_REQUEST:  'RADIOLOGY_REQUEST',
+  INVENTORY_ITEM:     'INVENTORY_ITEM',
+  PAYMENT_RECORD:     'PAYMENT_RECORD',
+  USER_ACCOUNT:       'USER_ACCOUNT',
+  TENANT:             'TENANT',
+  AUTH:               'AUTH',
+  PLATFORM_SETTINGS:  'PLATFORM_SETTINGS',
 } as const;
 
 export type AuditEntityType = typeof AuditEntityType[keyof typeof AuditEntityType];
