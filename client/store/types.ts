@@ -199,9 +199,10 @@ export interface OPDPatientHistory {
 }
  
 // ─── Lab ──────────────────────────────────────────────────────────────────────
- 
-export type LabRequestStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
- 
+
+export type LabRequestStatus   = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+export type LabRequestPriority = 'NORMAL' | 'URGENT';
+
 export interface PathologyRequestResponse {
   requestId:   string;
   patientId:   string;
@@ -210,12 +211,13 @@ export interface PathologyRequestResponse {
   requestedBy: string;
   testType:    string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
 }
- 
+
 export interface RadiologyRequestResponse {
   requestId:   string;
   patientId:   string;
@@ -224,22 +226,37 @@ export interface RadiologyRequestResponse {
   requestedBy: string;
   imagingType: string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
 }
- 
+
 export interface CreatePathologyRequest {
   patientId: string;
   testType:  string;
   notes?:    string;
 }
- 
+
 export interface CreateRadiologyRequest {
   patientId:   string;
   imagingType: string;
   notes?:      string;
+}
+
+export interface EditPathologyRequest {
+  testType?: string;
+  notes?:    string | null;
+  priority?: LabRequestPriority;
+  status?:   'PENDING' | 'IN_PROGRESS';
+}
+
+export interface EditRadiologyRequest {
+  imagingType?: string;
+  notes?:       string | null;
+  priority?:    LabRequestPriority;
+  status?:      'PENDING' | 'IN_PROGRESS';
 }
  
 export interface LabListResult<T> {
@@ -359,9 +376,17 @@ export interface UpdateStockRequest {
   quantityChange: number;
   reason:         string;
 }
- 
+
 export interface UpdateThresholdRequest {
   lowStockThreshold: number;
+}
+
+export interface UpdateInventoryItemRequest {
+  name?:              string;
+  category?:          string;
+  unit?:              string;
+  lowStockThreshold?: number;
+  description?:       string | null;
 }
  
 export interface InventoryListResult {

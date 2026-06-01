@@ -39,6 +39,8 @@ let doctorId: string;
 let doctorToken:      string;
 let pathologistToken: string;
 let radiologistToken: string;
+let adminToken:       string;
+let receptionistToken: string;
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
@@ -92,12 +94,26 @@ beforeEach(async () => {
     mobileNumber: '1234567890', address: '123 Test Street',
   });
 
+  const admin = await UserModel.create({
+    tenantId, email: 'admin@test.com', name: 'Lab Admin', passwordHash: 'x',
+    role: UserRole.HOSPITAL_ADMIN, isActive: true, isFirstLogin: false,
+  });
+  const adminId = (admin._id as mongoose.Types.ObjectId).toString();
+
+  const receptionist = await UserModel.create({
+    tenantId, email: 'reception@test.com', name: 'Receptionist', passwordHash: 'x',
+    role: UserRole.RECEPTIONIST, isActive: true, isFirstLogin: false,
+  });
+  const receptionistId = (receptionist._id as mongoose.Types.ObjectId).toString();
+
   const sign = (id: string, role: UserRole) =>
     jwt.sign({ userId: id, tenantId, role, email: 'x@x.com', isFirstLogin: false }, JWT_SECRET);
 
-  doctorToken      = sign(doctorId, UserRole.DOCTOR);
-  pathologistToken = sign(pathologistId, UserRole.PATHOLOGIST);
-  radiologistToken = sign(radiologistId, UserRole.RADIOLOGIST);
+  doctorToken       = sign(doctorId, UserRole.DOCTOR);
+  pathologistToken  = sign(pathologistId, UserRole.PATHOLOGIST);
+  radiologistToken  = sign(radiologistId, UserRole.RADIOLOGIST);
+  adminToken        = sign(adminId, UserRole.HOSPITAL_ADMIN);
+  receptionistToken = sign(receptionistId, UserRole.RECEPTIONIST);
 });
 
 // ─── Pathology ────────────────────────────────────────────────────────────────
@@ -282,5 +298,289 @@ describe('PATCH /api/lab/radiology/:requestId/report', () => {
       .attach('report', oversized, { filename: 'big.dcm', contentType: 'application/dicom' });
 
     expect(res.status).toBe(413);
+  });
+});
+
+// ─── Edit Pathology ───────────────────────────────────────────────────────────
+
+describe('PATCH /api/lab/pathology/:requestId', () => {
+  let requestId: string;
+
+  beforeEach(async () => {
+    requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — pathologist can edit testType and notes', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`)
+      .send({ testType: 'Urine Analysis', notes: 'Updated notes' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.testType).toBe('Urine Analysis');
+  });
+
+  test('200 — doctor can change status to IN_PROGRESS', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('IN_PROGRESS');
+  });
+
+  test('400 — body with status COMPLETED rejected by Zod', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ status: 'COMPLETED' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('409 — cannot edit an already COMPLETED request', async () => {
+    await PathologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED' });
+
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`)
+      .send({ testType: 'New Test' });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('403 — receptionist role gets 403', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ testType: 'New Test' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('401 — no auth token', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .send({ testType: 'New Test' });
+
+    expect(res.status).toBe(401);
+  });
+
+  test('404 — unknown requestId returns 404', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${uuidv4()}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ testType: 'New Test' });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── Delete Pathology ─────────────────────────────────────────────────────────
+
+describe('DELETE /api/lab/pathology/:requestId', () => {
+  let requestId: string;
+
+  beforeEach(async () => {
+    requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — doctor can delete a PENDING request', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/deleted/i);
+  });
+
+  test('200 — HOSPITAL_ADMIN can delete a COMPLETED request and subsequent GET returns 404', async () => {
+    await PathologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const delRes = await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(delRes.status).toBe(200);
+
+    const getRes = await request(app)
+      .get(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(getRes.status).toBe(404);
+  });
+
+  test('403 — doctor cannot delete a COMPLETED request', async () => {
+    await PathologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — pathologist cannot delete a COMPLETED request', async () => {
+    await PathologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('404 — double-delete returns 404', async () => {
+    await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('401 — no auth token', async () => {
+    const res = await request(app).delete(`/api/lab/pathology/${requestId}`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── Edit Radiology ───────────────────────────────────────────────────────────
+
+describe('PATCH /api/lab/radiology/:requestId', () => {
+  let requestId: string;
+
+  beforeEach(async () => {
+    requestId = uuidv4();
+    await RadiologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, imagingType: 'X-Ray Chest',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — radiologist can edit imagingType and priority', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`)
+      .send({ imagingType: 'CT Scan Brain', priority: 'URGENT' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.imagingType).toBe('CT Scan Brain');
+    expect(res.body.data.priority).toBe('URGENT');
+  });
+
+  test('409 — cannot edit a COMPLETED request', async () => {
+    await RadiologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED' });
+
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`)
+      .send({ imagingType: 'MRI Brain' });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('403 — receptionist role gets 403', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ imagingType: 'MRI Brain' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('401 — no auth token', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .send({ imagingType: 'MRI Brain' });
+
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── Delete Radiology ─────────────────────────────────────────────────────────
+
+describe('DELETE /api/lab/radiology/:requestId', () => {
+  let requestId: string;
+
+  beforeEach(async () => {
+    requestId = uuidv4();
+    await RadiologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, imagingType: 'X-Ray Chest',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — doctor can delete a PENDING request', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('200 — HOSPITAL_ADMIN can delete a COMPLETED request and subsequent GET returns 404', async () => {
+    await RadiologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const delRes = await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(delRes.status).toBe(200);
+
+    const getRes = await request(app)
+      .get(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(getRes.status).toBe(404);
+  });
+
+  test('403 — doctor cannot delete a COMPLETED request', async () => {
+    await RadiologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — radiologist cannot delete a COMPLETED request', async () => {
+    await RadiologyRequestModel.findOneAndUpdate({ requestId, tenantId }, { status: 'COMPLETED', reportS3Key: 'key' });
+
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('404 — double-delete returns 404', async () => {
+    await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('401 — no auth token', async () => {
+    const res = await request(app).delete(`/api/lab/radiology/${requestId}`);
+    expect(res.status).toBe(401);
   });
 });

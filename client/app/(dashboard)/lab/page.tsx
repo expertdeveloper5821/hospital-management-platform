@@ -5,9 +5,13 @@ import {
   useListPathologyRequestsQuery,
   useCreatePathologyRequestMutation,
   useUploadPathologyReportMutation,
+  useEditPathologyRequestMutation,
+  useDeletePathologyRequestMutation,
   useListRadiologyRequestsQuery,
   useCreateRadiologyRequestMutation,
   useUploadRadiologyReportMutation,
+  useEditRadiologyRequestMutation,
+  useDeleteRadiologyRequestMutation,
 } from '@/store/api/lab.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useAppSelector } from '@/store/hooks';
@@ -15,6 +19,7 @@ import type {
   PathologyRequestResponse,
   RadiologyRequestResponse,
   LabRequestStatus,
+  LabRequestPriority,
   PatientResponse,
 } from '@/store/types';
 import { Button }                        from '@/components/ui/button';
@@ -33,6 +38,8 @@ import {
   ChevronLeft,
   ChevronRight,
   FileText,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -329,17 +336,223 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
   );
 }
 
+// ─── Edit Request Modal ───────────────────────────────────────────────────────
+
+interface EditRequestModalProps {
+  request: PathologyRequestResponse | RadiologyRequestResponse;
+  type:    'pathology' | 'radiology';
+  onClose: () => void;
+}
+
+function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
+  const isPathology = type === 'pathology';
+  const pathDoc     = request as PathologyRequestResponse;
+  const radioDoc    = request as RadiologyRequestResponse;
+
+  const [typeField, setTypeField] = useState(isPathology ? pathDoc.testType : radioDoc.imagingType);
+  const [notes,     setNotes]     = useState(request.notes ?? '');
+  const [priority,  setPriority]  = useState<LabRequestPriority>(request.priority);
+  const [status,    setStatus]    = useState<'PENDING' | 'IN_PROGRESS'>(
+    request.status === 'COMPLETED' ? 'PENDING' : request.status as 'PENDING' | 'IN_PROGRESS',
+  );
+  const [error,     setError]     = useState('');
+
+  const [editPathology, { isLoading: editingPath }] = useEditPathologyRequestMutation();
+  const [editRadiology, { isLoading: editingRad  }] = useEditRadiologyRequestMutation();
+  const isLoading = editingPath || editingRad;
+
+  const fieldLabel = isPathology ? 'Test Type' : 'Imaging Type';
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    try {
+      if (isPathology) {
+        await editPathology({
+          requestId: request.requestId,
+          testType:  typeField.trim() || undefined,
+          notes:     notes.trim() || null,
+          priority,
+          status,
+        }).unwrap();
+      } else {
+        await editRadiology({
+          requestId:   request.requestId,
+          imagingType: typeField.trim() || undefined,
+          notes:       notes.trim() || null,
+          priority,
+          status,
+        }).unwrap();
+      }
+      onClose();
+    } catch (err: any) {
+      if (err?.status === 409) {
+        setError('This request is already completed and cannot be edited.');
+      } else {
+        setError(err?.data?.message ?? 'Failed to update request.');
+      }
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h2 className="text-base font-semibold">
+            Edit {isPathology ? 'Pathology' : 'Radiology'} Request
+          </h2>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {error && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="er-type">{fieldLabel}</Label>
+            <Input
+              id="er-type"
+              value={typeField}
+              onChange={(e) => setTypeField(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="er-notes">Clinical Notes</Label>
+            <textarea
+              id="er-notes"
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="er-priority">Priority</Label>
+              <select
+                id="er-priority"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as LabRequestPriority)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="NORMAL">Normal</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="er-status">Status</Label>
+              <select
+                id="er-status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as 'PENDING' | 'IN_PROGRESS')}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="PENDING">Pending</option>
+                <option value="IN_PROGRESS">In Progress</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-1">
+            <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Request Modal ─────────────────────────────────────────────────────
+
+interface DeleteRequestModalProps {
+  requestId: string;
+  type:      'pathology' | 'radiology';
+  onClose:   () => void;
+}
+
+function DeleteRequestModal({ requestId, type, onClose }: DeleteRequestModalProps) {
+  const [error, setError] = useState('');
+
+  const [deletePathology, { isLoading: deletingPath }] = useDeletePathologyRequestMutation();
+  const [deleteRadiology, { isLoading: deletingRad  }] = useDeleteRadiologyRequestMutation();
+  const isLoading = deletingPath || deletingRad;
+
+  async function handleConfirm() {
+    setError('');
+    try {
+      if (type === 'pathology') {
+        await deletePathology(requestId).unwrap();
+      } else {
+        await deleteRadiology(requestId).unwrap();
+      }
+      onClose();
+    } catch (err: any) {
+      if (err?.status === 403) {
+        setError('Only Hospital Admin or Manager can delete a completed request.');
+      } else if (err?.status === 404) {
+        setError('This request has already been deleted.');
+      } else {
+        setError(err?.data?.message ?? 'Failed to delete request.');
+      }
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-sm rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h2 className="text-base font-semibold">Delete Request</h2>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          {error && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+          )}
+          <p className="text-sm text-muted-foreground">
+            This will archive the request. This action cannot be undone.
+          </p>
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirm}
+              disabled={isLoading}
+            >
+              {isLoading ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Request Detail Panel ─────────────────────────────────────────────────────
 
 interface RequestDetailPanelProps {
   request:   PathologyRequestResponse | RadiologyRequestResponse;
   type:      'pathology' | 'radiology';
   canUpload: boolean;
+  canEdit:   boolean;
+  canDelete: boolean;
   onClose:   () => void;
 }
 
-function RequestDetailPanel({ request, type, canUpload, onClose }: RequestDetailPanelProps) {
+function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onClose }: RequestDetailPanelProps) {
   const [showUpload, setShowUpload] = useState(false);
+  const [showEdit,   setShowEdit]   = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
 
   const testLabel = type === 'pathology'
     ? (request as PathologyRequestResponse).testType
@@ -378,7 +591,17 @@ function RequestDetailPanel({ request, type, canUpload, onClose }: RequestDetail
             {row('Requested By', <span className="font-mono text-xs">{request.requestedBy}</span>)}
             {row('Requested At', formatDate(request.requestedAt))}
             {row('Updated At',   formatDate(request.updatedAt))}
-            {row('Notes',        request.notes)}
+            {row('Priority', (
+              <span className={cn(
+                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                request.priority === 'URGENT'
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-gray-100 text-gray-700',
+              )}>
+                {request.priority}
+              </span>
+            ))}
+            {row('Notes', request.notes)}
             {row('Report', request.reportUrl ? (
               <a
                 href={request.reportUrl}
@@ -392,12 +615,30 @@ function RequestDetailPanel({ request, type, canUpload, onClose }: RequestDetail
             ) : 'Not uploaded yet')}
           </div>
 
-          {canUpload && request.status !== 'COMPLETED' && (
-            <div className="shrink-0 p-5 border-t">
-              <Button className="w-full" onClick={() => setShowUpload(true)}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Report
-              </Button>
+          {(canUpload || canEdit || canDelete) && (
+            <div className="shrink-0 p-5 border-t space-y-2">
+              {canUpload && request.status !== 'COMPLETED' && (
+                <Button className="w-full" onClick={() => setShowUpload(true)}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Report
+                </Button>
+              )}
+              {canEdit && request.status !== 'COMPLETED' && (
+                <Button variant="outline" className="w-full" onClick={() => setShowEdit(true)}>
+                  <Pencil className="h-4 w-4 mr-2" />
+                  Edit Request
+                </Button>
+              )}
+              {canDelete && (
+                <Button
+                  variant="outline"
+                  className="w-full text-destructive hover:bg-destructive/10"
+                  onClick={() => setShowDelete(true)}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Request
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -410,6 +651,20 @@ function RequestDetailPanel({ request, type, canUpload, onClose }: RequestDetail
           onClose={() => { setShowUpload(false); onClose(); }}
         />
       )}
+      {showEdit && (
+        <EditRequestModal
+          request={request}
+          type={type}
+          onClose={() => { setShowEdit(false); onClose(); }}
+        />
+      )}
+      {showDelete && (
+        <DeleteRequestModal
+          requestId={request.requestId}
+          type={type}
+          onClose={() => { setShowDelete(false); onClose(); }}
+        />
+      )}
     </>
   );
 }
@@ -420,9 +675,11 @@ interface RequestsTableProps {
   type:      'pathology' | 'radiology';
   canCreate: boolean;
   canUpload: boolean;
+  canEdit:   boolean;
+  canDelete: boolean;
 }
 
-function RequestsTable({ type, canCreate, canUpload }: RequestsTableProps) {
+function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: RequestsTableProps) {
   const [statusFilter,    setStatusFilter]    = useState('');
   const [patientIdFilter, setPatientIdFilter] = useState('');
   const [patientInput,    setPatientInput]    = useState('');
@@ -563,12 +820,32 @@ function RequestsTable({ type, canCreate, canUpload }: RequestsTableProps) {
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <button
-                            className="text-xs text-primary hover:underline"
-                            onClick={(e) => { e.stopPropagation(); setSelected(r); }}
-                          >
-                            View
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              className="text-xs text-primary hover:underline"
+                              onClick={(e) => { e.stopPropagation(); setSelected(r); }}
+                            >
+                              View
+                            </button>
+                            {canEdit && r.status !== 'COMPLETED' && (
+                              <button
+                                className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                                title="Edit"
+                                onClick={(e) => { e.stopPropagation(); setSelected(r); }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button
+                                className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-destructive"
+                                title="Delete"
+                                onClick={(e) => { e.stopPropagation(); setSelected(r); }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -606,6 +883,8 @@ function RequestsTable({ type, canCreate, canUpload }: RequestsTableProps) {
           request={selected}
           type={type}
           canUpload={canUpload}
+          canEdit={canEdit}
+          canDelete={canDelete}
           onClose={() => setSelected(null)}
         />
       )}
@@ -625,6 +904,11 @@ export default function LabPage() {
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;
+
+  const canEditPathology   = ['PATHOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
+  const canEditRadiology   = ['RADIOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
+  const canEdit   = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
+  const canDelete = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
 
   return (
     <div className="space-y-6">
@@ -659,6 +943,8 @@ export default function LabPage() {
         type={activeTab}
         canCreate={canCreate}
         canUpload={canUpload}
+        canEdit={canEdit}
+        canDelete={canDelete}
       />
     </div>
   );

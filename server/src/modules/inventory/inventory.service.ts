@@ -5,6 +5,7 @@ import {
   CreateInventoryItemInput,
   UpdateStockInput,
   UpdateThresholdInput,
+  UpdateInventoryItemInput,
   ListInventoryQuery,
   InventoryItemResponse,
 } from './inventory.types';
@@ -154,6 +155,85 @@ export class InventoryService {
     } catch { /* swallow */ }
 
     return toResponse(updated);
+  }
+
+  async updateMetadata(
+    itemId:   string,
+    tenantId: string,
+    userId:   string,
+    input:    UpdateInventoryItemInput,
+  ): Promise<InventoryItemResponse> {
+    const current = await inventoryRepository.findById(itemId, tenantId);
+    if (!current) throw new NotFoundError('Inventory item not found');
+
+    const updated = await inventoryRepository.updateMetadata(itemId, tenantId, input);
+    if (!updated) throw new NotFoundError('Inventory item not found');
+
+    // Trigger low-stock notification when raising threshold causes item to cross the boundary
+    const wasLowStock = current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold;
+    const isNowLowStock = updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold;
+    if (!wasLowStock && isNowLowStock) {
+      try {
+        await notificationService.sendToRole(
+          UserRole.MANAGER,
+          tenantId,
+          'Low Stock Alert',
+          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
+          'INVENTORY_ITEM',
+          itemId,
+        );
+        await notificationService.sendToRole(
+          UserRole.HOSPITAL_ADMIN,
+          tenantId,
+          'Low Stock Alert',
+          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
+          'INVENTORY_ITEM',
+          itemId,
+        );
+      } catch { /* swallow */ }
+    }
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.INVENTORY_ITEM,
+        entityId:      itemId,
+        action:        'UPDATE',
+        userId,
+        tenantId,
+        previousValue: {
+          name:              current.name,
+          category:          current.category,
+          unit:              current.unit,
+          lowStockThreshold: current.lowStockThreshold,
+          description:       current.description,
+        },
+        newValue: input as Record<string, unknown>,
+      });
+    } catch { /* swallow */ }
+
+    return toResponse(updated);
+  }
+
+  async softDelete(
+    itemId:   string,
+    tenantId: string,
+    userId:   string,
+  ): Promise<void> {
+    const current = await inventoryRepository.findById(itemId, tenantId);
+    if (!current) throw new NotFoundError('Inventory item not found');
+
+    await inventoryRepository.softDelete(itemId, tenantId);
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.INVENTORY_ITEM,
+        entityId:      itemId,
+        action:        'DELETE',
+        userId,
+        tenantId,
+        previousValue: { name: current.name, category: current.category, quantity: current.quantity },
+      });
+    } catch { /* swallow */ }
   }
 
   async listItems(

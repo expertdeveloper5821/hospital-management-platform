@@ -5,7 +5,9 @@ import type {
   CreateInventoryItemRequest,
   UpdateStockRequest,
   UpdateThresholdRequest,
+  UpdateInventoryItemRequest,
   InventoryListResult,
+  AuditListResult,
 } from '../types';
 
 export const inventoryApi = baseApi.injectEndpoints({
@@ -50,6 +52,23 @@ export const inventoryApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<InventoryItemResponse>) => raw.data,
       invalidatesTags: ['Inventory'],
     }),
+
+    updateInventoryItem: build.mutation<InventoryItemResponse, { itemId: string } & UpdateInventoryItemRequest>({
+      query: ({ itemId, ...body }) => ({ url: `/api/inventory/${itemId}`, method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<InventoryItemResponse>) => raw.data,
+      invalidatesTags: ['Inventory'],
+    }),
+
+    deleteInventoryItem: build.mutation<{ message: string }, string>({
+      query: (itemId) => ({ url: `/api/inventory/${itemId}`, method: 'DELETE' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Inventory'],
+    }),
+
+    getStockHistory: build.query<AuditListResult, { itemId: string; page?: number }>({
+      query: ({ itemId, page = 1 }) => `/api/inventory/${itemId}/stock-history?page=${page}`,
+      transformResponse: (raw: ApiSuccess<AuditListResult>) => raw.data,
+    }),
   }),
 });
 
@@ -59,4 +78,7 @@ export const {
   useCreateInventoryItemMutation,
   useUpdateStockMutation,
   useUpdateThresholdMutation,
+  useUpdateInventoryItemMutation,
+  useDeleteInventoryItemMutation,
+  useGetStockHistoryQuery,
 } = inventoryApi;

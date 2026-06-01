@@ -12,10 +12,14 @@ import {
   listPathologyRequests,
   getPathologyRequest,
   uploadPathologyReport,
+  editPathologyRequest,
+  deletePathologyRequest,
   createRadiologyRequest,
   listRadiologyRequests,
   getRadiologyRequest,
   uploadRadiologyReport,
+  editRadiologyRequest,
+  deleteRadiologyRequest,
 } from './lab.controller';
 
 const router = express.Router();
@@ -54,6 +58,18 @@ router.get(
   getPathologyRequest,
 );
 
+router.patch(
+  '/pathology/:requestId',
+  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  editPathologyRequest,
+);
+
+router.delete(
+  '/pathology/:requestId',
+  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  deletePathologyRequest,
+);
+
 // multipart/form-data — field name: "report"
 // Multer rejects files > 10 MB with a MulterError (LIMIT_FILE_SIZE → 413).
 router.patch(
@@ -81,6 +97,18 @@ router.get(
   '/radiology/:requestId',
   requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.NURSE),
   getRadiologyRequest,
+);
+
+router.patch(
+  '/radiology/:requestId',
+  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  editRadiologyRequest,
+);
+
+router.delete(
+  '/radiology/:requestId',
+  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  deleteRadiologyRequest,
 );
 
 // multipart/form-data — field name: "report"

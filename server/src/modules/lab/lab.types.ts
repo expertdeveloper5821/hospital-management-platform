@@ -9,6 +9,14 @@ export const LabRequestStatus = {
 
 export type LabRequestStatus = typeof LabRequestStatus[keyof typeof LabRequestStatus];
 
+// ─── LabRequestPriority ───────────────────────────────────────────────────────
+export const LabRequestPriority = {
+  NORMAL: 'NORMAL',
+  URGENT: 'URGENT',
+} as const;
+
+export type LabRequestPriority = typeof LabRequestPriority[keyof typeof LabRequestPriority];
+
 // ─── Pathology Schemas ────────────────────────────────────────────────────────
 export const CreatePathologyRequestSchema = z.object({
   patientId: z.string().min(1, 'patientId is required'),
@@ -34,6 +42,25 @@ export const UpdateLabStatusSchema = z.object({
 
 export type UpdateLabStatusInput = z.infer<typeof UpdateLabStatusSchema>;
 
+// ─── Edit schemas ─────────────────────────────────────────────────────────────
+export const EditPathologyRequestSchema = z.object({
+  testType: z.string().min(1).max(200).trim().optional(),
+  notes:    z.string().max(2000).trim().nullable().optional(),
+  priority: z.enum(['NORMAL', 'URGENT']).optional(),
+  status:   z.enum(['PENDING', 'IN_PROGRESS']).optional(),
+});
+
+export type EditPathologyRequestInput = z.infer<typeof EditPathologyRequestSchema>;
+
+export const EditRadiologyRequestSchema = z.object({
+  imagingType: z.string().min(1).max(200).trim().optional(),
+  notes:       z.string().max(2000).trim().nullable().optional(),
+  priority:    z.enum(['NORMAL', 'URGENT']).optional(),
+  status:      z.enum(['PENDING', 'IN_PROGRESS']).optional(),
+});
+
+export type EditRadiologyRequestInput = z.infer<typeof EditRadiologyRequestSchema>;
+
 // ─── List query ───────────────────────────────────────────────────────────────
 export const ListLabRequestsQuerySchema = z.object({
   patientId: z.string().min(1).optional(),
@@ -49,11 +76,12 @@ export type ListLabRequestsQuery = z.infer<typeof ListLabRequestsQuerySchema>;
 export interface PathologyRequestResponse {
   requestId:   string;
   patientId:   string;
-  fullName?:       string;
+  fullName?:   string;
   tenantId:    string;
   requestedBy: string;
   testType:    string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportUrl:   string | null;
   requestedAt: string;
@@ -68,6 +96,7 @@ export interface RadiologyRequestResponse {
   requestedBy: string;
   imagingType: string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportUrl:   string | null;
   requestedAt: string;

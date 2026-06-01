@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { LabRequestStatus } from './lab.types';
+import { LabRequestStatus, LabRequestPriority } from './lab.types';
 
 // ─── PathologyRequest ─────────────────────────────────────────────────────────
 export interface IPathologyRequest extends Document {
@@ -10,8 +10,11 @@ export interface IPathologyRequest extends Document {
   requestedBy: string;
   testType:    string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportS3Key: string | null;
+  isDeleted:   boolean;
+  deletedAt:   Date | null;
   requestedAt: Date;
   createdAt:   Date;
   updatedAt:   Date;
@@ -30,8 +33,16 @@ const pathologyRequestSchema = new Schema<IPathologyRequest>(
       default:  LabRequestStatus.PENDING,
       required: true,
     },
+    priority: {
+      type:     String,
+      enum:     ['NORMAL', 'URGENT'],
+      default:  'NORMAL',
+      required: true,
+    },
     notes:       { type: String, default: null, trim: true, maxlength: 2000 },
     reportS3Key: { type: String, default: null },
+    isDeleted:   { type: Boolean, default: false },
+    deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },
   },
   {
@@ -43,6 +54,7 @@ const pathologyRequestSchema = new Schema<IPathologyRequest>(
 // tenantId first (NFR-01)
 pathologyRequestSchema.index({ tenantId: 1, status: 1 });
 pathologyRequestSchema.index({ tenantId: 1, patientId: 1 });
+pathologyRequestSchema.index({ tenantId: 1, isDeleted: 1 });
 
 export const PathologyRequestModel = mongoose.model<IPathologyRequest>(
   'PathologyRequest',
@@ -57,8 +69,11 @@ export interface IRadiologyRequest extends Document {
   requestedBy: string;
   imagingType: string;
   status:      LabRequestStatus;
+  priority:    LabRequestPriority;
   notes:       string | null;
   reportS3Key: string | null;
+  isDeleted:   boolean;
+  deletedAt:   Date | null;
   requestedAt: Date;
   createdAt:   Date;
   updatedAt:   Date;
@@ -77,8 +92,16 @@ const radiologyRequestSchema = new Schema<IRadiologyRequest>(
       default:  LabRequestStatus.PENDING,
       required: true,
     },
+    priority: {
+      type:     String,
+      enum:     ['NORMAL', 'URGENT'],
+      default:  'NORMAL',
+      required: true,
+    },
     notes:       { type: String, default: null, trim: true, maxlength: 2000 },
     reportS3Key: { type: String, default: null },
+    isDeleted:   { type: Boolean, default: false },
+    deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },
   },
   {
@@ -89,6 +112,7 @@ const radiologyRequestSchema = new Schema<IRadiologyRequest>(
 
 radiologyRequestSchema.index({ tenantId: 1, status: 1 });
 radiologyRequestSchema.index({ tenantId: 1, patientId: 1 });
+radiologyRequestSchema.index({ tenantId: 1, isDeleted: 1 });
 
 export const RadiologyRequestModel = mongoose.model<IRadiologyRequest>(
   'RadiologyRequest',

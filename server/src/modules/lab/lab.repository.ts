@@ -10,13 +10,13 @@ export class LabRepository {
 
   async findPathologyById(requestId: string, tenantId: string): Promise<IPathologyRequest | null> {
     assertDbConnected();
-    return PathologyRequestModel.findOne({ requestId, tenantId });
+    return PathologyRequestModel.findOne({ requestId, tenantId, isDeleted: { $ne: true } });
   }
 
   async findPendingPathology(tenantId: string): Promise<IPathologyRequest[]> {
     assertDbConnected();
     return PathologyRequestModel
-      .find({ tenantId, status: 'PENDING' })
+      .find({ tenantId, status: 'PENDING', isDeleted: { $ne: true } })
       .sort({ requestedAt: 1 });
   }
 
@@ -27,7 +27,7 @@ export class LabRepository {
     assertDbConnected();
     const { patientId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter: Record<string, unknown> = { tenantId };
+    const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
     if (patientId) filter['patientId'] = patientId;
     if (status)    filter['status']    = status;
 
@@ -46,12 +46,21 @@ export class LabRepository {
   async updatePathology(
     requestId: string,
     tenantId:  string,
-    update:    Partial<Pick<IPathologyRequest, 'status' | 'reportS3Key'>>,
+    update:    Partial<Pick<IPathologyRequest, 'status' | 'reportS3Key' | 'testType' | 'notes' | 'priority'>>,
   ): Promise<IPathologyRequest | null> {
     assertDbConnected();
     return PathologyRequestModel.findOneAndUpdate(
-      { requestId, tenantId },
+      { requestId, tenantId, isDeleted: { $ne: true } },
       { $set: update },
+      { new: true },
+    );
+  }
+
+  async softDeletePathology(requestId: string, tenantId: string): Promise<IPathologyRequest | null> {
+    assertDbConnected();
+    return PathologyRequestModel.findOneAndUpdate(
+      { requestId, tenantId, isDeleted: { $ne: true } },
+      { $set: { isDeleted: true, deletedAt: new Date() } },
       { new: true },
     );
   }
@@ -60,13 +69,13 @@ export class LabRepository {
 
   async findRadiologyById(requestId: string, tenantId: string): Promise<IRadiologyRequest | null> {
     assertDbConnected();
-    return RadiologyRequestModel.findOne({ requestId, tenantId });
+    return RadiologyRequestModel.findOne({ requestId, tenantId, isDeleted: { $ne: true } });
   }
 
   async findPendingRadiology(tenantId: string): Promise<IRadiologyRequest[]> {
     assertDbConnected();
     return RadiologyRequestModel
-      .find({ tenantId, status: 'PENDING' })
+      .find({ tenantId, status: 'PENDING', isDeleted: { $ne: true } })
       .sort({ requestedAt: 1 });
   }
 
@@ -77,7 +86,7 @@ export class LabRepository {
     assertDbConnected();
     const { patientId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter: Record<string, unknown> = { tenantId };
+    const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
     if (patientId) filter['patientId'] = patientId;
     if (status)    filter['status']    = status;
 
@@ -96,12 +105,21 @@ export class LabRepository {
   async updateRadiology(
     requestId: string,
     tenantId:  string,
-    update:    Partial<Pick<IRadiologyRequest, 'status' | 'reportS3Key'>>,
+    update:    Partial<Pick<IRadiologyRequest, 'status' | 'reportS3Key' | 'imagingType' | 'notes' | 'priority'>>,
   ): Promise<IRadiologyRequest | null> {
     assertDbConnected();
     return RadiologyRequestModel.findOneAndUpdate(
-      { requestId, tenantId },
+      { requestId, tenantId, isDeleted: { $ne: true } },
       { $set: update },
+      { new: true },
+    );
+  }
+
+  async softDeleteRadiology(requestId: string, tenantId: string): Promise<IRadiologyRequest | null> {
+    assertDbConnected();
+    return RadiologyRequestModel.findOneAndUpdate(
+      { requestId, tenantId, isDeleted: { $ne: true } },
+      { $set: { isDeleted: true, deletedAt: new Date() } },
       { new: true },
     );
   }

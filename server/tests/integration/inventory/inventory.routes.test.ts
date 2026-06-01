@@ -8,7 +8,10 @@ jest.mock('../../../src/shared/services/email.service', () => ({
   emailService: { sendInviteEmail: jest.fn(), sendWelcomeEmail: jest.fn() },
 }));
 jest.mock('../../../src/shared/services/audit.service', () => ({
-  auditService: { log: jest.fn().mockResolvedValue(undefined) },
+  auditService: {
+    log:       jest.fn().mockResolvedValue(undefined),
+    queryLogs: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, limit: 20, totalPages: 0 }),
+  },
 }));
 jest.mock('../../../src/shared/services/s3.service', () => ({
   s3Service: {
@@ -306,5 +309,186 @@ describe('PATCH /api/inventory/:itemId/threshold', () => {
       .send({ lowStockThreshold: -1 });
 
     expect(res.status).toBe(400);
+  });
+});
+
+// ─── Edit Item Metadata ───────────────────────────────────────────────────────
+
+describe('PATCH /api/inventory/:itemId (metadata)', () => {
+  let itemId: string;
+
+  beforeEach(async () => {
+    itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Bandages', category: 'Consumable',
+      unit: 'rolls', quantity: 200, lowStockThreshold: 20,
+    });
+  });
+
+  test('updates name and category (200)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Premium Bandages', category: 'Medical Supplies' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Premium Bandages');
+    expect(res.body.data.category).toBe('Medical Supplies');
+    expect(res.body.data.quantity).toBe(200); // unchanged
+  });
+
+  test('manager can edit item (200)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ name: 'Updated Name' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Updated Name');
+  });
+
+  test('returns 403 for doctor role', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ name: 'Should Fail' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 400 when quantity is included in body', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ quantity: 500 });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when no editable field is provided', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 404 for unknown item', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${uuidv4()}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Ghost' });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── Delete Item ──────────────────────────────────────────────────────────────
+
+describe('DELETE /api/inventory/:itemId', () => {
+  let itemId: string;
+
+  beforeEach(async () => {
+    itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Expired Stock', category: 'Medication',
+      unit: 'bottles', quantity: 10, lowStockThreshold: 5,
+    });
+  });
+
+  test('soft-deletes an item (200)', async () => {
+    const res = await request(app)
+      .delete(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.message).toMatch(/deleted/i);
+
+    // Item should no longer appear in list
+    const listRes = await request(app)
+      .get('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`);
+    const ids = listRes.body.data.data.map((i: { itemId: string }) => i.itemId);
+    expect(ids).not.toContain(itemId);
+  });
+
+  test('returns 404 when deleting an already-deleted item', async () => {
+    await request(app)
+      .delete(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    const res = await request(app)
+      .delete(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('returns 403 for doctor role', async () => {
+    const res = await request(app)
+      .delete(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 404 for unknown item', async () => {
+    const res = await request(app)
+      .delete(`/api/inventory/${uuidv4()}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── Stock History ────────────────────────────────────────────────────────────
+
+describe('GET /api/inventory/:itemId/stock-history', () => {
+  let itemId: string;
+
+  beforeEach(async () => {
+    itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Saline Bags', category: 'Fluids',
+      unit: 'bags', quantity: 100, lowStockThreshold: 10,
+    });
+  });
+
+  test('returns paginated stock history (200)', async () => {
+    const res = await request(app)
+      .get(`/api/inventory/${itemId}/stock-history`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('total');
+    expect(res.body.data).toHaveProperty('page');
+    expect(res.body.data).toHaveProperty('limit');
+    expect(res.body.data).toHaveProperty('totalPages');
+  });
+
+  test('manager can access stock history (200)', async () => {
+    const res = await request(app)
+      .get(`/api/inventory/${itemId}/stock-history`)
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('returns 403 for doctor role', async () => {
+    const res = await request(app)
+      .get(`/api/inventory/${itemId}/stock-history`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 404 for unknown item', async () => {
+    const res = await request(app)
+      .get(`/api/inventory/${uuidv4()}/stock-history`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(404);
   });
 });

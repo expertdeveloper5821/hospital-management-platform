@@ -9,6 +9,8 @@ export interface IInventoryItem extends Document {
   quantity:          number;
   lowStockThreshold: number;
   description:       string | null;
+  isDeleted:         boolean;
+  deletedAt:         Date | null;
   createdAt:         Date;
   updatedAt:         Date;
 }
@@ -23,6 +25,8 @@ const inventoryItemSchema = new Schema<IInventoryItem>(
     quantity:          { type: Number, required: true, min: 0, default: 0 },
     lowStockThreshold: { type: Number, required: true, min: 0, default: 0 },
     description:       { type: String, default: null, trim: true, maxlength: 1000 },
+    isDeleted:         { type: Boolean, default: false },
+    deletedAt:         { type: Date, default: null },
   },
   {
     timestamps: true,
