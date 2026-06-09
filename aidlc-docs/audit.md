@@ -2,6 +2,115 @@
 
 ---
 
+## Enhancement — Patient Name Search in Lab, IPD, OPD (Post-Construction)
+**Timestamp**: 2026-06-09T00:00:00Z
+**User Input**: "In Lab, IPD and OPD make search option filter by patient name also along with patient ID."
+**AI Response**: "Extended search across three modules so users can filter by patient name OR patient ID. Backend: added `search` query parameter to Lab (pathology + radiology), IPD admissions, and OPD queue endpoints. For Lab and IPD, `resolvePatientIdsBySearch()` helper does a regex query on `PatientModel` (`fullName` + `patientId`) and returns matching `patientId`s which are passed as `{ $in: [...] }` filters. For OPD, visit list is fetched for the date/doctor first (in-memory), then filtered by a regex against `fullName` or `patientId`. Frontend: API slices (`lab.api.ts`, `opd.api.ts`) updated to forward `search` param; `ListAdmissionsQuery` type gained `search` field. UI: Lab search input label changed to 'Search' with 'Patient name or ID…' placeholder; IPD search uses debounced server-side search (400ms); OPD filter bar gained a new Search input with debounce wired to `getOPDQueue`. Removed stale client-side patientId prefix filter in IPD."
+**Files changed**:
+- `server/src/modules/lab/lab.types.ts`
+- `server/src/modules/lab/lab.repository.ts`
+- `server/src/modules/lab/lab.service.ts`
+- `server/src/modules/ipd/ipd.types.ts`
+- `server/src/modules/ipd/ipd.repository.ts`
+- `server/src/modules/ipd/ipd.service.ts`
+- `server/src/modules/opd/opd.controller.ts`
+- `server/src/modules/opd/opd.service.ts`
+- `client/store/types.ts`
+- `client/store/api/lab.api.ts`
+- `client/store/api/ipd.api.ts` (type update via types.ts)
+- `client/store/api/opd.api.ts`
+- `client/app/(dashboard)/lab/page.tsx`
+- `client/app/(dashboard)/ipd/page.tsx`
+- `client/app/(dashboard)/opd/page.tsx`
+**Context**: CONSTRUCTION PHASE — Post-Construction Enhancement — Patient name search across Lab/IPD/OPD
+
+---
+
+## Enhancement — Lab: Show Requester Name Instead of ID (Post-Construction)
+**Timestamp**: 2026-06-08T10:00:00Z
+**User Input**: "Instead of requested by id, show requested by name by whom it is requested."
+**AI Response**: "Added `requestedByName` field to both `PathologyRequestResponse` and `RadiologyRequestResponse` types (backend + frontend). In `lab.service.ts`, added `getRequesterName()` helper that calls `userRepository.findById()` and returns `name ?? email`. Both `toPathologyResponse` and `toRadiologyResponse` now resolve patient name, requester name, and report URL in parallel via `Promise.all`. Frontend `RequestDetailPanel` now shows 'Requested By' row with `requestedByName`. Updated audit log."
+**Files changed**:
+- `server/src/modules/lab/lab.types.ts`
+- `server/src/modules/lab/lab.service.ts`
+- `client/store/types.ts`
+- `client/app/(dashboard)/lab/page.tsx`
+**Context**: CONSTRUCTION PHASE — U7-E Post-Construction Enhancement — Lab requester name
+
+---
+
+## Enhancement — Lab: Detail Panel — Remove Request ID & Requested By, Add Patient Name (Post-Construction)
+**Timestamp**: 2026-06-08T09:00:00Z
+**User Input**: "From lab, remove request id and add patient name and remove requested by also."
+**AI Response**: "In `RequestDetailPanel` removed 'Request ID' and 'Requested By' rows; added 'Patient Name' row using `request.fullName` (already present on both `PathologyRequestResponse` and `RadiologyRequestResponse`). Updated audit log."
+**Files changed**: `client/app/(dashboard)/lab/page.tsx`
+**Context**: CONSTRUCTION PHASE — U7-E Post-Construction Enhancement — Lab detail panel UI cleanup
+
+---
+
+## Enhancement — Audit Logs: Show User Name Instead of User ID (Post-Construction)
+**Timestamp**: 2026-06-08T11:00:00Z
+**User Input**: "In Audit Logs, instead of showing user ID, show user name."
+**AI Response**: "Added user name resolution to `AuditService.queryLogs()`: after fetching the page of logs, collects unique `userId` values, queries `UserModel` in one batch, and attaches `userName` (name or email) to each log entry. Added `userName?: string` to `AuditLogEntry` in frontend types. Updated audit page to display `userName` (falling back to truncated `userId`) in both the mobile card view and the desktop table column (renamed 'User ID' → 'User'). Updated audit log."
+**Files changed**:
+- `server/src/modules/audit/audit.service.ts`
+- `client/store/types.ts`
+- `client/app/(dashboard)/audit/page.tsx`
+**Context**: CONSTRUCTION PHASE — Post-Construction Enhancement — Audit log UI
+
+---
+
+## Enhancement — Payments: Remove Payment ID from Detail Panel (Post-Construction)
+**Timestamp**: 2026-06-08T08:00:00Z
+**User Input**: "Remove showing payment id from payments from frontend browser."
+**AI Response**: "Removed the 'Payment ID' row from the payment detail panel in `PaymentDetailPanel`. The `paymentId` is still used internally for receipt download and as React list key — only the visible display row was removed."
+**Files changed**: `client/app/(dashboard)/payments/page.tsx`
+**Context**: CONSTRUCTION PHASE — Post-Construction Enhancement — Payments UI cleanup
+
+---
+
+## Enhancement — Inventory: Remove Item ID from Detail Panel (Post-Construction)
+**Timestamp**: 2026-06-08T07:00:00Z
+**User Input**: "In inventory, remove showing item id from frontend."
+**AI Response**: "Removed the 'Item ID' row from the inventory item detail panel in `ItemDetailPanel`. The `itemId` field is still used internally for API calls (delete, stock update, threshold update) — only the visible display row was removed."
+**Files changed**: `client/app/(dashboard)/inventory/page.tsx`
+**Context**: CONSTRUCTION PHASE — U7-E Post-Construction Enhancement — Inventory UI cleanup
+
+---
+
+## Enhancement — Global Pagination Limit Changed from 20 to 10 (Post-Construction)
+**Timestamp**: 2026-06-08T06:00:00Z
+**User Input**: "Change the pagination limit to 10 for all."
+**AI Response**: "Updated all hardcoded `limit: 20` values to `limit: 10` across every paginated page component. Also updated the RTK Query default in `inventory.api.ts` (user had already changed that one). Updated audit log."
+**Files changed**:
+- `client/store/api/inventory.api.ts` — default `limit = 10` (user change, confirmed)
+- `client/app/(dashboard)/inventory/page.tsx` — `limit: 20` → `limit: 10`
+- `client/app/(dashboard)/lab/page.tsx` — both pathology + radiology queries: `limit: 20` → `limit: 10`
+- `client/app/(dashboard)/ipd/page.tsx` — `limit: 20` → `limit: 10`
+- `client/app/(dashboard)/patients/page.tsx` — `limit: 20` → `limit: 10`
+- `client/app/(dashboard)/payments/page.tsx` — `limit: 20` → `limit: 10`
+**Context**: CONSTRUCTION PHASE — Global UX Enhancement — Pagination page size
+
+---
+
+## Bug Fix — Payment Receipt PDF: Date Format and Rupee Symbol (Post-Construction)
+**Timestamp**: 2026-06-08T05:00:00Z
+**User Input**: "Fix the designing of date and price inside payment receipt" [screenshot showed "09 Jun2026" date and "¹ 234.00" amount]
+**AI Response**: "Fixed two rendering bugs in `PdfService.generateReceipt()`: (1) Date — replaced `toLocaleDateString('en-IN', ...)` with a manual formatter using a `MONTHS` array, producing consistent `DD Mon YYYY` output (e.g. `09 Jun 2026`) regardless of Node.js locale data. (2) Rupee symbol — PDFKit's built-in Helvetica font does not include the Unicode rupee glyph (U+20B9), which rendered as superscript `¹`. Replaced `₹` with `Rs.` which is fully supported by the standard PostScript font set. Updated audit log."
+**Files changed**: `server/src/shared/services/pdf.service.ts`
+**Context**: CONSTRUCTION PHASE — Post-Construction Bug Fix — Payment receipt PDF rendering
+
+---
+
+## Enhancement — Lab Table: Report Column Replaced with Priority (Post-Construction)
+**Timestamp**: 2026-06-08T04:00:00Z
+**User Input**: "In Lab page, remove the report column and add priority instead of that."
+**AI Response**: "Replaced the 'Report' column header and its table cell in `RequestsTable` with a 'Priority' column. URGENT renders as a red pill, NORMAL as a grey pill — consistent with the existing priority styling in `RequestDetailPanel`. Report upload status remains accessible via the detail panel slide-over. Updated `u7-e-lab-inventory-code-generation-plan.md` and audit log."
+**Files changed**: `client/app/(dashboard)/lab/page.tsx`
+**Context**: CONSTRUCTION PHASE — U7-E Post-Construction Enhancement — Lab table column
+
+---
+
 ## Bug Fix — IPD Duplicate Patient Admission Prevention (Post-Construction)
 **Timestamp**: 2026-06-08T03:00:00Z
 **User Input**: "In IPD, at the same time, 2 same patients with same patient id should not be admitted."

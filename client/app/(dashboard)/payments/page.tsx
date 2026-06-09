@@ -648,10 +648,6 @@ function PaymentDetailPanel({ payment, onClose }: PaymentDetailPanelProps) {
 
         <div className="flex-1 overflow-y-auto p-5">
           {row(
-            "Payment ID",
-            <span className="font-mono text-xs">{payment.paymentId}</span>,
-          )}
-          {row(
             "Patient ID",
             <span className="font-mono text-xs">{payment.patientId}</span>,
           )}
@@ -827,7 +823,7 @@ export default function PaymentsPage() {
       dateTo: dateTo || undefined,
       paymentMethod: methodFilter || undefined,
       page,
-      limit: 20,
+      limit: 10,
     },
     { skip: !canView },
   );

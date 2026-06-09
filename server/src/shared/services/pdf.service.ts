@@ -40,8 +40,11 @@ function hexToRgb(hex: string): [number, number, number] {
   return [isNaN(r) ? 0 : r, isNaN(g) ? 0 : g, isNaN(b) ? 0 : b];
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 function formatDate(date: Date): string {
-  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${d} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 function calculateAge(dob: Date): number {
@@ -256,10 +259,8 @@ export class PdfService {
         .text(` ${data.receiptNumber}`, { lineBreak: false });
 
       const dateStr = formatDate(data.paymentDate);
-      doc.fillColor('#555555').fontSize(8).font('Helvetica-Bold')
-        .text('Date:', W - M - 120, y, { width: 115, align: 'right', lineBreak: false, continued: true });
-      doc.font('Helvetica').fillColor('#111111')
-        .text(` ${dateStr}`, { lineBreak: false });
+      doc.fillColor('#333333').fontSize(8).font('Helvetica')
+        .text(dateStr, M, y, { width: CW, align: 'right', lineBreak: false });
 
       // ── Divider ───────────────────────────────────────────────────────────────
       y += 20;
@@ -300,7 +301,7 @@ export class PdfService {
       doc.fillColor('white').fontSize(8).font('Helvetica')
         .text('AMOUNT PAID (INR)', M + 10, y + 10, { width: CW - 20, lineBreak: false });
       doc.fontSize(22).font('Helvetica-Bold')
-        .text(`₹ ${amountStr}`, M + 10, y + 22, { width: CW - 20, align: 'right', lineBreak: false });
+        .text(`Rs. ${amountStr}`, M + 10, y + 22, { width: CW - 20, align: 'right', lineBreak: false });
 
       // ── Footer ────────────────────────────────────────────────────────────────
       y = H - 44;

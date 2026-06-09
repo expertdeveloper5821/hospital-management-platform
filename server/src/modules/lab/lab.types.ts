@@ -64,6 +64,7 @@ export type EditRadiologyRequestInput = z.infer<typeof EditRadiologyRequestSchem
 // ─── List query ───────────────────────────────────────────────────────────────
 export const ListLabRequestsQuerySchema = z.object({
   patientId: z.string().min(1).optional(),
+  search:    z.string().max(200).trim().optional(),
   status:    z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
   page:      z.coerce.number().int().min(1).default(1),
   limit:     z.coerce.number().int().min(1).max(100).default(20),
@@ -74,12 +75,13 @@ export type ListLabRequestsQuery = z.infer<typeof ListLabRequestsQuerySchema>;
 // ─── Response shapes ──────────────────────────────────────────────────────────
 // reportUrl is a fresh pre-signed S3 URL generated at response time (null when no report yet).
 export interface PathologyRequestResponse {
-  requestId:   string;
-  patientId:   string;
-  fullName?:   string;
-  tenantId:    string;
-  requestedBy: string;
-  testType:    string;
+  requestId:        string;
+  patientId:        string;
+  fullName?:        string;
+  tenantId:         string;
+  requestedBy:      string;
+  requestedByName?: string;
+  testType:         string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -89,12 +91,13 @@ export interface PathologyRequestResponse {
 }
 
 export interface RadiologyRequestResponse {
-  requestId:   string;
-  patientId:   string;
-  fullName?:   string;
-  tenantId:    string;
-  requestedBy: string;
-  imagingType: string;
+  requestId:        string;
+  patientId:        string;
+  fullName?:        string;
+  tenantId:         string;
+  requestedBy:      string;
+  requestedByName?: string;
+  imagingType:      string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;

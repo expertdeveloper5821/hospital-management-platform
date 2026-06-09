@@ -529,15 +529,23 @@ type TabType = 'queue' | 'new';
 export default function OPDPage() {
   const role = useAppSelector((s) => s.auth.profile?.role);
 
-  const [activeTab,   setActiveTab]   = useState<TabType>('queue');
-  const [filterDate,  setFilterDate]  = useState(todayISO());
-  const [filterDoctor,setFilterDoctor]= useState('');
+  const [activeTab,    setActiveTab]    = useState<TabType>('queue');
+  const [filterDate,   setFilterDate]   = useState(todayISO());
+  const [filterDoctor, setFilterDoctor] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedVisit, setSelectedVisit] = useState<OPDVisitResponse | null>(null);
   const [showNewVisit,  setShowNewVisit]  = useState(false);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(filterSearch), 400);
+    return () => clearTimeout(t);
+  }, [filterSearch]);
+
   const { data: queue, isFetching, refetch } = useGetOPDQueueQuery({
     date:     filterDate,
-    doctorId: filterDoctor || undefined,
+    doctorId: filterDoctor    || undefined,
+    search:   debouncedSearch || undefined,
   });
 
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
@@ -601,7 +609,7 @@ export default function OPDPage() {
       {/* Filters */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_auto]  sm:items-center">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_1fr_auto] sm:items-center">
             {/* Date */}
             <div className="flex items-center gap-2">
               <Label htmlFor="filterDate" className="shrink-0 text-sm w-14 sm:w-auto">Date</Label>
@@ -628,6 +636,21 @@ export default function OPDPage() {
                   <option key={d.userId} value={d.userId}>{d.name}</option>
                 ))}
               </select>
+            </div>
+
+            {/* Search */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="filterSearch" className="shrink-0 text-sm w-14 sm:w-auto">Search</Label>
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  id="filterSearch"
+                  placeholder="Patient name or ID…"
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  className="h-10 pl-8 text-sm"
+                />
+              </div>
             </div>
 
             {/* Refresh */}

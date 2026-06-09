@@ -752,7 +752,6 @@ function ItemDetailPanel({ item, canManage, onClose }: ItemDetailPanelProps) {
               </span>
             </div>
 
-            {row('Item ID',   <span className="font-mono text-xs">{item.itemId}</span>)}
             {row('Category',  item.category)}
             {row('Unit',      item.unit)}
             {row('Threshold', `${item.lowStockThreshold} ${item.unit}`)}
@@ -811,7 +810,7 @@ export default function InventoryPage() {
     category: categoryFilter || undefined,
     lowStock: lowStockOnly || undefined,
     page,
-    limit: 20,
+    limit: 10,
   });
 
   const items      = data?.data ?? [];

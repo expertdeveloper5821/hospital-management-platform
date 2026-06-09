@@ -31,14 +31,16 @@ export class IPDRepository {
   }
 
   async findActiveAdmissions(
-    tenantId: string,
-    query: ListAdmissionsQuery,
+    tenantId:    string,
+    query:       ListAdmissionsQuery,
+    patientIds?: string[],
   ): Promise<PaginatedResult<IIPDAdmission>> {
     assertDbConnected();
     const { wardId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, status };
-    if (wardId) filter['wardId'] = wardId;
+    if (wardId)      filter['wardId']     = wardId;
+    if (patientIds)  filter['patientId']  = { $in: patientIds };
 
     const [data, total] = await Promise.all([
       IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),

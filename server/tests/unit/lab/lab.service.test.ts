@@ -1,5 +1,6 @@
 jest.mock('../../../src/modules/lab/lab.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
+jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/modules/notification/notification.service');
 jest.mock('../../../src/shared/services/s3.service');
 jest.mock('../../../src/shared/services/audit.service');

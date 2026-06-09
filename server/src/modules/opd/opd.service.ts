@@ -191,11 +191,12 @@ export class OPDService {
 
   async getQueue(
     tenantId: string,
-    date?:     string,
+    date?:    string,
     doctorId?: string,
+    search?:  string,
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
-    const visits = (await opdRepository.findByDate(tenantId, visitDate, doctorId))
+    let visits = (await opdRepository.findByDate(tenantId, visitDate, doctorId))
       .filter((visit) =>
         visit.status === OPDVisitStatus.OPEN || visit.status === OPDVisitStatus.IN_PROGRESS,
       );
@@ -204,9 +205,19 @@ export class OPDService {
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds)
       ?? new Map<string, string>();
 
-    return visits.map((v) =>
+    const result = visits.map((v) =>
       withFullName(v, nameMap.get(v.patientId) ?? v.fullName ?? v.patientId),
     );
+
+    if (search) {
+      const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re   = new RegExp(safe, 'i');
+      return result.filter((v) =>
+        re.test(v.fullName ?? '') || re.test(v.patientId),
+      );
+    }
+
+    return result;
   }
 
   async getVisitById(tenantId: string, visitId: string): Promise<IOPDVisit & { fullName?: string }> {

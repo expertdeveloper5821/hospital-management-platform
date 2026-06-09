@@ -43,6 +43,7 @@ export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
 export const ListAdmissionsQuerySchema = z.object({
   wardId: z.string().min(1).optional(),
   status: z.enum(['ADMITTED', 'DISCHARGED']).optional().default('ADMITTED'),
+  search: z.string().max(200).trim().optional(),
   page:   z.coerce.number().int().min(1).default(1),
   limit:  z.coerce.number().int().min(1).max(100).default(20),
 });

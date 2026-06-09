@@ -586,9 +586,9 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
           </div>
 
           <div className="flex-1 overflow-y-auto p-5">
-            {row('Request ID',  <span className="font-mono text-xs">{request.requestId}</span>)}
-            {row('Patient ID',  <span className="font-mono text-xs">{request.patientId}</span>)}
-            {row('Requested By', <span className="font-mono text-xs">{request.requestedBy}</span>)}
+            {row('Patient Name',  request.fullName ?? '—')}
+            {row('Patient ID',   <span className="font-mono text-xs">{request.patientId}</span>)}
+            {row('Requested By', request.requestedByName ?? '—')}
             {row('Requested At', formatDate(request.requestedAt))}
             {row('Updated At',   formatDate(request.updatedAt))}
             {row('Priority', (
@@ -680,19 +680,19 @@ interface RequestsTableProps {
 }
 
 function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: RequestsTableProps) {
-  const [statusFilter,    setStatusFilter]    = useState('');
-  const [patientIdFilter, setPatientIdFilter] = useState('');
-  const [patientInput,    setPatientInput]    = useState('');
-  const [page,            setPage]            = useState(1);
-  const [showNewRequest,  setShowNewRequest]  = useState(false);
-  const [selected,        setSelected]        = useState<PathologyRequestResponse | RadiologyRequestResponse | null>(null);
+  const [statusFilter,  setStatusFilter]  = useState('');
+  const [searchFilter,  setSearchFilter]  = useState('');
+  const [searchInput,   setSearchInput]   = useState('');
+  const [page,          setPage]          = useState(1);
+  const [showNewRequest,setShowNewRequest]= useState(false);
+  const [selected,      setSelected]      = useState<PathologyRequestResponse | RadiologyRequestResponse | null>(null);
 
   const pathologyResult = useListPathologyRequestsQuery(
-    { patientId: patientIdFilter || undefined, status: statusFilter || undefined, page, limit: 20 },
+    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: 10 },
     { skip: type !== 'pathology' },
   );
   const radiologyResult = useListRadiologyRequestsQuery(
-    { patientId: patientIdFilter || undefined, status: statusFilter || undefined, page, limit: 20 },
+    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: 10 },
     { skip: type !== 'radiology' },
   );
 
@@ -702,8 +702,8 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
   const totalPages  = result.data?.totalPages ?? 1;
   const isFetching  = result.isFetching;
 
-  function handlePatientFilter() {
-    setPatientIdFilter(patientInput.trim());
+  function handleSearch() {
+    setSearchFilter(searchInput.trim());
     setPage(1);
   }
 
@@ -712,24 +712,24 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
       {/* Toolbar */}
       <div className="flex flex-wrap gap-3 items-end">
         <div className="space-y-1 flex-1 min-w-40">
-          <Label className="text-xs">Filter by Patient ID</Label>
+          <Label className="text-xs">Search</Label>
           <div className="flex gap-2">
             <Input
-              placeholder="Patient ID…"
-              value={patientInput}
-              onChange={(e) => setPatientInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handlePatientFilter()}
+              placeholder="Patient name or ID…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               className="h-9"
             />
-            <Button variant="outline" size="sm" onClick={handlePatientFilter} className="h-9">
+            <Button variant="outline" size="sm" onClick={handleSearch} className="h-9">
               <Search className="h-4 w-4" />
             </Button>
-            {patientIdFilter && (
+            {searchFilter && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-9"
-                onClick={() => { setPatientIdFilter(''); setPatientInput(''); setPage(1); }}
+                onClick={() => { setSearchFilter(''); setSearchInput(''); setPage(1); }}
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -786,7 +786,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Requested</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Report</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Priority</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Action</th>
                   </tr>
                 </thead>
@@ -813,11 +813,14 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                           <Badge variant={statusVariant(r.status)}>{r.status.replace('_', ' ')}</Badge>
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell">
-                          {r.reportUrl ? (
-                            <span className="text-xs text-green-600 font-medium">Uploaded</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Pending</span>
-                          )}
+                          <span className={cn(
+                            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                            r.priority === 'URGENT'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-gray-100 text-gray-600',
+                          )}>
+                            {r.priority}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">

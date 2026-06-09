@@ -204,12 +204,13 @@ export type LabRequestStatus   = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
 export type LabRequestPriority = 'NORMAL' | 'URGENT';
 
 export interface PathologyRequestResponse {
-  requestId:   string;
-  patientId:   string;
-  fullName:    string;
-  tenantId:    string;
-  requestedBy: string;
-  testType:    string;
+  requestId:        string;
+  patientId:        string;
+  fullName:         string;
+  tenantId:         string;
+  requestedBy:      string;
+  requestedByName?: string;
+  testType:         string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -219,12 +220,13 @@ export interface PathologyRequestResponse {
 }
 
 export interface RadiologyRequestResponse {
-  requestId:   string;
-  patientId:   string;
-  fullName:    string;
-  tenantId:    string;
-  requestedBy: string;
-  imagingType: string;
+  requestId:        string;
+  patientId:        string;
+  fullName:         string;
+  tenantId:         string;
+  requestedBy:      string;
+  requestedByName?: string;
+  imagingType:      string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -332,10 +334,11 @@ export interface AddProgressNoteRequest {
 }
  
 export interface ListAdmissionsQuery {
-  wardId?: string;
-  status?: AdmissionStatus;
-  page?:   number;
-  limit?:  number;
+  wardId?:  string;
+  status?:  AdmissionStatus;
+  search?:  string;
+  page?:    number;
+  limit?:   number;
 }
  
 export interface CreateWardRequest {
@@ -480,6 +483,7 @@ export interface AuditLogEntry {
   entityId:       string;
   action:         string;
   userId:         string;
+  userName?:      string;
   tenantId:       string | null;
   previousValue?: Record<string, unknown>;
   newValue?:      Record<string, unknown>;

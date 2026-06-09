@@ -47,7 +47,7 @@ const ACTION_COLORS: Record<string, string> = {
   PASSWORD_RESET: 'bg-amber-500 text-white',
 };
 
-const LIMIT = 25;
+const LIMIT = 10;
 
 // ─── Filter form state ────────────────────────────────────────────────────────
 
@@ -303,7 +303,7 @@ export default function AuditPage() {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">User: </span>
-                        <span className="font-mono" title={log.userId}>{truncate(log.userId, 20)}</span>
+                        <span title={log.userId}>{log.userName ?? truncate(log.userId, 20)}</span>
                       </p>
                       <p className="text-xs text-muted-foreground">{formatDate(log.timestamp)}</p>
                     </div>
@@ -319,7 +319,7 @@ export default function AuditPage() {
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity Type</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity ID</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Action</th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">User ID</th>
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">User</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Timestamp</th>
                     </tr>
                   </thead>
@@ -347,8 +347,8 @@ export default function AuditPage() {
                             {log.action}
                           </span>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.userId}>
-                          {truncate(log.userId, 16)}
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground" title={log.userId}>
+                          {log.userName ?? truncate(log.userId, 16)}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground">
                           {formatDate(log.timestamp)}

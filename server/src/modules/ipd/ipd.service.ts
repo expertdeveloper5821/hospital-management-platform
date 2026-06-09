@@ -27,6 +27,18 @@ import {
 import { PatientModel } from '../patient/patient.model';
 
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async function resolvePatientIdsBySearch(tenantId: string, search: string): Promise<string[]> {
+  const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re   = new RegExp(safe, 'i');
+  const patients = await PatientModel.find(
+    { tenantId, $or: [{ fullName: re }, { patientId: re }] },
+    { patientId: 1 },
+  ).lean();
+  return patients.map((p) => p.patientId);
+}
+
 // ─── BedOccupiedError (standalone — NOT inside IPDService) ───────────────────
 export class BedOccupiedError extends Error {
   readonly statusCode = 409;
@@ -240,7 +252,10 @@ export class IPDService {
     tenantId: string,
     query:    ListAdmissionsQuery,
   ): Promise<PaginatedResult<AdmissionResponse>> {
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query);
+    const searchPatientIds = query.search
+      ? await resolvePatientIdsBySearch(tenantId, query.search)
+      : undefined;
+    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds);
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);

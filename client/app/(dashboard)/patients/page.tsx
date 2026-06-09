@@ -709,7 +709,7 @@ export default function PatientsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data, isFetching } = useSearchPatientsQuery({ q: debouncedSearch || undefined, page, limit: 20 });
+  const { data, isFetching } = useSearchPatientsQuery({ q: debouncedSearch || undefined, page, limit: 10 });
 
   const patients    = data?.data    ?? [];
   const totalPages  = data ? Math.ceil(data.total / 20) : 1;
