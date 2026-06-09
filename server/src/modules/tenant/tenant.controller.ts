@@ -6,7 +6,7 @@ import { s3Service } from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType } from '../../shared/types/common.types';
 import { ValidationError } from '../../shared/middleware/error-handler';
-import { objectIdSchema, paginationSchema } from '../../shared/utils/validation';
+import { objectIdSchema, searchSchema } from '../../shared/utils/validation';
 
 const createTenantSchema = z.object({
   name:       z.string().min(1).max(200),
@@ -39,9 +39,9 @@ export async function createTenant(req: Request, res: Response, next: NextFuncti
 
 export async function listTenants(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const query = paginationSchema.safeParse(req.query);
+    const query = searchSchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
-    const result = await tenantService.listTenants(query.data.page, query.data.limit);
+    const result = await tenantService.listTenants(query.data.page, query.data.limit, query.data.q);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

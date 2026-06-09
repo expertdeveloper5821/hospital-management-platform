@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   useListTenantsQuery,
   useApproveTenantMutation,
@@ -10,22 +10,39 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Building2, RefreshCw, CheckCircle, XCircle, Mail, Plus } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Building2, RefreshCw, CheckCircle, XCircle, Mail, Plus, Search } from 'lucide-react';
 
 function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status) {
     case 'ACTIVE':               return 'default';
-    case 'PENDING_VERIFICATION': return 'secondary';
+    case 'PENDING_VERIFICATION': return 'outline';
     case 'INACTIVE':             return 'destructive';
     default:                     return 'outline';
   }
 }
 
+function statusExtraClass(status: string): string {
+  return status === 'PENDING_VERIFICATION'
+    ? 'border-transparent bg-orange-500 text-white hover:bg-orange-500'
+    : '';
+}
+
 export default function SuperAdminPage() {
   const [page, setPage] = useState(1);
-  const limit = 20;
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const limit = 10;
 
-  const { data, isLoading, isFetching, refetch } = useListTenantsQuery({ page, limit });
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const { data, isLoading, isFetching, refetch } = useListTenantsQuery({ page, limit, search: search || undefined });
   const [approveTenant,    { isLoading: approving   }] = useApproveTenantMutation();
   const [deactivateTenant, { isLoading: deactivating }] = useDeactivateTenantMutation();
   const [resendInvite,     { isLoading: resending    }] = useResendInviteMutation();
@@ -43,11 +60,11 @@ export default function SuperAdminPage() {
           <Button
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-xs"
+            className="h-7 px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
             disabled={isBusy}
             onClick={() => approveTenant(tenant._id)}
           >
-            <CheckCircle className="h-3.5 w-3.5 mr-1 text-green-500" />
+            <CheckCircle className="h-3.5 w-3.5 mr-1" />
             Approve
           </Button>
         )}
@@ -90,6 +107,16 @@ export default function SuperAdminPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              type="search"
+              placeholder="Search hospitals…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="h-8 w-48 pl-8 text-sm sm:w-56"
+            />
+          </div>
           <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
             Refresh
@@ -112,7 +139,7 @@ export default function SuperAdminPage() {
       ) : tenants.length === 0 ? (
         <div className="rounded-lg border bg-card py-20 text-center text-sm text-muted-foreground">
           <Building2 className="mx-auto h-8 w-8 mb-3 opacity-40" />
-          No tenants found
+          {search ? `No hospitals match "${search}"` : 'No tenants found'}
         </div>
       ) : (
         <>
@@ -125,7 +152,7 @@ export default function SuperAdminPage() {
                     <p className="font-medium truncate">{tenant.name}</p>
                     <p className="text-xs text-muted-foreground font-mono truncate">{tenant._id}</p>
                   </div>
-                  <Badge variant={statusVariant(tenant.status)} className="shrink-0 text-xs">
+                  <Badge variant={statusVariant(tenant.status)} className={`shrink-0 text-xs ${statusExtraClass(tenant.status)}`}>
                     {tenant.status}
                   </Badge>
                 </div>
@@ -162,7 +189,7 @@ export default function SuperAdminPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{tenant.adminEmail}</td>
                       <td className="px-4 py-3">
-                        <Badge variant={statusVariant(tenant.status)}>{tenant.status}</Badge>
+                        <Badge variant={statusVariant(tenant.status)} className={statusExtraClass(tenant.status)}>{tenant.status}</Badge>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {new Date(tenant.createdAt).toLocaleDateString()}

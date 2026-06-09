@@ -11,12 +11,18 @@ export class TenantRepository {
     return TenantModel.findById(tenantId);
   }
 
-  async findAll(page: number, limit: number): Promise<PaginatedResult<ITenant>> {
+  async findAll(page: number, limit: number, search?: string): Promise<PaginatedResult<ITenant>> {
     assertDbConnected();
     const skip  = (page - 1) * limit;
+    const query: Record<string, unknown> = {};
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(escaped, 'i');
+      query.$or = [{ name: re }, { adminEmail: re }];
+    }
     const [data, total] = await Promise.all([
-      TenantModel.find().skip(skip).limit(limit).lean(),
-      TenantModel.countDocuments(),
+      TenantModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      TenantModel.countDocuments(query),
     ]);
     return { data: data as ITenant[], total, page, limit, totalPages: Math.ceil(total / limit) };
   }

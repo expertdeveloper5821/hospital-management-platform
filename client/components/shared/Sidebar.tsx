@@ -132,13 +132,18 @@ export function Sidebar({ onClose }: SidebarProps) {
 
       {/* Platform logo — shown when set by Super Admin */}
       {platformSettings?.logoUrl && (
-        <div className="shrink-0 border-t border-sidebar-accent/40 px-4 py-3 flex items-center justify-center">
+        <div className="shrink-0 border-t border-sidebar-accent/40 px-4 py-3 flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={platformSettings.logoUrl}
             alt={platformSettings.platformTitle ?? 'Platform'}
-            className="h-12 w-auto max-w-[140px] object-contain opacity-80"
+            className="h-12 w-auto max-w-[80px] object-contain opacity-80 shrink-0"
           />
+          {/* {platformSettings.platformTitle && (
+            <span className="text-xs text-sidebar-foreground/60 truncate">
+              {platformSettings.platformTitle}
+            </span>
+          )} */}
         </div>
       )}
     </aside>

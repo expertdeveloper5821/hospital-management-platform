@@ -84,8 +84,8 @@ export class TenantService {
     });
   }
 
-  async listTenants(page: number, limit: number): Promise<PaginatedResult<ITenant>> {
-    return tenantRepository.findAll(page, limit);
+  async listTenants(page: number, limit: number, search?: string): Promise<PaginatedResult<ITenant>> {
+    return tenantRepository.findAll(page, limit, search);
   }
 
   async resendInvite(tenantId: string, superAdminId: string): Promise<void> {
