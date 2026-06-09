@@ -73,6 +73,14 @@ export class IPDService {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
+    // [1b] Reject if the patient already has an active admission
+    const activeAdmission = await ipdRepository.findActiveAdmissionByPatient(input.patientId, tenantId);
+    if (activeAdmission) {
+      throw new ConflictError(
+        `Patient is already admitted (admission ID: ${activeAdmission.admissionId}). Discharge the patient before creating a new admission.`,
+      );
+    }
+
     // [2] Verify ward exists — uses ipdRepository (U3-A owns Ward model)
     const ward = await ipdRepository.findWardById(tenantId, input.wardId);
     if (!ward) throw new NotFoundError('Ward not found');

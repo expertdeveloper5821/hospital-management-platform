@@ -35,8 +35,12 @@ interface BrandingDetail {
 export const tenantApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
-    listTenants: build.query<PaginatedResult<TenantSummary>, { page?: number; limit?: number }>({
-      query: ({ page = 1, limit = 20 } = {}) => `/api/tenants?page=${page}&limit=${limit}`,
+    listTenants: build.query<PaginatedResult<TenantSummary>, { page?: number; limit?: number; search?: string }>({
+      query: ({ page = 1, limit = 20, search } = {}) => {
+        const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+        if (search) params.set('q', search);
+        return `/api/tenants?${params.toString()}`;
+      },
       transformResponse: (raw: ApiSuccess<PaginatedResult<TenantSummary>>) => raw.data,
       providesTags: ['Tenant'],
     }),

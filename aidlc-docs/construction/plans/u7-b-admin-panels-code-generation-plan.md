@@ -105,3 +105,49 @@ Replaced HTML `required` attributes with full client-side validation:
 - `noValidate` on `<form>` suppresses browser native popups
 - API errors kept in separate `apiError` state, shown below the form fields
 - Validation pattern: derived `errors` from form state + `touched` + `submitted` states + `fieldError()` helper
+
+---
+
+## Post-Construction Bug Fix — Superadmin Tenant Search (2026-06-08)
+
+**Problem**: The search bar on the Super Admin Console (`/super-admin`) was non-functional — typing hospital names or email addresses had no effect because no search wiring existed anywhere in the stack.
+
+**Root cause**: The `GET /api/tenants` endpoint, `TenantService.listTenants()`, `TenantRepository.findAll()`, the RTK Query slice, and the page component all lacked search parameter support. The shared `searchSchema` existed in `validation.ts` but was unused for tenants.
+
+**Files changed**:
+
+| File | Change |
+|---|---|
+| `server/src/modules/tenant/tenant.repository.ts` | `findAll()` now accepts optional `search?: string`; builds `$or` regex filter on `name` and `adminEmail` when present |
+| `server/src/modules/tenant/tenant.service.ts` | `listTenants()` signature extended to accept and forward `search` to repository |
+| `server/src/modules/tenant/tenant.controller.ts` | Import swapped from `paginationSchema` to `searchSchema`; `listTenants` handler passes `query.data.q` to service |
+| `client/store/api/tenant.api.ts` | `listTenants` query arg extended with `search?: string`; builds URL via `URLSearchParams`, appends `q` when present |
+| `client/app/(dashboard)/super-admin/page.tsx` | Added `searchInput` + `search` states; 300ms debounce via `useEffect`; search resets page to 1; search `<Input>` with `Search` icon rendered in header; empty state message is search-aware |
+
+**Pattern followed**: Identical to the existing user-list search in `UserRepository.findAll()` (case-insensitive MongoDB regex with special-character escaping).
+
+---
+
+## Post-Construction Enhancement — Branding Moved to Profile Dropdown (2026-06-08)
+
+**Change**: The Branding tab was separated from the Hospital Admin Panel (`/admin`) to improve usability and organisation.
+
+**What changed**:
+
+| File | Change |
+|---|---|
+| `client/app/(dashboard)/admin/branding/page.tsx` | **New** — standalone branding settings page extracted from the BrandingTab component |
+| `client/components/header/ProfileDropdown.tsx` | Added **Branding** menu item (visible to `HOSPITAL_ADMIN` only) navigating to `/admin/branding` |
+| `client/app/(dashboard)/admin/page.tsx` | Removed `BrandingTab` component, tab navigation, and all branding-related imports; `AdminPage` now renders `UsersTab` directly |
+
+**Rationale**: Branding is a one-time or rare configuration task; mixing it in the same tab view as daily user management caused clutter. Placing it behind the profile icon (alongside My Profile and Change Password) groups it logically with other account/settings actions.
+
+---
+
+## Post-Construction Bug Fix — Tenant List Sort Order (2026-06-08)
+
+**Problem**: Newly onboarded hospitals appeared at the bottom of the list. The user expected the latest tenant to appear at the top.
+
+**Fix**: Added `.sort({ createdAt: -1 })` to `TenantRepository.findAll()` so tenants are returned newest-first. The sort is applied before `.skip()` and `.limit()` so pagination remains correct.
+
+**File changed**: `server/src/modules/tenant/tenant.repository.ts` — `findAll()` query chain.

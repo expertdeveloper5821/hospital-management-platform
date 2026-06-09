@@ -160,7 +160,7 @@ export async function getStockHistory(
   try {
     const { itemId } = itemIdParamSchema.parse(req.params);
     const { page } = pageQuerySchema.parse(req.query);
-    const LIMIT = 20;
+    const LIMIT = 10;
 
     // Verify item exists in this tenant
     const item = await inventoryService.getItemById(itemId, req.user!.tenantId as string);

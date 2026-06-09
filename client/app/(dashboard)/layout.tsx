@@ -1,17 +1,25 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/shared/Sidebar';
 import { NotificationBell } from '@/components/shared/NotificationBell';
 import { BrandingProvider } from '@/components/shared/BrandingProvider';
-import { SearchOverlay } from '@/components/header/SearchOverlay';
 import { ProfileDropdown } from '@/components/header/ProfileDropdown';
 import { MobileNav } from '@/components/layout/MobileNav';
 import { useAppSelector } from '@/store/hooks';
 import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
+import { useGetMyProfileQuery } from '@/store/api/user.api';
 import { wsClient } from '@/lib/websocket-client';
-import { Menu, Search } from 'lucide-react';
+import { Menu } from 'lucide-react';
+
+function getTimeGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour >= 5  && hour < 12) return 'Good Morning';
+  if (hour >= 12 && hour < 17) return 'Good Afternoon';
+  if (hour >= 17 && hour < 21) return 'Good Evening';
+  return 'Good Night';
+}
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router  = useRouter();
@@ -19,7 +27,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const profile = useAppSelector((s) => s.auth.profile);
   const isAuth  = useAppSelector((s) => s.auth.isAuthenticated);
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
-  const [searchOpen,   setSearchOpen]   = useState(false);
+  const isSuperAdmin = profile?.role === 'SUPER_ADMIN';
+  const { data: myProfile } = useGetMyProfileQuery(undefined, { skip: !profile || isSuperAdmin });
 
   const { data: platformSettings } = useGetPlatformSettingsQuery();
 
@@ -38,19 +47,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       link.href = platformSettings.faviconUrl;
     }
   }, [platformSettings]);
-
-  // Ctrl+K / Cmd+K global shortcut
-  const handleGlobalKey = useCallback((e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-      e.preventDefault();
-      setSearchOpen((v) => !v);
-    }
-  }, []);
-
-  useEffect(() => {
-    document.addEventListener('keydown', handleGlobalKey);
-    return () => document.removeEventListener('keydown', handleGlobalKey);
-  }, [handleGlobalKey]);
 
   // Guard — unauthenticated users go to login
   useEffect(() => {
@@ -95,38 +91,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
           <header className="flex items-center justify-between h-16 px-4 sm:px-6 border-b bg-background shrink-0">
-            <button
-              className="md:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              onClick={() => setSidebarOpen(true)}
-              aria-label="Open navigation"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            {/* Header action bar */}
-            <div className="ml-auto flex items-center gap-2">
-              {/* Search trigger */}
+            {/* Left: hamburger (mobile) + greeting (desktop) */}
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => setSearchOpen(true)}
-                aria-label="Open search (Ctrl+K)"
-                className="hidden sm:flex items-center gap-2 h-8 rounded-md border bg-muted/50 px-3 text-xs text-muted-foreground hover:bg-muted transition-colors"
+                className="md:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                onClick={() => setSidebarOpen(true)}
+                aria-label="Open navigation"
               >
-                <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Search…</span>
-                <kbd className="rounded border px-1 font-mono text-[10px] opacity-60">Ctrl K</kbd>
+                <Menu className="h-5 w-5" />
               </button>
-              <button
-                onClick={() => setSearchOpen(true)}
-                aria-label="Open search"
-                className="sm:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                <Search className="h-5 w-5" aria-hidden="true" />
-              </button>
-
+              {!isSuperAdmin && (
+                <p className="hidden md:block text-sm font-medium text-foreground">
+                  Hi, {getTimeGreeting()}{myProfile?.name ? `, ${myProfile.name}` : ''}.
+                </p>
+              )}
+            </div>
+            {/* Right: notification + profile */}
+            <div className="flex items-center gap-2">
               <NotificationBell />
               <ProfileDropdown />
             </div>
-
-            <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
           </header>
           <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
         </div>

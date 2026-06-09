@@ -2,6 +2,15 @@
 
 ---
 
+## Bug Fix — IPD Duplicate Patient Admission Prevention (Post-Construction)
+**Timestamp**: 2026-06-08T03:00:00Z
+**User Input**: "In IPD, at the same time, 2 same patients with same patient id should not be admitted."
+**AI Response**: "Added duplicate-patient guard in `IPDService.createAdmission()`. After verifying the patient exists, calls `ipdRepository.findActiveAdmissionByPatient()` (method already existed in the repository). If a matching admission with status `ADMITTED` is found, throws `ConflictError` (HTTP 409) with a descriptive message including the active admission ID. The frontend `NewAdmissionModal` already surfaces the API error message via its `setError` handler, so no frontend changes were required. Updated audit log."
+**Files changed**: `server/src/modules/ipd/ipd.service.ts`
+**Context**: CONSTRUCTION PHASE — IPD Post-Construction Bug Fix — Duplicate patient admission
+
+---
+
 ## Workflow Start
 **Timestamp**: 2026-05-12T00:00:00Z
 **User Input**: "[Complete HMS requirements document provided — covering 15 requirements across Super Admin onboarding, multi-tenant isolation, branding, user management, authentication, patient registration, OPD, IPD, pathology, radiology, inventory, payments, role-permission matrix, audit logging, and in-app notifications. Full raw input captured in session context.]"
@@ -297,5 +306,29 @@
 **User Input**: "Approve & Generate"
 **AI Response**: "Code Generation Plan approved. Beginning Part 2: Generation. Executing Steps 7-33 sequentially. Marking checkboxes as each step completes."
 **Context**: CONSTRUCTION PHASE — Unit 1: Foundation — Code Generation Part 2 (Generation) — STARTED
+
+---
+
+## Enhancement — Branding Moved to Profile Dropdown (Post-Construction)
+**Timestamp**: 2026-06-08T02:00:00Z
+**User Input**: "In Hospital Admin page, Please keep the Branding option separate from the User section. Place it behind profile icon with My Profile, Change Password."
+**AI Response**: "Extracted BrandingTab into standalone page at `/admin/branding`. Added Branding menu item to ProfileDropdown (HOSPITAL_ADMIN only). Simplified AdminPage to render UsersTab directly with no tab navigation. Updated u7-b plan and audit log."
+**Context**: CONSTRUCTION PHASE — U7-B Post-Construction Enhancement — Branding UX reorganisation
+
+---
+
+## Bug Fix — Tenant List Sort Order (Post-Construction)
+**Timestamp**: 2026-06-08T01:00:00Z
+**User Input**: "In super admin screen, the latest added tenant should be listed at top."
+**AI Response**: "Added `.sort({ createdAt: -1 })` to `TenantRepository.findAll()` query chain (before skip/limit) so newest tenants appear first. Updated u7-b plan and audit log."
+**Context**: CONSTRUCTION PHASE — U7-B Post-Construction Bug Fix — Tenant list sort order
+
+---
+
+## Bug Fix — Super Admin Tenant Search (Post-Construction)
+**Timestamp**: 2026-06-08T00:00:00Z
+**User Input**: "In superadmin screen, inside search bar, the search keywords are not working example with hospital names, email id"
+**AI Response**: "Diagnosed missing search wiring across all 5 layers (repository → service → controller → RTK Query slice → page component). Implemented end-to-end: `TenantRepository.findAll()` accepts `search?` and applies case-insensitive MongoDB `$or` regex on `name`/`adminEmail`; service and controller updated to propagate param (controller now uses `searchSchema` instead of `paginationSchema`); RTK Query `listTenants` query appends `?q=` via URLSearchParams; `super-admin/page.tsx` adds debounced search input (300ms) with page-reset on change and search-aware empty state. Updated `u7-b-admin-panels-code-generation-plan.md`."
+**Context**: CONSTRUCTION PHASE — U7-B Post-Construction Bug Fix — Tenant search end-to-end
 
 ---
