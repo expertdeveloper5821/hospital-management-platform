@@ -3,6 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: jest.fn() }),
+}));
+
 const mockEditPathology   = jest.fn();
 const mockDeletePathology = jest.fn();
 const mockEditRadiology   = jest.fn();

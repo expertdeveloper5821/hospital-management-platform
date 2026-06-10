@@ -90,9 +90,41 @@
 ### 🟡 OPERATIONS PHASE
 - [ ] Operations — PLACEHOLDER
 
+## Enhancement Task Status (v1.1)
+
+| Task | Title | Status |
+|---|---|---|
+| E01 | Dashboard Analytics | ✅ COMPLETE (backend + frontend + tests) |
+| E02 | Header Action Items | ⬜ Pending |
+| E03 | Staff Profile Update | ⬜ Pending |
+| E04 | Users List Improvements | ⬜ Pending |
+| E05 | Patients Module | ⬜ Pending |
+| E06 | Pathology/Radiology Actions | ⬜ Pending |
+| E07 | Inventory Module | ⬜ Pending |
+
+## Post-Construction Enhancements Applied (outside E01–E07)
+- Patient name search across Lab / IPD / OPD (2026-06-09)
+- Dashboard permission fix — data-driven rendering aligned to backend ROLE_FIELD_ACCESS (2026-06-10)
+- Role permission gaps fixed — HR can edit user roles; FINANCE_MANAGER/PATHOLOGIST/RADIOLOGIST/HR can reach dashboard; NURSE can list users; FINANCE_MANAGER can search patients (2026-06-10)
+- Lab cross-tab 403 fixed — RADIOLOGIST added to pathology read routes; PATHOLOGIST added to radiology read routes (2026-06-10)
+- IPD History tab added to Patient detail panel — new `GET /api/ipd/patients/:patientId/history` endpoint (repository `findByPatient`, service `getPatientHistory`, controller `getPatientIPDHistory`); `useGetIPDPatientHistoryQuery` RTK Query hook; `IPDHistoryTab` component with status filter and pagination; FR-08.9 added to requirements.md (2026-06-10)
+- Lab access revoked from RECEPTIONIST — removed from all 8 lab routes (create/list/view/upload for pathology and radiology); dashboard "Create Lab Test" quick action hidden for RECEPTIONIST; lab page redirects RECEPTIONIST to /dashboard; requirements.md RBAC matrix and FR-09/FR-10 narratives updated (2026-06-10)
+- Login page brand fixed — fallback changed to 'MediScribe'; text always visible alongside icon/logo (2026-06-10)
+- Lab: requester name, detail panel cleanup, priority column (2026-06-08)
+- Audit logs: show user name (2026-06-08)
+- Payments: hide payment ID from detail panel (2026-06-08)
+- Inventory: hide item ID from detail panel (2026-06-08)
+- Global pagination limit 20 → 10 (2026-06-08)
+- Payment receipt PDF date format + rupee symbol fix (2026-06-08)
+- IPD duplicate admission prevention (2026-06-08)
+- Super Admin tenant search fix (2026-06-08)
+- Tenant list sort order (newest first) (2026-06-08)
+- Branding moved to profile dropdown (2026-06-08)
+- Toast system + form validations (branch `toastify`, 2026-05-25)
+
 ## Current Status
 - **Lifecycle Phase**: CONSTRUCTION
-- **Current Stage**: Post-construction enhancements — branch `toastify`
+- **Current Stage**: Post-construction enhancements — branch `bugfix2`
 - **Next Stage**: Build and Test
-- **Status**: All U7 subunits complete. Branch `toastify` adds: global toast infrastructure (`lib/toast.ts`, `Toaster.tsx`, `base.api.ts` auto-toast layer), form validations on Onboard Hospital and Register Patient forms, and a backend bug fix in `approveTenant` (status no longer set ACTIVE when invite email fails).
+- **Status**: All U7 subunits complete. E01 (Dashboard Analytics) fully implemented and permission-corrected. All dashboard sections are data-driven — backend `ROLE_FIELD_ACCESS` is the single source of truth for what each role sees.
 - **Plan docs**: `u7-b-admin-panels-code-generation-plan.md`, `u7-c-patient-opd-code-generation-plan.md`, `u7-e-lab-inventory-code-generation-plan.md`, `u7-g-notifications-audit-code-generation-plan.md`, `u7-frontend-infrastructure-plan.md`

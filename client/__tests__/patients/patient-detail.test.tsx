@@ -22,6 +22,14 @@ jest.mock('@/store/api/opd.api', () => ({
   useGetOPDPatientHistoryQuery: (...args: unknown[]) => mockGetHistory(...args),
 }));
 
+jest.mock('@/store/api/ipd.api', () => ({
+  useGetIPDPatientHistoryQuery: () => ({
+    data:       { data: [], total: 0, page: 1, limit: 10, totalPages: 0 },
+    isLoading:  false,
+    isFetching: false,
+  }),
+}));
+
 jest.mock('@/lib/toast', () => ({
   toastSuccess: jest.fn(),
   toastError:   jest.fn(),

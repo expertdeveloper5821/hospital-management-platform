@@ -2,7 +2,7 @@
 
 **Version**: 1.1  
 **Date**: 2026-05-27  
-**Status**: Planning Complete — Awaiting Implementation Instruction  
+**Status**: E01 COMPLETE — Remaining tasks awaiting implementation instruction  
 **Prerequisites**: All Units 1–7 complete. No tasks in this file modify existing passing tests or existing API contracts.
 
 > Tasks are grouped by enhancement requirement. Each task is self-contained and ordered for minimal inter-task dependency. Implementation SHALL NOT begin until explicitly instructed.
@@ -22,32 +22,34 @@
 
 ---
 
-## E01 — Dashboard Analytics
+## E01 — Dashboard Analytics ✅ COMPLETE
+
+> Implemented 2026-06-09 to 2026-06-10. All backend tasks done inline (no separate component files — widgets are co-located in `dashboard/page.tsx`). Permission-corrected 2026-06-10 to align Quick Actions with page-level `canXxx` arrays and make all section visibility data-driven.
 
 ### Backend Tasks
 
-| Task ID | Title | Files | Dependencies | Effort |
-|---|---|---|---|---|
-| E01-B01 | Create `dashboard.types.ts` — define `DashboardStats` response type (role-filtered fields, `lastUpdated`) | `server/src/modules/dashboard/dashboard.types.ts` | None | XS |
-| E01-B02 | Create `dashboard.service.ts` — implement MongoDB aggregation pipelines for all 9 stat fields; implement 60s in-memory TTL cache per `tenantId+role` | `server/src/modules/dashboard/dashboard.service.ts` | E01-B01 | M |
-| E01-B03 | Create `dashboard.controller.ts` — `GET /stats` handler; extract role from JWT; call service with role filter; return role-scoped payload | `server/src/modules/dashboard/dashboard.controller.ts` | E01-B02 | S |
-| E01-B04 | Create `dashboard.routes.ts` — register `GET /api/v1/dashboard/stats` with `authenticateJWT`, `scopeTenant`, `requireRole([...all tenant roles])` middleware | `server/src/modules/dashboard/dashboard.routes.ts` | E01-B03 | XS |
-| E01-B05 | Register dashboard routes in `app.ts` — one-line import + `app.use('/api/v1/dashboard', dashboardRouter)` | `server/src/app.ts` | E01-B04 | XS |
-| E01-B06 | Add `DASHBOARD_CACHE_TTL_SECONDS` and `DASHBOARD_POLL_INTERVAL_SECONDS` to `env.ts` with defaults | `server/src/shared/config/env.ts` | E01-B01 | XS |
-| E01-B07 | Write unit tests for `DashboardService` — test each aggregation with mocked MongoDB; test cache hit/miss; test role filtering omits non-permitted fields | `server/tests/unit/dashboard/dashboard.service.test.ts` | E01-B02 | M |
-| E01-B08 | Write integration tests for `GET /api/v1/dashboard/stats` — test each permitted role gets correct fields; test 403 for forbidden roles; test `?refresh=true` bypass | `server/tests/integration/dashboard/dashboard.routes.test.ts` | E01-B05 | M |
+| Task ID | Title | Status |
+|---|---|---|
+| E01-B01 | `dashboard.types.ts` — `DashboardStats` + `RecentActivity` + `ROLE_FIELD_ACCESS` for 12 roles | ✅ Done |
+| E01-B02 | `dashboard.service.ts` — 18 parallel aggregations, 60s TTL cache per `tenantId+role` | ✅ Done |
+| E01-B03 | `dashboard.controller.ts` — `GET /stats` + `?refresh=true` bypass | ✅ Done |
+| E01-B04 | `dashboard.routes.ts` — registered with `authenticateJWT → scopeTenant → requireRole` | ✅ Done |
+| E01-B05 | Dashboard routes registered in `app.ts` | ✅ Done |
+| E01-B06 | `DASHBOARD_CACHE_TTL_SECONDS` env var with default 60 | ✅ Done |
+| E01-B07 | Unit tests — role filtering, cache hit/miss, aggregation correctness | ✅ Done |
+| E01-B08 | Integration tests | ⬜ Pending |
 
 ### Frontend Tasks
 
-| Task ID | Title | Files | Dependencies | Effort |
-|---|---|---|---|---|
-| E01-F01 | Create `store/api/dashboard.api.ts` — RTK Query slice with `getDashboardStats` query; 60s `pollingInterval`; `?refresh=true` arg support | `client/store/api/dashboard.api.ts` | E01-B05 | S |
-| E01-F02 | Create `StatCard.tsx` — icon + label + primary value + secondary context; skeleton variant | `client/components/dashboard/StatCard.tsx` | None | S |
-| E01-F03 | Create `TrendChart.tsx` — Recharts LineChart wrapping `{ date, count/amount }[]`; responsive container; loading state | `client/components/dashboard/TrendChart.tsx` | None | S |
-| E01-F04 | Create `AlertBadge.tsx` — count badge with warning color for low-stock and pending-lab alerts | `client/components/dashboard/AlertBadge.tsx` | None | XS |
-| E01-F05 | Create `DashboardSkeleton.tsx` — shimmer grid matching 4-col StatCard layout | `client/components/dashboard/DashboardSkeleton.tsx` | None | XS |
-| E01-F06 | Update `app/(dashboard)/page.tsx` — wire `getDashboardStats`, render widget grid; loading skeleton; error banner; Refresh button; role-conditional rendering | `client/app/(dashboard)/page.tsx` | E01-F01, E01-F02, E01-F03, E01-F04, E01-F05 | M |
-| E01-F07 | Write unit tests for `StatCard`, `TrendChart`, `AlertBadge` components | `client/__tests__/dashboard/` | E01-F02, E01-F03, E01-F04 | S |
+| Task ID | Title | Status |
+|---|---|---|
+| E01-F01 | `store/api/dashboard.api.ts` — RTK Query + 60s poll + `?refresh=true` | ✅ Done |
+| E01-F02 | `MetricCard`, `AlertCard`, `QuickAction` components (co-located in page) | ✅ Done |
+| E01-F03 | `AreaChart` OPD + Revenue trend charts with gradient fills | ✅ Done |
+| E01-F04 | Critical Alerts section with warning colors | ✅ Done |
+| E01-F05 | Loading skeleton (pulse animation) | ✅ Done |
+| E01-F06 | `dashboard/page.tsx` — full rebuild; purely data-driven; Quick Actions match page-level permissions | ✅ Done |
+| E01-F07 | Component unit tests | ⬜ Pending |
 
 ---
 

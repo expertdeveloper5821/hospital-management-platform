@@ -431,7 +431,7 @@ describe('PATCH /api/users/:userId/role', () => {
     expect(res.status).toBe(409);
   });
 
-  test('403 — HR cannot update roles', async () => {
+  test('200 — HR can update roles', async () => {
     const tenant = await seedTenant();
     const hr     = await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
     const target = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
@@ -442,7 +442,7 @@ describe('PATCH /api/users/:userId/role', () => {
       .set(bearer(token))
       .send({ role: UserRole.NURSE });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 });
 

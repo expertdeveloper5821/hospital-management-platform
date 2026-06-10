@@ -179,6 +179,24 @@ export async function dischargePatient(
   }
 }
 
+export async function getPatientIPDHistory(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const { patientId } = req.params;
+    const page   = Math.max(1, parseInt(String(req.query['page']  ?? '1'),  10) || 1);
+    const limit  = Math.min(50, Math.max(1, parseInt(String(req.query['limit'] ?? '10'), 10) || 10));
+    const status = req.query['status'] as 'ADMITTED' | 'DISCHARGED' | undefined;
+
+    const tenantId = req.user!.tenantId as string;
+    const result   = await ipdService.getPatientHistory(tenantId, patientId, page, limit, status);
+
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
 export async function getBedOccupancySummary(
   req: Request,
   res: Response,

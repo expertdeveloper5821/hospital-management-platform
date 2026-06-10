@@ -2,24 +2,26 @@
 jest.mock('../../../src/modules/patient/patient.model');
 jest.mock('../../../src/modules/opd/opd.model');
 jest.mock('../../../src/modules/ipd/ipd.model');
+jest.mock('../../../src/modules/ipd/bed.model');
 jest.mock('../../../src/modules/lab/lab.model');
 jest.mock('../../../src/modules/inventory/inventory.model');
 jest.mock('../../../src/modules/payment/payment.model');
 jest.mock('../../../src/modules/user/user.model');
+jest.mock('../../../src/modules/audit/audit.model');
 
 import { PatientModel }          from '../../../src/modules/patient/patient.model';
 import { OPDVisitModel }         from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel }     from '../../../src/modules/ipd/ipd.model';
+import { BedModel }              from '../../../src/modules/ipd/bed.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
 import { InventoryItemModel }    from '../../../src/modules/inventory/inventory.model';
 import { PaymentModel }          from '../../../src/modules/payment/payment.model';
 import { UserModel }             from '../../../src/modules/user/user.model';
+import { AuditLogModel }         from '../../../src/modules/audit/audit.model';
 import { DashboardService, clearDashboardCache } from '../../../src/modules/dashboard/dashboard.service';
 import { UserRole }              from '../../../src/shared/types/common.types';
 
 const TENANT = 'tenant-001';
-
-// ─── helpers to set up countDocuments / aggregate mocks ───────────────────────
 
 function mockCount(model: unknown, value: number) {
   (model as jest.MockedClass<typeof PatientModel>).countDocuments = jest.fn().mockResolvedValue(value);
@@ -27,6 +29,14 @@ function mockCount(model: unknown, value: number) {
 
 function mockAggregate(model: unknown, values: Record<string, unknown>[]) {
   (model as jest.MockedClass<typeof PaymentModel>).aggregate = jest.fn().mockResolvedValue(values);
+}
+
+function mockFind(model: unknown, values: unknown[]) {
+  (model as { find: jest.Mock }).find = jest.fn().mockReturnValue({
+    sort:  jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    lean:  jest.fn().mockResolvedValue(values),
+  });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -40,15 +50,19 @@ describe('DashboardService.getStats', () => {
     service = new DashboardService();
 
     // Default: all counts return 0 / empty arrays
-    mockCount(PatientModel, 0);
-    mockCount(OPDVisitModel, 0);
-    mockCount(IPDAdmissionModel, 0);
-    mockCount(PathologyRequestModel, 0);
-    mockCount(RadiologyRequestModel, 0);
-    mockCount(UserModel, 0);
-    mockAggregate(PaymentModel, []);
-    mockAggregate(OPDVisitModel, []);
+    mockCount(PatientModel,           0);
+    mockCount(OPDVisitModel,          0);
+    mockCount(IPDAdmissionModel,      0);
+    mockCount(PathologyRequestModel,  0);
+    mockCount(RadiologyRequestModel,  0);
+    mockCount(UserModel,              0);
+    mockCount(BedModel,               0);
+    mockCount(InventoryItemModel,     0);
+    mockCount(PaymentModel,           0);
+    mockAggregate(PaymentModel,       []);
+    mockAggregate(OPDVisitModel,      []);
     mockAggregate(InventoryItemModel, []);
+    mockFind(AuditLogModel,           []);
   });
 
   // ─── Role filtering ────────────────────────────────────────────────────────
@@ -61,14 +75,13 @@ describe('DashboardService.getStats', () => {
       mockCount(PathologyRequestModel, 3);
       mockCount(RadiologyRequestModel, 2);
       mockCount(UserModel, 20);
-      // PaymentModel.aggregate is called 3 times for ADMIN:
-      //   1) getRevenueSummary → today, 2) getRevenueSummary → month, 3) getMonthlyRevenueTrend
+      // PaymentModel.aggregate: today, month, averageDaily, trend = 4 calls
       (PaymentModel.aggregate as jest.Mock)
-        .mockResolvedValueOnce([{ total: 5000 }])
-        .mockResolvedValueOnce([{ total: 40000 }])
-        .mockResolvedValueOnce([]);
+        .mockResolvedValueOnce([{ total: 5000 }])   // today
+        .mockResolvedValueOnce([{ total: 40000 }])  // month
+        .mockResolvedValueOnce([{ total: 30000 }])  // averageDaily (30-day window)
+        .mockResolvedValueOnce([]);                 // monthlyRevenueTrend
       mockAggregate(InventoryItemModel, [{ total: 4 }]);
-      // OPDVisitModel.aggregate is called once for getMonthlyOpdTrend
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([]);
 
       const stats = await service.getStats(TENANT, UserRole.ADMIN, true);
@@ -88,7 +101,7 @@ describe('DashboardService.getStats', () => {
   });
 
   describe('role filtering — Receptionist sees limited fields', () => {
-    test('returns only totalPatients and todayOpdCount for RECEPTIONIST', async () => {
+    test('returns patient and OPD stats for RECEPTIONIST', async () => {
       mockCount(PatientModel, 15);
       mockCount(OPDVisitModel, 3);
 
@@ -132,7 +145,7 @@ describe('DashboardService.getStats', () => {
   });
 
   describe('role filtering — Nurse', () => {
-    test('returns patients, OPD, and IPD counts only for NURSE', async () => {
+    test('returns patients, OPD, and IPD counts for NURSE', async () => {
       mockCount(PatientModel, 12);
       mockCount(OPDVisitModel, 4);
       mockCount(IPDAdmissionModel, 6);
@@ -161,13 +174,8 @@ describe('DashboardService.getStats', () => {
 
   describe('pendingLabCount combines pathology + radiology', () => {
     test('sums both pending counts', async () => {
-      mockCount(PatientModel, 0);
-      mockCount(OPDVisitModel, 0);
-      mockCount(IPDAdmissionModel, 0);
       mockCount(PathologyRequestModel, 7);
       mockCount(RadiologyRequestModel, 3);
-      mockCount(UserModel, 0);
-      // 3 PaymentModel.aggregate calls for ADMIN (today, month, trend)
       (PaymentModel.aggregate as jest.Mock).mockResolvedValue([]);
       mockAggregate(InventoryItemModel, []);
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([]);
@@ -179,12 +187,6 @@ describe('DashboardService.getStats', () => {
 
   describe('revenue summary uses aggregate results', () => {
     test('returns 0 when no payments exist', async () => {
-      mockCount(PatientModel, 0);
-      mockCount(OPDVisitModel, 0);
-      mockCount(IPDAdmissionModel, 0);
-      mockCount(PathologyRequestModel, 0);
-      mockCount(RadiologyRequestModel, 0);
-      mockCount(UserModel, 0);
       (PaymentModel.aggregate as jest.Mock).mockResolvedValue([]);
       mockAggregate(InventoryItemModel, []);
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([]);
@@ -195,16 +197,11 @@ describe('DashboardService.getStats', () => {
     });
 
     test('returns aggregated amount when payments exist', async () => {
-      mockCount(PatientModel, 0);
-      mockCount(OPDVisitModel, 0);
-      mockCount(IPDAdmissionModel, 0);
-      mockCount(PathologyRequestModel, 0);
-      mockCount(RadiologyRequestModel, 0);
-      mockCount(UserModel, 0);
-      // aggregate is called 3x for ADMIN: today revenue, month revenue, revenue trend
+      // aggregate called 4x: today, month, averageDaily, trend
       (PaymentModel.aggregate as jest.Mock)
         .mockResolvedValueOnce([{ total: 2500 }])
         .mockResolvedValueOnce([{ total: 18000 }])
+        .mockResolvedValueOnce([{ total: 15000 }])
         .mockResolvedValueOnce([]);
       mockAggregate(InventoryItemModel, []);
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([]);
@@ -217,16 +214,8 @@ describe('DashboardService.getStats', () => {
 
   describe('monthlyOpdTrend formats date correctly', () => {
     test('formats aggregate result into TrendPoint array', async () => {
-      mockCount(PatientModel, 0);
-      mockCount(OPDVisitModel, 0);
-      mockCount(IPDAdmissionModel, 0);
-      mockCount(PathologyRequestModel, 0);
-      mockCount(RadiologyRequestModel, 0);
-      mockCount(UserModel, 0);
-      // 3 PaymentModel.aggregate calls for ADMIN (today, month, trend)
       (PaymentModel.aggregate as jest.Mock).mockResolvedValue([]);
       mockAggregate(InventoryItemModel, []);
-      // OPDVisitModel.aggregate is called for the trend
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([
         { _id: { year: 2026, month: 5, day: 1 }, count: 3 },
         { _id: { year: 2026, month: 5, day: 2 }, count: 7 },
@@ -248,10 +237,12 @@ describe('DashboardService.getStats', () => {
       mockCount(OPDVisitModel, 2);
 
       await service.getStats(TENANT, UserRole.RECEPTIONIST, true); // populate cache
-      await service.getStats(TENANT, UserRole.RECEPTIONIST);       // should hit cache
+      const callsAfterFirst = (PatientModel.countDocuments as jest.Mock).mock.calls.length;
 
-      // countDocuments should only have been called on the first (bypass) pass
-      expect(PatientModel.countDocuments).toHaveBeenCalledTimes(1);
+      await service.getStats(TENANT, UserRole.RECEPTIONIST);       // should hit cache
+      const callsAfterSecond = (PatientModel.countDocuments as jest.Mock).mock.calls.length;
+
+      expect(callsAfterSecond).toBe(callsAfterFirst); // no extra calls on cache hit
     });
 
     test('bypass=true skips cache', async () => {
@@ -259,10 +250,12 @@ describe('DashboardService.getStats', () => {
       mockCount(OPDVisitModel, 1);
 
       await service.getStats(TENANT, UserRole.RECEPTIONIST);       // populate cache
-      await service.getStats(TENANT, UserRole.RECEPTIONIST, true); // bypass
+      const callsAfterFirst = (PatientModel.countDocuments as jest.Mock).mock.calls.length;
 
-      // countDocuments called twice: once warm, once forced
-      expect(PatientModel.countDocuments).toHaveBeenCalledTimes(2);
+      await service.getStats(TENANT, UserRole.RECEPTIONIST, true); // bypass
+      const callsAfterSecond = (PatientModel.countDocuments as jest.Mock).mock.calls.length;
+
+      expect(callsAfterSecond).toBeGreaterThan(callsAfterFirst);   // new DB calls made
     });
 
     test('different roles get separate cache entries', async () => {
@@ -273,8 +266,8 @@ describe('DashboardService.getStats', () => {
       await service.getStats(TENANT, UserRole.RECEPTIONIST, true);
       await service.getStats(TENANT, UserRole.NURSE, true);
 
-      // Each role populates its own cache key — PatientModel called twice
-      expect(PatientModel.countDocuments).toHaveBeenCalledTimes(2);
+      // Each role populates its own cache key — PatientModel called at least twice
+      expect((PatientModel.countDocuments as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

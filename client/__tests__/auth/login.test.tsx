@@ -10,14 +10,17 @@ jest.mock('next/navigation', () => ({
 }));
 
 const mockLogin = jest.fn();
-const mockUseLoginMutation = jest.fn(() => [mockLogin, { isLoading: false, error: null }]);
+const mockUseLoginMutation = jest.fn(
+  (): [jest.Mock, { isLoading: boolean; error: { status: number; data: unknown } | null }] =>
+    [mockLogin, { isLoading: false, error: null }],
+);
 
 jest.mock('@/store/api/auth.api', () => ({
-  useLoginMutation: (...args: unknown[]) => mockUseLoginMutation(...args),
+  useLoginMutation: () => mockUseLoginMutation(),
 }));
 
 jest.mock('@/store/api/platformSettings.api', () => ({
-  useGetPlatformSettingsQuery: () => ({ data: undefined, isLoading: false, isError: false }),
+  useGetPlatformSettingsQuery: () => ({ data: { platformTitle: 'MediScribe', logoUrl: null, faviconUrl: null }, isLoading: false, isError: false }),
 }));
 
 jest.mock('@/store/hooks', () => ({
@@ -50,7 +53,7 @@ describe('LoginPage — field rendering', () => {
 
   test('renders platform logo and sign-in heading', () => {
     render(<LoginPage />);
-    expect(screen.getByText('MediCore')).toBeInTheDocument();
+    expect(screen.getByText('MediScribe')).toBeInTheDocument();
     expect(screen.getByText(/sign in to your account/i)).toBeInTheDocument();
   });
 

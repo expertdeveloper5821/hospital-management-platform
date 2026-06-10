@@ -42,19 +42,19 @@ const radiologyUpload = multer({
 
 router.post(
   '/pathology',
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   createPathologyRequest,
 );
 
 router.get(
   '/pathology',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.MANAGER),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.MANAGER),
   listPathologyRequests,
 );
 
 router.get(
   '/pathology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
   getPathologyRequest,
 );
 
@@ -74,7 +74,7 @@ router.delete(
 // Multer rejects files > 10 MB with a MulterError (LIMIT_FILE_SIZE → 413).
 router.patch(
   '/pathology/:requestId/report',
-  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   pathologyUpload.single('report'),
   uploadPathologyReport,
 );
@@ -83,19 +83,19 @@ router.patch(
 
 router.post(
   '/radiology',
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST, UserRole.NURSE),
   createRadiologyRequest,
 );
 
 router.get(
   '/radiology',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
   listRadiologyRequests,
 );
 
 router.get(
   '/radiology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
   getRadiologyRequest,
 );
 
@@ -115,7 +115,7 @@ router.delete(
 // Multer rejects files > 20 MB with a MulterError (LIMIT_FILE_SIZE → 413).
 router.patch(
   '/radiology/:requestId/report',
-  requireRole(UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.NURSE),
+  requireRole(UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   radiologyUpload.single('report'),
   uploadRadiologyReport,
 );

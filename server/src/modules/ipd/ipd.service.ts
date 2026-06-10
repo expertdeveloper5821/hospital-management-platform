@@ -275,6 +275,24 @@ export class IPDService {
     };
   }
 
+  async getPatientHistory(
+    tenantId:  string,
+    patientId: string,
+    page:      number,
+    limit:     number,
+    status?:   'ADMITTED' | 'DISCHARGED',
+  ): Promise<PaginatedResult<AdmissionResponse>> {
+    const patient = await patientRepository.findByPatientId(tenantId, patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const result = await ipdRepository.findByPatient(tenantId, patientId, page, limit, status);
+
+    return {
+      ...result,
+      data: result.data.map((a) => toResponse(a, patient.fullName)),
+    };
+  }
+
   async getBedOccupancySummary(tenantId: string): Promise<WardOccupancySummary[]> {
     // Delegates to U3-A's aggregation-based occupancy query (single DB round-trip)
     return ipdRepository.getOccupancySummary(tenantId);

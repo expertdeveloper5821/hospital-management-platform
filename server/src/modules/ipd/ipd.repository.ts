@@ -30,6 +30,32 @@ export class IPDRepository {
     return IPDAdmissionModel.findOne({ patientId, tenantId, status: 'ADMITTED' });
   }
 
+  async findByPatient(
+    tenantId:  string,
+    patientId: string,
+    page:      number,
+    limit:     number,
+    status?:   'ADMITTED' | 'DISCHARGED',
+  ): Promise<PaginatedResult<IIPDAdmission>> {
+    assertDbConnected();
+    const skip = (page - 1) * limit;
+    const filter: Record<string, unknown> = { tenantId, patientId };
+    if (status) filter['status'] = status;
+
+    const [data, total] = await Promise.all([
+      IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),
+      IPDAdmissionModel.countDocuments(filter),
+    ]);
+
+    return {
+      data:       data as IIPDAdmission[],
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   async findActiveAdmissions(
     tenantId:    string,
     query:       ListAdmissionsQuery,

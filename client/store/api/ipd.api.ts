@@ -88,6 +88,23 @@ export const ipdApi = baseApi.injectEndpoints({
       invalidatesTags: ['IPD'],
     }),
 
+    // ── Patient IPD history ───────────────────────────────────────────────────
+
+    getIPDPatientHistory: build.query<PaginatedResult<AdmissionResponse>, {
+      patientId: string;
+      page?:     number;
+      limit?:    number;
+      status?:   'ADMITTED' | 'DISCHARGED';
+    }>({
+      query: ({ patientId, page = 1, limit = 10, status }) => {
+        const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+        if (status) params.set('status', status);
+        return `/api/ipd/patients/${patientId}/history?${params}`;
+      },
+      transformResponse: (raw: ApiSuccess<PaginatedResult<AdmissionResponse>>) => raw.data,
+      providesTags: ['IPD'],
+    }),
+
     // ── Occupancy ─────────────────────────────────────────────────────────────
 
     getBedOccupancySummary: build.query<WardOccupancySummary[], void>({
@@ -114,6 +131,7 @@ export const {
   useCreateAdmissionMutation,
   useAddProgressNoteMutation,
   useDischargePatientMutation,
+  useGetIPDPatientHistoryQuery,
   useGetBedOccupancySummaryQuery,
   useGetOccupancySummaryQuery,
 } = ipdApi;
