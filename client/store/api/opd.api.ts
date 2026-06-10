@@ -11,11 +11,12 @@ import type {
 export const opdApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
-    getOPDQueue: build.query<OPDVisitResponse[], { date?: string; doctorId?: string }>({
-      query: ({ date, doctorId } = {}) => {
+    getOPDQueue: build.query<OPDVisitResponse[], { date?: string; doctorId?: string; search?: string }>({
+      query: ({ date, doctorId, search } = {}) => {
         const params = new URLSearchParams();
         if (date)     params.set('date',     date);
         if (doctorId) params.set('doctorId', doctorId);
+        if (search)   params.set('search',   search);
         const qs = params.toString();
         return `/api/opd/visits${qs ? `?${qs}` : ''}`;
       },

@@ -14,11 +14,13 @@ import {
   RADIOLOGY_REPORT_MAX_BYTES,
 } from './lab.types';
 import { patientRepository }   from '../patient/patient.repository';
+import { userRepository }      from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
 import { s3Service }           from '../../shared/services/s3.service';
 import { auditService }        from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { AppError, NotFoundError, ForbiddenError } from '../../shared/middleware/error-handler';
+import { PatientModel } from '../patient/patient.model';
 
 // Pre-signed URL expiry: 1 hour (3600 s) — short-lived per security baseline.
 const REPORT_URL_EXPIRY_SECONDS = 3600;
@@ -30,28 +32,49 @@ async function resolveReportUrl(s3Key: string | null): Promise<string | null> {
   return s3Service.getPresignedUrl(s3Key, REPORT_URL_EXPIRY_SECONDS);
 }
 
+async function resolvePatientIdsBySearch(tenantId: string, search: string): Promise<string[]> {
+  const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re   = new RegExp(safe, 'i');
+  const patients = await PatientModel.find(
+    { tenantId, $or: [{ fullName: re }, { patientId: re }] },
+    { patientId: 1 },
+  ).lean();
+  return patients.map((p) => p.patientId);
+}
+
 async function getPatientFullName(tenantId: string, patientId: string): Promise<string | undefined> {
   const patient = await patientRepository.findByPatientId(tenantId, patientId);
   return patient?.fullName;
+}
+
+async function getRequesterName(tenantId: string, userId: string): Promise<string | undefined> {
+  const user = await userRepository.findById(tenantId, userId);
+  return user?.name ?? user?.email;
 }
 
 async function toPathologyResponse(
   doc: IPathologyRequest,
   fullName?: string,
 ): Promise<PathologyRequestResponse> {
+  const [patientName, requesterName, reportUrl] = await Promise.all([
+    fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
+    getRequesterName(doc.tenantId, doc.requestedBy),
+    resolveReportUrl(doc.reportS3Key),
+  ]);
   return {
-    requestId:   doc.requestId,
-    patientId:   doc.patientId,
-    fullName:    fullName ?? await getPatientFullName(doc.tenantId, doc.patientId),
-    tenantId:    doc.tenantId,
-    requestedBy: doc.requestedBy,
-    testType:    doc.testType,
-    status:      doc.status,
-    priority:    doc.priority,
-    notes:       doc.notes,
-    reportUrl:   await resolveReportUrl(doc.reportS3Key),
-    requestedAt: doc.requestedAt.toISOString(),
-    updatedAt:   doc.updatedAt.toISOString(),
+    requestId:        doc.requestId,
+    patientId:        doc.patientId,
+    fullName:         patientName,
+    tenantId:         doc.tenantId,
+    requestedBy:      doc.requestedBy,
+    requestedByName:  requesterName,
+    testType:         doc.testType,
+    status:           doc.status,
+    priority:         doc.priority,
+    notes:            doc.notes,
+    reportUrl,
+    requestedAt:      doc.requestedAt.toISOString(),
+    updatedAt:        doc.updatedAt.toISOString(),
   };
 }
 
@@ -59,19 +82,25 @@ async function toRadiologyResponse(
   doc: IRadiologyRequest,
   fullName?: string,
 ): Promise<RadiologyRequestResponse> {
+  const [patientName, requesterName, reportUrl] = await Promise.all([
+    fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
+    getRequesterName(doc.tenantId, doc.requestedBy),
+    resolveReportUrl(doc.reportS3Key),
+  ]);
   return {
-    requestId:   doc.requestId,
-    patientId:   doc.patientId,
-    fullName:    fullName ?? await getPatientFullName(doc.tenantId, doc.patientId),
-    tenantId:    doc.tenantId,
-    requestedBy: doc.requestedBy,
-    imagingType: doc.imagingType,
-    status:      doc.status,
-    priority:    doc.priority,
-    notes:       doc.notes,
-    reportUrl:   await resolveReportUrl(doc.reportS3Key),
-    requestedAt: doc.requestedAt.toISOString(),
-    updatedAt:   doc.updatedAt.toISOString(),
+    requestId:        doc.requestId,
+    patientId:        doc.patientId,
+    fullName:         patientName,
+    tenantId:         doc.tenantId,
+    requestedBy:      doc.requestedBy,
+    requestedByName:  requesterName,
+    imagingType:      doc.imagingType,
+    status:           doc.status,
+    priority:         doc.priority,
+    notes:            doc.notes,
+    reportUrl,
+    requestedAt:      doc.requestedAt.toISOString(),
+    updatedAt:        doc.updatedAt.toISOString(),
   };
 }
 
@@ -191,7 +220,10 @@ export class LabService {
     tenantId: string,
     query:    ListLabRequestsQuery,
   ): Promise<PaginatedResult<PathologyRequestResponse>> {
-    const result = await labRepository.findPathologyByPatient(tenantId, query);
+    const searchPatientIds = query.search
+      ? await resolvePatientIdsBySearch(tenantId, query.search)
+      : undefined;
+    const result = await labRepository.findPathologyByPatient(tenantId, query, searchPatientIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(
@@ -310,7 +342,10 @@ export class LabService {
     tenantId: string,
     query:    ListLabRequestsQuery,
   ): Promise<PaginatedResult<RadiologyRequestResponse>> {
-    const result = await labRepository.findRadiologyByPatient(tenantId, query);
+    const searchPatientIds = query.search
+      ? await resolvePatientIdsBySearch(tenantId, query.search)
+      : undefined;
+    const result = await labRepository.findRadiologyByPatient(tenantId, query, searchPatientIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(

@@ -17,12 +17,13 @@ export const labApi = baseApi.injectEndpoints({
 
     listPathologyRequests: build.query<
       LabListResult<PathologyRequestResponse>,
-      { patientId?: string; status?: string; page?: number; limit?: number }
+      { patientId?: string; status?: string; search?: string; page?: number; limit?: number }
     >({
-      query: ({ patientId, status, page = 1, limit = 20 } = {}) => {
+      query: ({ patientId, status, search, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
         if (patientId) params.set('patientId', patientId);
         if (status)    params.set('status',    status);
+        if (search)    params.set('search',    search);
         params.set('page',  String(page));
         params.set('limit', String(limit));
         return `/api/lab/pathology?${params.toString()}`;
@@ -60,12 +61,13 @@ export const labApi = baseApi.injectEndpoints({
 
     listRadiologyRequests: build.query<
       LabListResult<RadiologyRequestResponse>,
-      { patientId?: string; status?: string; page?: number; limit?: number }
+      { patientId?: string; status?: string; search?: string; page?: number; limit?: number }
     >({
-      query: ({ patientId, status, page = 1, limit = 20 } = {}) => {
+      query: ({ patientId, status, search, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
         if (patientId) params.set('patientId', patientId);
         if (status)    params.set('status',    status);
+        if (search)    params.set('search',    search);
         params.set('page',  String(page));
         params.set('limit', String(limit));
         return `/api/lab/radiology?${params.toString()}`;

@@ -30,6 +30,7 @@ const completeVisitSchema = z.object({
 const queueQuerySchema = z.object({
   date:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   doctorId: z.string().optional(),
+  search:   z.string().max(200).trim().optional(),
 });
 
 const OPD_STATUS_VALUES = ['OPEN', 'COMPLETED'] as const;
@@ -83,7 +84,7 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     const query = queueQuerySchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
 
-    const visits = await opdService.getQueue(req.user!.tenantId!, query.data.date, query.data.doctorId);
+    const visits = await opdService.getQueue(req.user!.tenantId!, query.data.date, query.data.doctorId, query.data.search);
     res.status(200).json({
       status: 'success',
       data: visits.map((v) => toResponse(v)),

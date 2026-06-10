@@ -638,19 +638,26 @@ function CreateWardModal({ onClose }: CreateWardModalProps) {
 // ─── Admissions Tab ───────────────────────────────────────────────────────────
 
 function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] }) {
-  const [filterWard,   setFilterWard]   = useState('');
-  const [filterStatus, setFilterStatus] = useState<'ADMITTED' | 'DISCHARGED'>('ADMITTED');
-  const [searchQ,      setSearchQ]      = useState('');
-  const [page,         setPage]         = useState(1);
-  const [showNew,      setShowNew]      = useState(false);
-  const [notesFor,     setNotesFor]     = useState<AdmissionResponse | null>(null);
-  const [dischargeFor, setDischargeFor] = useState<AdmissionResponse | null>(null);
+  const [filterWard,      setFilterWard]      = useState('');
+  const [filterStatus,    setFilterStatus]    = useState<'ADMITTED' | 'DISCHARGED'>('ADMITTED');
+  const [searchQ,         setSearchQ]         = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page,            setPage]            = useState(1);
+  const [showNew,         setShowNew]         = useState(false);
+  const [notesFor,        setNotesFor]        = useState<AdmissionResponse | null>(null);
+  const [dischargeFor,    setDischargeFor]    = useState<AdmissionResponse | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(searchQ.trim()); setPage(1); }, 400);
+    return () => clearTimeout(t);
+  }, [searchQ]);
 
   const { data, isLoading, isFetching, refetch } = useListAdmissionsQuery({
     status: filterStatus,
     page,
-    limit: 20,
-    ...(filterWard ? { wardId: filterWard } : {}),
+    limit: 10,
+    ...(filterWard      ? { wardId: filterWard }          : {}),
+    ...(debouncedSearch ? { search: debouncedSearch }     : {}),
   });
 
   // Fetch all doctors once so we can resolve names in the table and notes modal
@@ -673,16 +680,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.ADMIN ||
     role === UserRole.RECEPTIONIST;
 
-  // Client-side filter by patientId prefix
-  const allAdmissions = data?.data ?? [];
-  const admissions    = searchQ.trim()
-    ? allAdmissions.filter((a) =>
-        a.patientId.toLowerCase().includes(searchQ.toLowerCase()),
-      )
-    : allAdmissions;
-
+  const admissions = data?.data ?? [];
   const total      = data?.total      ?? 0;
-  const totalPages = Math.ceil(total / 20);
+  const totalPages = data?.totalPages ?? 1;
 
   async function handleDischargeConfirm() {
     if (!dischargeFor) return;
@@ -699,7 +699,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           <div className="relative flex-1 min-w-[160px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Filter by patient ID…"
+              placeholder="Search by patient name or ID…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
               className="h-9 pl-8 text-sm w-full"

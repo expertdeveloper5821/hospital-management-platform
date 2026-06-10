@@ -21,15 +21,17 @@ export class LabRepository {
   }
 
   async findPathologyByPatient(
-    tenantId: string,
-    query:    ListLabRequestsQuery,
+    tenantId:   string,
+    query:      ListLabRequestsQuery,
+    patientIds?: string[],
   ): Promise<PaginatedResult<IPathologyRequest>> {
     assertDbConnected();
     const { patientId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
-    if (patientId) filter['patientId'] = patientId;
-    if (status)    filter['status']    = status;
+    if (patientIds)       filter['patientId'] = { $in: patientIds };
+    else if (patientId)   filter['patientId'] = patientId;
+    if (status)           filter['status']    = status;
 
     const [data, total] = await Promise.all([
       PathologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),
@@ -80,15 +82,17 @@ export class LabRepository {
   }
 
   async findRadiologyByPatient(
-    tenantId: string,
-    query:    ListLabRequestsQuery,
+    tenantId:    string,
+    query:       ListLabRequestsQuery,
+    patientIds?: string[],
   ): Promise<PaginatedResult<IRadiologyRequest>> {
     assertDbConnected();
     const { patientId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
-    if (patientId) filter['patientId'] = patientId;
-    if (status)    filter['status']    = status;
+    if (patientIds)       filter['patientId'] = { $in: patientIds };
+    else if (patientId)   filter['patientId'] = patientId;
+    if (status)           filter['status']    = status;
 
     const [data, total] = await Promise.all([
       RadiologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),

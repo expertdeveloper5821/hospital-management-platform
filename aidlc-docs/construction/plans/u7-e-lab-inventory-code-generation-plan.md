@@ -29,3 +29,17 @@ RBAC: manage=HOSPITAL_ADMIN/MANAGER; view=HOSPITAL_ADMIN/MANAGER/DOCTOR/NURSE.
 - Report FormData field = `"report"` (must match multer .single('report') in lab.routes.ts)
 - isLowStock = server-computed; client trusts it
 - tsc --noEmit passes
+
+---
+
+## Post-Construction Enhancement — Lab Table Priority Column (2026-06-08)
+
+**Change**: Replaced the "Report" column in the lab requests table with a "Priority" column.
+
+**File changed**: `client/app/(dashboard)/lab/page.tsx`
+
+| Before | After |
+|---|---|
+| "Report" column — showed "Uploaded" (green) or "Pending" (muted) based on `reportUrl` | "Priority" column — shows `URGENT` (red pill) or `NORMAL` (grey pill) using the same badge styling as the detail panel |
+
+**Rationale**: Priority is actionable information visible at a glance in the list; report upload status is already accessible via the detail panel slide-over.
