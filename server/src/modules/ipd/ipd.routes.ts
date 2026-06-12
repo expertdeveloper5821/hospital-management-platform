@@ -10,6 +10,7 @@ import {
   getAdmissionById,
   addProgressNote,
   dischargePatient,
+  getPatientIPDHistory,
   getBedOccupancySummary,
   createWard,
   listWards,
@@ -34,6 +35,8 @@ router.post(
      ...ADMIN_ROLES),
   createAdmission,
 );
+
+
 
 // GET /api/ipd/admissions — List admissions (filterable by ward and status)
 router.get(
@@ -115,6 +118,14 @@ const ADMISSION_READERS = [
   UserRole.NURSE,
   UserRole.RECEPTIONIST,
 ];
+
+// GET /api/ipd/patients/:patientId/history — IPD admission history for a patient
+router.get(
+  '/patients/:patientId/history',
+  ...protect,
+  requireRole(...ADMISSION_READERS),
+  getPatientIPDHistory,
+);
 
 // ─── Ward routes ──────────────────────────────────────────────────────────────
 router.post('/wards',

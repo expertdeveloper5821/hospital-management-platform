@@ -28,10 +28,10 @@ router.post('/me/profile-image',          ...protect, profileImageUpload.single(
 router.patch('/me/password',              ...protect, changeMyPassword);
 
 router.post('/',                          ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), createUser);
-router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER), listUsers);
+router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER, UserRole.NURSE), listUsers);
 router.get('/:userId',                    ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR, UserRole.MANAGER), getUserById);
 router.patch('/:userId',                  ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserProfile);
-router.patch('/:userId/role',             ...protect, requireRole(UserRole.HOSPITAL_ADMIN), updateUserRole);
+router.patch('/:userId/role',             ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserRole);
 router.patch('/:userId/deactivate',       ...protect, requireRole(UserRole.HOSPITAL_ADMIN), deactivateUser);
 
 export default router;

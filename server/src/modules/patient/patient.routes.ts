@@ -24,6 +24,7 @@ const READERS = [
   ...ADMIN_ROLES,
   UserRole.MANAGER,
   UserRole.DOCTOR,
+  UserRole.FINANCE_MANAGER,
 ];
 
 router.post('/',

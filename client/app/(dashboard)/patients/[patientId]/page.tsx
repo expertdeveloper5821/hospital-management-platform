@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useGetPatientByIdQuery, useDeletePatientMutation } from '@/store/api/patient.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
+import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import { toastSuccess } from '@/lib/toast';
 import { UserRole } from '@/store/types';
@@ -218,6 +219,108 @@ function OPDHistoryTab({ patientId }: { patientId: string }) {
   );
 }
 
+// ─── IPD History Tab ──────────────────────────────────────────────────────────
+function IPDHistoryTab({ patientId }: { patientId: string }) {
+  const [page,   setPage]   = useState(1);
+  const [status, setStatus] = useState<'ALL' | 'ADMITTED' | 'DISCHARGED'>('ALL');
+
+  const { data, isLoading, isFetching } = useGetIPDPatientHistoryQuery({
+    patientId,
+    page,
+    limit: 10,
+    status: status !== 'ALL' ? status : undefined,
+  });
+
+  const resetPage = () => setPage(1);
+  const busy = isLoading || isFetching;
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <select
+          value={status}
+          onChange={(e) => { setStatus(e.target.value as typeof status); resetPage(); }}
+          className="px-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="ALL">All Status</option>
+          <option value="ADMITTED">Admitted</option>
+          <option value="DISCHARGED">Discharged</option>
+        </select>
+      </div>
+
+      {/* Loading skeleton */}
+      {busy && (
+        <div className="space-y-2 animate-pulse">
+          {[1, 2, 3].map((i) => <div key={i} className="rounded-lg border bg-muted h-20" />)}
+        </div>
+      )}
+
+      {/* Admission list */}
+      {!busy && data && data.data.length > 0 && (
+        <div className="space-y-2">
+          {data.data.map((admission) => (
+            <div key={admission.admissionId} className="rounded-lg border bg-card px-4 py-3 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-mono text-muted-foreground">{admission.admissionId}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                  admission.status === 'ADMITTED'
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                    : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                }`}>
+                  {admission.status}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm">
+                <span><span className="text-muted-foreground">Ward: </span>{admission.wardName}</span>
+                <span><span className="text-muted-foreground">Bed: </span>{admission.bedNumber}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                <span>Admitted: {formatDate(admission.admissionDate)}</span>
+                {admission.dischargeDate && (
+                  <span>Discharged: {formatDate(admission.dischargeDate)}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!busy && data && data.data.length === 0 && (
+        <div className="rounded-lg border bg-card py-10 text-center text-sm text-muted-foreground">
+          No IPD admissions found.
+        </div>
+      )}
+
+      {/* Pagination */}
+      {data && data.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-muted-foreground">
+            Page {data.page} of {data.totalPages} ({data.total} admissions)
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || busy}
+              className="p-1.5 rounded-md border hover:bg-muted disabled:opacity-40"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+              disabled={page === data.totalPages || busy}
+              className="p-1.5 rounded-md border hover:bg-muted disabled:opacity-40"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function PatientDetailPage({ params }: { params: { patientId: string } }) {
   const { patientId } = params;
@@ -227,7 +330,7 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
   const { data: patient, isLoading, isError } = useGetPatientByIdQuery(patientId);
   const [deletePatient, { isLoading: isDeleting }] = useDeletePatientMutation();
 
-  const [activeTab,      setActiveTab]      = useState<'info' | 'opd'>('info');
+  const [activeTab,      setActiveTab]      = useState<'info' | 'opd' | 'ipd'>('info');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteError,     setDeleteError]    = useState<string | undefined>();
 
@@ -304,7 +407,7 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
 
         {/* Tabs */}
         <div className="border-b flex gap-6">
-          {(['info', 'opd'] as const).map((tab) => (
+          {(['info', 'opd', 'ipd'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -314,7 +417,7 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              {tab === 'info' ? 'Patient Info' : 'OPD History'}
+              {tab === 'info' ? 'Patient Info' : tab === 'opd' ? 'OPD History' : 'IPD History'}
             </button>
           ))}
         </div>
@@ -344,6 +447,7 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
         )}
 
         {activeTab === 'opd' && <OPDHistoryTab patientId={patientId} />}
+        {activeTab === 'ipd' && <IPDHistoryTab patientId={patientId} />}
       </div>
     </>
   );

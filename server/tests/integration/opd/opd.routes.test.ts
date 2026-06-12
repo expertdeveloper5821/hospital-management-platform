@@ -245,7 +245,7 @@ describe('POST /api/opd/visits', () => {
 
 // ─── GET /api/opd/visits ──────────────────────────────────────────────────────
 describe('GET /api/opd/visits', () => {
-  test('200 — returns OPEN and IN_PROGRESS visits for the given date', async () => {
+  test('200 — returns all visits for the given date regardless of status', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedVisit(tid, { visitId: 'OPD-OPEN0001', status: OPDVisitStatus.OPEN });
@@ -265,8 +265,8 @@ describe('GET /api/opd/visits', () => {
     const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toContain('OPD-OPEN0001');
     expect(visitIds).toContain('OPD-INPR0001');
-    expect(visitIds).not.toContain('OPD-DONE0001');
-    expect(visitIds).not.toContain('OPD-CANC0001');
+    expect(visitIds).toContain('OPD-DONE0001');
+    expect(visitIds).toContain('OPD-CANC0001');
   });
 
   test('200 — filters queue by doctorId', async () => {

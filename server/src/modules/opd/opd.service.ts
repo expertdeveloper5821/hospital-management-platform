@@ -196,10 +196,7 @@ export class OPDService {
     search?:  string,
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
-    let visits = (await opdRepository.findByDate(tenantId, visitDate, doctorId))
-      .filter((visit) =>
-        visit.status === OPDVisitStatus.OPEN || visit.status === OPDVisitStatus.IN_PROGRESS,
-      );
+    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId);
 
     const patientIds = [...new Set(visits.map((v) => v.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds)

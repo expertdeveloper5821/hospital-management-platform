@@ -9,6 +9,7 @@ import {
   useDeletePatientMutation,
 } from '@/store/api/patient.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
+import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import type { PatientResponse, Gender, BloodGroup, CreatePatientRequest, UpdatePatientRequest, OPDVisitResponse } from '@/store/types';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ import {
   Pencil,
   ClipboardList,
   Stethoscope,
+  Bed,
   Trash2,
 } from 'lucide-react';
 import { toastSuccess } from '@/lib/toast';
@@ -477,8 +479,9 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
   const role = useAppSelector((s) => s.auth.profile?.role);
   const canDelete = role === UserRole.ADMIN || role === UserRole.MANAGER || role === UserRole.HOSPITAL_ADMIN;
 
-  const [tab,           setTab]           = useState<'details' | 'history'>('details');
+  const [tab,           setTab]           = useState<'details' | 'history' | 'ipd'>('details');
   const [historyPage,   setHistoryPage]   = useState(1);
+  const [ipdPage,       setIpdPage]       = useState(1);
   const [downloadCard, { isLoading: downloading }] = useDownloadMedicalCardMutation();
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -504,9 +507,18 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
     { skip: tab !== 'history' },
   );
 
+  const { data: ipdHistoryData, isLoading: ipdHistoryLoading } = useGetIPDPatientHistoryQuery(
+    { patientId: patient.patientId, page: ipdPage, limit: 10 },
+    { skip: tab !== 'ipd' },
+  );
+
   const visits      = historyData?.data  ?? [];
   const totalVisits = historyData?.total ?? 0;
   const totalPages  = Math.ceil(totalVisits / 10) || 1;
+
+  const ipdAdmissions = ipdHistoryData?.data  ?? [];
+  const totalIpd      = ipdHistoryData?.total ?? 0;
+  const ipdTotalPages = Math.ceil(totalIpd / 10) || 1;
 
   async function handleDownload() {
     setDownloadError(null);
@@ -550,12 +562,12 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
 
         {/* Tabs */}
         <div className="flex border-b shrink-0">
-          {(['details', 'history'] as const).map((t) => (
+          {(['details', 'history', 'ipd'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={[
-                'flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium border-b-2 transition-colors',
+                'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors',
                 tab === t
                   ? 'border-primary text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
@@ -563,7 +575,9 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
             >
               {t === 'details'
                 ? <><Pencil className="h-3.5 w-3.5" /> Details</>
-                : <><ClipboardList className="h-3.5 w-3.5" /> OPD History</>}
+                : t === 'history'
+                ? <><ClipboardList className="h-3.5 w-3.5" /> OPD History</>
+                : <><Bed className="h-3.5 w-3.5" /> IPD History</>}
             </button>
           ))}
         </div>
@@ -581,6 +595,59 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
               {row('EC Name',       patient.emergencyContactName)}
               {row('EC Mobile',     patient.emergencyContactMobile)}
               {row('Registered',    formatDate(patient.createdAt))}
+            </div>
+          )}
+
+          {tab === 'ipd' && (
+            <div className="p-5 space-y-3">
+              {ipdHistoryLoading ? (
+                <p className="text-sm text-muted-foreground text-center py-10">Loading history…</p>
+              ) : ipdAdmissions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Bed className="h-8 w-8 mb-2 opacity-30" />
+                  <p className="text-sm">No IPD admissions recorded.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-muted-foreground">{totalIpd} admission{totalIpd !== 1 ? 's' : ''} total</p>
+                  {ipdAdmissions.map((a) => (
+                    <div key={a.admissionId} className="rounded-lg border bg-card p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium">
+                          {new Date(a.admissionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                          a.status === 'ADMITTED'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </div>
+                      <div className="space-y-1 text-xs text-muted-foreground">
+                        <p><span className="font-medium text-foreground">Ward:</span> {a.wardName}</p>
+                        <p><span className="font-medium text-foreground">Bed:</span> {a.bedNumber}</p>
+                        {a.dischargeDate && (
+                          <p><span className="font-medium text-foreground">Discharged:</span> {new Date(a.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {ipdTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs text-muted-foreground">Page {ipdPage} of {ipdTotalPages}</span>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" disabled={ipdPage <= 1} onClick={() => setIpdPage((p) => p - 1)}>
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="outline" disabled={ipdPage >= ipdTotalPages} onClick={() => setIpdPage((p) => p + 1)}>
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 

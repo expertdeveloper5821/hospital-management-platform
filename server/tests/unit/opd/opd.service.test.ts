@@ -319,7 +319,7 @@ describe('OPDService — example-based', () => {
 
   // ── getQueue ───────────────────────────────────────────────────────────────
   describe('getQueue', () => {
-    test('returns only OPEN and IN_PROGRESS visits', async () => {
+    test('returns all visits for the date regardless of status', async () => {
       const visits = [
         makeVisit({ visitId: 'OPD-OPEN0001', status: OPDVisitStatus.OPEN }),
         makeVisit({ visitId: 'OPD-INPR0001', status: OPDVisitStatus.IN_PROGRESS }),
@@ -330,15 +330,14 @@ describe('OPDService — example-based', () => {
 
       const queue = await service.getQueue('t1', '2026-05-15');
 
-      expect(queue).toHaveLength(2);
-      expect(queue.map((v) => v.visitId)).toEqual(['OPD-OPEN0001', 'OPD-INPR0001']);
+      expect(queue).toHaveLength(4);
+      expect(queue.map((v) => v.visitId)).toEqual([
+        'OPD-OPEN0001', 'OPD-INPR0001', 'OPD-DONE0001', 'OPD-CANC0001',
+      ]);
     });
 
-    test('returns empty array when no active visits', async () => {
-      mockOpdRepo.findByDate.mockResolvedValue([
-        makeVisit({ status: OPDVisitStatus.COMPLETED }),
-        makeVisit({ status: OPDVisitStatus.CANCELLED }),
-      ] as never);
+    test('returns empty array when no visits exist for the date', async () => {
+      mockOpdRepo.findByDate.mockResolvedValue([] as never);
 
       const queue = await service.getQueue('t1', '2026-05-15');
 

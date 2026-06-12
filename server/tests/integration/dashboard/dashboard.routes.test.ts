@@ -98,12 +98,12 @@ describe('GET /api/dashboard/stats — auth enforcement', () => {
     expect(res.status).toBe(200);
   });
 
-  test('returns 403 for FINANCE_MANAGER role', async () => {
+  test('returns 200 for FINANCE_MANAGER role', async () => {
     const token = makeToken(UserRole.FINANCE_MANAGER);
     const res = await request(app)
       .get('/api/dashboard/stats')
       .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 });
 

@@ -4,7 +4,7 @@ import type { ApiSuccess } from '../types';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TrendPoint {
-  date:  string; // YYYY-MM-DD
+  date:  string;
   count: number;
 }
 
@@ -13,18 +13,49 @@ export interface RevenueTrendPoint {
   amount: number;
 }
 
+export interface RecentActivity {
+  entityType: string;
+  entityId:   string;
+  action:     string;
+  timestamp:  string;
+}
+
 export interface DashboardStats {
-  lastUpdated:          string;
-  totalPatients?:       number;
-  todayOpdCount?:       number;
-  activeIpdCount?:      number;
-  pendingLabCount?:     number;
-  revenueToday?:        number;
-  revenueThisMonth?:    number;
+  lastUpdated: string;
+
+  // Patient / OPD / IPD
+  totalPatients?:         number;
+  todayOpdCount?:         number;
+  activeIpdCount?:        number;
+  admissionsToday?:       number;
+  newRegistrationsToday?: number;
+
+  // Lab
+  pendingLabCount?:  number;
+  labReportsToday?:  number;
+
+  // Revenue / Payments
+  revenueToday?:         number;
+  revenueThisMonth?:     number;
+  averageDailyRevenue?:  number;
+  pendingPaymentsCount?: number;
+
+  // Inventory
   lowStockCount?:       number;
-  totalActiveStaff?:    number;
+  outOfStockCount?:     number;
+  totalInventoryItems?: number;
+
+  // Staff / Beds
+  totalActiveStaff?: number;
+  totalBeds?:        number;
+  occupiedBeds?:     number;
+
+  // Trends
   monthlyOpdTrend?:     TrendPoint[];
   monthlyRevenueTrend?: RevenueTrendPoint[];
+
+  // Activity feed
+  recentActivities?: RecentActivity[];
 }
 
 // ─── API slice ────────────────────────────────────────────────────────────────

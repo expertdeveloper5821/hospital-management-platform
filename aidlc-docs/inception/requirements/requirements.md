@@ -180,6 +180,7 @@
 6. When a Doctor, Hospital Admin, Admin, or Receptionist discharges a patient, the IPD_Service SHALL set the admission status to `DISCHARGED`, record the discharge date, and release the bed for future assignments.
 7. The IPD_Service SHALL allow a Nurse or Doctor to view all currently admitted patients within the same Tenant, filterable by ward.
 8. The IPD_Service SHALL allow a Manager to view a summary of bed occupancy per ward, showing total beds, occupied beds, and available beds.
+9. The IPD_Service SHALL expose `GET /api/ipd/patients/:patientId/history` to retrieve all IPD admissions for a patient (both ADMITTED and DISCHARGED), paginated at 10 per page, filterable by status. Allowed roles: Hospital Admin, Admin, Manager, Doctor, Nurse, Receptionist. The history SHALL be accessible from the Patient detail panel as an "IPD History" tab alongside the existing "OPD History" tab, displaying ward, bed number, admission date, discharge date, and status for each admission.
 
 ---
 
@@ -187,11 +188,11 @@
 
 **Source**: Requirement 9
 
-1. When a Doctor or Receptionist creates a pathology test request for a patient, the Lab_Service SHALL create a test request record with a unique request ID, patient ID, test name(s), requesting Doctor's user ID, and status `PENDING`.
+1. When a Doctor or Nurse creates a pathology test request for a patient, the Lab_Service SHALL create a test request record with a unique request ID, patient ID, test name(s), requesting Doctor's user ID, and status `PENDING`.
 2. When a Pathologist uploads a pathology report for a test request, the Lab_Service SHALL store the report file (PDF or image, max 10 MB) in AWS S3, attach the S3 URL to the test request record, and set the status to `COMPLETED`.
 3. If a Pathologist attempts to upload a report file exceeding 10 MB, the Lab_Service SHALL reject the upload and return a descriptive error.
 4. When a pathology report status is set to `COMPLETED`, the System SHALL notify the requesting Doctor via an in-app WebSocket notification.
-5. The Lab_Service SHALL allow a Doctor, Receptionist, or Manager to view all pathology test requests for a patient within the same Tenant, ordered by request date descending.
+5. The Lab_Service SHALL allow a Doctor, Nurse, or Manager to view all pathology test requests for a patient within the same Tenant, ordered by request date descending.
 6. The Lab_Service SHALL allow a Pathologist to view all pending pathology test requests within the same Tenant.
 
 ---
@@ -200,11 +201,11 @@
 
 **Source**: Requirement 10
 
-1. When a Doctor or Receptionist creates a radiology imaging request for a patient, the Lab_Service SHALL create an imaging request record with a unique request ID, patient ID, imaging type (X-Ray, MRI, CT Scan, Ultrasound), requesting Doctor's user ID, and status `PENDING`.
+1. When a Doctor or Nurse creates a radiology imaging request for a patient, the Lab_Service SHALL create an imaging request record with a unique request ID, patient ID, imaging type (X-Ray, MRI, CT Scan, Ultrasound), requesting Doctor's user ID, and status `PENDING`.
 2. When a Radiologist uploads a radiology report for an imaging request, the Lab_Service SHALL store the report file (PDF or image, max 20 MB) in AWS S3, attach the S3 URL to the imaging request record, and set the status to `COMPLETED`.
 3. If a Radiologist attempts to upload a report file exceeding 20 MB, the Lab_Service SHALL reject the upload and return a descriptive error.
 4. When a radiology report status is set to `COMPLETED`, the System SHALL notify the requesting Doctor via an in-app WebSocket notification.
-5. The Lab_Service SHALL allow a Doctor, Receptionist, or Manager to view all radiology imaging requests for a patient within the same Tenant, ordered by request date descending.
+5. The Lab_Service SHALL allow a Doctor, Nurse, or Manager to view all radiology imaging requests for a patient within the same Tenant, ordered by request date descending.
 6. The Lab_Service SHALL allow a Radiologist to view all pending radiology imaging requests within the same Tenant.
 
 ---
@@ -252,8 +253,8 @@ The System SHALL enforce the following module access permissions per role at the
 | Patient Registration | | | ✓ | | ✓ | ✓ | | | | | | |
 | OPD | | | ✓ | ✓ | Read | ✓ | | | | | | |
 | IPD | | | ✓ | ✓ | ✓ | ✓ | | | | | | |
-| Pathology | | | Read | ✓ | | ✓ | ✓ | | | | | |
-| Radiology | | | Read | ✓ | | ✓ | | ✓ | | | | |
+| Pathology | | ✓ | Read | ✓ | ✓ | | ✓ | Read | | | ✓ | |
+| Radiology | | ✓ | Read | ✓ | ✓ | | Read | ✓ | | | ✓ | |
 | Inventory | | | ✓ | | | | | | | | ✓ | |
 | Payments | | | Read | | | ✓ | | | ✓ | | | |
 | Branding Config | | ✓ | | | | | | | | | | |

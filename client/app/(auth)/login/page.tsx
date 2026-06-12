@@ -32,7 +32,7 @@ export default function LoginPage() {
   const profile  = useAppSelector((s) => s.auth.profile);
   const [showPassword, setShowPassword] = useState(false);
 
-  const { data: platformSettings } = useGetPlatformSettingsQuery();
+  const { data: platformSettings, isLoading: settingsLoading } = useGetPlatformSettingsQuery();
 
   // Apply platform title and favicon on mount / when settings load
   useEffect(() => {
@@ -88,20 +88,23 @@ export default function LoginPage() {
   return (
     <Card>
       <CardHeader className="space-y-4 pb-2 text-center">
-        <div className="flex items-center justify-center gap-2 text-primary">
-          {platformSettings?.logoUrl ? (
-            <img
-              src={platformSettings.logoUrl}
-              alt="Platform logo"
-              className="h-10 w-auto object-contain"
-            />
-          ) : (
-            <>
-              <Activity className="h-8 w-8" aria-hidden="true" />
-              <span className="text-2xl font-bold tracking-tight">
-                {platformSettings?.platformTitle ?? 'MediCore'}
-              </span>
-            </>
+        <div className="flex items-center justify-center gap-2 text-primary min-h-[2.5rem]">
+          {!settingsLoading && (
+            platformSettings?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={platformSettings.logoUrl}
+                alt={platformSettings.platformTitle ?? ''}
+                style={{ maxHeight: '3.5rem', maxWidth: '16rem', width: 'auto', height: 'auto' }}
+              />
+            ) : (
+              <>
+                <Activity className="h-8 w-8" aria-hidden="true" />
+                <span className="text-2xl font-bold tracking-tight">
+                  {platformSettings?.platformTitle}
+                </span>
+              </>
+            )
           )}
         </div>
         <p className="text-sm text-muted-foreground">Sign in to your account</p>

@@ -1,20 +1,24 @@
 import { PatientModel }          from '../patient/patient.model';
 import { OPDVisitModel }         from '../opd/opd.model';
 import { IPDAdmissionModel }     from '../ipd/ipd.model';
+import { BedModel }              from '../ipd/bed.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../lab/lab.model';
 import { InventoryItemModel }    from '../inventory/inventory.model';
 import { PaymentModel }          from '../payment/payment.model';
 import { UserModel }             from '../user/user.model';
+import { AuditLogModel }         from '../audit/audit.model';
 import { AppError }              from '../../shared/middleware/error-handler';
 import config                    from '../../shared/config/env';
 import {
   DashboardStats,
+  RecentActivity,
   ROLE_FIELD_ACCESS,
   TrendPoint,
   RevenueTrendPoint,
 } from './dashboard.types';
 import { UserRole }              from '../../shared/types/common.types';
 import { PaymentStatus }         from '../payment/payment.types';
+import { LabRequestStatus }      from '../lab/lab.types';
 
 // ─── In-memory TTL cache (keyed by tenantId+role) ────────────────────────────
 
@@ -45,12 +49,11 @@ function setInCache(tenantId: string, role: UserRole, stats: DashboardStats): vo
   });
 }
 
-// Exported for testing
 export function clearDashboardCache(): void {
   statsCache.clear();
 }
 
-// ─── Aggregation helpers ──────────────────────────────────────────────────────
+// ─── Date helpers ─────────────────────────────────────────────────────────────
 
 function todayRange(): { start: Date; end: Date } {
   const now   = new Date();
@@ -73,34 +76,49 @@ function last30DaysStart(): Date {
   return d;
 }
 
+// ─── Aggregation functions ────────────────────────────────────────────────────
+
 async function getTotalPatients(tenantId: string): Promise<number> {
-  const result = await PatientModel.countDocuments({ tenantId });
-  return result ?? 0;
+  return (await PatientModel.countDocuments({ tenantId })) ?? 0;
 }
 
 async function getTodayOpdCount(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return OPDVisitModel.countDocuments({
-    tenantId,
-    visitDate: { $gte: start, $lte: end },
-  });
+  return OPDVisitModel.countDocuments({ tenantId, visitDate: { $gte: start, $lte: end } });
 }
 
 async function getActiveIpdCount(tenantId: string): Promise<number> {
   return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED' });
 }
 
+async function getAdmissionsToday(tenantId: string): Promise<number> {
+  const { start, end } = todayRange();
+  return IPDAdmissionModel.countDocuments({ tenantId, admissionDate: { $gte: start, $lte: end } });
+}
+
+async function getNewRegistrationsToday(tenantId: string): Promise<number> {
+  const { start, end } = todayRange();
+  return PatientModel.countDocuments({ tenantId, createdAt: { $gte: start, $lte: end } });
+}
+
 async function getPendingLabCount(tenantId: string): Promise<number> {
   const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: 'PENDING' }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: 'PENDING' }),
+    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
+    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
   ]);
   return (path ?? 0) + (rad ?? 0);
 }
 
-async function getRevenueSummary(
-  tenantId: string,
-): Promise<{ today: number; month: number }> {
+async function getLabReportsToday(tenantId: string): Promise<number> {
+  const { start, end } = todayRange();
+  const [path, rad] = await Promise.all([
+    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
+    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
+  ]);
+  return (path ?? 0) + (rad ?? 0);
+}
+
+async function getRevenueSummary(tenantId: string): Promise<{ today: number; month: number }> {
   const { start: todayStart, end: todayEnd } = todayRange();
   const { start: monthStart, end: monthEnd } = monthRange();
 
@@ -121,16 +139,51 @@ async function getRevenueSummary(
   };
 }
 
+async function getAverageDailyRevenue(tenantId: string): Promise<number> {
+  const since = last30DaysStart();
+  const result = await PaymentModel.aggregate([
+    { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
+    { $group: { _id: null, total: { $sum: '$amount' } } },
+  ]);
+  return Math.round((result[0]?.total ?? 0) / 30);
+}
+
+async function getPendingPaymentsCount(tenantId: string): Promise<number> {
+  return PaymentModel.countDocuments({ tenantId, status: PaymentStatus.PENDING });
+}
+
 async function getLowStockCount(tenantId: string): Promise<number> {
   const result = await InventoryItemModel.aggregate([
-    { $match: { tenantId, $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] } } },
+    {
+      $match: {
+        tenantId,
+        isDeleted: { $ne: true },
+        $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
+      },
+    },
     { $count: 'total' },
   ]);
   return result[0]?.total ?? 0;
 }
 
+async function getOutOfStockCount(tenantId: string): Promise<number> {
+  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true }, quantity: 0 });
+}
+
+async function getTotalInventoryItems(tenantId: string): Promise<number> {
+  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true } });
+}
+
 async function getTotalActiveStaff(tenantId: string): Promise<number> {
   return UserModel.countDocuments({ tenantId, isActive: true });
+}
+
+async function getBedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
+  const [total, occupied] = await Promise.all([
+    BedModel.countDocuments({ tenantId }),
+    BedModel.countDocuments({ tenantId, isOccupied: true }),
+  ]);
+  return { total, occupied };
 }
 
 async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
@@ -139,17 +192,12 @@ async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
     { $match: { tenantId, visitDate: { $gte: since } } },
     {
       $group: {
-        _id: {
-          year:  { $year: '$visitDate' },
-          month: { $month: '$visitDate' },
-          day:   { $dayOfMonth: '$visitDate' },
-        },
+        _id: { year: { $year: '$visitDate' }, month: { $month: '$visitDate' }, day: { $dayOfMonth: '$visitDate' } },
         count: { $sum: 1 },
       },
     },
     { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
   ]);
-
   return results.map((r) => ({
     date:  `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
     count: r.count,
@@ -162,31 +210,34 @@ async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoi
     { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
     {
       $group: {
-        _id: {
-          year:  { $year: '$createdAt' },
-          month: { $month: '$createdAt' },
-          day:   { $dayOfMonth: '$createdAt' },
-        },
+        _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } },
         amount: { $sum: '$amount' },
       },
     },
     { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
   ]);
-
   return results.map((r) => ({
-    date:   `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '00')}`,
+    date:   `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
     amount: r.amount,
+  }));
+}
+
+async function getRecentActivities(tenantId: string): Promise<RecentActivity[]> {
+  const logs = await AuditLogModel.find({ tenantId })
+    .sort({ timestamp: -1 })
+    .limit(10)
+    .lean();
+  return logs.map((l) => ({
+    entityType: l.entityType,
+    entityId:   l.entityId,
+    action:     l.action,
+    timestamp:  l.timestamp.toISOString(),
   }));
 }
 
 // ─── DashboardService ─────────────────────────────────────────────────────────
 
 export class DashboardService {
-  /**
-   * Returns role-scoped dashboard stats.
-   * Uses in-memory TTL cache unless bypassCache is true.
-   * Wraps aggregation in a 10s timeout (FR-E01.5.3).
-   */
   async getStats(
     tenantId:    string,
     role:        UserRole,
@@ -198,62 +249,81 @@ export class DashboardService {
     }
 
     const permittedFields = ROLE_FIELD_ACCESS[role] ?? [];
-
-    const needs = (field: string): boolean =>
-      (permittedFields as string[]).includes(field);
+    const needs = (field: string): boolean => (permittedFields as string[]).includes(field);
 
     const TIMEOUT_MS = 10_000;
-
-    const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
+    const withTimeout = <T>(p: Promise<T>): Promise<T> =>
       Promise.race([
-        promise,
+        p,
         new Promise<T>((_, reject) =>
-          setTimeout(
-            () => reject(new AppError('Dashboard aggregation timed out', 504)),
-            TIMEOUT_MS,
-          ),
+          setTimeout(() => reject(new AppError('Dashboard aggregation timed out', 504)), TIMEOUT_MS),
         ),
       ]);
 
-    // Fire only the aggregations required by this role (parallel)
     const [
       totalPatients,
       todayOpdCount,
       activeIpdCount,
+      admissionsToday,
+      newRegistrationsToday,
       pendingLabCount,
+      labReportsToday,
       revenueSummary,
+      averageDailyRevenue,
+      pendingPaymentsCount,
       lowStockCount,
+      outOfStockCount,
+      totalInventoryItems,
       totalActiveStaff,
+      bedStats,
       monthlyOpdTrend,
       monthlyRevenueTrend,
-    ] = await withTimeout(
-      Promise.all([
-        needs('totalPatients')   ? getTotalPatients(tenantId)        : Promise.resolve(undefined),
-        needs('todayOpdCount')   ? getTodayOpdCount(tenantId)        : Promise.resolve(undefined),
-        needs('activeIpdCount')  ? getActiveIpdCount(tenantId)       : Promise.resolve(undefined),
-        needs('pendingLabCount') ? getPendingLabCount(tenantId)      : Promise.resolve(undefined),
-        (needs('revenueToday') || needs('revenueThisMonth'))
-          ? getRevenueSummary(tenantId)
-          : Promise.resolve(undefined),
-        needs('lowStockCount')       ? getLowStockCount(tenantId)       : Promise.resolve(undefined),
-        needs('totalActiveStaff')    ? getTotalActiveStaff(tenantId)    : Promise.resolve(undefined),
-        needs('monthlyOpdTrend')     ? getMonthlyOpdTrend(tenantId)     : Promise.resolve(undefined),
-        needs('monthlyRevenueTrend') ? getMonthlyRevenueTrend(tenantId) : Promise.resolve(undefined),
-      ]),
-    );
+      recentActivities,
+    ] = await withTimeout(Promise.all([
+      needs('totalPatients')         ? getTotalPatients(tenantId)         : Promise.resolve(undefined),
+      needs('todayOpdCount')         ? getTodayOpdCount(tenantId)         : Promise.resolve(undefined),
+      needs('activeIpdCount')        ? getActiveIpdCount(tenantId)        : Promise.resolve(undefined),
+      needs('admissionsToday')       ? getAdmissionsToday(tenantId)       : Promise.resolve(undefined),
+      needs('newRegistrationsToday') ? getNewRegistrationsToday(tenantId) : Promise.resolve(undefined),
+      needs('pendingLabCount')       ? getPendingLabCount(tenantId)       : Promise.resolve(undefined),
+      needs('labReportsToday')       ? getLabReportsToday(tenantId)       : Promise.resolve(undefined),
+      (needs('revenueToday') || needs('revenueThisMonth'))
+        ? getRevenueSummary(tenantId) : Promise.resolve(undefined),
+      needs('averageDailyRevenue')   ? getAverageDailyRevenue(tenantId)   : Promise.resolve(undefined),
+      needs('pendingPaymentsCount')  ? getPendingPaymentsCount(tenantId)  : Promise.resolve(undefined),
+      needs('lowStockCount')         ? getLowStockCount(tenantId)         : Promise.resolve(undefined),
+      needs('outOfStockCount')       ? getOutOfStockCount(tenantId)       : Promise.resolve(undefined),
+      needs('totalInventoryItems')   ? getTotalInventoryItems(tenantId)   : Promise.resolve(undefined),
+      needs('totalActiveStaff')      ? getTotalActiveStaff(tenantId)      : Promise.resolve(undefined),
+      (needs('totalBeds') || needs('occupiedBeds'))
+        ? getBedStats(tenantId) : Promise.resolve(undefined),
+      needs('monthlyOpdTrend')       ? getMonthlyOpdTrend(tenantId)       : Promise.resolve(undefined),
+      needs('monthlyRevenueTrend')   ? getMonthlyRevenueTrend(tenantId)   : Promise.resolve(undefined),
+      needs('recentActivities')      ? getRecentActivities(tenantId)      : Promise.resolve(undefined),
+    ]));
 
     const stats: DashboardStats = { lastUpdated: new Date().toISOString() };
 
-    if (needs('totalPatients')       && totalPatients       !== undefined) stats.totalPatients       = totalPatients as number;
-    if (needs('todayOpdCount')       && todayOpdCount       !== undefined) stats.todayOpdCount       = todayOpdCount as number;
-    if (needs('activeIpdCount')      && activeIpdCount      !== undefined) stats.activeIpdCount      = activeIpdCount as number;
-    if (needs('pendingLabCount')     && pendingLabCount      !== undefined) stats.pendingLabCount     = pendingLabCount as number;
-    if (needs('revenueToday')        && revenueSummary       !== undefined) stats.revenueToday        = (revenueSummary as { today: number; month: number }).today;
-    if (needs('revenueThisMonth')    && revenueSummary       !== undefined) stats.revenueThisMonth    = (revenueSummary as { today: number; month: number }).month;
-    if (needs('lowStockCount')       && lowStockCount        !== undefined) stats.lowStockCount       = lowStockCount as number;
-    if (needs('totalActiveStaff')    && totalActiveStaff     !== undefined) stats.totalActiveStaff    = totalActiveStaff as number;
-    if (needs('monthlyOpdTrend')     && monthlyOpdTrend      !== undefined) stats.monthlyOpdTrend     = monthlyOpdTrend as TrendPoint[];
-    if (needs('monthlyRevenueTrend') && monthlyRevenueTrend  !== undefined) stats.monthlyRevenueTrend = monthlyRevenueTrend as RevenueTrendPoint[];
+    if (needs('totalPatients')         && totalPatients         !== undefined) stats.totalPatients         = totalPatients as number;
+    if (needs('todayOpdCount')         && todayOpdCount         !== undefined) stats.todayOpdCount         = todayOpdCount as number;
+    if (needs('activeIpdCount')        && activeIpdCount        !== undefined) stats.activeIpdCount        = activeIpdCount as number;
+    if (needs('admissionsToday')       && admissionsToday       !== undefined) stats.admissionsToday       = admissionsToday as number;
+    if (needs('newRegistrationsToday') && newRegistrationsToday !== undefined) stats.newRegistrationsToday = newRegistrationsToday as number;
+    if (needs('pendingLabCount')       && pendingLabCount       !== undefined) stats.pendingLabCount       = pendingLabCount as number;
+    if (needs('labReportsToday')       && labReportsToday       !== undefined) stats.labReportsToday       = labReportsToday as number;
+    if (needs('revenueToday')          && revenueSummary        !== undefined) stats.revenueToday          = (revenueSummary as { today: number; month: number }).today;
+    if (needs('revenueThisMonth')      && revenueSummary        !== undefined) stats.revenueThisMonth      = (revenueSummary as { today: number; month: number }).month;
+    if (needs('averageDailyRevenue')   && averageDailyRevenue   !== undefined) stats.averageDailyRevenue   = averageDailyRevenue as number;
+    if (needs('pendingPaymentsCount')  && pendingPaymentsCount  !== undefined) stats.pendingPaymentsCount  = pendingPaymentsCount as number;
+    if (needs('lowStockCount')         && lowStockCount         !== undefined) stats.lowStockCount         = lowStockCount as number;
+    if (needs('outOfStockCount')       && outOfStockCount       !== undefined) stats.outOfStockCount       = outOfStockCount as number;
+    if (needs('totalInventoryItems')   && totalInventoryItems   !== undefined) stats.totalInventoryItems   = totalInventoryItems as number;
+    if (needs('totalActiveStaff')      && totalActiveStaff      !== undefined) stats.totalActiveStaff      = totalActiveStaff as number;
+    if (needs('totalBeds')             && bedStats              !== undefined) stats.totalBeds             = (bedStats as { total: number; occupied: number }).total;
+    if (needs('occupiedBeds')          && bedStats              !== undefined) stats.occupiedBeds          = (bedStats as { total: number; occupied: number }).occupied;
+    if (needs('monthlyOpdTrend')       && monthlyOpdTrend       !== undefined) stats.monthlyOpdTrend       = monthlyOpdTrend as TrendPoint[];
+    if (needs('monthlyRevenueTrend')   && monthlyRevenueTrend   !== undefined) stats.monthlyRevenueTrend   = monthlyRevenueTrend as RevenueTrendPoint[];
+    if (needs('recentActivities')      && recentActivities      !== undefined) stats.recentActivities      = recentActivities as RecentActivity[];
 
     setInCache(tenantId, role, stats);
     return stats;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   useListPathologyRequestsQuery,
   useCreatePathologyRequestMutation,
@@ -899,11 +900,20 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
 
 type TabType = 'pathology' | 'radiology';
 
+const LAB_ALLOWED_ROLES = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE', 'PATHOLOGIST', 'RADIOLOGIST'];
+
 export default function LabPage() {
+  const router = useRouter();
   const role = useAppSelector((s) => s.auth.profile?.role);
   const [activeTab, setActiveTab] = useState<TabType>('pathology');
 
-  const canCreate = ['DOCTOR', 'HOSPITAL_ADMIN', 'RECEPTIONIST'].includes(role ?? '');
+  useEffect(() => {
+    if (role && !LAB_ALLOWED_ROLES.includes(role)) {
+      router.replace('/dashboard');
+    }
+  }, [role, router]);
+
+  const canCreate = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;
