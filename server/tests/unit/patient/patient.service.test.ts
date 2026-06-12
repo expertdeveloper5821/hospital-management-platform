@@ -271,7 +271,7 @@ describe('PatientService — example-based', () => {
 
       const result = await service.searchPatients('t1', 'Ravi', 1, 20);
 
-      expect(mockRepo.search).toHaveBeenCalledWith('t1', 'Ravi', 1, 20);
+      expect(mockRepo.search).toHaveBeenCalledWith('t1', 'Ravi', 1, 20, undefined);
       expect(result).toEqual(expected);
     });
 
@@ -281,7 +281,7 @@ describe('PatientService — example-based', () => {
 
       await service.searchPatients('t1', undefined, 1, 20);
 
-      expect(mockRepo.search).toHaveBeenCalledWith('t1', undefined, 1, 20);
+      expect(mockRepo.search).toHaveBeenCalledWith('t1', undefined, 1, 20, undefined);
     });
   });
 
