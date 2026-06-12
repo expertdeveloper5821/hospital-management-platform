@@ -10,6 +10,7 @@ export interface IIPDAdmission extends Document {
   bedNumber:        string;
   wardName:         string;
   assignedDoctorId: string;
+  departmentId:     string | null;
   status:           AdmissionStatus;
   admissionDate:    Date;
   dischargeDate:    Date | null;
@@ -40,6 +41,7 @@ const ipdAdmissionSchema = new Schema<IIPDAdmission>(
     bedNumber:        { type: String, required: true },
     wardName:         { type: String, required: true },
     assignedDoctorId: { type: String, required: true },
+    departmentId:     { type: String, default: null },
     status: {
       type:     String,
       enum:     Object.values(AdmissionStatus),
@@ -62,6 +64,7 @@ ipdAdmissionSchema.index({ tenantId: 1, status: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, wardId: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, bedId: 1, status: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, patientId: 1 });
+ipdAdmissionSchema.index({ tenantId: 1, departmentId: 1, status: 1 });
 
 export const IPDAdmissionModel = mongoose.model<IIPDAdmission>(
   'IPDAdmission',

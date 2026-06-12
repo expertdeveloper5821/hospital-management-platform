@@ -8,6 +8,7 @@ import {
   useDownloadMedicalCardMutation,
   useDeletePatientMutation,
 } from '@/store/api/patient.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
@@ -167,6 +168,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     emergencyContactName:   initial?.emergencyContactName   ?? '',
     emergencyContactMobile: sanitizeMobile(initial?.emergencyContactMobile ?? ''),
     bloodGroup:             initial?.bloodGroup             ?? undefined,
+    departmentId:           initial?.departmentId           ?? undefined,
     forceCreate:            false,
   });
 
@@ -177,6 +179,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
   const [createPatient, { isLoading: creating }] = useCreatePatientMutation();
   const [updatePatient, { isLoading: updating }] = useUpdatePatientMutation();
+  const { data: departments } = useListDepartmentsQuery();
   const isLoading = creating || updating;
 
   const errors   = validatePatientForm(form);
@@ -220,6 +223,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
           bloodGroup:             form.bloodGroup,
+          departmentId:           form.departmentId ?? null,
         };
         const result = await updatePatient({ patientId: initial.patientId, ...body }).unwrap();
         onSuccess?.(result);
@@ -381,6 +385,21 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               </select>
             </div>
 
+            <div className="space-y-1">
+              <Label htmlFor="department">Department</Label>
+              <select
+                id="department"
+                value={form.departmentId ?? ''}
+                onChange={(e) => set('departmentId', e.target.value || undefined)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— None —</option>
+                {(departments ?? []).map((d) => (
+                  <option key={d.departmentId} value={d.departmentId}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="sm:col-span-2 space-y-1">
               <Label htmlFor="address">Address *</Label>
               <textarea
@@ -478,6 +497,10 @@ interface PatientDetailPanelProps {
 function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDetailPanelProps) {
   const role = useAppSelector((s) => s.auth.profile?.role);
   const canDelete = role === UserRole.ADMIN || role === UserRole.MANAGER || role === UserRole.HOSPITAL_ADMIN;
+  const { data: departments } = useListDepartmentsQuery();
+  const departmentName = patient.departmentId
+    ? (departments?.find((d) => d.departmentId === patient.departmentId)?.name ?? patient.departmentId)
+    : null;
 
   const [tab,           setTab]           = useState<'details' | 'history' | 'ipd'>('details');
   const [historyPage,   setHistoryPage]   = useState(1);
@@ -592,6 +615,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
               {row('Blood Group',   patient.bloodGroup)}
               {row('Aadhaar',       patient.aadhaarNumber)}
               {row('Address',       patient.address)}
+              {row('Department',    departmentName)}
               {row('EC Name',       patient.emergencyContactName)}
               {row('EC Mobile',     patient.emergencyContactMobile)}
               {row('Registered',    formatDate(patient.createdAt))}

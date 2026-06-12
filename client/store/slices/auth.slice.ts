@@ -8,6 +8,7 @@ interface AuthState {
   profile:         MeResponse | null;
   branding:        BrandingConfig | null;
   isAuthenticated: boolean;
+  hydrated:        boolean;
 }
 
 const initialState: AuthState = {
@@ -15,6 +16,7 @@ const initialState: AuthState = {
   profile:         null,
   branding:        null,
   isAuthenticated: false,
+  hydrated:        false,
 };
 
 const authSlice = createSlice({
@@ -40,11 +42,15 @@ const authSlice = createSlice({
         state.profile.isFirstLogin = false;
       }
     },
+    hydrationComplete(state) {
+      state.hydrated = true;
+    },
     logout(state) {
-      state.token          = null;
-      state.profile        = null;
-      state.branding       = null;
+      state.token           = null;
+      state.profile         = null;
+      state.branding        = null;
       state.isAuthenticated = false;
+      state.hydrated        = true;
       if (typeof window !== 'undefined') {
         localStorage.removeItem(TOKEN_KEY);
       }
@@ -59,6 +65,7 @@ export const {
   profileLoaded,
   setBranding,
   setFirstLoginDone,
+  hydrationComplete,
   logout,
 } = authSlice.actions;
 

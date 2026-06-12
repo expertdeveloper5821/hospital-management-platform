@@ -2,6 +2,35 @@
 
 ---
 
+## Feature — Doctor-Scoped Filtering for OPD and IPD (Post-Construction)
+**Timestamp**: 2026-06-12T14:00:00Z
+**User Input**: "When we logged in as doctor, In opd and ipd, Make like that doctor can view only their own opds and ipds patients not whole department patients."
+**AI Response**: "Replaced the previous department-wide filtering logic (which looked up the doctor's `departmentIds` and returned all records across those departments) with a direct `doctorId`/`assignedDoctorId` filter applied at the controller level. OPD: `getQueue` controller forces `doctorId = req.user!.userId` when role is DOCTOR; removed `userRepository` import and the department-ID lookup from both controller and service. IPD: `listAdmissions` controller sets `assignedDoctorId = req.user!.userId` for DOCTOR role; service signature changed from `departmentIds?: string[]` to `assignedDoctorId?: string`; repository `findActiveAdmissions` filter changed from `departmentId $in [...]` to `assignedDoctorId = <id>`. Dist rebuilt (`npm run build`). Server restart required."
+**Files changed**:
+- `server/src/modules/opd/opd.controller.ts` — DOCTOR role forces `doctorId = req.user!.userId` in `getQueue`; removed `userRepository` import
+- `server/src/modules/opd/opd.service.ts` — removed `departmentIds` parameter and patient-ID lookup from `getQueue`
+- `server/src/modules/ipd/ipd.controller.ts` — DOCTOR role sets `assignedDoctorId = req.user!.userId` in `listAdmissions`; removed `userRepository` import
+- `server/src/modules/ipd/ipd.service.ts` — `listAdmissions` parameter changed from `departmentIds?: string[]` to `assignedDoctorId?: string`
+- `server/src/modules/ipd/ipd.repository.ts` — `findActiveAdmissions` filter changed from `departmentId $in [...]` to `assignedDoctorId = <id>`
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — enhancement log updated
+**Context**: CONSTRUCTION PHASE — Post-Construction Feature — Role-based record scoping for DOCTOR role
+
+---
+
+## Bug Fix — IPD: `updateAdmission` Route Missing from Compiled Dist (Post-Construction)
+**Timestamp**: 2026-06-12T12:00:00Z
+**User Input**: "still showing this { 'Route not found' error } while saving changes in ipd, Add in md files also"
+**AI Response**: "Root cause identified: `PATCH /api/ipd/admissions/:admissionId` (`updateAdmission`) route and updated `listAdmissions` (with `departmentIds` doctor-scoped filter) had been added to the TypeScript source (`ipd.routes.ts`, `ipd.controller.ts`, `ipd.service.ts`) but the compiled `dist/` was stale — these additions were absent from `dist/modules/ipd/ipd.routes.js`. The server process was running `ts-node src/server.ts` started before the source changes were made, so even the ts-node run had the old in-memory module graph. Fix: Ran `npm run build` in `server/` to regenerate all dist files. `dist/modules/ipd/ipd.routes.js` now includes `router.patch('/admissions/:admissionId', requireRole(RECEPTIONIST, DOCTOR, ADMIN, HOSPITAL_ADMIN), updateAdmission)`. Server restart required (`npm run dev` or `npm start`) to load the regenerated output."
+**Files changed**:
+- `server/dist/modules/ipd/ipd.routes.js` — rebuilt; now includes `PATCH /admissions/:admissionId` → `updateAdmission`
+- `server/dist/modules/ipd/ipd.controller.js` — rebuilt; now includes `updateAdmission` handler and department-scoped `listAdmissions`
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — enhancement log updated
+**Context**: CONSTRUCTION PHASE — Post-Construction Bug Fix — IPD module compiled dist stale after source changes
+
+---
+
 ## Feature — IPD History Tab in Patient Detail Panel (Post-Construction)
 **Timestamp**: 2026-06-10T12:00:00Z
 **User Input**: "Also show ipd history with opd in patients module"
@@ -514,5 +543,17 @@
 **User Input**: "In superadmin screen, inside search bar, the search keywords are not working example with hospital names, email id"
 **AI Response**: "Diagnosed missing search wiring across all 5 layers (repository → service → controller → RTK Query slice → page component). Implemented end-to-end: `TenantRepository.findAll()` accepts `search?` and applies case-insensitive MongoDB `$or` regex on `name`/`adminEmail`; service and controller updated to propagate param (controller now uses `searchSchema` instead of `paginationSchema`); RTK Query `listTenants` query appends `?q=` via URLSearchParams; `super-admin/page.tsx` adds debounced search input (300ms) with page-reset on change and search-aware empty state. Updated `u7-b-admin-panels-code-generation-plan.md`."
 **Context**: CONSTRUCTION PHASE — U7-B Post-Construction Bug Fix — Tenant search end-to-end
+
+---
+
+## Bug Fix — IPD: "Route not found" 404 When Saving Changes (Post-Construction)
+**Timestamp**: 2026-06-12T00:00:00Z
+**User Input**: "error in this { \"status\": \"error\", \"message\": \"Route not found\", \"details\": { \"stack\": \"NotFoundError: Route not found\\n    at /home/.../server/src/app.ts:153:8...\" } } While saving changes in ipd, also update md files"
+**AI Response**: "Root cause identified: `dischargePatient` mutation builds URL `/api/ipd/admissions/${admissionId}/discharge`. When `admissionId` is an empty string, the URL becomes `/api/ipd/admissions//discharge` (double slash). Express cannot match `:admissionId` against an empty segment, so the request falls through all routes and hits the 404 catch-all handler at `app.ts:153`. Secondary bug: `handleSave` in `AdmissionPanel` was including `bedId: ''` in the request body when the user changed wards (clearing bed selection), which would cause a Zod validation failure (400). Fixed: (1) `handleDischargeConfirm` — added guard `if (!dischargeFor.admissionId) return` before calling `discharge()`. (2) `dischargePatient` mutation query — added early throw when `admissionId` is falsy. (3) `updateAdmission` mutation query — added early throw when `admissionId` is falsy. (4) `addProgressNote` mutation query — added early throw when `admissionId` is falsy. (5) `listBeds` query — added early throw when `wardId` is falsy to prevent `/api/ipd/wards//beds`. (6) `handleSave` — changed `if (bedId !== admission.bedId)` to `if (bedId && bedId !== admission.bedId)` to exclude empty string; added client-side validation requiring a bed selection when ward changes."
+**Files changed**:
+- `client/store/api/ipd.api.ts` — defensive guards on `listBeds`, `addProgressNote`, `updateAdmission`, `dischargePatient` query builders
+- `client/app/(dashboard)/ipd/page.tsx` — fixed `handleDischargeConfirm` guard; fixed `handleSave` bedId empty-string bug and added ward-change bed validation
+- `aidlc-docs/audit.md` — this entry
+**Context**: CONSTRUCTION PHASE — Post-Construction Bug Fix — IPD module
 
 ---

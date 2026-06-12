@@ -102,6 +102,7 @@ export const baseApi = createApi({
     'Audit',
     'Dashboard',
     'PlatformSettings',
+    'Department',
   ],
   endpoints: () => ({}),
 });

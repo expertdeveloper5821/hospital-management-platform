@@ -10,6 +10,7 @@ import {
 import { IWard } from './ward.model';
 import { IBed  } from './bed.model';
 import mongoose from 'mongoose';
+import { UserRole } from '../../shared/types/common.types';
 
 const admissionIdSchema = z.string().uuid('admissionId must be a valid UUID');
 
@@ -112,12 +113,48 @@ export async function listAdmissions(
     }
 
     const tenantId = req.user!.tenantId as string;
-    const result   = await ipdService.listAdmissions(tenantId, parsed.data);
+
+    const assignedDoctorId = req.user!.role === UserRole.DOCTOR ? req.user!.userId : undefined;
+    const result = await ipdService.listAdmissions(tenantId, parsed.data, assignedDoctorId);
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) {
     next(err);
   }
+}
+
+const updateAdmissionSchema = z.object({
+  assignedDoctorId: z.string().min(1).optional(),
+  wardId:           z.string().min(1).optional(),
+  bedId:            z.string().min(1).optional(),
+}).refine((d) => d.assignedDoctorId || d.wardId || d.bedId, {
+  message: 'Provide at least one field to update',
+});
+
+export async function updateAdmission(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const body = updateAdmissionSchema.safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const tenantId = req.user!.tenantId as string;
+    const result   = await ipdService.updateAdmission(
+      idResult.data,
+      tenantId,
+      body.data,
+      req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
 }
 
 export async function addProgressNote(

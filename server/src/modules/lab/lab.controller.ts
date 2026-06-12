@@ -9,6 +9,13 @@ import {
   ListLabRequestsQuerySchema,
 } from './lab.types';
 import { UserRole } from '../../shared/types/common.types';
+import { userRepository } from '../user/user.repository';
+
+async function resolveDoctorDepartments(tenantId: string, userId: string, role: string): Promise<string[] | undefined> {
+  if (role !== UserRole.DOCTOR) return undefined;
+  const doctor = await userRepository.findById(tenantId, userId);
+  return doctor?.departmentIds?.length ? doctor.departmentIds : undefined;
+}
 
 const requestIdSchema = z.string().uuid('requestId must be a valid UUID');
 
@@ -39,7 +46,9 @@ export async function listPathologyRequests(
       res.status(400).json({ status: 'error', message: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
       return;
     }
-    const result = await labService.listPathologyRequests(req.user!.tenantId as string, parsed.data);
+    const tenantId = req.user!.tenantId as string;
+    const departmentIds = await resolveDoctorDepartments(tenantId, req.user!.userId, req.user!.role);
+    const result = await labService.listPathologyRequests(tenantId, parsed.data, departmentIds);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -107,7 +116,9 @@ export async function listRadiologyRequests(
       res.status(400).json({ status: 'error', message: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
       return;
     }
-    const result = await labService.listRadiologyRequests(req.user!.tenantId as string, parsed.data);
+    const tenantId = req.user!.tenantId as string;
+    const departmentIds = await resolveDoctorDepartments(tenantId, req.user!.userId, req.user!.role);
+    const result = await labService.listRadiologyRequests(tenantId, parsed.data, departmentIds);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

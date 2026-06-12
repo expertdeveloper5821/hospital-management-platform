@@ -8,6 +8,7 @@ import {
   createAdmission,
   listAdmissions,
   getAdmissionById,
+  updateAdmission,
   addProgressNote,
   dischargePatient,
   getPatientIPDHistory,
@@ -64,6 +65,19 @@ router.get(
     ...ADMIN_ROLES,
   ),
   getAdmissionById,
+);
+
+// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor)
+router.patch(
+  '/admissions/:admissionId',
+  ...protect,
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.DOCTOR,
+    UserRole.ADMIN,
+    UserRole.HOSPITAL_ADMIN,
+  ),
+  updateAdmission,
 );
 
 // POST /api/ipd/admissions/:admissionId/progress-notes — Doctor records daily note

@@ -4,6 +4,8 @@ import { patientService, DuplicateWarningError } from './patient.service';
 import { IPatient } from './patient.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
+import { UserRole } from '../../shared/types/common.types';
+import { userRepository } from '../user/user.repository';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
@@ -18,6 +20,7 @@ const createPatientSchema = z.object({
   emergencyContactName:   z.string().min(1).max(200).optional(),
   emergencyContactMobile: z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
   bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
+  departmentId:           z.string().min(1).optional(),
   forceCreate:            z.boolean().optional(),
 });
 
@@ -31,6 +34,7 @@ const updatePatientSchema = z.object({
   emergencyContactName:   z.string().min(1).max(200).optional(),
   emergencyContactMobile: z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
   bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
+  departmentId:           z.string().min(1).nullable().optional(),
 });
 
 function toResponse(p: IPatient) {
@@ -45,6 +49,7 @@ function toResponse(p: IPatient) {
     emergencyContactName:   p.emergencyContactName   ?? null,
     emergencyContactMobile: p.emergencyContactMobile ?? null,
     bloodGroup:             p.bloodGroup             ?? null,
+    departmentId:           p.departmentId           ?? null,
     tenantId:               p.tenantId,
     createdAt:              p.createdAt,
     updatedAt:              p.updatedAt,
@@ -80,7 +85,15 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
     const query = searchSchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
     const { q, page, limit } = query.data;
-    const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit);
+
+    // Doctors only see patients in their own departments
+    let departmentIds: string[] | undefined;
+    if (req.user!.role === UserRole.DOCTOR) {
+      const doctor = await userRepository.findById(req.user!.tenantId!, req.user!.userId);
+      if (doctor?.departmentIds?.length) departmentIds = doctor.departmentIds;
+    }
+
+    const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit, departmentIds);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

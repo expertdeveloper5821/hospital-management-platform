@@ -97,6 +97,22 @@ export class UserRepository {
     assertDbConnected();
     await UserModel.findOneAndUpdate({ _id: userId, tenantId }, { passwordHash });
   }
+
+  async addDepartmentToUsers(tenantId: string, userIds: string[], departmentId: string): Promise<void> {
+    assertDbConnected();
+    await UserModel.updateMany(
+      { _id: { $in: userIds }, tenantId },
+      { $addToSet: { departmentIds: departmentId } },
+    );
+  }
+
+  async removeDepartmentFromUsers(tenantId: string, userIds: string[], departmentId: string): Promise<void> {
+    assertDbConnected();
+    await UserModel.updateMany(
+      { _id: { $in: userIds }, tenantId },
+      { $pull: { departmentIds: departmentId } },
+    );
+  }
 }
 
 export const userRepository = new UserRepository();

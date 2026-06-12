@@ -60,6 +60,7 @@ export interface AdmissionResponse {
   bedId:            string;
   bedNumber:        string;
   assignedDoctorId: string;
+  departmentId:     string | null;
   status:           AdmissionStatus;
   admissionDate:    string;
   dischargeDate:    string | null;

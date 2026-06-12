@@ -1,9 +1,10 @@
 import { UserRole } from '../../shared/types/common.types';
 
 export interface CreateUserRequest {
-  email:    string;
-  name:     string;
-  role:     UserRole;
+  email:        string;
+  name:         string;
+  role:         UserRole;
+  departmentIds?: string[];
 }
 
 export interface UpdateRoleRequest {
@@ -27,14 +28,15 @@ export interface ChangeMyPasswordRequest {
 }
 
 export interface UserResponse {
-  userId:      string;
-  email:       string;
-  name:        string;
-  role:        UserRole;
-  isActive:    boolean;
+  userId:       string;
+  email:        string;
+  name:         string;
+  role:         UserRole;
+  departmentIds: string[];
+  isActive:     boolean;
   isFirstLogin: boolean;
-  tenantId:    string;
-  createdAt:   Date;
+  tenantId:     string;
+  createdAt:    Date;
 }
 
 export type SortByField   = 'name' | 'createdAt' | 'role';

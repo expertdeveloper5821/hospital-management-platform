@@ -23,9 +23,10 @@ function getTimeGreeting(): string {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router  = useRouter();
-  const token   = useAppSelector((s) => s.auth.token);
-  const profile = useAppSelector((s) => s.auth.profile);
-  const isAuth  = useAppSelector((s) => s.auth.isAuthenticated);
+  const token    = useAppSelector((s) => s.auth.token);
+  const profile  = useAppSelector((s) => s.auth.profile);
+  const isAuth   = useAppSelector((s) => s.auth.isAuthenticated);
+  const hydrated = useAppSelector((s) => s.auth.hydrated);
   const [sidebarOpen,  setSidebarOpen]  = useState(false);
   const isSuperAdmin = profile?.role === 'SUPER_ADMIN';
   const { data: myProfile } = useGetMyProfileQuery(undefined, { skip: !profile || isSuperAdmin });
@@ -48,19 +49,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [platformSettings]);
 
-  // Guard — unauthenticated users go to login
+  // Guard — unauthenticated users go to login (wait for hydration to avoid false redirect on refresh)
   useEffect(() => {
-    if (!isAuth) {
+    if (hydrated && !isAuth) {
       router.replace('/login');
     }
-  }, [isAuth, router]);
+  }, [hydrated, isAuth, router]);
 
   // Guard — first-login users must change password before accessing the dashboard
   useEffect(() => {
-    if (isAuth && profile?.isFirstLogin) {
+    if (hydrated && isAuth && profile?.isFirstLogin) {
       router.replace('/change-password');
     }
-  }, [isAuth, profile, router]);
+  }, [hydrated, isAuth, profile, router]);
 
   // WebSocket lifecycle
   useEffect(() => {
@@ -75,8 +76,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setSidebarOpen(false);
   }, []);
 
-  // Render nothing while redirecting (prevents flash of dashboard for wrong users)
-  if (!isAuth || !profile || profile.isFirstLogin) return null;
+  // Render nothing until hydration completes (prevents flash and premature redirects)
+  if (!hydrated || !isAuth || !profile || profile.isFirstLogin) return null;
 
   return (
     <BrandingProvider>

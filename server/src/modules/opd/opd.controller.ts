@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { opdService } from './opd.service';
 import { IOPDVisit } from './opd.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { UserRole } from '../../shared/types/common.types';
 
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
@@ -57,6 +58,7 @@ function toResponse(v: IOPDVisit) {
     patientId:      v.patientId,
     fullName:       v.fullName,
     doctorId:       v.doctorId,
+    departmentId:   v.departmentId ?? null,
     visitDate:      v.visitDate,
     queueNumber:    v.queueNumber,
     status:         v.status,
@@ -84,7 +86,13 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     const query = queueQuerySchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
 
-    const visits = await opdService.getQueue(req.user!.tenantId!, query.data.date, query.data.doctorId, query.data.search);
+    const tenantId = req.user!.tenantId!;
+    // Doctors always see only their own visits
+    const doctorId = req.user!.role === UserRole.DOCTOR
+      ? req.user!.userId
+      : query.data.doctorId;
+
+    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search);
     res.status(200).json({
       status: 'success',
       data: visits.map((v) => toResponse(v)),

@@ -49,6 +49,7 @@ export class PatientService {
       emergencyContactName:   data.emergencyContactName   ?? null,
       emergencyContactMobile: data.emergencyContactMobile ?? null,
       bloodGroup:             data.bloodGroup             ?? null,
+      departmentId:           data.departmentId           ?? null,
     });
 
     await auditService.log({
@@ -80,6 +81,7 @@ export class PatientService {
     const fields = [
       'fullName', 'gender', 'mobileNumber', 'address',
       'aadhaarNumber', 'emergencyContactName', 'emergencyContactMobile', 'bloodGroup',
+      'departmentId',
     ] as const;
 
     for (const key of fields) {
@@ -146,12 +148,13 @@ export class PatientService {
   }
 
   async searchPatients(
-    tenantId: string,
-    q:        string | undefined,
-    page:     number,
-    limit:    number,
+    tenantId:     string,
+    q:            string | undefined,
+    page:         number,
+    limit:        number,
+    departmentIds?: string[],
   ): Promise<PaginatedResult<IPatient>> {
-    return patientRepository.search(tenantId, q, page, limit);
+    return patientRepository.search(tenantId, q, page, limit, departmentIds);
   }
 
   async generateMedicalCard(tenantId: string, patientId: string): Promise<Buffer> {
