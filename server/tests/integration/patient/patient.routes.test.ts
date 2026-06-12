@@ -38,16 +38,34 @@ import { Gender, BloodGroup }     from '../../../src/modules/patient/patient.typ
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
-let mongod: MongoMemoryServer;
+let mongod: MongoMemoryServer | undefined;
+
+async function createMongoMemoryServerWithRetry(attempts = 3): Promise<MongoMemoryServer> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await MongoMemoryServer.create();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/port .*already in use/i.test(message) || attempt === attempts) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await createMongoMemoryServerWithRetry();
   await mongoose.connect(mongod.getUri());
 });
 
 afterAll(async () => {
   await mongoose.disconnect();
-  await mongod.stop();
+  await mongod?.stop();
 });
 
 beforeEach(async () => {

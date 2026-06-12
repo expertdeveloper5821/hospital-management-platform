@@ -29,6 +29,7 @@ export interface CreatePatientRequest {
   emergencyContactName?:  string;
   emergencyContactMobile?: string;
   bloodGroup?:            BloodGroup;
+  departmentId?:          string;
   forceCreate?:           boolean; // explicit confirmation to bypass duplicate warning
 }
 
@@ -42,4 +43,5 @@ export interface UpdatePatientRequest {
   emergencyContactName?:   string;
   emergencyContactMobile?: string;
   bloodGroup?:             BloodGroup;
+  departmentId?:           string | null;
 }

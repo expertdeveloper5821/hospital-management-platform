@@ -8,12 +8,14 @@ import {
   useAddBedsMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
+  useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
   useDischargePatientMutation,
   useGetOccupancySummaryQuery,
 } from '@/store/api/ipd.api';
 import { useListUsersQuery }    from '@/store/api/user.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector }       from '@/store/hooks';
 import { UserRole }             from '@/store/types';
 import type { AdmissionResponse, WardResponse, PatientResponse, UserResponse } from '@/store/types';
@@ -233,6 +235,284 @@ function DoctorSearch({ doctors, value, onChange }: DoctorSearchProps) {
   );
 }
 
+// ─── Admission Panel (slide-over) ────────────────────────────────────────────
+
+interface AdmissionPanelProps {
+  admission:     AdmissionResponse;
+  onClose:       () => void;
+  onUpdate:      (a: AdmissionResponse) => void;
+  canEdit:       boolean;
+  canDischarge:  boolean;
+  doctorMap:     Record<string, string>;
+  onDischarge:   (a: AdmissionResponse) => void;
+  onNotes:       (a: AdmissionResponse) => void;
+  canProgress:   boolean;
+}
+
+function AdmissionPanel({
+  admission, onClose, onUpdate,
+  canEdit, canDischarge, doctorMap,
+  onDischarge, onNotes, canProgress,
+}: AdmissionPanelProps) {
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [error, setError] = useState<string | null>(null);
+
+  // Edit state — initialised from current admission
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [doctor,  setDoctor]  = useState<UserResponse | null>(null);
+  const [wardId,  setWardId]  = useState(admission.wardId);
+  const [bedId,   setBedId]   = useState(admission.bedId);
+
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: doctorsPage }     = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
+  const { data: wardsData }       = useListWardsQuery();
+  const { data: bedsData }        = useListBedsQuery(wardId, { skip: !wardId || mode !== 'edit' });
+
+  const departments = departmentsData ?? [];
+  const allDoctors  = doctorsPage?.data ?? [];
+  const wards       = wardsData ?? [];
+  const allBeds     = bedsData ?? [];
+  const availableBeds = allBeds.filter((b) => !b.isOccupied || b.bedId === admission.bedId);
+
+  const doctorList = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
+
+  const [updateAdmission, { isLoading: saving }] = useUpdateAdmissionMutation();
+
+  function enterEdit() {
+    setSelectedDepartmentId('');
+    setDoctor(null);
+    setWardId(admission.wardId);
+    setBedId(admission.bedId);
+    setError(null);
+    setMode('edit');
+  }
+
+  async function handleSave() {
+    setError(null);
+
+    // Validate: if ward changed, a bed must be selected in the new ward
+    const wardChanged = wardId !== admission.wardId;
+    if (wardChanged && !bedId) {
+      setError('Please select a bed in the new ward before saving.');
+      return;
+    }
+
+    const body: { assignedDoctorId?: string; wardId?: string; bedId?: string } = {};
+    if (doctor)                              body.assignedDoctorId = doctor.userId;
+    if (wardId !== admission.wardId)         body.wardId           = wardId;
+    // Only include bedId when it's a non-empty, valid value different from current
+    if (bedId && bedId !== admission.bedId)  body.bedId            = bedId;
+
+    if (!body.assignedDoctorId && !body.wardId && !body.bedId) {
+      setMode('view');
+      return;
+    }
+
+    if (!admission.admissionId) {
+      setError('Invalid admission — please close and reopen this panel.');
+      return;
+    }
+
+    try {
+      const updated = await updateAdmission({ admissionId: admission.admissionId, ...body }).unwrap();
+      onUpdate(updated);
+      setMode('view');
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to update admission.');
+    }
+  }
+
+  const isAdmitted = admission.status === 'ADMITTED';
+
+  const row = (label: string, val: React.ReactNode) => (
+    <div className="py-2.5 border-b last:border-0 grid grid-cols-5 gap-2 items-start">
+      <span className="col-span-2 text-sm text-muted-foreground pt-0.5">{label}</span>
+      <span className="col-span-3 text-sm font-medium break-words">{val ?? '—'}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div
+        className="relative flex flex-col h-full w-full max-w-lg bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b shrink-0">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant={admission.status === 'ADMITTED' ? 'default' : 'secondary'}>
+                {admission.status}
+              </Badge>
+            </div>
+            <p className="text-sm font-semibold">{admission.fullName ?? admission.patientId}</p>
+            <p className="text-xs text-muted-foreground font-mono">{admission.patientId}</p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {error && (
+            <p className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+          )}
+
+          {mode === 'view' && (
+            <div>
+              {row('Ward',          admission.wardName)}
+              {row('Bed',           admission.bedNumber)}
+              {row('Doctor',        doctorMap[admission.assignedDoctorId] ?? admission.assignedDoctorId)}
+              {row('Admitted',      new Date(admission.admissionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }))}
+              {row('Discharged',    admission.dischargeDate
+                ? new Date(admission.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : null)}
+              {row('Progress Notes', (
+                <button
+                  className="text-primary text-sm underline-offset-2 hover:underline"
+                  onClick={() => { onClose(); onNotes(admission); }}
+                >
+                  {admission.progressNotes.length} note{admission.progressNotes.length !== 1 ? 's' : ''}
+                </button>
+              ))}
+              {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
+            </div>
+          )}
+
+          {mode === 'edit' && (
+            <div className="space-y-4">
+              {/* Department filter */}
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-dept">Department (filter doctors)</Label>
+                <select
+                  id="ap-dept"
+                  value={selectedDepartmentId}
+                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setDoctor(null); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">— All Departments —</option>
+                  {departments.map((d) => (
+                    <option key={d.departmentId} value={d.departmentId}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Doctor */}
+              <div className="space-y-1.5">
+                <Label>Assigned Doctor</Label>
+                <DoctorSearch doctors={doctorList} value={doctor} onChange={setDoctor} />
+                {selectedDepartmentId && doctorList.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No doctors in this department.</p>
+                )}
+                {!doctor && (
+                  <p className="text-xs text-muted-foreground">
+                    Current: {doctorMap[admission.assignedDoctorId] ?? admission.assignedDoctorId}
+                  </p>
+                )}
+              </div>
+
+              {/* Ward */}
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-ward">Ward</Label>
+                <select
+                  id="ap-ward"
+                  value={wardId}
+                  onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {wards.map((w) => (
+                    <option key={w.wardId} value={w.wardId}>
+                      {w.name}{w.floor ? ` — Floor ${w.floor}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Bed */}
+              <div className="space-y-1.5">
+                <Label>Bed</Label>
+                {allBeds.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No beds in this ward.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-3">
+                      {allBeds.map((b) => {
+                        const isSelected  = bedId === b.bedId;
+                        const isAvailable = !b.isOccupied || b.bedId === admission.bedId;
+                        return (
+                          <button
+                            key={b.bedId}
+                            type="button"
+                            disabled={!isAvailable}
+                            onClick={() => setBedId(b.bedId)}
+                            className={[
+                              'inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-medium transition-colors',
+                              isSelected
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : isAvailable
+                                  ? 'border-green-500/50 bg-green-50 text-green-700 hover:bg-green-100'
+                                  : 'border-muted bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed',
+                            ].join(' ')}
+                          >
+                            <Bed className="h-3 w-3" />
+                            {b.bedNumber}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {availableBeds.length} available · current bed highlighted
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {isAdmitted && (
+          <div className="shrink-0 border-t p-4 space-y-2">
+            {mode === 'view' && (
+              <div className="flex flex-wrap gap-2">
+                {canProgress && (
+                  <Button variant="outline" className="flex-1" onClick={() => { onClose(); onNotes(admission); }}>
+                    Progress Notes
+                  </Button>
+                )}
+                {canEdit && (
+                  <Button variant="outline" className="flex-1" onClick={enterEdit}>
+                    Edit
+                  </Button>
+                )}
+                {canDischarge && (
+                  <Button variant="destructive" size="sm" onClick={() => { onClose(); onDischarge(admission); }}>
+                    Discharge
+                  </Button>
+                )}
+              </div>
+            )}
+            {mode === 'edit' && (
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setMode('view'); setError(null); }}>
+                  Back
+                </Button>
+                <Button className="flex-1" disabled={saving} onClick={handleSave}>
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── New Admission Modal ──────────────────────────────────────────────────────
 
 interface NewAdmissionModalProps {
@@ -241,18 +521,24 @@ interface NewAdmissionModalProps {
 }
 
 function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
-  const [patient, setPatient] = useState<PatientResponse | null>(null);
-  const [wardId,  setWardId]  = useState('');
-  const [bedId,   setBedId]   = useState('');
-  const [doctor,  setDoctor]  = useState<UserResponse | null>(null);
-  const [error,   setError]   = useState<string | null>(null);
+  const [patient,              setPatient]              = useState<PatientResponse | null>(null);
+  const [wardId,               setWardId]               = useState('');
+  const [bedId,                setBedId]                = useState('');
+  const [doctor,               setDoctor]               = useState<UserResponse | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [error,                setError]                = useState<string | null>(null);
 
-  const { data: bedsData } = useListBedsQuery(wardId, { skip: !wardId });
-  const { data: doctorsPage } = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
+  const { data: bedsData }      = useListBedsQuery(wardId, { skip: !wardId });
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: doctorsPage }   = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
 
   const availableBeds = bedsData?.filter((b) => !b.isOccupied) ?? [];
   const allBeds       = bedsData ?? [];
-  const doctorList    = doctorsPage?.data ?? [];
+  const allDoctors    = doctorsPage?.data ?? [];
+  const departments   = departmentsData ?? [];
+  const doctorList    = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
 
   const [createAdmission, { isLoading }] = useCreateAdmissionMutation();
 
@@ -364,10 +650,32 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             </div>
           )}
 
-          {/* Step 4 — Doctor */}
+          {/* Step 4 — Department filter */}
+          <div className="space-y-2">
+            <Label htmlFor="na-dept">Department</Label>
+            <select
+              id="na-dept"
+              value={selectedDepartmentId}
+              onChange={(e) => {
+                setSelectedDepartmentId(e.target.value);
+                setDoctor(null);
+              }}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">— All Departments —</option>
+              {departments.map((dept) => (
+                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Step 5 — Doctor */}
           <div className="space-y-2">
             <Label>Assigned Doctor</Label>
             <DoctorSearch doctors={doctorList} value={doctor} onChange={setDoctor} />
+            {selectedDepartmentId && doctorList.length === 0 && (
+              <p className="text-xs text-muted-foreground">No doctors assigned to this department.</p>
+            )}
           </div>
 
           {error && (
@@ -644,6 +952,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page,            setPage]            = useState(1);
   const [showNew,         setShowNew]         = useState(false);
+  const [viewFor,         setViewFor]         = useState<AdmissionResponse | null>(null);
   const [notesFor,        setNotesFor]        = useState<AdmissionResponse | null>(null);
   const [dischargeFor,    setDischargeFor]    = useState<AdmissionResponse | null>(null);
 
@@ -674,6 +983,11 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
   const canProgress  = role === UserRole.DOCTOR;
+  const canEdit =
+    role === UserRole.RECEPTIONIST ||
+    role === UserRole.DOCTOR ||
+    role === UserRole.HOSPITAL_ADMIN ||
+    role === UserRole.ADMIN;
   const canDischarge =
     role === UserRole.DOCTOR ||
     role === UserRole.HOSPITAL_ADMIN ||
@@ -686,6 +1000,12 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   async function handleDischargeConfirm() {
     if (!dischargeFor) return;
+    // Guard: admissionId must be a non-empty string to avoid a broken URL
+    // (/api/ipd/admissions//discharge) that hits the 404 catch-all.
+    if (!dischargeFor.admissionId) {
+      setDischargeFor(null);
+      return;
+    }
     await discharge(dischargeFor.admissionId);
     setDischargeFor(null);
   }
@@ -797,6 +1117,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                         </span>
                       )}
                     </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setViewFor(a)}>
+                      View
+                    </Button>
                     {canDischarge && a.status === 'ADMITTED' && (
                       <Button
                         size="sm"
@@ -876,6 +1199,14 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                               </span>
                             )}
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setViewFor(a)}
+                          >
+                            View
+                          </Button>
                           {canDischarge && a.status === 'ADMITTED' && (
                             <Button
                               size="sm"
@@ -914,6 +1245,19 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
       {showNew  && <NewAdmissionModal wards={wards} onClose={() => setShowNew(false)} />}
       {notesFor && <NotesModal admission={notesFor} canAdd={canProgress} doctorMap={doctorMap} onClose={() => setNotesFor(null)} />}
+      {viewFor && (
+        <AdmissionPanel
+          admission={viewFor}
+          onClose={() => setViewFor(null)}
+          onUpdate={(updated) => setViewFor(updated)}
+          canEdit={canEdit}
+          canDischarge={canDischarge}
+          canProgress={canProgress}
+          doctorMap={doctorMap}
+          onDischarge={(a) => setDischargeFor(a)}
+          onNotes={(a) => setNotesFor(a)}
+        />
+      )}
       {dischargeFor && (
         <DischargeConfirm
           admission={dischargeFor}

@@ -29,6 +29,7 @@ export class UserService {
       name:         data.name,
       passwordHash,
       role:         data.role,
+      departmentIds: data.departmentIds ?? [],
       isActive:     true,
       isFirstLogin: true,
     });

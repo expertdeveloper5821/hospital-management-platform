@@ -7,6 +7,7 @@ export interface IOPDVisit extends Document {
   patientId:      string;
   fullName?:      string;
   doctorId:       string | null;
+  departmentId:   string | null;
   visitDate:      Date;
   queueNumber:    number;
   status:         OPDVisitStatus;
@@ -25,6 +26,7 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
     patientId:      { type: String, required: true },
     fullName:       { type: String, required: false },
     doctorId:       { type: String, default: null },
+    departmentId:   { type: String, default: null },
     visitDate:      { type: Date,   required: true },
     queueNumber:    { type: Number, required: true },
     status:         { type: String, required: true, enum: Object.values(OPDVisitStatus), default: OPDVisitStatus.OPEN },
@@ -41,5 +43,6 @@ OPDVisitSchema.index({ tenantId: 1, visitId: 1 }, { unique: true });
 OPDVisitSchema.index({ tenantId: 1, patientId: 1, visitDate: -1 }); // patient history
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, status: 1 });      // queue queries
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, doctorId: 1 });    // doctor's queue
+OPDVisitSchema.index({ tenantId: 1, departmentId: 1, visitDate: -1 }); // department queue
 
 export const OPDVisitModel = mongoose.model<IOPDVisit>('OPDVisit', OPDVisitSchema);

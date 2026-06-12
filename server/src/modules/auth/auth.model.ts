@@ -37,6 +37,7 @@ export interface IUser extends Document {
   profileImageUrl: string | null;
   passwordHash: string;
   role: UserRole;
+  departmentIds: string[];
   isActive: boolean;
   isFirstLogin: boolean;
   failedLoginAttempts: number;
@@ -55,7 +56,8 @@ const UserSchema = new Schema<IUser>(
     phone: { type: String, default: null, trim: true },
     profileImageUrl: { type: String, default: null },
     passwordHash: { type: String, required: true },
-    role: { type: String, required: true, enum: Object.values(UserRole) },
+    role:         { type: String, required: true, enum: Object.values(UserRole) },
+    departmentIds: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
     isFirstLogin: { type: Boolean, default: true },
     failedLoginAttempts: { type: Number, default: 0 },

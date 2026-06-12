@@ -70,14 +70,15 @@ export interface BrandingConfig {
 // ─── Users ────────────────────────────────────────────────────────────────────
  
 export interface UserResponse {
-  userId:       string;
-  email:        string;
-  name:         string;
-  role:         UserRole;
-  isActive:     boolean;
-  isFirstLogin: boolean;
-  tenantId:     string;
-  createdAt:    string;
+  userId:        string;
+  email:         string;
+  name:          string;
+  role:          UserRole;
+  departmentIds: string[];
+  isActive:      boolean;
+  isFirstLogin:  boolean;
+  tenantId:      string;
+  createdAt:     string;
 }
  
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -109,6 +110,7 @@ export interface PatientResponse {
   emergencyContactName:   string | null;
   emergencyContactMobile: string | null;
   bloodGroup:             BloodGroup | null;
+  departmentId:           string | null;
   tenantId:               string;
   createdAt:              string;
   updatedAt:              string;
@@ -124,6 +126,7 @@ export interface CreatePatientRequest {
   emergencyContactName?:  string;
   emergencyContactMobile?: string;
   bloodGroup?:            BloodGroup;
+  departmentId?:          string;
   forceCreate?:           boolean;
 }
  
@@ -137,6 +140,7 @@ export interface UpdatePatientRequest {
   emergencyContactName?:   string;
   emergencyContactMobile?: string;
   bloodGroup?:             BloodGroup;
+  departmentId?:           string | null;
 }
  
 export interface PatientSearchResult {
@@ -156,6 +160,7 @@ export interface OPDVisitResponse {
   patientId:      string;
   fullName?:      string | null;
   doctorId:       string | null;
+  departmentId:   string | null;
   visitDate:      string;
   queueNumber:    number;
   status:         OPDVisitStatus;
@@ -307,6 +312,7 @@ export interface AdmissionResponse {
   bedId:            string;
   bedNumber:        string;
   assignedDoctorId: string;
+  departmentId:     string | null;
   status:           AdmissionStatus;
   admissionDate:    string;
   dischargeDate:    string | null;
@@ -473,6 +479,7 @@ export const AuditEntityTypes = [
   'USER_ACCOUNT',
   'TENANT',
   'AUTH',
+  'DEPARTMENT',
 ] as const;
  
 export type AuditEntityType = typeof AuditEntityTypes[number];
@@ -517,4 +524,28 @@ export interface PaginatedResult<T> {
   page:       number;
   limit:      number;
   totalPages: number;
+}
+
+// ─── Department ───────────────────────────────────────────────────────────────
+
+export interface DepartmentResponse {
+  departmentId:  string;
+  name:          string;
+  description:   string | null;
+  headDoctorId:  string | null;
+  tenantId:      string;
+  createdAt:     string;
+  updatedAt:     string;
+}
+
+export interface CreateDepartmentRequest {
+  name:          string;
+  description?:  string;
+  headDoctorId?: string;
+}
+
+export interface UpdateDepartmentRequest {
+  name?:         string;
+  description?:  string | null;
+  headDoctorId?: string | null;
 }

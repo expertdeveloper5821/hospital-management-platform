@@ -306,3 +306,20 @@ Phase 6 — Frontend tests:
 - [ ] No new TypeScript `any` types introduced
 - [ ] No existing API routes modified (only additive)
 - [ ] No existing Mongoose schema fields removed or renamed
+
+---
+
+## E08 — Department Module ✅ COMPLETE (2026-06-11)
+
+> Adds a Department entity and department-scoped data visibility for clinical staff.
+
+### Summary
+- New `server/src/modules/department/` module with full CRUD (types, model, repository, service, controller, routes).
+- `IUser` gains optional `departmentId`; assignable at user-creation time for DOCTOR, NURSE, PATHOLOGIST, RADIOLOGIST roles.
+- `IPatient` gains optional `departmentId`; selectable during patient registration.
+- `IIPDAdmission` gains `departmentId` (copied from assigned doctor at admission time).
+- `IPathologyRequest` and `IRadiologyRequest` gain `departmentId` (copied from requester).
+- **Doctor-scoped filtering**: Patient list, IPD admissions list, and Lab lists auto-filter by the requesting doctor's `departmentId`.
+- Frontend: `/departments` page (HOSPITAL_ADMIN, ADMIN, MANAGER), department selector in user-create modal (clinical roles only) and patient-register modal.
+- `building-2` icon; Departments nav item added for HOSPITAL_ADMIN, ADMIN, MANAGER.
+- `AuditEntityType.DEPARTMENT` added; all department mutations are audit-logged.
