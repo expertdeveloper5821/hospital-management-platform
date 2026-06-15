@@ -30,6 +30,10 @@ jest.mock('@/store/api/ipd.api', () => ({
   }),
 }));
 
+jest.mock('@/store/api/department.api', () => ({
+  useListDepartmentsQuery: () => ({ data: [] }),
+}));
+
 jest.mock('@/lib/toast', () => ({
   toastSuccess: jest.fn(),
   toastError:   jest.fn(),

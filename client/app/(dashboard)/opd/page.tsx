@@ -10,6 +10,7 @@ import {
 } from '@/store/api/opd.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector } from '@/store/hooks';
 import type {
   OPDVisitResponse,
@@ -74,8 +75,19 @@ interface VisitPanelProps {
 function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorName }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState(visit.departmentId ?? '');
+
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: editUsersData }   = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
+  const editAllDoctors = editUsersData?.data ?? [];
+  const editDepartments = departmentsData ?? [];
+  const editDoctors = selectedDepartmentId
+    ? editAllDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : editAllDoctors;
+
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
     chiefComplaint: visit.chiefComplaint,
+    doctorId:       visit.doctorId       ?? '',
     diagnosis:      visit.diagnosis      ?? '',
     prescription:   visit.prescription   ?? '',
     notes:          visit.notes          ?? '',
@@ -97,8 +109,16 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     setError('');
     try {
-      const updated = await updateVisit({ visitId: visit.visitId, ...form }).unwrap();
-      onUpdate(updated); // reflect changes immediately without waiting for cache refetch
+      // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
+      const body: UpdateOPDVisitRequest = {
+        ...(form.chiefComplaint?.trim() ? { chiefComplaint: form.chiefComplaint.trim() } : {}),
+        ...(form.doctorId               ? { doctorId: form.doctorId }                   : {}),
+        ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
+        ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
+        ...(form.notes        != null   ? { notes: form.notes }                          : {}),
+      };
+      const updated = await updateVisit({ visitId: visit.visitId, ...body }).unwrap();
+      onUpdate(updated);
       setMode('view');
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to update visit.');
@@ -152,8 +172,8 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               <span className="text-xs font-mono text-muted-foreground">#{visit.queueNumber}</span>
               <Badge variant={statusVariant(visit.status)}>{statusLabel(visit.status)}</Badge>
             </div>
-            <p className="text-sm font-semibold">{visit.patientId}</p>
-            <p className="text-xs text-muted-foreground">{formatDate(visit.visitDate)}</p>
+            <p className="text-sm font-semibold">{visit.fullName ?? visit.patientId}</p>
+            <p className="text-xs text-muted-foreground">{visit.patientId} · {formatDate(visit.visitDate)}</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
@@ -183,6 +203,40 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {/* Edit mode */}
           {mode === 'edit' && (
             <form id="editForm" onSubmit={handleUpdate} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-dept">Department</Label>
+                <select
+                  id="ep-dept"
+                  value={selectedDepartmentId}
+                  onChange={(e) => {
+                    setSelectedDepartmentId(e.target.value);
+                    setForm((f) => ({ ...f, doctorId: '' }));
+                  }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— All Departments —</option>
+                  {editDepartments.map((dept) => (
+                    <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-doctor">Assigned Doctor</Label>
+                <select
+                  id="ep-doctor"
+                  value={form.doctorId ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, doctorId: e.target.value }))}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— Unassigned —</option>
+                  {editDoctors.map((d) => (
+                    <option key={d.userId} value={d.userId}>{d.name}</option>
+                  ))}
+                </select>
+                {selectedDepartmentId && editDoctors.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No doctors assigned to this department.</p>
+                )}
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-complaint">Chief Complaint *</Label>
                 <Input
@@ -347,6 +401,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [patientSearch, setPatientSearch]     = useState('');
   const [debouncedPSearch, setDebouncedPSearch] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<PatientResponse | null>(null);
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId'>>({
     chiefComplaint: '',
     doctorId:       '',
@@ -366,8 +421,14 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   );
   const patients = patientData?.data ?? [];
 
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const departments = departmentsData ?? [];
+
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
-  const doctors = usersData?.data ?? [];
+  const allDoctors = usersData?.data ?? [];
+  const doctors = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
 
   const [createVisit, { isLoading }] = useCreateOPDVisitMutation();
 
@@ -457,6 +518,25 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             )}
           </div>
 
+          {/* Department */}
+          <div className="space-y-1.5">
+            <Label htmlFor="nv-dept">Department</Label>
+            <select
+              id="nv-dept"
+              value={selectedDepartmentId}
+              onChange={(e) => {
+                setSelectedDepartmentId(e.target.value);
+                setForm((f) => ({ ...f, doctorId: '' }));
+              }}
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">— All Departments —</option>
+              {departments.map((dept) => (
+                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Doctor */}
           <div className="space-y-1.5">
             <Label htmlFor="nv-doctor">Assign Doctor</Label>
@@ -471,6 +551,9 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                 <option key={d.userId} value={d.userId}>{d.name}</option>
               ))}
             </select>
+            {selectedDepartmentId && doctors.length === 0 && (
+              <p className="text-xs text-muted-foreground">No doctors assigned to this department.</p>
+            )}
           </div>
 
           {/* Visit date */}

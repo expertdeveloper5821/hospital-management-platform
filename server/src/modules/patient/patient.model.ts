@@ -14,6 +14,7 @@ export interface IPatient extends Document {
   emergencyContactName:   string | null;
   emergencyContactMobile: string | null;
   bloodGroup:             BloodGroup | null;
+  departmentId:           string | null;
   isDeleted:              boolean;
   deletedAt:              Date | null;
   createdAt:              Date;
@@ -38,6 +39,7 @@ const PatientSchema = new Schema<IPatient>(
     emergencyContactName:   { type: String, default: null },
     emergencyContactMobile: { type: String, default: null },
     bloodGroup:             { type: String, default: null },
+    departmentId:           { type: String, default: null },
     isDeleted:              { type: Boolean, default: false },
     deletedAt:              { type: Date,    default: null },
   },
@@ -49,5 +51,6 @@ PatientSchema.index({ tenantId: 1, mobileNumber: 1 }); // duplicate detection
 PatientSchema.index({ tenantId: 1, patientId: 1 }, { unique: true }); // scoped lookup
 PatientSchema.index({ tenantId: 1, fullName: 1 }); // name search
 PatientSchema.index({ tenantId: 1, isDeleted: 1 }); // soft-delete filter
+PatientSchema.index({ tenantId: 1, departmentId: 1, isDeleted: 1 }); // department-scoped queries
 
 export const PatientModel = mongoose.model<IPatient>('Patient', PatientSchema);

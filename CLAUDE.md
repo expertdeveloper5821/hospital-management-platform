@@ -84,6 +84,28 @@ Every state-mutating operation (create/update/delete) must write an audit log vi
 ### Soft Deletes
 Multiple modules use soft-delete (`isDeleted: Boolean`, `deletedAt: Date`) rather than hard deletes. All repository list queries must filter `{ isDeleted: { $ne: true } }`. Completed records may have restricted delete permissions (Admin/Manager only).
 
+### Department Module
+`server/src/modules/department/` — CRUD for clinical departments (Cardiology, Radiology, etc.).
+- Each `IUser` document has a **`departmentIds: string[]`** field (default `[]`); clinical roles (DOCTOR, NURSE, PATHOLOGIST, RADIOLOGIST) can be assigned to **multiple** departments. The create-user form shows a checkbox multi-select.
+- Each `IPatient` document has an optional `departmentId: string | null` field, set during registration and updatable via PATCH.
+- `IIPDAdmission` carries `departmentId` (copied from `doctor.departmentIds[0]` at admission time).
+- `IPathologyRequest` and `IRadiologyRequest` carry `departmentId` (copied from `requester.departmentIds[0]` at request time).
+- `IOPDVisit` carries `departmentId` (copied from the patient's department at visit creation) for historical record.
+- **Doctor-scoped filtering**: When a DOCTOR calls any list endpoint, the controller reads `doctor.departmentIds[]` and applies `$in` filtering — they see records across **all** their departments:
+  - Patient list → `patient.departmentId $in doctor.departmentIds`
+  - IPD admissions → `admission.departmentId $in doctor.departmentIds`
+  - Lab lists (pathology/radiology) → `request.departmentId $in doctor.departmentIds`
+  - OPD queue → `patientRepository.findPatientIdsByDepartments(tenantId, doctor.departmentIds)` returns matching `patientId[]`, then visits filtered by `patientId $in [...]` — covers legacy visits with no stored `departmentId`
+- Route: `GET|POST /api/departments`, `GET|PATCH|DELETE /api/departments/:departmentId`.
+- Roles that can manage departments: HOSPITAL_ADMIN, ADMIN, MANAGER.
+- Frontend: `client/app/(dashboard)/departments/page.tsx`, API slice `client/store/api/department.api.ts`.
+  - Departments table shows a **Doctors chip list** (all doctors whose `departmentIds` includes that department) instead of a single head doctor.
+  - Patient detail slide-over and dedicated page both show the resolved department name.
+  - OPD new visit form (`client/app/(dashboard)/opd/page.tsx`) shows a **Department** dropdown first; selecting a department filters the **Doctor** dropdown to only doctors belonging to that department. Leaving department as "All Departments" shows all doctors. Changing department resets the doctor selection.
+  - OPD edit visit panel (`VisitPanel` in the same file) exposes **Department** and **Assigned Doctor** fields in edit mode with the same cascading behaviour; doctor is pre-populated from `visit.doctorId`.
+  - IPD new admission modal (`client/app/(dashboard)/ipd/page.tsx`) shows a **Department** dropdown before the doctor typeahead; selecting a department filters the `DoctorSearch` list to only doctors belonging to that department. Changing department clears the doctor selection.
+  - IPD admissions table has a **View** button on every row; opens `AdmissionPanel` slide-over (like OPD's `VisitPanel`) showing ward, bed, doctor, dates, and notes count. Edit mode (RECEPTIONIST, DOCTOR, ADMIN, HOSPITAL_ADMIN on ADMITTED rows) allows changing department filter → doctor (DoctorSearch), ward, and bed (grid picker showing availability). Backend: `PATCH /api/ipd/admissions/:admissionId` accepts optional `assignedDoctorId`, `wardId`, `bedId`; releases old bed and occupies new bed atomically; re-stamps `departmentId` from new doctor's `departmentIds[0]`.
+
 ---
 
 ## AIDLC Methodology

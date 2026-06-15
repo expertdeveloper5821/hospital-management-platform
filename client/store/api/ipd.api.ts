@@ -31,7 +31,10 @@ export const ipdApi = baseApi.injectEndpoints({
     // ── Beds ──────────────────────────────────────────────────────────────────
 
     listBeds: build.query<BedResponse[], string>({
-      query: (wardId) => `/api/ipd/wards/${wardId}/beds`,
+      query: (wardId) => {
+        if (!wardId) throw new Error('wardId is required');
+        return `/api/ipd/wards/${wardId}/beds`;
+      },
       transformResponse: (raw: ApiSuccess<BedResponse[]>) => raw.data,
       providesTags: ['IPD'],
     }),
@@ -70,20 +73,48 @@ export const ipdApi = baseApi.injectEndpoints({
     }),
 
     addProgressNote: build.mutation<AdmissionResponse, { admissionId: string } & AddProgressNoteRequest>({
-      query: ({ admissionId, note }) => ({
-        url:    `/api/ipd/admissions/${admissionId}/progress-notes`,
-        method: 'POST',
-        body:   { note },
-      }),
+      query: ({ admissionId, note }) => {
+        if (!admissionId) throw new Error('admissionId is required');
+        return {
+          url:    `/api/ipd/admissions/${admissionId}/progress-notes`,
+          method: 'POST',
+          body:   { note },
+        };
+      },
+      transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
+    updateAdmission: build.mutation<AdmissionResponse, {
+      admissionId:      string;
+      assignedDoctorId?: string;
+      wardId?:           string;
+      bedId?:            string;
+    }>({
+      query: ({ admissionId, ...body }) => {
+        if (!admissionId) throw new Error('admissionId is required');
+        return {
+          url:    `/api/ipd/admissions/${admissionId}`,
+          method: 'PATCH',
+          body,
+        };
+      },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
       invalidatesTags: ['IPD'],
     }),
 
     dischargePatient: build.mutation<AdmissionResponse, string>({
-      query: (admissionId) => ({
-        url:    `/api/ipd/admissions/${admissionId}/discharge`,
-        method: 'PATCH',
-      }),
+      query: (admissionId) => {
+        // Defensive guard: an empty admissionId would produce the URL
+        // /api/ipd/admissions//discharge (double-slash) which hits the 404 handler.
+        if (!admissionId) {
+          throw new Error('admissionId is required for discharge');
+        }
+        return {
+          url:    `/api/ipd/admissions/${admissionId}/discharge`,
+          method: 'PATCH',
+        };
+      },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
       invalidatesTags: ['IPD'],
     }),
@@ -129,6 +160,7 @@ export const {
   useAddBedsMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
+  useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
   useDischargePatientMutation,
   useGetIPDPatientHistoryQuery,

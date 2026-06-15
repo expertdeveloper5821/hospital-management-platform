@@ -38,6 +38,7 @@ export class OPDService {
       tenantId,
       patientId:      data.patientId,
       doctorId:       data.doctorId      ?? null,
+      departmentId:   patient.departmentId ?? null,
       visitDate,
       queueNumber,
       status:         OPDVisitStatus.OPEN,
@@ -190,16 +191,17 @@ export class OPDService {
   }
 
   async getQueue(
-    tenantId: string,
-    date?:    string,
+    tenantId:  string,
+    date?:     string,
     doctorId?: string,
-    search?:  string,
+    search?:   string,
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
+
     let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId);
 
-    const patientIds = [...new Set(visits.map((v) => v.patientId))];
-    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds)
+    const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
+    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
       ?? new Map<string, string>();
 
     const result = visits.map((v) =>

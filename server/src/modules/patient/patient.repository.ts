@@ -17,6 +17,14 @@ export class PatientRepository {
     return PatientModel.findOne({ tenantId, patientId, isDeleted: { $ne: true } });
   }
 
+  async findPatientIdsByDepartments(tenantId: string, departmentIds: string[]): Promise<string[]> {
+    assertDbConnected();
+    const patients = await PatientModel.find(
+      { tenantId, departmentId: { $in: departmentIds }, isDeleted: { $ne: true } },
+    ).select('patientId').lean();
+    return patients.map((p) => (p as IPatient).patientId);
+  }
+
   async findNamesByPatientIds(tenantId: string, patientIds: string[]): Promise<Map<string, string>> {
     assertDbConnected();
     const patients = await PatientModel.find(
@@ -28,16 +36,18 @@ export class PatientRepository {
   }
 
   async search(
-    tenantId: string,
-    q: string | undefined,
-    page: number,
-    limit: number,
+    tenantId:     string,
+    q:            string | undefined,
+    page:         number,
+    limit:        number,
+    departmentIds?: string[],
   ): Promise<PaginatedResult<IPatient>> {
     assertDbConnected();
     const skip = (page - 1) * limit;
     const safeQuery = q ? escapeRegex(q) : undefined;
 
     const base: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
+    if (departmentIds?.length) base['departmentId'] = { $in: departmentIds };
 
     const query: Record<string, unknown> = safeQuery
       ? {
