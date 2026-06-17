@@ -61,9 +61,9 @@ interface CreateUserModalProps {
   onClose: () => void;
 }
 
-// Roles that can be assigned to a department
+// Only doctors can be assigned to departments during user creation
 const DEPARTMENT_ROLES = new Set<UserRole>([
-  UserRole.DOCTOR, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST,
+  UserRole.DOCTOR,
 ]);
 
 function CreateUserModal({ onClose }: CreateUserModalProps) {

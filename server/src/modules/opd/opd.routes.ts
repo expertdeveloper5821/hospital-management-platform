@@ -41,7 +41,7 @@ router.get('/visits',
 // them as the visitId param.
 router.patch('/visits/:visitId/complete',
   ...protect,
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
   completeVisit,
 );
 

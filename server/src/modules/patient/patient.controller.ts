@@ -4,8 +4,6 @@ import { patientService, DuplicateWarningError } from './patient.service';
 import { IPatient } from './patient.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
-import { UserRole } from '../../shared/types/common.types';
-import { userRepository } from '../user/user.repository';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
@@ -86,14 +84,7 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
     if (!query.success) throw new ValidationError('Invalid query params');
     const { q, page, limit } = query.data;
 
-    // Doctors only see patients in their own departments
-    let departmentIds: string[] | undefined;
-    if (req.user!.role === UserRole.DOCTOR) {
-      const doctor = await userRepository.findById(req.user!.tenantId!, req.user!.userId);
-      if (doctor?.departmentIds?.length) departmentIds = doctor.departmentIds;
-    }
-
-    const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit, departmentIds);
+    const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
