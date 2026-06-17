@@ -980,16 +980,19 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   const canAdmit =
     role === UserRole.RECEPTIONIST ||
+    role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
-  const canProgress  = role === UserRole.DOCTOR;
+  const canProgress  = role === UserRole.DOCTOR || role === UserRole.NURSE;
   const canEdit =
     role === UserRole.RECEPTIONIST ||
     role === UserRole.DOCTOR ||
+    role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
   const canDischarge =
     role === UserRole.DOCTOR ||
+    role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN ||
     role === UserRole.RECEPTIONIST;
@@ -1450,7 +1453,7 @@ export default function IPDPage() {
   const { data: wards = [], isLoading: wardsLoading } = useListWardsQuery();
 
   const canManageWards  = role === UserRole.HOSPITAL_ADMIN;
-  const canViewOccupancy = role === UserRole.HOSPITAL_ADMIN || role === UserRole.MANAGER;
+  const canViewOccupancy = role === UserRole.HOSPITAL_ADMIN || role === UserRole.MANAGER || role === UserRole.NURSE;
 
   const tabs = [
     { key: 'admissions' as Tab, label: 'Admissions',        Icon: ClipboardList },

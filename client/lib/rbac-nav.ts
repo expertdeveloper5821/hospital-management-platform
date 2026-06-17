@@ -46,6 +46,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   NURSE: [
     { label: 'Dashboard', href: '/dashboard', icon: 'layout-dashboard' },
     { label: 'Patients',  href: '/patients',  icon: 'heart-pulse'      },
+    { label: 'OPD',       href: '/opd',       icon: 'stethoscope'      },
     { label: 'IPD',       href: '/ipd',       icon: 'bed'              },
   ],
   RECEPTIONIST: [

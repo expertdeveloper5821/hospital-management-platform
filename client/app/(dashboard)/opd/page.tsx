@@ -644,7 +644,7 @@ export default function OPDPage() {
 
   const canCreateVisit = ['RECEPTIONIST', 'NURSE', 'HOSPITAL_ADMIN', 'DOCTOR'].includes(role ?? '');
   const canEdit        = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canComplete    = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canComplete    = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canCancel      = ['RECEPTIONIST', 'NURSE', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
 
   // Queue stats
