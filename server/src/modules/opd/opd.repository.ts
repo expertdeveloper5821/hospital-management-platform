@@ -38,7 +38,7 @@ export class OPDRepository {
       tenantId,
       visitDate: { $gte: start, $lte: end },
     };
-    if (doctorId)            query.doctorId  = doctorId;
+    if (doctorId)            query.doctorIds = { $in: [doctorId] };
     if (patientIds?.length)  query.patientId = { $in: patientIds };
 
     return OPDVisitModel.find(query).sort({ queueNumber: 1 });

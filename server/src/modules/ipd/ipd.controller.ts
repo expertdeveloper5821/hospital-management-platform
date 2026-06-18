@@ -124,10 +124,10 @@ export async function listAdmissions(
 }
 
 const updateAdmissionSchema = z.object({
-  assignedDoctorId: z.string().min(1).optional(),
-  wardId:           z.string().min(1).optional(),
-  bedId:            z.string().min(1).optional(),
-}).refine((d) => d.assignedDoctorId || d.wardId || d.bedId, {
+  assignedDoctorIds: z.array(z.string().min(1)).optional(),
+  wardId:            z.string().min(1).optional(),
+  bedId:             z.string().min(1).optional(),
+}).refine((d) => d.assignedDoctorIds || d.wardId || d.bedId, {
   message: 'Provide at least one field to update',
 });
 

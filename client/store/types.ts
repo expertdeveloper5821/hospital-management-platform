@@ -100,34 +100,38 @@ export type Gender     = 'MALE' | 'FEMALE' | 'OTHER';
 export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
  
 export interface PatientResponse {
-  patientId:              string;
-  fullName:               string;
-  dateOfBirth:            string;
-  gender:                 Gender;
-  mobileNumber:           string;
-  address:                string;
-  aadhaarNumber:          string | null;
-  emergencyContactName:   string | null;
-  emergencyContactMobile: string | null;
-  bloodGroup:             BloodGroup | null;
-  departmentId:           string | null;
-  tenantId:               string;
-  createdAt:              string;
-  updatedAt:              string;
+  patientId:                 string;
+  fullName:                  string;
+  dateOfBirth:               string;
+  gender:                    Gender;
+  mobileNumber:              string;
+  address:                   string;
+  aadhaarNumber:             string | null;
+  emergencyContactName:      string | null;
+  emergencyContactMobile:    string | null;
+  bloodGroup:                BloodGroup | null;
+  departmentId:              string | null;
+  registrationFee:           number | null;
+  registrationPaymentMethod: string | null;
+  tenantId:                  string;
+  createdAt:                 string;
+  updatedAt:                 string;
 }
  
 export interface CreatePatientRequest {
-  fullName:               string;
-  dateOfBirth:            string; // YYYY-MM-DD
-  gender:                 Gender;
-  mobileNumber:           string;
-  address:                string;
-  aadhaarNumber?:         string;
-  emergencyContactName?:  string;
-  emergencyContactMobile?: string;
-  bloodGroup?:            BloodGroup;
-  departmentId?:          string;
-  forceCreate?:           boolean;
+  fullName:                  string;
+  dateOfBirth:               string; // YYYY-MM-DD
+  gender:                    Gender;
+  mobileNumber:              string;
+  address:                   string;
+  aadhaarNumber?:            string;
+  emergencyContactName?:     string;
+  emergencyContactMobile?:   string;
+  bloodGroup?:               BloodGroup;
+  departmentId?:             string;
+  registrationFee?:          number;
+  registrationPaymentMethod?: string;
+  forceCreate?:              boolean;
 }
  
 export interface UpdatePatientRequest {
@@ -159,7 +163,7 @@ export interface OPDVisitResponse {
   tenantId:       string;
   patientId:      string;
   fullName?:      string | null;
-  doctorId:       string | null;
+  doctorIds:      string[];
   departmentId:   string | null;
   visitDate:      string;
   queueNumber:    number;
@@ -175,14 +179,14 @@ export interface OPDVisitResponse {
 export interface CreateOPDVisitRequest {
   patientId:      string;
   chiefComplaint: string;
-  doctorId?:      string;
+  doctorIds?:     string[];
   visitDate?:     string; // YYYY-MM-DD
   notes?:         string;
 }
  
 export interface UpdateOPDVisitRequest {
   chiefComplaint?: string;
-  doctorId?:       string;
+  doctorIds?:      string[];
   visitDate?:      string;
   diagnosis?:      string;
   prescription?:   string;
@@ -311,8 +315,8 @@ export interface AdmissionResponse {
   wardName:         string;
   bedId:            string;
   bedNumber:        string;
-  assignedDoctorId: string;
-  departmentId:     string | null;
+  assignedDoctorIds: string[];
+  departmentId:      string | null;
   status:           AdmissionStatus;
   admissionDate:    string;
   dischargeDate:    string | null;
@@ -332,7 +336,7 @@ export interface CreateAdmissionRequest {
   patientId:        string;
   wardId:           string;
   bedId:            string;
-  assignedDoctorId: string;
+  assignedDoctorIds?: string[];
 }
  
 export interface AddProgressNoteRequest {
@@ -431,7 +435,7 @@ export interface PaymentResponse {
 export interface CreateManualPaymentRequest {
   patientId:     string;
   amount:        number;
-  paymentMethod: 'CASH' | 'CHEQUE';
+  paymentMethod: 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
   description:   string;
 }
  

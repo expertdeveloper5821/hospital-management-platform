@@ -6,7 +6,7 @@ export interface IOPDVisit extends Document {
   tenantId:       string;
   patientId:      string;
   fullName?:      string;
-  doctorId:       string | null;
+  doctorIds:      string[];
   departmentId:   string | null;
   visitDate:      Date;
   queueNumber:    number;
@@ -25,7 +25,7 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
     tenantId:       { type: String, required: true, index: true },
     patientId:      { type: String, required: true },
     fullName:       { type: String, required: false },
-    doctorId:       { type: String, default: null },
+    doctorIds:      { type: [String], default: [] },
     departmentId:   { type: String, default: null },
     visitDate:      { type: Date,   required: true },
     queueNumber:    { type: Number, required: true },
@@ -42,7 +42,7 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
 OPDVisitSchema.index({ tenantId: 1, visitId: 1 }, { unique: true });
 OPDVisitSchema.index({ tenantId: 1, patientId: 1, visitDate: -1 }); // patient history
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, status: 1 });      // queue queries
-OPDVisitSchema.index({ tenantId: 1, visitDate: 1, doctorId: 1 });    // doctor's queue
+OPDVisitSchema.index({ tenantId: 1, visitDate: 1, doctorIds: 1 });   // doctor's queue
 OPDVisitSchema.index({ tenantId: 1, departmentId: 1, visitDate: -1 }); // department queue
 
 export const OPDVisitModel = mongoose.model<IOPDVisit>('OPDVisit', OPDVisitSchema);

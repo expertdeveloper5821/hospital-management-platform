@@ -13,9 +13,11 @@ export interface IPatient extends Document {
   aadhaarNumber:          string | null;
   emergencyContactName:   string | null;
   emergencyContactMobile: string | null;
-  bloodGroup:             BloodGroup | null;
-  departmentId:           string | null;
-  isDeleted:              boolean;
+  bloodGroup:                BloodGroup | null;
+  departmentId:              string | null;
+  registrationFee:           number | null;
+  registrationPaymentMethod: string | null;
+  isDeleted:                 boolean;
   deletedAt:              Date | null;
   createdAt:              Date;
   updatedAt:              Date;
@@ -38,9 +40,11 @@ const PatientSchema = new Schema<IPatient>(
     aadhaarNumber:          { type: String, default: null },
     emergencyContactName:   { type: String, default: null },
     emergencyContactMobile: { type: String, default: null },
-    bloodGroup:             { type: String, default: null },
-    departmentId:           { type: String, default: null },
-    isDeleted:              { type: Boolean, default: false },
+    bloodGroup:                { type: String, default: null },
+    departmentId:              { type: String, default: null },
+    registrationFee:           { type: Number, default: null },
+    registrationPaymentMethod: { type: String, default: null },
+    isDeleted:                 { type: Boolean, default: false },
     deletedAt:              { type: Date,    default: null },
   },
   { timestamps: true, collection: 'patients' },
