@@ -3,10 +3,11 @@ import { patientRepository } from './patient.repository';
 import { IPatient } from './patient.model';
 import { tenantRepository } from '../tenant/tenant.repository';
 import { ipdRepository } from '../ipd/ipd.repository';
-import { pdfService } from '../../shared/services/pdf.service';
+import { buildMedicalCardPdf } from './medical-card.pdf';
+import { s3Service }   from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { NotFoundError, ConflictError } from '../../shared/middleware/error-handler';
+import { NotFoundError, ConflictError, AppError } from '../../shared/middleware/error-handler';
 import { CreatePatientRequest, UpdatePatientRequest } from './patient.types';
 
 // Thrown when a duplicate mobile is detected but forceCreate was not set.
@@ -154,7 +155,11 @@ export class PatientService {
     return patientRepository.search(tenantId, q, page, limit);
   }
 
-  async generateMedicalCard(tenantId: string, patientId: string): Promise<Buffer> {
+  async generateMedicalCard(
+    tenantId:    string,
+    patientId:   string,
+    requesterId?: string,
+  ): Promise<Buffer> {
     const [patient, tenant] = await Promise.all([
       patientRepository.findByPatientId(tenantId, patientId),
       tenantRepository.findById(tenantId),
@@ -162,20 +167,39 @@ export class PatientService {
     if (!patient) throw new NotFoundError('Patient not found');
     if (!tenant)  throw new NotFoundError('Tenant not found');
 
-    return pdfService.generateMedicalCard({
-      patientId:               patient.patientId,
-      fullName:                patient.fullName,
-      dateOfBirth:             patient.dateOfBirth,
-      gender:                  patient.gender,
-      mobileNumber:            patient.mobileNumber,
-      address:                 patient.address               ?? undefined,
-      bloodGroup:              patient.bloodGroup            ?? undefined,
-      emergencyContactName:    patient.emergencyContactName  ?? undefined,
-      emergencyContactMobile:  patient.emergencyContactMobile ?? undefined,
-      hospitalName:            tenant.branding.displayName || tenant.name,
-      hospitalLogoUrl:         tenant.branding.logoUrl      ?? undefined,
-      primaryColor:            tenant.branding.primaryColor,
+    const s3Key = `tenants/${tenantId}/medical-cards/${patientId}.pdf`;
+
+    // Determine CREATE vs UPDATE by checking if S3 object exists
+    let auditAction: 'CREATE' | 'UPDATE' = 'CREATE';
+    try {
+      await s3Service.getPresignedUrl(s3Key, 5);
+      auditAction = 'UPDATE';
+    } catch {
+      auditAction = 'CREATE';
+    }
+
+    const pdfBuffer = await buildMedicalCardPdf(patient, {
+      displayName:  tenant.branding.displayName || tenant.name,
+      primaryColor: tenant.branding.primaryColor,
+      logoUrl:      tenant.branding.logoUrl,
     });
+
+    try {
+      await s3Service.uploadFile(s3Key, pdfBuffer, 'application/pdf');
+    } catch {
+      throw new AppError('File storage operation failed.', 502);
+    }
+
+    await auditService.log({
+      entityType: AuditEntityType.PATIENT,
+      entityId:   patientId,
+      action:     auditAction,
+      userId:     requesterId ?? 'system',
+      tenantId,
+      newValue:   { patientId, medicalCardGenerated: true },
+    });
+
+    return pdfBuffer;
   }
 }
 

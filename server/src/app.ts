@@ -32,6 +32,10 @@ import webhookRouter from './modules/payment/payment.webhook.routes';
 import auditRouter from './modules/audit/audit.routes';
 import dashboardRouter from './modules/dashboard/dashboard.routes';
 import searchRouter    from './modules/search/search.routes';
+import packagesRouter       from './modules/packages/packages.routes';
+import staffIdCardRouter    from './modules/staff-id-card/staff-id-card.routes';
+import staffDocumentsRouter from './modules/staff-documents/staff-documents.routes';
+import chargesRouter        from './modules/charges/charges.routes';
 
 const app = express();
 
@@ -145,6 +149,10 @@ app.use('/api/payments', paymentRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/search',    searchRouter);
+app.use('/api/packages',       packagesRouter);
+app.use('/api/staff-id-cards', staffIdCardRouter);
+app.use('/api/staff-documents', staffDocumentsRouter);
+app.use('/api/charges',        chargesRouter);
 
 // 404 HANDLER
 app.use((_req, _res, next) => {

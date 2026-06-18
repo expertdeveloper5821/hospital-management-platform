@@ -119,12 +119,17 @@ export async function deletePatient(req: Request, res: Response, next: NextFunct
 export async function getMedicalCard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
-    const pdf = await patientService.generateMedicalCard(req.user!.tenantId!, patientId);
-    res.set({
-      'Content-Type':        'application/pdf',
-      'Content-Disposition': `attachment; filename="medical-card-${patientId}.pdf"`,
-      'Content-Length':      String(pdf.length),
-    });
-    res.end(pdf);
+    const pdfBuffer = await patientService.generateMedicalCard(
+      req.user!.tenantId!,
+      patientId,
+      req.user!.userId,
+    );
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `attachment; filename="medical-card-${patientId}.pdf"`,
+        'Content-Length':      pdfBuffer.length.toString(),
+      })
+      .send(pdfBuffer);
   } catch (err) { next(err); }
 }

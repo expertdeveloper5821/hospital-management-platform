@@ -70,6 +70,11 @@ export const AuditEntityType = {
   TENANT:             'TENANT',
   AUTH:               'AUTH',
   PLATFORM_SETTINGS:  'PLATFORM_SETTINGS',
+  STAFF_ID_CARD:      'STAFF_ID_CARD',
+  PACKAGE:            'PACKAGE',
+  PACKAGE_ASSIGNMENT: 'PACKAGE_ASSIGNMENT',
+  STAFF_DOCUMENT:     'STAFF_DOCUMENT',
+  CHARGE:             'CHARGE',
 } as const;
 
 export type AuditEntityType = typeof AuditEntityType[keyof typeof AuditEntityType];
