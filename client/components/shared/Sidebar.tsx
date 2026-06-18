@@ -16,6 +16,10 @@ import {
   Settings,
   LogOut,
   X,
+  FileBadge,
+  Receipt,
+  FolderOpen,
+  Gift,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -37,6 +41,10 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'credit-card':      CreditCard,
   'file-text':        FileText,
   'settings':         Settings,
+  'file-badge':       FileBadge,
+  'receipt':          Receipt,
+  'folder-open':      FolderOpen,
+  'gift':             Gift,
 };
 
 interface SidebarProps {

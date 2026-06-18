@@ -473,6 +473,11 @@ export const AuditEntityTypes = [
   'USER_ACCOUNT',
   'TENANT',
   'AUTH',
+  'STAFF_ID_CARD',
+  'PACKAGE',
+  'PACKAGE_ASSIGNMENT',
+  'STAFF_DOCUMENT',
+  'CHARGE',
 ] as const;
  
 export type AuditEntityType = typeof AuditEntityTypes[number];
@@ -517,4 +522,156 @@ export interface PaginatedResult<T> {
   page:       number;
   limit:      number;
   totalPages: number;
+}
+
+// ─── Staff ID Card ────────────────────────────────────────────────────────────
+
+export interface StaffIdCardResponse {
+  userId:       string;
+  s3Key:        string;
+  issuedAt:     string;
+  cardExpiresAt: string;
+  presignedUrl: string;
+  isNew:        boolean;
+}
+
+// ─── Packages ─────────────────────────────────────────────────────────────────
+
+export type PackageStatus    = 'ACTIVE' | 'INACTIVE';
+export type AssignmentStatus = 'ACTIVE' | 'CANCELLED';
+
+export interface PackageResponse {
+  packageId:        string;
+  tenantId:         string;
+  name:             string;
+  description:      string | null;
+  price:            number;
+  includedServices: string[];
+  status:           PackageStatus;
+  createdAt:        string;
+  updatedAt:        string;
+}
+
+export interface CreatePackageRequest {
+  name:             string;
+  description?:     string;
+  price:            number;
+  includedServices: string[];
+}
+
+export interface UpdatePackageRequest {
+  name?:             string;
+  description?:      string;
+  price?:            number;
+  includedServices?: string[];
+  status?:           PackageStatus;
+}
+
+export interface AssignmentResponse {
+  assignmentId: string;
+  tenantId:     string;
+  packageId:    string;
+  patientId:    string;
+  assignedDate: string;
+  status:       AssignmentStatus;
+  assignedBy:   string;
+  cancelledAt:  string | null;
+  cancelledBy:  string | null;
+  createdAt:    string;
+  updatedAt:    string;
+}
+
+export interface AssignPackageRequest {
+  packageId:    string;
+  patientId:    string;
+  assignedDate?: string;
+}
+
+export interface PackageListResult {
+  data:       PackageResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Charges / Billing ────────────────────────────────────────────────────────
+
+export type ChargeCategory =
+  | 'CONSULTATION'
+  | 'PROCEDURE'
+  | 'LAB_TEST'
+  | 'MEDICATION'
+  | 'ROOM'
+  | 'NURSING'
+  | 'PACKAGE'
+  | 'OTHER';
+
+export type ChargeStatus = 'UNPAID' | 'VOIDED';
+
+export interface ChargeResponse {
+  chargeId:           string;
+  tenantId:           string;
+  patientId:          string;
+  category:           ChargeCategory;
+  description:        string;
+  amount:             number;
+  encounterReference: string | null;
+  addedBy:            string;
+  status:             ChargeStatus;
+  voidedBy:           string | null;
+  voidedAt:           string | null;
+  createdAt:          string;
+  updatedAt:          string;
+}
+
+export interface AddChargeRequest {
+  patientId:           string;
+  category:            ChargeCategory;
+  description:         string;
+  amount:              number;
+  encounterReference?: string;
+}
+
+export interface BillResponse {
+  patientId:         string;
+  lineItems:         ChargeResponse[];
+  categorySubtotals: Record<ChargeCategory, number>;
+  grandTotal:        number;
+}
+
+export interface ChargeListResult {
+  data:       ChargeResponse[];
+  total:      number;
+  page:       number;
+  limit:      number;
+  totalPages: number;
+}
+
+// ─── Staff Documents ──────────────────────────────────────────────────────────
+
+export type DocumentCategory =
+  | 'IDENTITY_PROOF'
+  | 'ADDRESS_PROOF'
+  | 'EDUCATIONAL_CERTIFICATE'
+  | 'EXPERIENCE_LETTER'
+  | 'OFFER_LETTER'
+  | 'CONTRACT'
+  | 'OTHER';
+
+export interface StaffDocumentResponse {
+  documentId:    string;
+  tenantId:      string;
+  userId:        string;
+  category:      DocumentCategory;
+  documentName:  string;
+  s3Key:         string;
+  uploadedBy:    string;
+  presignedUrl:  string;
+  createdAt:     string;
+}
+
+export interface ChecklistItem {
+  category:  DocumentCategory;
+  status:    'complete' | 'missing';
 }
