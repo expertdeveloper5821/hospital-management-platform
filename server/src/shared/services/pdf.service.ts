@@ -1,18 +1,20 @@
 import PDFDocument from 'pdfkit';
 
 export interface MedicalCardData {
-  patientId:               string;
-  fullName:                string;
-  dateOfBirth:             Date;
-  gender:                  string;
-  mobileNumber:            string;
-  address?:                string;
-  bloodGroup?:             string;
-  emergencyContactName?:   string;
-  emergencyContactMobile?: string;
-  hospitalName:            string;
-  hospitalLogoUrl?:        string;
-  primaryColor:            string;
+  patientId:                 string;
+  fullName:                  string;
+  dateOfBirth:               Date;
+  gender:                    string;
+  mobileNumber:              string;
+  address?:                  string;
+  bloodGroup?:               string;
+  emergencyContactName?:     string;
+  emergencyContactMobile?:   string;
+  registrationFee?:          number;
+  registrationPaymentMethod?: string;
+  hospitalName:              string;
+  hospitalLogoUrl?:          string;
+  primaryColor:              string;
 }
 
 export interface ReceiptData {
@@ -207,6 +209,24 @@ export class PdfService {
 
       // Row 7 — Allergies (blank)
       drawField('Allergies: ', '', M, y, R);
+      y += ROW_H;
+
+      // Registration fee footer (only when fee was collected)
+      if (data.registrationFee != null) {
+        const METHOD_LABELS: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque' };
+        const methodLabel = data.registrationPaymentMethod
+          ? (METHOD_LABELS[data.registrationPaymentMethod] ?? data.registrationPaymentMethod)
+          : '';
+        const feeText = methodLabel
+          ? `Registration Fee: ₹${data.registrationFee.toLocaleString('en-IN')}  |  Mode: ${methodLabel}`
+          : `Registration Fee: ₹${data.registrationFee.toLocaleString('en-IN')}`;
+
+        doc.moveTo(M, y).lineTo(R, y)
+          .strokeColor('#CCCCCC').lineWidth(0.5).stroke();
+
+        doc.font('Helvetica-Bold').fontSize(7).fillColor([pr, pg, pb])
+          .text(feeText, M, y + 4, { width: CW, align: 'center', lineBreak: false });
+      }
 
       doc.end();
     });

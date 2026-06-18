@@ -23,9 +23,10 @@ export class OPDRepository {
   }
 
   async findByDate(
-    tenantId: string,
-    date: Date,
-    doctorId?: string,
+    tenantId:   string,
+    date:       Date,
+    doctorId?:  string,
+    patientIds?: string[],
   ): Promise<IOPDVisit[]> {
     assertDbConnected();
     const start = new Date(date);
@@ -37,7 +38,8 @@ export class OPDRepository {
       tenantId,
       visitDate: { $gte: start, $lte: end },
     };
-    if (doctorId) query.doctorId = doctorId;
+    if (doctorId)            query.doctorIds = { $in: [doctorId] };
+    if (patientIds?.length)  query.patientId = { $in: patientIds };
 
     return OPDVisitModel.find(query).sort({ queueNumber: 1 });
   }

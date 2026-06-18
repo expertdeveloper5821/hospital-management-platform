@@ -52,18 +52,18 @@ const BASE_DOCTOR = {
 };
 
 const BASE_ADMISSION = {
-  admissionId:      'adm-uuid-001',
-  patientId:        'PAT-00001',
-  wardId:           'ward-001',
-  wardName:         'General Ward',
-  bedId:            'bed-001',
-  bedNumber:        'G-01',
-  assignedDoctorId: DOCTOR_ID,
-  status:           AdmissionStatus.ADMITTED,
-  admissionDate:    new Date(),
-  dischargeDate:    null,
-  progressNotes:    [],
-  tenantId:         TENANT_ID,
+  admissionId:       'adm-uuid-001',
+  patientId:         'PAT-00001',
+  wardId:            'ward-001',
+  wardName:          'General Ward',
+  bedId:             'bed-001',
+  bedNumber:         'G-01',
+  assignedDoctorIds: [DOCTOR_ID],
+  status:            AdmissionStatus.ADMITTED,
+  admissionDate:     new Date(),
+  dischargeDate:     null,
+  progressNotes:     [],
+  tenantId:          TENANT_ID,
 };
 
 // ─── IPDService — example-based tests ────────────────────────────────────────
@@ -79,10 +79,10 @@ describe('IPDService — example-based', () => {
   // ── createAdmission ──────────────────────────────────────────────────────────
   describe('createAdmission', () => {
     const validInput = {
-      patientId:        'PAT-00001',
-      wardId:           'ward-001',
-      bedId:            'bed-001',
-      assignedDoctorId: DOCTOR_ID,
+      patientId:         'PAT-00001',
+      wardId:            'ward-001',
+      bedId:             'bed-001',
+      assignedDoctorIds: [DOCTOR_ID],
     };
 
     beforeEach(() => {

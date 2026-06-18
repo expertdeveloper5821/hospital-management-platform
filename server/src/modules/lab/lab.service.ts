@@ -118,16 +118,19 @@ export class LabService {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
+    const requester = await userRepository.findById(tenantId, userId);
+
     const doc = await labRepository.savePathology({
-      requestId:   uuidv4(),
-      patientId:   input.patientId,
+      requestId:    uuidv4(),
+      patientId:    input.patientId,
       tenantId,
-      requestedBy: userId,
-      testType:    input.testType,
-      status:      LabRequestStatus.PENDING,
-      notes:       input.notes ?? null,
-      reportS3Key: null,
-      requestedAt: new Date(),
+      requestedBy:  userId,
+      testType:     input.testType,
+      departmentId: requester?.departmentIds?.[0] ?? null,
+      status:       LabRequestStatus.PENDING,
+      notes:        input.notes ?? null,
+      reportS3Key:  null,
+      requestedAt:  new Date(),
     });
 
     try {
@@ -217,13 +220,14 @@ export class LabService {
   }
 
   async listPathologyRequests(
-    tenantId: string,
-    query:    ListLabRequestsQuery,
+    tenantId:      string,
+    query:         ListLabRequestsQuery,
+    departmentIds?: string[],
   ): Promise<PaginatedResult<PathologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await labRepository.findPathologyByPatient(tenantId, query, searchPatientIds);
+    const result = await labRepository.findPathologyByPatient(tenantId, query, searchPatientIds, departmentIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(
@@ -242,16 +246,19 @@ export class LabService {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
+    const requester = await userRepository.findById(tenantId, userId);
+
     const doc = await labRepository.saveRadiology({
-      requestId:   uuidv4(),
-      patientId:   input.patientId,
+      requestId:    uuidv4(),
+      patientId:    input.patientId,
       tenantId,
-      requestedBy: userId,
-      imagingType: input.imagingType,
-      status:      LabRequestStatus.PENDING,
-      notes:       input.notes ?? null,
-      reportS3Key: null,
-      requestedAt: new Date(),
+      requestedBy:  userId,
+      imagingType:  input.imagingType,
+      departmentId: requester?.departmentIds?.[0] ?? null,
+      status:       LabRequestStatus.PENDING,
+      notes:        input.notes ?? null,
+      reportS3Key:  null,
+      requestedAt:  new Date(),
     });
 
     try {
@@ -339,13 +346,14 @@ export class LabService {
   }
 
   async listRadiologyRequests(
-    tenantId: string,
-    query:    ListLabRequestsQuery,
+    tenantId:      string,
+    query:         ListLabRequestsQuery,
+    departmentIds?: string[],
   ): Promise<PaginatedResult<RadiologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await labRepository.findRadiologyByPatient(tenantId, query, searchPatientIds);
+    const result = await labRepository.findRadiologyByPatient(tenantId, query, searchPatientIds, departmentIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(

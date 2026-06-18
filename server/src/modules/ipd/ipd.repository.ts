@@ -57,16 +57,18 @@ export class IPDRepository {
   }
 
   async findActiveAdmissions(
-    tenantId:    string,
-    query:       ListAdmissionsQuery,
-    patientIds?: string[],
+    tenantId:          string,
+    query:             ListAdmissionsQuery,
+    patientIds?:       string[],
+    assignedDoctorId?: string,
   ): Promise<PaginatedResult<IIPDAdmission>> {
     assertDbConnected();
     const { wardId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, status };
-    if (wardId)      filter['wardId']     = wardId;
-    if (patientIds)  filter['patientId']  = { $in: patientIds };
+    if (wardId)            filter['wardId']           = wardId;
+    if (patientIds)        filter['patientId']        = { $in: patientIds };
+    if (assignedDoctorId)  filter['assignedDoctorIds'] = { $in: [assignedDoctorId] };
 
     const [data, total] = await Promise.all([
       IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),
@@ -96,6 +98,26 @@ export class IPDRepository {
     return IPDAdmissionModel.findOneAndUpdate(
       { admissionId, tenantId },
       { $set: update },
+      { new: true },
+    );
+  }
+
+  async updateAdmissionFields(
+    admissionId: string,
+    tenantId: string,
+    fields: Partial<{
+      assignedDoctorIds: string[];
+      departmentId:      string | null;
+      wardId:            string;
+      wardName:          string;
+      bedId:             string;
+      bedNumber:         string;
+    }>,
+  ): Promise<IIPDAdmission | null> {
+    assertDbConnected();
+    return IPDAdmissionModel.findOneAndUpdate(
+      { admissionId, tenantId },
+      { $set: fields },
       { new: true },
     );
   }

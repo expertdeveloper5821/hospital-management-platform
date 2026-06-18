@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useAppDispatch } from '@/store/hooks';
-import { tokenReceived, profileLoaded, setBranding, TOKEN_STORAGE_KEY } from '@/store/slices/auth.slice';
+import { tokenReceived, profileLoaded, setBranding, hydrationComplete, TOKEN_STORAGE_KEY } from '@/store/slices/auth.slice';
 import { authApi } from '@/store/api/auth.api';
 import type { UserRole } from '@/store/types';
 
@@ -28,14 +28,22 @@ export function AuthHydrator() {
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (!token) return;
+
+    if (!token) {
+      dispatch(hydrationComplete());
+      return;
+    }
 
     const claims = decodeJwt(token);
-    if (!claims) return;
+    if (!claims) {
+      dispatch(hydrationComplete());
+      return;
+    }
 
     // Reject expired tokens immediately (exp is in seconds)
     if (claims.exp && claims.exp * 1000 < Date.now()) {
       localStorage.removeItem(TOKEN_STORAGE_KEY);
+      dispatch(hydrationComplete());
       return;
     }
 
@@ -47,6 +55,7 @@ export function AuthHydrator() {
       tenantId:     claims.tenantId,
       isFirstLogin: claims.isFirstLogin,
     }));
+    dispatch(hydrationComplete());
 
     if (!claims.isFirstLogin && claims.tenantId) {
       dispatch(

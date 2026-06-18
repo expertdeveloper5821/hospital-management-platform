@@ -55,18 +55,19 @@ export class BedOccupiedError extends Error {
 
 function toResponse(doc: IIPDAdmission, fullName: string | null = null): AdmissionResponse {
   return {
-    admissionId:      doc.admissionId,
-    patientId:        doc.patientId,
+    admissionId:       doc.admissionId,
+    patientId:         doc.patientId,
     fullName,
-    wardId:           doc.wardId,
-    wardName:         doc.wardName,
-    bedId:            doc.bedId,
-    bedNumber:        doc.bedNumber,
-    assignedDoctorId: doc.assignedDoctorId,
-    status:           doc.status,
-    admissionDate:    doc.admissionDate.toISOString(),
-    dischargeDate:    doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
-    progressNotes:    doc.progressNotes,
+    wardId:            doc.wardId,
+    wardName:          doc.wardName,
+    bedId:             doc.bedId,
+    bedNumber:         doc.bedNumber,
+    assignedDoctorIds: doc.assignedDoctorIds ?? [],
+    departmentId:      doc.departmentId ?? null,
+    status:            doc.status,
+    admissionDate:     doc.admissionDate.toISOString(),
+    dischargeDate:     doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
+    progressNotes:     doc.progressNotes,
   };
 }
 
@@ -115,21 +116,29 @@ export class IPDService {
       );
     }
 
-    // [6] Verify assignedDoctorId is a Doctor in this tenant
-    const doctor = await userRepository.findById(tenantId, input.assignedDoctorId);
-    if (!doctor || doctor.role !== UserRole.DOCTOR) {
-      throw new AppError('Assigned user is not a Doctor in this tenant', 400);
+    // [6] Verify all assigned doctors are Doctors in this tenant (only when provided)
+    let doctorDepartmentId: string | null = null;
+    const assignedDoctorIds = input.assignedDoctorIds ?? [];
+    for (const dId of assignedDoctorIds) {
+      const doctor = await userRepository.findById(tenantId, dId);
+      if (!doctor || doctor.role !== UserRole.DOCTOR) {
+        throw new AppError(`Assigned user ${dId} is not a Doctor in this tenant`, 400);
+      }
+      if (!doctorDepartmentId) {
+        doctorDepartmentId = doctor.departmentIds?.[0] ?? null;
+      }
     }
 
     // [7] Create admission — denormalize ward.name and bed.bedNumber at write time
     const admission = await ipdRepository.save({
-      admissionId:      uuidv4(),
-      patientId:        input.patientId,
-      wardId:           input.wardId,
-      bedId:            input.bedId,
-      bedNumber:        bed.bedNumber,
-      wardName:         ward.name,           // U3-A IWard uses .name, not .wardName
-      assignedDoctorId: input.assignedDoctorId,
+      admissionId:       uuidv4(),
+      patientId:         input.patientId,
+      wardId:            input.wardId,
+      bedId:             input.bedId,
+      bedNumber:         bed.bedNumber,
+      wardName:          ward.name,
+      assignedDoctorIds: assignedDoctorIds,
+      departmentId:      doctorDepartmentId,
       status:           AdmissionStatus.ADMITTED,
       admissionDate:    new Date(),
       dischargeDate:    null,
@@ -172,6 +181,105 @@ export class IPDService {
     if (!admission) throw new NotFoundError('Admission not found');
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
     return toResponse(admission, patient?.fullName ?? null);
+  }
+
+  async updateAdmission(
+    admissionId: string,
+    tenantId:    string,
+    input: {
+      assignedDoctorIds?: string[];
+      wardId?:            string;
+      bedId?:             string;
+    },
+    userId: string,
+  ): Promise<AdmissionResponse> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+    if (admission.status !== AdmissionStatus.ADMITTED) {
+      throw new AppError('Cannot edit a discharged admission', 400);
+    }
+
+    const fields: Parameters<typeof ipdRepository.updateAdmissionFields>[2] = {};
+    const prevValue: Record<string, unknown> = {};
+
+    // ── Doctor / department change ──────────────────────────────────────────
+    if (input.assignedDoctorIds) {
+      for (const dId of input.assignedDoctorIds) {
+        const doctor = await userRepository.findById(tenantId, dId);
+        if (!doctor || doctor.role !== UserRole.DOCTOR) {
+          throw new AppError(`Assigned user ${dId} is not a Doctor in this tenant`, 400);
+        }
+      }
+      prevValue.assignedDoctorIds = admission.assignedDoctorIds;
+      fields.assignedDoctorIds    = input.assignedDoctorIds;
+      if (input.assignedDoctorIds.length > 0) {
+        const firstDoctor = await userRepository.findById(tenantId, input.assignedDoctorIds[0]);
+        fields.departmentId = firstDoctor?.departmentIds?.[0] ?? null;
+      } else {
+        fields.departmentId = null;
+      }
+    }
+
+    // ── Bed / ward change ───────────────────────────────────────────────────
+    const bedChanging = input.bedId && input.bedId !== admission.bedId;
+    if (bedChanging) {
+      const newWardId = input.wardId ?? admission.wardId;
+
+      const ward = await ipdRepository.findWardById(tenantId, newWardId);
+      if (!ward) throw new AppError('Ward not found', 404);
+
+      const bed = await ipdRepository.findBedById(tenantId, input.bedId!);
+      if (!bed) throw new AppError('Bed not found', 404);
+      if (bed.wardId !== newWardId) throw new AppError('Bed does not belong to specified ward', 400);
+
+      const occupant = await ipdRepository.findActiveAdmissionByBed(input.bedId!, tenantId);
+      if (occupant && occupant.admissionId !== admissionId) {
+        throw new ConflictError(`Bed is already occupied by admission ${occupant.admissionId}`);
+      }
+
+      prevValue.wardId = admission.wardId;
+      prevValue.bedId  = admission.bedId;
+      fields.wardId    = newWardId;
+      fields.wardName  = ward.name;
+      fields.bedId     = input.bedId!;
+      fields.bedNumber = bed.bedNumber;
+
+      // Release the old bed
+      await ipdRepository.updateBedOccupancy(tenantId, admission.bedId, false, null);
+      // Occupy the new bed
+      await ipdRepository.updateBedOccupancy(tenantId, input.bedId!, true, admissionId);
+    } else if (input.wardId && input.wardId !== admission.wardId) {
+      // Ward changed but no new bed specified — just update wardId/wardName
+      const ward = await ipdRepository.findWardById(tenantId, input.wardId);
+      if (!ward) throw new AppError('Ward not found', 404);
+      prevValue.wardId = admission.wardId;
+      fields.wardId    = input.wardId;
+      fields.wardName  = ward.name;
+    }
+
+    if (Object.keys(fields).length === 0) {
+      // Nothing changed — return current state
+      const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
+      return toResponse(admission, patient?.fullName ?? null);
+    }
+
+    const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
+    if (!updated) throw new NotFoundError('Admission not found');
+
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      admissionId,
+        action:        'UPDATE',
+        userId,
+        tenantId,
+        previousValue: prevValue,
+        newValue:      fields as Record<string, unknown>,
+      });
+    } catch { /* swallow */ }
+
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return toResponse(updated, patient?.fullName ?? null);
   }
 
   async addProgressNote(
@@ -249,13 +357,14 @@ export class IPDService {
   }
 
   async listAdmissions(
-    tenantId: string,
-    query:    ListAdmissionsQuery,
+    tenantId:         string,
+    query:            ListAdmissionsQuery,
+    assignedDoctorId?: string,
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds);
+    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds, assignedDoctorId);
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);

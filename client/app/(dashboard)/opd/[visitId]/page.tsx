@@ -76,7 +76,7 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
         <DetailRow icon={<User className="h-4 w-4" />}          label="Patient ID"       value={visit.patientId} />
         <DetailRow icon={<Calendar className="h-4 w-4" />}       label="Visit Date"       value={formatDate(visit.visitDate)} />
         <DetailRow icon={<Activity className="h-4 w-4" />}       label="Queue Number"     value={`#${visit.queueNumber}`} />
-        <DetailRow icon={<Stethoscope className="h-4 w-4" />}    label="Doctor"           value={visit.doctorId} />
+        <DetailRow icon={<Stethoscope className="h-4 w-4" />}    label="Doctor(s)"        value={visit.doctorIds?.join(', ') || '—'} />
         <DetailRow icon={<ClipboardList className="h-4 w-4" />}  label="Chief Complaint"  value={visit.chiefComplaint} />
         {visit.diagnosis && (
           <DetailRow icon={<FileText className="h-4 w-4" />} label="Diagnosis" value={visit.diagnosis} />

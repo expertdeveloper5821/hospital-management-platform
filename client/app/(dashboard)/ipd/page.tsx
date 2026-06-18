@@ -8,12 +8,15 @@ import {
   useAddBedsMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
+  useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
   useDischargePatientMutation,
   useGetOccupancySummaryQuery,
 } from '@/store/api/ipd.api';
+import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useListUsersQuery }    from '@/store/api/user.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector }       from '@/store/hooks';
 import { UserRole }             from '@/store/types';
 import type { AdmissionResponse, WardResponse, PatientResponse, UserResponse } from '@/store/types';
@@ -38,6 +41,10 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Tab = 'admissions' | 'wards' | 'occupancy';
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque',
+};
 
 // ─── PatientSearch ────────────────────────────────────────────────────────────
 // Live search typeahead — type name or mobile, pick a patient from the dropdown.
@@ -233,6 +240,342 @@ function DoctorSearch({ doctors, value, onChange }: DoctorSearchProps) {
   );
 }
 
+// ─── Admission Panel (slide-over) ────────────────────────────────────────────
+
+interface AdmissionPanelProps {
+  admission:     AdmissionResponse;
+  onClose:       () => void;
+  onUpdate:      (a: AdmissionResponse) => void;
+  canEdit:       boolean;
+  canDischarge:  boolean;
+  doctorMap:     Record<string, string>;
+  onDischarge:   (a: AdmissionResponse) => void;
+  onNotes:       (a: AdmissionResponse) => void;
+  canProgress:   boolean;
+}
+
+function AdmissionPanel({
+  admission, onClose, onUpdate,
+  canEdit, canDischarge, doctorMap,
+  onDischarge, onNotes, canProgress,
+}: AdmissionPanelProps) {
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [error, setError] = useState<string | null>(null);
+
+  const admissionDateStr = new Date(admission.admissionDate).toISOString().substring(0, 10);
+  const { data: paymentData } = useListPaymentsQuery({
+    patientId: admission.patientId,
+    dateFrom:  admissionDateStr,
+    dateTo:    admissionDateStr,
+    limit:     10,
+  });
+  const admissionPayment = paymentData?.data?.[0] ?? null;
+
+  // Edit state — initialised from current admission
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [editDoctors,    setEditDoctors]    = useState<UserResponse[]>([]);
+  const [editAddDoctorId, setEditAddDoctorId] = useState('');
+  const [wardId,  setWardId]  = useState(admission.wardId);
+  const [bedId,   setBedId]   = useState(admission.bedId);
+
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: doctorsPage }     = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
+  const { data: wardsData }       = useListWardsQuery();
+  const { data: bedsData }        = useListBedsQuery(wardId, { skip: !wardId || mode !== 'edit' });
+
+  const departments = departmentsData ?? [];
+  const allDoctors  = doctorsPage?.data ?? [];
+  const wards       = wardsData ?? [];
+  const allBeds     = bedsData ?? [];
+  const availableBeds = allBeds.filter((b) => !b.isOccupied || b.bedId === admission.bedId);
+
+  const doctorList = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
+
+  const [updateAdmission, { isLoading: saving }] = useUpdateAdmissionMutation();
+
+  function enterEdit() {
+    setSelectedDepartmentId('');
+    setEditDoctors([]);
+    setEditAddDoctorId('');
+    setWardId(admission.wardId);
+    setBedId(admission.bedId);
+    setError(null);
+    setMode('edit');
+  }
+
+  async function handleSave() {
+    setError(null);
+
+    // Validate: if ward changed, a bed must be selected in the new ward
+    const wardChanged = wardId !== admission.wardId;
+    if (wardChanged && !bedId) {
+      setError('Please select a bed in the new ward before saving.');
+      return;
+    }
+
+    const body: { assignedDoctorIds?: string[]; wardId?: string; bedId?: string } = {};
+    if (editDoctors.length > 0)              body.assignedDoctorIds = editDoctors.map((d) => d.userId);
+    if (wardId !== admission.wardId)         body.wardId            = wardId;
+    // Only include bedId when it's a non-empty, valid value different from current
+    if (bedId && bedId !== admission.bedId)  body.bedId             = bedId;
+
+    if (!body.assignedDoctorIds && !body.wardId && !body.bedId) {
+      setMode('view');
+      return;
+    }
+
+    if (!admission.admissionId) {
+      setError('Invalid admission — please close and reopen this panel.');
+      return;
+    }
+
+    try {
+      const updated = await updateAdmission({ admissionId: admission.admissionId, ...body }).unwrap();
+      onUpdate(updated);
+      setMode('view');
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to update admission.');
+    }
+  }
+
+  const isAdmitted = admission.status === 'ADMITTED';
+
+  const row = (label: string, val: React.ReactNode) => (
+    <div className="py-2.5 border-b last:border-0 grid grid-cols-5 gap-2 items-start">
+      <span className="col-span-2 text-sm text-muted-foreground pt-0.5">{label}</span>
+      <span className="col-span-3 text-sm font-medium break-words">{val ?? '—'}</span>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <div
+        className="relative flex flex-col h-full w-full max-w-lg bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b shrink-0">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant={admission.status === 'ADMITTED' ? 'default' : 'secondary'}>
+                {admission.status}
+              </Badge>
+            </div>
+            <p className="text-sm font-semibold">{admission.fullName ?? admission.patientId}</p>
+            <p className="text-xs text-muted-foreground font-mono">{admission.patientId}</p>
+          </div>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {error && (
+            <p className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+          )}
+
+          {mode === 'view' && (
+            <div>
+              {row('Ward',          admission.wardName)}
+              {row('Bed',           admission.bedNumber)}
+              {row('Doctor(s)',      admission.assignedDoctorIds?.length
+                ? admission.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ')
+                : '—')}
+              {row('Admitted',      new Date(admission.admissionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }))}
+              {row('Discharged',    admission.dischargeDate
+                ? new Date(admission.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : null)}
+              {row('Progress Notes', (
+                <button
+                  className="text-primary text-sm underline-offset-2 hover:underline"
+                  onClick={() => { onClose(); onNotes(admission); }}
+                >
+                  {admission.progressNotes.length} note{admission.progressNotes.length !== 1 ? 's' : ''}
+                </button>
+              ))}
+              {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
+              <div className="mt-3 pt-3 border-t space-y-0">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
+                {admissionPayment ? (
+                  <>
+                    {row('Amount',       <span className="font-semibold">₹{admissionPayment.amount.toLocaleString('en-IN')}</span>)}
+                    {row('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[admissionPayment.paymentMethod] ?? admissionPayment.paymentMethod}</span>)}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-1">No payment on record for this admission.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {mode === 'edit' && (
+            <div className="space-y-4">
+              {/* Department filter */}
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-dept">Department (filter doctors)</Label>
+                <select
+                  id="ap-dept"
+                  value={selectedDepartmentId}
+                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">— All Departments —</option>
+                  {departments.map((d) => (
+                    <option key={d.departmentId} value={d.departmentId}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Doctors */}
+              <div className="space-y-1.5">
+                <Label>Assigned Doctors</Label>
+                {editDoctors.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {editDoctors.map((d) => (
+                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                        {d.name}
+                        <button type="button" onClick={() => setEditDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 hover:text-destructive">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <select
+                    value={editAddDoctorId}
+                    onChange={(e) => setEditAddDoctorId(e.target.value)}
+                    className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
+                    <option value="">— Add doctor —</option>
+                    {doctorList.filter((d) => !editDoctors.some((x) => x.userId === d.userId)).map((d) => (
+                      <option key={d.userId} value={d.userId}>{d.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!editAddDoctorId}
+                    onClick={() => {
+                      const d = allDoctors.find((u) => u.userId === editAddDoctorId);
+                      if (d && !editDoctors.some((x) => x.userId === d.userId)) {
+                        setEditDoctors((prev) => [...prev, d]);
+                        setEditAddDoctorId('');
+                      }
+                    }}
+                    className="shrink-0 rounded-md border border-input bg-background px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+                {admission.assignedDoctorIds?.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Current: {admission.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ')}
+                  </p>
+                )}
+              </div>
+
+              {/* Ward */}
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-ward">Ward</Label>
+                <select
+                  id="ap-ward"
+                  value={wardId}
+                  onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {wards.map((w) => (
+                    <option key={w.wardId} value={w.wardId}>
+                      {w.name}{w.floor ? ` — Floor ${w.floor}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Bed */}
+              <div className="space-y-1.5">
+                <Label>Bed</Label>
+                {allBeds.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No beds in this ward.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-3">
+                      {allBeds.map((b) => {
+                        const isSelected  = bedId === b.bedId;
+                        const isAvailable = !b.isOccupied || b.bedId === admission.bedId;
+                        return (
+                          <button
+                            key={b.bedId}
+                            type="button"
+                            disabled={!isAvailable}
+                            onClick={() => setBedId(b.bedId)}
+                            className={[
+                              'inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-medium transition-colors',
+                              isSelected
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : isAvailable
+                                  ? 'border-green-500/50 bg-green-50 text-green-700 hover:bg-green-100'
+                                  : 'border-muted bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed',
+                            ].join(' ')}
+                          >
+                            <Bed className="h-3 w-3" />
+                            {b.bedNumber}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {availableBeds.length} available · current bed highlighted
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {isAdmitted && (
+          <div className="shrink-0 border-t p-4 space-y-2">
+            {mode === 'view' && (
+              <div className="flex flex-wrap gap-2">
+                {canProgress && (
+                  <Button variant="outline" className="flex-1" onClick={() => { onClose(); onNotes(admission); }}>
+                    Progress Notes
+                  </Button>
+                )}
+                {canEdit && (
+                  <Button variant="outline" className="flex-1" onClick={enterEdit}>
+                    Edit
+                  </Button>
+                )}
+                {canDischarge && (
+                  <Button variant="destructive" size="sm" onClick={() => { onClose(); onDischarge(admission); }}>
+                    Discharge
+                  </Button>
+                )}
+              </div>
+            )}
+            {mode === 'edit' && (
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={() => { setMode('view'); setError(null); }}>
+                  Back
+                </Button>
+                <Button className="flex-1" disabled={saving} onClick={handleSave}>
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── New Admission Modal ──────────────────────────────────────────────────────
 
 interface NewAdmissionModalProps {
@@ -240,21 +583,40 @@ interface NewAdmissionModalProps {
   onClose: () => void;
 }
 
-function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
-  const [patient, setPatient] = useState<PatientResponse | null>(null);
-  const [wardId,  setWardId]  = useState('');
-  const [bedId,   setBedId]   = useState('');
-  const [doctor,  setDoctor]  = useState<UserResponse | null>(null);
-  const [error,   setError]   = useState<string | null>(null);
+const IPD_PAYMENT_MODES = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI',  label: 'UPI'  },
+  { value: 'CARD', label: 'Card' },
+] as const;
 
-  const { data: bedsData } = useListBedsQuery(wardId, { skip: !wardId });
-  const { data: doctorsPage } = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
+type IPDPaymentMode = 'CASH' | 'UPI' | 'CARD';
+
+function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
+  const [patient,              setPatient]              = useState<PatientResponse | null>(null);
+  const [wardId,               setWardId]               = useState('');
+  const [bedId,                setBedId]                = useState('');
+  const [selectedDoctors,      setSelectedDoctors]      = useState<UserResponse[]>([]);
+  const [addDoctorId,          setAddDoctorId]          = useState('');
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [paymentAmount,        setPaymentAmount]        = useState('');
+  const [paymentMode,          setPaymentMode]          = useState<IPDPaymentMode | ''>('');
+  const [error,                setError]                = useState<string | null>(null);
+
+  const { data: bedsData }      = useListBedsQuery(wardId, { skip: !wardId });
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: doctorsPage }   = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
 
   const availableBeds = bedsData?.filter((b) => !b.isOccupied) ?? [];
   const allBeds       = bedsData ?? [];
-  const doctorList    = doctorsPage?.data ?? [];
+  const allDoctors    = doctorsPage?.data ?? [];
+  const departments   = departmentsData ?? [];
+  const doctorList    = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
 
-  const [createAdmission, { isLoading }] = useCreateAdmissionMutation();
+  const [createAdmission,     { isLoading: admitting }]       = useCreateAdmissionMutation();
+  const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
+  const isLoading = admitting || creatingPayment;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -262,13 +624,24 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
     if (!patient) { setError('Select a patient.'); return; }
     if (!wardId)  { setError('Select a ward.'); return; }
     if (!bedId)   { setError('Select a bed.'); return; }
-    if (!doctor)  { setError('Select a doctor.'); return; }
+    const amount = parseFloat(paymentAmount);
+    if (!paymentAmount || isNaN(amount) || amount <= 0) {
+      setError('Payment amount is required and must be greater than zero.');
+      return;
+    }
+    if (!paymentMode) { setError('Payment mode is required.'); return; }
     try {
       await createAdmission({
-        patientId:        patient.patientId,
+        patientId:         patient.patientId,
         wardId,
         bedId,
-        assignedDoctorId: doctor.userId,
+        ...(selectedDoctors.length ? { assignedDoctorIds: selectedDoctors.map((d) => d.userId) } : {}),
+      }).unwrap();
+      await createManualPayment({
+        patientId:     patient.patientId,
+        amount,
+        paymentMethod: paymentMode,
+        description:   'IPD Admission',
       }).unwrap();
       onClose();
     } catch (err: unknown) {
@@ -364,10 +737,102 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             </div>
           )}
 
-          {/* Step 4 — Doctor */}
+          {/* Step 4 — Department filter (optional) */}
           <div className="space-y-2">
-            <Label>Assigned Doctor</Label>
-            <DoctorSearch doctors={doctorList} value={doctor} onChange={setDoctor} />
+            <Label htmlFor="na-dept">Department <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <select
+              id="na-dept"
+              value={selectedDepartmentId}
+              onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">— All Departments —</option>
+              {departments.map((dept) => (
+                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Step 5 — Doctors (optional) */}
+          <div className="space-y-2">
+            <Label>Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            {selectedDoctors.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedDoctors.map((d) => (
+                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                    {d.name}
+                    <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 hover:text-destructive">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <select
+                value={addDoctorId}
+                onChange={(e) => setAddDoctorId(e.target.value)}
+                className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="">— Add doctor —</option>
+                {doctorList.filter((d) => !selectedDoctors.some((x) => x.userId === d.userId)).map((d) => (
+                  <option key={d.userId} value={d.userId}>{d.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!addDoctorId}
+                onClick={() => {
+                  const d = allDoctors.find((u) => u.userId === addDoctorId);
+                  if (d && !selectedDoctors.some((x) => x.userId === d.userId)) {
+                    setSelectedDoctors((prev) => [...prev, d]);
+                    setAddDoctorId('');
+                  }
+                }}
+                className="shrink-0 rounded-md border border-input bg-background px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* Step 6 — Payment */}
+          <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
+            <p className="text-sm font-medium">Payment *</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="na-pay-amount">Amount (₹) *</Label>
+              <input
+                id="na-pay-amount"
+                type="number"
+                min="1"
+                step="0.01"
+                placeholder="0.00"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Payment Mode *</Label>
+              <div className="flex gap-2">
+                {IPD_PAYMENT_MODES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setPaymentMode(value)}
+                    className={[
+                      'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                      paymentMode === value
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-muted',
+                    ].join(' ')}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {error && (
@@ -380,7 +845,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             </Button>
             <Button
               type="submit"
-              disabled={isLoading || !patient || !wardId || !bedId || !doctor}
+              disabled={isLoading || !patient || !wardId || !bedId}
             >
               {isLoading ? 'Admitting…' : 'Admit Patient'}
             </Button>
@@ -644,6 +1109,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page,            setPage]            = useState(1);
   const [showNew,         setShowNew]         = useState(false);
+  const [viewFor,         setViewFor]         = useState<AdmissionResponse | null>(null);
   const [notesFor,        setNotesFor]        = useState<AdmissionResponse | null>(null);
   const [dischargeFor,    setDischargeFor]    = useState<AdmissionResponse | null>(null);
 
@@ -671,11 +1137,19 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   const canAdmit =
     role === UserRole.RECEPTIONIST ||
+    role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
-  const canProgress  = role === UserRole.DOCTOR;
+  const canProgress  = role === UserRole.DOCTOR || role === UserRole.NURSE;
+  const canEdit =
+    role === UserRole.RECEPTIONIST ||
+    role === UserRole.DOCTOR ||
+    role === UserRole.NURSE ||
+    role === UserRole.HOSPITAL_ADMIN ||
+    role === UserRole.ADMIN;
   const canDischarge =
     role === UserRole.DOCTOR ||
+    role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN ||
     role === UserRole.RECEPTIONIST;
@@ -686,6 +1160,12 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   async function handleDischargeConfirm() {
     if (!dischargeFor) return;
+    // Guard: admissionId must be a non-empty string to avoid a broken URL
+    // (/api/ipd/admissions//discharge) that hits the 404 catch-all.
+    if (!dischargeFor.admissionId) {
+      setDischargeFor(null);
+      return;
+    }
     await discharge(dischargeFor.admissionId);
     setDischargeFor(null);
   }
@@ -763,7 +1243,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                       </p>
                       <p className="font-mono text-xs text-muted-foreground mt-0.5">{a.patientId}</p>
                       <p className="font-medium mt-0.5">{a.wardName} · Bed {a.bedNumber}</p>
-                      <p className="text-xs text-muted-foreground">{doctorMap[a.assignedDoctorId] ?? '—'}</p>
+                      <p className="text-xs text-muted-foreground">{a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : '—'}</p>
                     </div>
                     <div className="shrink-0 flex flex-col items-end gap-1">
                       <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'} className="text-xs">
@@ -796,6 +1276,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                           {a.progressNotes.length}
                         </span>
                       )}
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setViewFor(a)}>
+                      View
                     </Button>
                     {canDischarge && a.status === 'ADMITTED' && (
                       <Button
@@ -839,8 +1322,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                         <div className="text-xs text-muted-foreground">Bed {a.bedNumber}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium">{doctorMap[a.assignedDoctorId] ?? '—'}</div>
-                        <div className="text-xs text-muted-foreground font-mono">{a.assignedDoctorId.slice(0, 8)}…</div>
+                        <div className="text-sm font-medium">{a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : '—'}</div>
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'}>
@@ -875,6 +1357,14 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                                 {a.progressNotes.length}
                               </span>
                             )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => setViewFor(a)}
+                          >
+                            View
                           </Button>
                           {canDischarge && a.status === 'ADMITTED' && (
                             <Button
@@ -914,6 +1404,19 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
       {showNew  && <NewAdmissionModal wards={wards} onClose={() => setShowNew(false)} />}
       {notesFor && <NotesModal admission={notesFor} canAdd={canProgress} doctorMap={doctorMap} onClose={() => setNotesFor(null)} />}
+      {viewFor && (
+        <AdmissionPanel
+          admission={viewFor}
+          onClose={() => setViewFor(null)}
+          onUpdate={(updated) => setViewFor(updated)}
+          canEdit={canEdit}
+          canDischarge={canDischarge}
+          canProgress={canProgress}
+          doctorMap={doctorMap}
+          onDischarge={(a) => setDischargeFor(a)}
+          onNotes={(a) => setNotesFor(a)}
+        />
+      )}
       {dischargeFor && (
         <DischargeConfirm
           admission={dischargeFor}
@@ -1106,7 +1609,7 @@ export default function IPDPage() {
   const { data: wards = [], isLoading: wardsLoading } = useListWardsQuery();
 
   const canManageWards  = role === UserRole.HOSPITAL_ADMIN;
-  const canViewOccupancy = role === UserRole.HOSPITAL_ADMIN || role === UserRole.MANAGER;
+  const canViewOccupancy = role === UserRole.HOSPITAL_ADMIN || role === UserRole.MANAGER || role === UserRole.NURSE;
 
   const tabs = [
     { key: 'admissions' as Tab, label: 'Admissions',        Icon: ClipboardList },

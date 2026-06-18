@@ -41,15 +41,18 @@ export class PatientService {
     const patient = await patientRepository.save({
       patientId,
       tenantId,
-      fullName:               data.fullName,
-      dateOfBirth:            new Date(data.dateOfBirth),
-      gender:                 data.gender,
-      mobileNumber:           data.mobileNumber,
-      address:                data.address,
-      aadhaarNumber:          data.aadhaarNumber          ?? null,
-      emergencyContactName:   data.emergencyContactName   ?? null,
-      emergencyContactMobile: data.emergencyContactMobile ?? null,
-      bloodGroup:             data.bloodGroup             ?? null,
+      fullName:                  data.fullName,
+      dateOfBirth:               new Date(data.dateOfBirth),
+      gender:                    data.gender,
+      mobileNumber:              data.mobileNumber,
+      address:                   data.address,
+      aadhaarNumber:             data.aadhaarNumber             ?? null,
+      emergencyContactName:      data.emergencyContactName      ?? null,
+      emergencyContactMobile:    data.emergencyContactMobile    ?? null,
+      bloodGroup:                data.bloodGroup                ?? null,
+      departmentId:              data.departmentId              ?? null,
+      registrationFee:           data.registrationFee           ?? null,
+      registrationPaymentMethod: data.registrationPaymentMethod ?? null,
     });
 
     await auditService.log({
@@ -81,6 +84,7 @@ export class PatientService {
     const fields = [
       'fullName', 'gender', 'mobileNumber', 'address',
       'aadhaarNumber', 'emergencyContactName', 'emergencyContactMobile', 'bloodGroup',
+      'departmentId',
     ] as const;
 
     for (const key of fields) {
@@ -147,12 +151,13 @@ export class PatientService {
   }
 
   async searchPatients(
-    tenantId: string,
-    q:        string | undefined,
-    page:     number,
-    limit:    number,
+    tenantId:     string,
+    q:            string | undefined,
+    page:         number,
+    limit:        number,
+    departmentIds?: string[],
   ): Promise<PaginatedResult<IPatient>> {
-    return patientRepository.search(tenantId, q, page, limit);
+    return patientRepository.search(tenantId, q, page, limit, departmentIds);
   }
 
   async generateMedicalCard(

@@ -19,9 +19,10 @@ const ALLOWED_IMAGE_TYPES: Record<string, string> = {
 };
 
 const createUserSchema = z.object({
-  email: z.string().email().max(254),
-  name:  z.string().min(1).max(200),
-  role:  z.enum(Object.values(UserRole) as [string, ...string[]]),
+  email:        z.string().email().max(254),
+  name:         z.string().min(1).max(200),
+  role:         z.enum(Object.values(UserRole) as [string, ...string[]]),
+  departmentIds: z.array(z.string().min(1)).optional(),
 });
 
 const updateRoleSchema = z.object({
@@ -176,7 +177,7 @@ export async function createUser(req: Request, res: Response, next: NextFunction
     const body = createUserSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
     const user = await userService.createUser(req.user!.tenantId!, body.data as Parameters<typeof userService.createUser>[1], req.user!.userId);
-    res.status(201).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role } });
+    res.status(201).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, departmentIds: user.departmentIds ?? [] } });
   } catch (err) { next(err); }
 }
 
@@ -218,7 +219,7 @@ export async function getUserById(req: Request, res: Response, next: NextFunctio
   try {
     const { userId } = userIdParamSchema.parse(req.params);
     const user = await userService.getUserById(req.user!.tenantId!, userId);
-    res.status(200).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, isActive: user.isActive } });
+    res.status(200).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, departmentIds: user.departmentIds ?? [], isActive: user.isActive } });
   } catch (err) { next(err); }
 }
 

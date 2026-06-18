@@ -38,12 +38,12 @@ describe('getNavItems — RBAC nav filtering', () => {
     expect(hrefs).not.toContain('/admin');
   });
 
-  it('NURSE sees patient and IPD — not OPD, payments, or lab', () => {
+  it('NURSE sees patients, OPD, and IPD — not payments or lab', () => {
     const items = getNavItems('NURSE');
     const hrefs = items.map((i) => i.href);
     expect(hrefs).toContain('/patients');
+    expect(hrefs).toContain('/opd');
     expect(hrefs).toContain('/ipd');
-    expect(hrefs).not.toContain('/opd');
     expect(hrefs).not.toContain('/payments');
     expect(hrefs).not.toContain('/lab');
   });

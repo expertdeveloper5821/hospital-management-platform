@@ -22,6 +22,7 @@ export class PaymentRepository {
     assertDbConnected();
     const filter: Record<string, unknown> = { tenantId };
 
+    if (query.patientId)     filter['patientId']     = query.patientId;
     if (query.paymentMethod) filter['paymentMethod'] = query.paymentMethod;
 
     if (query.dateFrom || query.dateTo) {

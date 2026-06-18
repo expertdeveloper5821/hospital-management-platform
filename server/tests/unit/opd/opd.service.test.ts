@@ -18,15 +18,15 @@ const BASE_PATIENT = {
 };
 
 function makeVisit(overrides: Partial<{
-  visitId:  string;
-  status:   OPDVisitStatus;
-  doctorId: string | null;
+  visitId:   string;
+  status:    OPDVisitStatus;
+  doctorIds: string[];
 }> = {}) {
   return {
     visitId:        overrides.visitId  ?? 'OPD-TEST0001',
     tenantId:       't1',
     patientId:      'PAT-ABCD1234',
-    doctorId:       overrides.doctorId ?? null,
+    doctorIds:      overrides.doctorIds ?? [],
     visitDate:      new Date('2026-05-15T00:00:00.000Z'),
     queueNumber:    1,
     status:         overrides.status   ?? OPDVisitStatus.OPEN,
@@ -119,7 +119,7 @@ describe('OPDService — example-based', () => {
       await service.createVisit('t1', VALID_CREATE_REQ, 'user-1');
 
       expect(mockOpdRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ doctorId: null, notes: null, diagnosis: null, prescription: null }),
+        expect.objectContaining({ doctorIds: [], notes: null, diagnosis: null, prescription: null }),
       );
     });
 

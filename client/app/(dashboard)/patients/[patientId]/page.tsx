@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, User, Phone, MapPin, Droplets, Shield, Calendar,
-  Trash2, Search, ChevronLeft, ChevronRight,
+  Trash2, Search, ChevronLeft, ChevronRight, Building2,
 } from 'lucide-react';
 import { useGetPatientByIdQuery, useDeletePatientMutation } from '@/store/api/patient.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
@@ -329,12 +330,16 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
 
   const { data: patient, isLoading, isError } = useGetPatientByIdQuery(patientId);
   const [deletePatient, { isLoading: isDeleting }] = useDeletePatientMutation();
+  const { data: departments } = useListDepartmentsQuery();
 
   const [activeTab,      setActiveTab]      = useState<'info' | 'opd' | 'ipd'>('info');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteError,     setDeleteError]    = useState<string | undefined>();
 
   const canDelete = role === UserRole.ADMIN || role === UserRole.MANAGER || role === UserRole.HOSPITAL_ADMIN;
+  const departmentName = patient?.departmentId
+    ? (departments?.find((d) => d.departmentId === patient.departmentId)?.name ?? patient.departmentId)
+    : null;
 
   const handleDelete = async () => {
     setDeleteError(undefined);
@@ -426,12 +431,13 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
         {activeTab === 'info' && (
           <div className="space-y-4">
             <div className="rounded-xl border bg-card divide-y">
-              <DetailRow icon={<Calendar className="h-4 w-4" />} label="Date of Birth" value={formatDate(patient.dateOfBirth)} />
-              <DetailRow icon={<User className="h-4 w-4" />}     label="Gender"        value={patient.gender} />
-              <DetailRow icon={<Phone className="h-4 w-4" />}    label="Mobile"        value={patient.mobileNumber} />
-              <DetailRow icon={<MapPin className="h-4 w-4" />}   label="Address"       value={patient.address} />
-              <DetailRow icon={<Droplets className="h-4 w-4" />} label="Blood Group"   value={patient.bloodGroup} />
-              <DetailRow icon={<Shield className="h-4 w-4" />}   label="Aadhaar"       value={patient.aadhaarNumber} />
+              <DetailRow icon={<Calendar className="h-4 w-4" />}   label="Date of Birth" value={formatDate(patient.dateOfBirth)} />
+              <DetailRow icon={<User className="h-4 w-4" />}       label="Gender"        value={patient.gender} />
+              <DetailRow icon={<Phone className="h-4 w-4" />}      label="Mobile"        value={patient.mobileNumber} />
+              <DetailRow icon={<MapPin className="h-4 w-4" />}     label="Address"       value={patient.address} />
+              <DetailRow icon={<Droplets className="h-4 w-4" />}   label="Blood Group"   value={patient.bloodGroup} />
+              <DetailRow icon={<Shield className="h-4 w-4" />}     label="Aadhaar"       value={patient.aadhaarNumber} />
+              <DetailRow icon={<Building2 className="h-4 w-4" />}  label="Department"    value={departmentName} />
             </div>
 
             {(patient.emergencyContactName || patient.emergencyContactMobile) && (

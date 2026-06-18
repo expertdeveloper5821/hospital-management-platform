@@ -4,21 +4,26 @@ import { patientService, DuplicateWarningError } from './patient.service';
 import { IPatient } from './patient.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
+import { paymentService } from '../payment/payment.service';
+import { PaymentMethod } from '../payment/payment.types';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
 
 const createPatientSchema = z.object({
-  fullName:               z.string().min(1).max(200).trim(),
-  dateOfBirth:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
-  gender:                 z.enum(GENDER_VALUES),
-  mobileNumber:           z.string().min(7).max(15).regex(/^\+?[0-9]+$/, 'Invalid mobile number'),
-  address:                z.string().min(1).max(500).trim(),
-  aadhaarNumber:          z.string().length(12).regex(/^[0-9]+$/).optional(),
-  emergencyContactName:   z.string().min(1).max(200).optional(),
-  emergencyContactMobile: z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
-  bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
-  forceCreate:            z.boolean().optional(),
+  fullName:                  z.string().min(1).max(200).trim(),
+  dateOfBirth:               z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+  gender:                    z.enum(GENDER_VALUES),
+  mobileNumber:              z.string().min(7).max(15).regex(/^\+?[0-9]+$/, 'Invalid mobile number'),
+  address:                   z.string().min(1).max(500).trim(),
+  aadhaarNumber:             z.string().length(12).regex(/^[0-9]+$/).optional(),
+  emergencyContactName:      z.string().min(1).max(200).optional(),
+  emergencyContactMobile:    z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
+  bloodGroup:                z.enum(BLOOD_GROUP_VALUES).optional(),
+  departmentId:              z.string().min(1).optional(),
+  registrationFee:           z.number().positive().optional(),
+  registrationPaymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.UPI, PaymentMethod.CARD]).optional(),
+  forceCreate:               z.boolean().optional(),
 });
 
 const updatePatientSchema = z.object({
@@ -31,23 +36,27 @@ const updatePatientSchema = z.object({
   emergencyContactName:   z.string().min(1).max(200).optional(),
   emergencyContactMobile: z.string().min(7).max(15).regex(/^\+?[0-9]+$/).optional(),
   bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
+  departmentId:           z.string().min(1).nullable().optional(),
 });
 
 function toResponse(p: IPatient) {
   return {
-    patientId:              p.patientId,
-    fullName:               p.fullName,
-    dateOfBirth:            p.dateOfBirth,
-    gender:                 p.gender,
-    mobileNumber:           p.mobileNumber,
-    address:                p.address,
-    aadhaarNumber:          p.aadhaarNumber          ?? null,
-    emergencyContactName:   p.emergencyContactName   ?? null,
-    emergencyContactMobile: p.emergencyContactMobile ?? null,
-    bloodGroup:             p.bloodGroup             ?? null,
-    tenantId:               p.tenantId,
-    createdAt:              p.createdAt,
-    updatedAt:              p.updatedAt,
+    patientId:                 p.patientId,
+    fullName:                  p.fullName,
+    dateOfBirth:               p.dateOfBirth,
+    gender:                    p.gender,
+    mobileNumber:              p.mobileNumber,
+    address:                   p.address,
+    aadhaarNumber:             p.aadhaarNumber             ?? null,
+    emergencyContactName:      p.emergencyContactName      ?? null,
+    emergencyContactMobile:    p.emergencyContactMobile    ?? null,
+    bloodGroup:                p.bloodGroup                ?? null,
+    departmentId:              p.departmentId              ?? null,
+    registrationFee:           p.registrationFee           ?? null,
+    registrationPaymentMethod: p.registrationPaymentMethod ?? null,
+    tenantId:                  p.tenantId,
+    createdAt:                 p.createdAt,
+    updatedAt:                 p.updatedAt,
   };
 }
 
@@ -56,11 +65,31 @@ export async function createPatient(req: Request, res: Response, next: NextFunct
     const body = createPatientSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
+    const tenantId = req.user!.tenantId!;
+    const userId   = req.user!.userId;
+
     const patient = await patientService.createPatient(
-      req.user!.tenantId!,
+      tenantId,
       body.data as Parameters<typeof patientService.createPatient>[1],
-      req.user!.userId,
+      userId,
     );
+
+    // Create payment record when registration fee is provided
+    if (body.data.registrationFee && body.data.registrationPaymentMethod) {
+      try {
+        await paymentService.createManualPayment(
+          {
+            patientId:     patient.patientId,
+            amount:        body.data.registrationFee,
+            paymentMethod: body.data.registrationPaymentMethod as typeof PaymentMethod[keyof typeof PaymentMethod],
+            description:   'Patient Registration Fee',
+          },
+          tenantId,
+          userId,
+        );
+      } catch { /* payment failure must not roll back patient creation */ }
+    }
+
     res.status(201).json({ status: 'success', data: toResponse(patient) });
   } catch (err) {
     if (err instanceof DuplicateWarningError) {
@@ -80,6 +109,7 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
     const query = searchSchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
     const { q, page, limit } = query.data;
+
     const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

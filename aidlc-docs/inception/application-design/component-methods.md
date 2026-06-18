@@ -135,7 +135,9 @@ interface CreatePatientInput {
   emergencyContactName?: string;
   emergencyContactMobile?: string;
   bloodGroup?: string;
-  forceCreate?: boolean;   // bypass duplicate warning
+  forceCreate?: boolean;              // bypass duplicate warning
+  registrationFee?: number;           // positive; omit or null = Free registration
+  registrationPaymentMethod?: string; // CASH | UPI | CARD; required when registrationFee is set
 }
 createPatient(input: CreatePatientInput, createdBy: string): Promise<{ patient: Patient; isDuplicate: boolean }>
 
@@ -160,8 +162,10 @@ update(patientId: string, updates: Partial<Patient>): Promise<Patient>
 interface CreateVisitInput {
   tenantId: string;
   patientId: string;
-  doctorId: string;
+  doctorIds?: string[];        // array — multiple doctors per visit
   visitDate: Date;
+  amount: number;              // mandatory consultation fee (> 0)
+  paymentMethod: 'CASH' | 'UPI' | 'CARD';  // mandatory; payment record auto-created after visit
 }
 createVisit(input: CreateVisitInput, createdBy: string): Promise<OPDVisit>
 
@@ -170,6 +174,7 @@ interface UpdateVisitInput {
   diagnosis?: string;
   prescription?: string;   // free-text
   followUpDate?: Date;
+  doctorIds?: string[];    // replaces full array on save
 }
 updateVisit(visitId: string, updates: UpdateVisitInput, tenantId: string, updatedBy: string): Promise<OPDVisit>
 completeVisit(visitId: string, tenantId: string, doctorId: string): Promise<OPDVisit>
@@ -179,7 +184,7 @@ getPatientHistory(patientId: string, tenantId: string): Promise<OPDVisit[]>
 
 // OPDRepository
 findById(visitId: string, tenantId: string): Promise<OPDVisit | null>
-findByDate(tenantId: string, date: Date, doctorId?: string): Promise<OPDVisit[]>
+findByDate(tenantId: string, date: Date, doctorId?: string): Promise<OPDVisit[]>  // doctorId used as $in filter on doctorIds[]
 findByPatient(patientId: string, tenantId: string): Promise<OPDVisit[]>
 save(visit: OPDVisit): Promise<OPDVisit>
 updateStatus(visitId: string, status: OPDStatus, completedAt?: Date): Promise<void>
@@ -204,10 +209,12 @@ assertBedAvailable(tenantId: string, wardId: string, bedNumber: string): Promise
 interface CreateAdmissionInput {
   tenantId: string;
   patientId: string;
-  doctorId: string;
+  assignedDoctorIds?: string[];  // array — multiple doctors per admission; optional (defaults to [])
   wardId: string;
-  bedNumber: string;
+  bedId: string;
   admissionDate: Date;
+  amount: number;                // mandatory admission fee (> 0)
+  paymentMethod: 'CASH' | 'UPI' | 'CARD';  // mandatory; payment record auto-created after admission
 }
 createAdmission(input: CreateAdmissionInput, createdBy: string): Promise<IPDAdmission>
 addProgressNote(admissionId: string, note: string, tenantId: string, doctorId: string): Promise<ProgressNote>

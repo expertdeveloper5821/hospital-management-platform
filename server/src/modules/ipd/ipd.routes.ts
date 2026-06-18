@@ -8,6 +8,7 @@ import {
   createAdmission,
   listAdmissions,
   getAdmissionById,
+  updateAdmission,
   addProgressNote,
   dischargePatient,
   getPatientIPDHistory,
@@ -66,20 +67,35 @@ router.get(
   getAdmissionById,
 );
 
-// POST /api/ipd/admissions/:admissionId/progress-notes — Doctor records daily note
+// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse)
+router.patch(
+  '/admissions/:admissionId',
+  ...protect,
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.DOCTOR,
+    UserRole.NURSE,
+    UserRole.ADMIN,
+    UserRole.HOSPITAL_ADMIN,
+  ),
+  updateAdmission,
+);
+
+// POST /api/ipd/admissions/:admissionId/progress-notes — Doctor/Nurse records daily note
 router.post(
   '/admissions/:admissionId/progress-notes',
   ...protect,
-  requireRole(UserRole.DOCTOR),
+  requireRole(UserRole.DOCTOR, UserRole.NURSE),
   addProgressNote,
 );
 
-// PATCH /api/ipd/admissions/:admissionId/discharge — Doctor/Admin/Receptionist discharges patient
+// PATCH /api/ipd/admissions/:admissionId/discharge — Doctor/Nurse/Admin/Receptionist discharges patient
 router.patch(
   '/admissions/:admissionId/discharge',
   ...protect,
   requireRole(
     UserRole.DOCTOR,
+    UserRole.NURSE,
     UserRole.HOSPITAL_ADMIN,
     UserRole.ADMIN,
     UserRole.RECEPTIONIST,
@@ -159,10 +175,10 @@ router.get('/wards/:wardId/beds',
   listBeds,
 );
 
-// ─── Occupancy summary — Manager + Hospital Admin (FR-08.8) ──────────────────
+// ─── Occupancy summary — Manager + Hospital Admin + Nurse (FR-08.8) ──────────
 router.get('/occupancy',
   ...protect,
-  requireRole(...ADMIN_ROLES, UserRole.MANAGER),
+  requireRole(...ADMIN_ROLES, UserRole.MANAGER, UserRole.NURSE),
   getOccupancySummary,
 );
 

@@ -117,7 +117,7 @@
 
 **Interfaces**:
 - `POST /api/opd/visits` — Receptionist creates OPD visit
-- `GET /api/opd/visits` — list today's OPD queue (filter: doctorId, date)
+- `GET /api/opd/visits` — list today's OPD queue (filter: doctorId scoped via `doctorIds[]`, date)
 - `GET /api/opd/visits/:visitId` — get visit details
 - `PATCH /api/opd/visits/:visitId` — Doctor updates visit (complaint, diagnosis, prescription, follow-up)
 - `PATCH /api/opd/visits/:visitId/complete` — Doctor marks visit COMPLETED

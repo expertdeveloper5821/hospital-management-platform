@@ -177,9 +177,16 @@ export default function DashboardPage() {
   const hasInventory      = data?.totalInventoryItems !== undefined;
   const hasRevenue        = data?.revenueToday !== undefined;
   const hasActivities     = (data?.recentActivities?.length ?? 0) > 0;
-  const hasCriticalAlerts = [
+  const alertCardCount = [
     data?.lowStockCount, data?.pendingLabCount, data?.pendingPaymentsCount, data?.todayOpdCount,
-  ].some((v) => v !== undefined);
+  ].filter((v) => v !== undefined).length;
+  const hasCriticalAlerts = alertCardCount > 0;
+
+  const statCardCount = [
+    data?.totalPatients, data?.activeIpdCount, data?.totalActiveStaff,
+    data?.labReportsToday, data?.admissionsToday, data?.newRegistrationsToday,
+  ].filter((v) => v !== undefined).length;
+
   const hasTodayActivity  = [
     data?.newRegistrationsToday, data?.todayOpdCount, data?.admissionsToday,
     data?.labReportsToday, data?.revenueToday,
@@ -252,7 +259,7 @@ export default function DashboardPage() {
             <AlertTriangle className="h-4 w-4 text-orange-500" />
             Critical Alerts
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className={cn('grid grid-cols-1 gap-4', alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2')}>
             {data?.lowStockCount !== undefined && (
               <AlertCard icon={PackageX}    label="Low Stock Items"       count={data.lowStockCount}        href="/inventory" warn />
             )}
@@ -278,7 +285,7 @@ export default function DashboardPage() {
         data?.admissionsToday,
         data?.newRegistrationsToday,
       ].some((v) => v !== undefined) && (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className={cn('grid gap-4', statCardCount > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2')}>
           {data?.totalPatients !== undefined && (
             <MetricCard icon={Users}        label="Total Patients"        value={data.totalPatients}      sub="Registered" />
           )}

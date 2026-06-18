@@ -7,6 +7,7 @@ import {
   useUpdateUserRoleMutation,
   useDeactivateUserMutation,
 } from '@/store/api/user.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector } from '@/store/hooks';
 import { UserRole } from '@/store/types';
 import type { UserResponse } from '@/store/types';
@@ -60,12 +61,20 @@ interface CreateUserModalProps {
   onClose: () => void;
 }
 
+// Only doctors can be assigned to departments during user creation
+const DEPARTMENT_ROLES = new Set<UserRole>([
+  UserRole.DOCTOR,
+]);
+
 function CreateUserModal({ onClose }: CreateUserModalProps) {
-  const [name,  setName]  = useState('');
-  const [email, setEmail] = useState('');
-  const [role,  setRole]  = useState<UserRole>(UserRole.STAFF);
-  const [error, setError] = useState<string | null>(null);
+  const [name,         setName]         = useState('');
+  const [email,        setEmail]        = useState('');
+  const [role,         setRole]         = useState<UserRole>(UserRole.STAFF);
+  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  const [error,         setError]         = useState<string | null>(null);
+
   const [createUser, { isLoading }] = useCreateUserMutation();
+  const { data: departments }       = useListDepartmentsQuery();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,7 +93,12 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
     }
 
     try {
-      await createUser({ name: trimmedName, email: trimmedEmail, role }).unwrap();
+      await createUser({
+        name:          trimmedName,
+        email:         trimmedEmail,
+        role,
+        departmentIds: DEPARTMENT_ROLES.has(role) && departmentIds.length ? departmentIds : undefined,
+      }).unwrap();
       onClose();
     } catch (err: unknown) {
       const msg = (err as { data?: { message?: string } })?.data?.message;
@@ -139,7 +153,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
             <select
               id="cu-role"
               value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
+              onChange={(e) => { setRole(e.target.value as UserRole); setDepartmentIds([]); }}
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {ASSIGNABLE_ROLES.map((r) => (
@@ -147,6 +161,35 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
               ))}
             </select>
           </div>
+
+          {DEPARTMENT_ROLES.has(role) && (
+            <div className="space-y-2">
+              <Label>Departments</Label>
+              {(departments ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">No departments available.</p>
+              ) : (
+                <div className="rounded-md border border-input max-h-36 overflow-y-auto divide-y">
+                  {(departments ?? []).map((d) => (
+                    <label key={d.departmentId} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors">
+                      <input
+                        type="checkbox"
+                        className="accent-primary h-4 w-4 shrink-0"
+                        checked={departmentIds.includes(d.departmentId)}
+                        onChange={(e) => {
+                          setDepartmentIds((prev) =>
+                            e.target.checked
+                              ? [...prev, d.departmentId]
+                              : prev.filter((id) => id !== d.departmentId)
+                          );
+                        }}
+                      />
+                      <span className="text-sm">{d.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>

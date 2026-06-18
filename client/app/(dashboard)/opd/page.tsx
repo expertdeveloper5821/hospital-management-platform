@@ -8,8 +8,10 @@ import {
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
 } from '@/store/api/opd.api';
+import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector } from '@/store/hooks';
 import type {
   OPDVisitResponse,
@@ -18,6 +20,7 @@ import type {
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
   PatientResponse,
+  UserResponse,
 } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -68,11 +71,38 @@ interface VisitPanelProps {
   canEdit: boolean;    // DOCTOR, NURSE, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
   canCancel: boolean;  // RECEPTIONIST, NURSE, DOCTOR, HOSPITAL_ADMIN
-  doctorName: (id: string | null) => string;
+  doctorNames: (ids: string[]) => string;
+  allDoctors:  UserResponse[];
 }
 
-function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorName }: VisitPanelProps) {
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque',
+};
+
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorNames, allDoctors }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
+
+  const visitDateStr = new Date(visit.visitDate).toISOString().substring(0, 10);
+  const { data: paymentData } = useListPaymentsQuery({
+    patientId: visit.patientId,
+    dateFrom:  visitDateStr,
+    dateTo:    visitDateStr,
+    limit:     10,
+  });
+  const visitPayment = paymentData?.data?.[0] ?? null;
+
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState(visit.departmentId ?? '');
+
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: editUsersData }   = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
+  const editAllDoctors = editUsersData?.data ?? [];
+  const editDepartments = departmentsData ?? [];
+  const editDoctors = selectedDepartmentId
+    ? editAllDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : editAllDoctors;
+
+  const [editDoctorIds,    setEditDoctorIds]    = useState<string[]>(visit.doctorIds ?? []);
+  const [editAddDoctorId,  setEditAddDoctorId]  = useState('');
 
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
     chiefComplaint: visit.chiefComplaint,
@@ -97,8 +127,16 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     setError('');
     try {
-      const updated = await updateVisit({ visitId: visit.visitId, ...form }).unwrap();
-      onUpdate(updated); // reflect changes immediately without waiting for cache refetch
+      // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
+      const body: UpdateOPDVisitRequest = {
+        ...(form.chiefComplaint?.trim() ? { chiefComplaint: form.chiefComplaint.trim() } : {}),
+        doctorIds:    editDoctorIds,
+        ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
+        ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
+        ...(form.notes        != null   ? { notes: form.notes }                          : {}),
+      };
+      const updated = await updateVisit({ visitId: visit.visitId, ...body }).unwrap();
+      onUpdate(updated);
       setMode('view');
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to update visit.');
@@ -152,8 +190,8 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               <span className="text-xs font-mono text-muted-foreground">#{visit.queueNumber}</span>
               <Badge variant={statusVariant(visit.status)}>{statusLabel(visit.status)}</Badge>
             </div>
-            <p className="text-sm font-semibold">{visit.patientId}</p>
-            <p className="text-xs text-muted-foreground">{formatDate(visit.visitDate)}</p>
+            <p className="text-sm font-semibold">{visit.fullName ?? visit.patientId}</p>
+            <p className="text-xs text-muted-foreground">{visit.patientId} · {formatDate(visit.visitDate)}</p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
@@ -169,7 +207,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {/* View mode */}
           {mode === 'view' && (
             <div>
-              {f('Doctor',          doctorName(visit.doctorId))}
+              {f('Doctor(s)',        doctorNames(visit.doctorIds ?? []))}
               {f('Chief Complaint', visit.chiefComplaint)}
               {f('Diagnosis',       visit.diagnosis)}
               {f('Prescription',    visit.prescription ? (
@@ -177,12 +215,80 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               ) : null)}
               {f('Notes',           visit.notes)}
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
+              <div className="mt-3 pt-3 border-t space-y-0">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
+                {visitPayment ? (
+                  <>
+                    {f('Amount',       <span className="font-semibold">₹{visitPayment.amount.toLocaleString('en-IN')}</span>)}
+                    {f('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[visitPayment.paymentMethod] ?? visitPayment.paymentMethod}</span>)}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-1">No payment on record for this visit.</p>
+                )}
+              </div>
             </div>
           )}
 
           {/* Edit mode */}
           {mode === 'edit' && (
             <form id="editForm" onSubmit={handleUpdate} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-dept">Department</Label>
+                <select
+                  id="ep-dept"
+                  value={selectedDepartmentId}
+                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— All Departments —</option>
+                  {editDepartments.map((dept) => (
+                    <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Assigned Doctors</Label>
+                {editDoctorIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {editDoctorIds.map((id) => {
+                      const d = allDoctors.find((u) => u.userId === id);
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                          {d?.name ?? id}
+                          <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 hover:text-destructive">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <select
+                    value={editAddDoctorId}
+                    onChange={(e) => setEditAddDoctorId(e.target.value)}
+                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">— Add doctor —</option>
+                    {editDoctors.filter((d) => !editDoctorIds.includes(d.userId)).map((d) => (
+                      <option key={d.userId} value={d.userId}>{d.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!editAddDoctorId}
+                    onClick={() => {
+                      if (editAddDoctorId && !editDoctorIds.includes(editAddDoctorId)) {
+                        setEditDoctorIds((prev) => [...prev, editAddDoctorId]);
+                        setEditAddDoctorId('');
+                      }
+                    }}
+                    className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-complaint">Chief Complaint *</Label>
                 <Input
@@ -343,16 +449,28 @@ interface NewVisitModalProps {
   onClose: () => void;
 }
 
+const PAYMENT_MODES = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI',  label: 'UPI'  },
+  { value: 'CARD', label: 'Card' },
+] as const;
+
+type OPDPaymentMode = 'CASH' | 'UPI' | 'CARD';
+
 function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [patientSearch, setPatientSearch]     = useState('');
   const [debouncedPSearch, setDebouncedPSearch] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<PatientResponse | null>(null);
-  const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId'>>({
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
+  const [selectedDoctorIds,    setSelectedDoctorIds]    = useState<string[]>([]);
+  const [addDoctorId,          setAddDoctorId]          = useState('');
+  const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId' | 'doctorIds'>>({
     chiefComplaint: '',
-    doctorId:       '',
     visitDate:      todayISO(),
     notes:          '',
   });
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -366,25 +484,45 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   );
   const patients = patientData?.data ?? [];
 
-  const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
-  const doctors = usersData?.data ?? [];
+  const { data: departmentsData } = useListDepartmentsQuery();
+  const departments = departmentsData ?? [];
 
-  const [createVisit, { isLoading }] = useCreateOPDVisitMutation();
+  const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
+  const allDoctors = usersData?.data ?? [];
+  const doctors = selectedDepartmentId
+    ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
+    : allDoctors;
+
+  const [createVisit,         { isLoading: creatingVisit }]   = useCreateOPDVisitMutation();
+  const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
+  const isLoading = creatingVisit || creatingPayment;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     if (!selectedPatient) { setError('Please select a patient.'); return; }
     if (!form.chiefComplaint.trim()) { setError('Chief complaint is required.'); return; }
+    const amount = parseFloat(paymentAmount);
+    if (!paymentAmount || isNaN(amount) || amount <= 0) {
+      setError('Payment amount is required and must be greater than zero.');
+      return;
+    }
+    if (!paymentMode) { setError('Payment mode is required.'); return; }
     try {
       const body: CreateOPDVisitRequest = {
         patientId:      selectedPatient.patientId,
         chiefComplaint: form.chiefComplaint,
-        doctorId:       form.doctorId || undefined,
+        doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
         visitDate:      form.visitDate || undefined,
         notes:          form.notes    || undefined,
       };
-      await createVisit(body).unwrap();
+      const visit = await createVisit(body).unwrap();
+      await createManualPayment({
+        patientId:     selectedPatient.patientId,
+        amount,
+        paymentMethod: paymentMode,
+        description:   `OPD Consultation – Visit #${visit.queueNumber}`,
+      }).unwrap();
       onClose();
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to create visit.');
@@ -457,20 +595,65 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             )}
           </div>
 
-          {/* Doctor */}
+          {/* Department */}
           <div className="space-y-1.5">
-            <Label htmlFor="nv-doctor">Assign Doctor</Label>
+            <Label htmlFor="nv-dept">Department</Label>
             <select
-              id="nv-doctor"
-              value={form.doctorId ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, doctorId: e.target.value }))}
+              id="nv-dept"
+              value={selectedDepartmentId}
+              onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="">— Unassigned —</option>
-              {doctors.map((d) => (
-                <option key={d.userId} value={d.userId}>{d.name}</option>
+              <option value="">— All Departments —</option>
+              {departments.map((dept) => (
+                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
               ))}
             </select>
+          </div>
+
+          {/* Doctors */}
+          <div className="space-y-1.5">
+            <Label>Assign Doctors</Label>
+            {selectedDoctorIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {selectedDoctorIds.map((id) => {
+                  const d = allDoctors.find((u) => u.userId === id);
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                      {d?.name ?? id}
+                      <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <select
+                value={addDoctorId}
+                onChange={(e) => setAddDoctorId(e.target.value)}
+                className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— Add doctor —</option>
+                {doctors.filter((d) => !selectedDoctorIds.includes(d.userId)).map((d) => (
+                  <option key={d.userId} value={d.userId}>{d.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                disabled={!addDoctorId}
+                onClick={() => {
+                  if (addDoctorId && !selectedDoctorIds.includes(addDoctorId)) {
+                    setSelectedDoctorIds((prev) => [...prev, addDoctorId]);
+                    setAddDoctorId('');
+                  }
+                }}
+                className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
           </div>
 
           {/* Visit date */}
@@ -508,6 +691,44 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+          </div>
+
+          {/* Payment */}
+          <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
+            <p className="text-sm font-medium">Payment *</p>
+            <div className="space-y-1.5">
+              <Label htmlFor="nv-pay-amount">Amount (₹) *</Label>
+              <Input
+                id="nv-pay-amount"
+                type="number"
+                min="1"
+                step="0.01"
+                placeholder="0.00"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Payment Mode *</Label>
+              <div className="flex gap-2">
+                {PAYMENT_MODES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setPaymentMode(value)}
+                    className={cn(
+                      'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                      paymentMode === value
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-muted',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -551,17 +772,19 @@ export default function OPDPage() {
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
   const doctors = usersData?.data ?? [];
 
-  const doctorName = useCallback((id: string | null) => {
-    if (!id) return 'Unassigned';
-    const d = doctors.find((u) => u.userId === id);
-    return d ? d.name : id;
+  const doctorNames = useCallback((ids: string[]) => {
+    if (!ids?.length) return 'Unassigned';
+    return ids.map((id) => {
+      const d = doctors.find((u) => u.userId === id);
+      return d ? d.name : id;
+    }).join(', ');
   }, [doctors]);
 
   const visits = queue ?? [];
 
   const canCreateVisit = ['RECEPTIONIST', 'NURSE', 'HOSPITAL_ADMIN', 'DOCTOR'].includes(role ?? '');
   const canEdit        = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canComplete    = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canComplete    = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canCancel      = ['RECEPTIONIST', 'NURSE', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
 
   // Queue stats
@@ -704,7 +927,7 @@ export default function OPDPage() {
                         {v.chiefComplaint}
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
-                        {doctorName(v.doctorId)}
+                        {doctorNames(v.doctorIds ?? [])}
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={statusVariant(v.status)}>{statusLabel(v.status)}</Badge>
@@ -732,7 +955,8 @@ export default function OPDPage() {
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}
-          doctorName={doctorName}
+          doctorNames={doctorNames}
+          allDoctors={doctors}
         />
       )}
 

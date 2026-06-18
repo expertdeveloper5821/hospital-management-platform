@@ -75,6 +75,7 @@ export const AuditEntityType = {
   PACKAGE_ASSIGNMENT: 'PACKAGE_ASSIGNMENT',
   STAFF_DOCUMENT:     'STAFF_DOCUMENT',
   CHARGE:             'CHARGE',
+  DEPARTMENT:         'DEPARTMENT',
 } as const;
 
 export type AuditEntityType = typeof AuditEntityType[keyof typeof AuditEntityType];

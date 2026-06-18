@@ -108,6 +108,7 @@ export const baseApi = createApi({
     'Bill',
     'StaffDocument',
     'StaffIdCard',
+    'Department',
   ],
   endpoints: () => ({}),
 });

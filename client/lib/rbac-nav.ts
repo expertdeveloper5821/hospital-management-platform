@@ -15,6 +15,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   HOSPITAL_ADMIN: [
     { label: 'Dashboard',  href: '/dashboard',  icon: 'layout-dashboard' },
+    { label: 'Departments', href: '/departments', icon: 'building-2'       },
     { label: 'Users',      href: '/admin',      icon: 'users'            },
     { label: 'Staff',      href: '/staff',      icon: 'file-badge'       },
     { label: 'Patients',   href: '/patients',   icon: 'heart-pulse'      },
@@ -29,6 +30,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   MANAGER: [
     { label: 'Dashboard',  href: '/dashboard',  icon: 'layout-dashboard' },
+    { label: 'Departments', href: '/departments', icon: 'building-2'       },
     { label: 'Patients',   href: '/patients',   icon: 'heart-pulse'      },
     { label: 'OPD',        href: '/opd',        icon: 'stethoscope'      },
     { label: 'IPD',        href: '/ipd',        icon: 'bed'              },
@@ -50,6 +52,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   NURSE: [
     { label: 'Dashboard', href: '/dashboard', icon: 'layout-dashboard' },
     { label: 'Patients',  href: '/patients',  icon: 'heart-pulse'      },
+    { label: 'OPD',       href: '/opd',       icon: 'stethoscope'      },
     { label: 'IPD',       href: '/ipd',       icon: 'bed'              },
   ],
   RECEPTIONIST: [
@@ -81,6 +84,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   ADMIN: [
     { label: 'Dashboard',     href: '/dashboard',     icon: 'layout-dashboard' },
+    { label: 'Departments', href: '/departments', icon: 'building-2'       },
     { label: 'Users',         href: '/admin',         icon: 'users'            },
     { label: 'Patients',      href: '/patients',      icon: 'heart-pulse'      },
     { label: 'OPD',           href: '/opd',           icon: 'stethoscope'      },

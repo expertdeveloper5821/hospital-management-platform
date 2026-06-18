@@ -9,6 +9,7 @@ function normaliseUser(u: any): UserResponse {
     email:        u.email  ?? '',
     name:         typeof u.name === 'string' ? u.name : '',
     role:         u.role,
+    departmentIds: Array.isArray(u.departmentIds) ? u.departmentIds : [],
     isActive:     u.isActive     ?? true,
     isFirstLogin: u.isFirstLogin ?? false,
     tenantId:     u.tenantId     ?? '',
@@ -17,9 +18,10 @@ function normaliseUser(u: any): UserResponse {
 }
 
 interface CreateUserRequest {
-  email: string;
-  name:  string;
-  role:  UserRole;
+  email:        string;
+  name:         string;
+  role:         UserRole;
+  departmentIds?: string[];
 }
 
 export interface MyProfileResponse {
