@@ -9,7 +9,7 @@ export interface IIPDAdmission extends Document {
   bedId:            string;
   bedNumber:        string;
   wardName:         string;
-  assignedDoctorId: string;
+  assignedDoctorIds: string[];
   departmentId:     string | null;
   status:           AdmissionStatus;
   admissionDate:    Date;
@@ -40,7 +40,7 @@ const ipdAdmissionSchema = new Schema<IIPDAdmission>(
     bedId:            { type: String, required: true },
     bedNumber:        { type: String, required: true },
     wardName:         { type: String, required: true },
-    assignedDoctorId: { type: String, required: true },
+    assignedDoctorIds: { type: [String], default: [] },
     departmentId:     { type: String, default: null },
     status: {
       type:     String,

@@ -55,19 +55,19 @@ export class BedOccupiedError extends Error {
 
 function toResponse(doc: IIPDAdmission, fullName: string | null = null): AdmissionResponse {
   return {
-    admissionId:      doc.admissionId,
-    patientId:        doc.patientId,
+    admissionId:       doc.admissionId,
+    patientId:         doc.patientId,
     fullName,
-    wardId:           doc.wardId,
-    wardName:         doc.wardName,
-    bedId:            doc.bedId,
-    bedNumber:        doc.bedNumber,
-    assignedDoctorId: doc.assignedDoctorId,
-    departmentId:     doc.departmentId ?? null,
-    status:           doc.status,
-    admissionDate:    doc.admissionDate.toISOString(),
-    dischargeDate:    doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
-    progressNotes:    doc.progressNotes,
+    wardId:            doc.wardId,
+    wardName:          doc.wardName,
+    bedId:             doc.bedId,
+    bedNumber:         doc.bedNumber,
+    assignedDoctorIds: doc.assignedDoctorIds ?? [],
+    departmentId:      doc.departmentId ?? null,
+    status:            doc.status,
+    admissionDate:     doc.admissionDate.toISOString(),
+    dischargeDate:     doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
+    progressNotes:     doc.progressNotes,
   };
 }
 
@@ -116,23 +116,29 @@ export class IPDService {
       );
     }
 
-    // [6] Verify assignedDoctorId is a Doctor in this tenant
-    const doctor = await userRepository.findById(tenantId, input.assignedDoctorId);
-    if (!doctor || doctor.role !== UserRole.DOCTOR) {
-      throw new AppError('Assigned user is not a Doctor in this tenant', 400);
+    // [6] Verify all assigned doctors are Doctors in this tenant (only when provided)
+    let doctorDepartmentId: string | null = null;
+    const assignedDoctorIds = input.assignedDoctorIds ?? [];
+    for (const dId of assignedDoctorIds) {
+      const doctor = await userRepository.findById(tenantId, dId);
+      if (!doctor || doctor.role !== UserRole.DOCTOR) {
+        throw new AppError(`Assigned user ${dId} is not a Doctor in this tenant`, 400);
+      }
+      if (!doctorDepartmentId) {
+        doctorDepartmentId = doctor.departmentIds?.[0] ?? null;
+      }
     }
 
     // [7] Create admission — denormalize ward.name and bed.bedNumber at write time
-    // Carry the doctor's departmentId so the admission inherits the department scope
     const admission = await ipdRepository.save({
-      admissionId:      uuidv4(),
-      patientId:        input.patientId,
-      wardId:           input.wardId,
-      bedId:            input.bedId,
-      bedNumber:        bed.bedNumber,
-      wardName:         ward.name,           // U3-A IWard uses .name, not .wardName
-      assignedDoctorId: input.assignedDoctorId,
-      departmentId:     doctor.departmentIds?.[0] ?? null,
+      admissionId:       uuidv4(),
+      patientId:         input.patientId,
+      wardId:            input.wardId,
+      bedId:             input.bedId,
+      bedNumber:         bed.bedNumber,
+      wardName:          ward.name,
+      assignedDoctorIds: assignedDoctorIds,
+      departmentId:      doctorDepartmentId,
       status:           AdmissionStatus.ADMITTED,
       admissionDate:    new Date(),
       dischargeDate:    null,
@@ -181,9 +187,9 @@ export class IPDService {
     admissionId: string,
     tenantId:    string,
     input: {
-      assignedDoctorId?: string;
-      wardId?:           string;
-      bedId?:            string;
+      assignedDoctorIds?: string[];
+      wardId?:            string;
+      bedId?:             string;
     },
     userId: string,
   ): Promise<AdmissionResponse> {
@@ -197,14 +203,21 @@ export class IPDService {
     const prevValue: Record<string, unknown> = {};
 
     // ── Doctor / department change ──────────────────────────────────────────
-    if (input.assignedDoctorId && input.assignedDoctorId !== admission.assignedDoctorId) {
-      const doctor = await userRepository.findById(tenantId, input.assignedDoctorId);
-      if (!doctor || doctor.role !== UserRole.DOCTOR) {
-        throw new AppError('Assigned user is not a Doctor in this tenant', 400);
+    if (input.assignedDoctorIds) {
+      for (const dId of input.assignedDoctorIds) {
+        const doctor = await userRepository.findById(tenantId, dId);
+        if (!doctor || doctor.role !== UserRole.DOCTOR) {
+          throw new AppError(`Assigned user ${dId} is not a Doctor in this tenant`, 400);
+        }
       }
-      prevValue.assignedDoctorId = admission.assignedDoctorId;
-      fields.assignedDoctorId    = input.assignedDoctorId;
-      fields.departmentId        = doctor.departmentIds?.[0] ?? null;
+      prevValue.assignedDoctorIds = admission.assignedDoctorIds;
+      fields.assignedDoctorIds    = input.assignedDoctorIds;
+      if (input.assignedDoctorIds.length > 0) {
+        const firstDoctor = await userRepository.findById(tenantId, input.assignedDoctorIds[0]);
+        fields.departmentId = firstDoctor?.departmentIds?.[0] ?? null;
+      } else {
+        fields.departmentId = null;
+      }
     }
 
     // ── Bed / ward change ───────────────────────────────────────────────────

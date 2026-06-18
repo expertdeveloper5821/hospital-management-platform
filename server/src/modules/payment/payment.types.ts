@@ -25,8 +25,8 @@ export const CreateManualPaymentSchema = z.object({
   patientId:     z.string().min(1, 'patientId is required'),
   amount:        z.number({ invalid_type_error: 'amount must be a number' })
                   .positive('Amount must be greater than zero'),
-  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.CHEQUE], {
-    errorMap: () => ({ message: 'paymentMethod must be CASH or CHEQUE for manual payments' }),
+  paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.CHEQUE, PaymentMethod.UPI, PaymentMethod.CARD], {
+    errorMap: () => ({ message: 'paymentMethod must be CASH, CHEQUE, UPI, or CARD for manual payments' }),
   }),
   description:   z.string().min(1, 'description is required').max(500).trim(),
 });
@@ -46,6 +46,7 @@ export const CreateRazorpayOrderSchema = z.object({
 export type CreateRazorpayOrderInput = z.infer<typeof CreateRazorpayOrderSchema>;
 
 export const ListPaymentsQuerySchema = z.object({
+  patientId:     z.string().min(1).optional(),
   dateFrom:      z.string().datetime({ offset: true }).optional(),
   dateTo:        z.string().datetime({ offset: true }).optional(),
   paymentMethod: z.enum(['CASH', 'CHEQUE', 'UPI', 'CARD']).optional(),

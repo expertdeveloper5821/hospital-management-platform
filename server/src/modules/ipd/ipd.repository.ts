@@ -68,7 +68,7 @@ export class IPDRepository {
     const filter: Record<string, unknown> = { tenantId, status };
     if (wardId)            filter['wardId']           = wardId;
     if (patientIds)        filter['patientId']        = { $in: patientIds };
-    if (assignedDoctorId)  filter['assignedDoctorId'] = assignedDoctorId;
+    if (assignedDoctorId)  filter['assignedDoctorIds'] = { $in: [assignedDoctorId] };
 
     const [data, total] = await Promise.all([
       IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),
@@ -106,12 +106,12 @@ export class IPDRepository {
     admissionId: string,
     tenantId: string,
     fields: Partial<{
-      assignedDoctorId: string;
-      departmentId:     string | null;
-      wardId:           string;
-      wardName:         string;
-      bedId:            string;
-      bedNumber:        string;
+      assignedDoctorIds: string[];
+      departmentId:      string | null;
+      wardId:            string;
+      wardName:          string;
+      bedId:             string;
+      bedNumber:         string;
     }>,
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();

@@ -37,7 +37,7 @@ export class OPDService {
       visitId,
       tenantId,
       patientId:      data.patientId,
-      doctorId:       data.doctorId      ?? null,
+      doctorIds:      data.doctorIds     ?? [],
       departmentId:   patient.departmentId ?? null,
       visitDate,
       queueNumber,
@@ -77,12 +77,13 @@ export class OPDService {
     const previousValue: Record<string, unknown> = {};
     const newValue:      Record<string, unknown> = {};
 
-    const fields = ['chiefComplaint', 'doctorId', 'diagnosis', 'prescription', 'notes'] as const;
+    const fields: Array<keyof UpdateOPDVisitRequest & keyof IOPDVisit> =
+      ['chiefComplaint', 'doctorIds', 'diagnosis', 'prescription', 'notes'];
     for (const key of fields) {
-      if (data[key] !== undefined) {
+      if ((data as Record<string, unknown>)[key] !== undefined) {
         previousValue[key] = (visit as unknown as Record<string, unknown>)[key];
-        newValue[key]      = data[key];
-        (updateData as Record<string, unknown>)[key] = data[key];
+        newValue[key]      = (data as Record<string, unknown>)[key];
+        (updateData as Record<string, unknown>)[key] = (data as Record<string, unknown>)[key];
       }
     }
 
@@ -243,7 +244,7 @@ export class OPDService {
         tenantId:       visit.tenantId,
         patientId:      visit.patientId,
         fullName:       patient.fullName,
-        doctorId:       visit.doctorId,
+        doctorIds:      visit.doctorIds,
         visitDate:      visit.visitDate,
         queueNumber:    visit.queueNumber,
         status:         visit.status,

@@ -150,13 +150,13 @@ describe('POST /api/payments/manual', () => {
     expect(res.status).toBe(400);
   });
 
-  test('rejects UPI method (must use CASH or CHEQUE)', async () => {
+  test('accepts UPI method (CASH, CHEQUE, UPI, CARD all valid for manual)', async () => {
     const res = await request(app)
       .post('/api/payments/manual')
       .set('Authorization', `Bearer ${receptionistToken}`)
       .send({ patientId, amount: 100, paymentMethod: 'UPI', description: 'Fee' });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
   });
 
   test('returns 404 for unknown patient', async () => {

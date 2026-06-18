@@ -77,7 +77,7 @@ export default function IPDAdmissionDetailPage({ params }: { params: { admission
       <div className="rounded-xl border bg-card divide-y">
         <DetailRow icon={<User className="h-4 w-4" />}        label="Patient ID"       value={admission.patientId} />
         <DetailRow icon={<BedDouble className="h-4 w-4" />}   label="Ward"             value={`${admission.wardName} · Bed ${admission.bedNumber}`} />
-        <DetailRow icon={<Stethoscope className="h-4 w-4" />} label="Assigned Doctor"  value={admission.assignedDoctorId} />
+        <DetailRow icon={<Stethoscope className="h-4 w-4" />} label="Assigned Doctor(s)" value={admission.assignedDoctorIds?.join(', ') || '—'} />
         <DetailRow icon={<Calendar className="h-4 w-4" />}    label="Admission Date"   value={formatDate(admission.admissionDate)} />
         {admission.dischargeDate && (
           <DetailRow icon={<Activity className="h-4 w-4" />}  label="Discharge Date"   value={formatDate(admission.dischargeDate)} />

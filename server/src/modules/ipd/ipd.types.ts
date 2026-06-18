@@ -23,10 +23,10 @@ const mongoIdSchema = (field: string) =>
   z.string().min(1, `${field} is required`);
 
 export const CreateAdmissionSchema = z.object({
-  patientId:        z.string().min(1, 'patientId is required'),
-  wardId:           mongoIdSchema('wardId'),
-  bedId:            mongoIdSchema('bedId'),
-  assignedDoctorId: mongoIdSchema('assignedDoctorId'),
+  patientId:         z.string().min(1, 'patientId is required'),
+  wardId:            mongoIdSchema('wardId'),
+  bedId:             mongoIdSchema('bedId'),
+  assignedDoctorIds: z.array(z.string().min(1)).optional(),
 });
 
 export type CreateAdmissionInput = z.infer<typeof CreateAdmissionSchema>;
@@ -52,19 +52,19 @@ export type ListAdmissionsQuery = z.infer<typeof ListAdmissionsQuerySchema>;
 
 // ─── Response Shapes ──────────────────────────────────────────────────────────
 export interface AdmissionResponse {
-  admissionId:      string;
-  patientId:        string;
-  fullName:         string | null;
-  wardId:           string;
-  wardName:         string;
-  bedId:            string;
-  bedNumber:        string;
-  assignedDoctorId: string;
-  departmentId:     string | null;
-  status:           AdmissionStatus;
-  admissionDate:    string;
-  dischargeDate:    string | null;
-  progressNotes:    ProgressNote[];
+  admissionId:       string;
+  patientId:         string;
+  fullName:          string | null;
+  wardId:            string;
+  wardName:          string;
+  bedId:             string;
+  bedNumber:         string;
+  assignedDoctorIds: string[];
+  departmentId:      string | null;
+  status:            AdmissionStatus;
+  admissionDate:     string;
+  dischargeDate:     string | null;
+  progressNotes:     ProgressNote[];
 }
 
 // Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)

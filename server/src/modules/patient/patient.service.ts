@@ -40,16 +40,18 @@ export class PatientService {
     const patient = await patientRepository.save({
       patientId,
       tenantId,
-      fullName:               data.fullName,
-      dateOfBirth:            new Date(data.dateOfBirth),
-      gender:                 data.gender,
-      mobileNumber:           data.mobileNumber,
-      address:                data.address,
-      aadhaarNumber:          data.aadhaarNumber          ?? null,
-      emergencyContactName:   data.emergencyContactName   ?? null,
-      emergencyContactMobile: data.emergencyContactMobile ?? null,
-      bloodGroup:             data.bloodGroup             ?? null,
-      departmentId:           data.departmentId           ?? null,
+      fullName:                  data.fullName,
+      dateOfBirth:               new Date(data.dateOfBirth),
+      gender:                    data.gender,
+      mobileNumber:              data.mobileNumber,
+      address:                   data.address,
+      aadhaarNumber:             data.aadhaarNumber             ?? null,
+      emergencyContactName:      data.emergencyContactName      ?? null,
+      emergencyContactMobile:    data.emergencyContactMobile    ?? null,
+      bloodGroup:                data.bloodGroup                ?? null,
+      departmentId:              data.departmentId              ?? null,
+      registrationFee:           data.registrationFee           ?? null,
+      registrationPaymentMethod: data.registrationPaymentMethod ?? null,
     });
 
     await auditService.log({
@@ -166,18 +168,20 @@ export class PatientService {
     if (!tenant)  throw new NotFoundError('Tenant not found');
 
     return pdfService.generateMedicalCard({
-      patientId:               patient.patientId,
-      fullName:                patient.fullName,
-      dateOfBirth:             patient.dateOfBirth,
-      gender:                  patient.gender,
-      mobileNumber:            patient.mobileNumber,
-      address:                 patient.address               ?? undefined,
-      bloodGroup:              patient.bloodGroup            ?? undefined,
-      emergencyContactName:    patient.emergencyContactName  ?? undefined,
-      emergencyContactMobile:  patient.emergencyContactMobile ?? undefined,
-      hospitalName:            tenant.branding.displayName || tenant.name,
-      hospitalLogoUrl:         tenant.branding.logoUrl      ?? undefined,
-      primaryColor:            tenant.branding.primaryColor,
+      patientId:                 patient.patientId,
+      fullName:                  patient.fullName,
+      dateOfBirth:               patient.dateOfBirth,
+      gender:                    patient.gender,
+      mobileNumber:              patient.mobileNumber,
+      address:                   patient.address                ?? undefined,
+      bloodGroup:                patient.bloodGroup             ?? undefined,
+      emergencyContactName:      patient.emergencyContactName   ?? undefined,
+      emergencyContactMobile:    patient.emergencyContactMobile ?? undefined,
+      registrationFee:           patient.registrationFee        ?? undefined,
+      registrationPaymentMethod: patient.registrationPaymentMethod ?? undefined,
+      hospitalName:              tenant.branding.displayName || tenant.name,
+      hospitalLogoUrl:           tenant.branding.logoUrl        ?? undefined,
+      primaryColor:              tenant.branding.primaryColor,
     });
   }
 }

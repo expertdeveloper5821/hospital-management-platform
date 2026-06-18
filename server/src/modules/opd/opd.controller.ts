@@ -8,14 +8,14 @@ import { UserRole } from '../../shared/types/common.types';
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
   chiefComplaint: z.string().min(1).max(1000).trim(),
-  doctorId:       z.string().min(1).optional(),
+  doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   notes:          z.string().max(2000).optional(),
 });
 
 const updateVisitSchema = z.object({
   chiefComplaint: z.string().min(1).max(1000).trim().optional(),
-  doctorId:       z.string().min(1).optional(),
+  doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   diagnosis:      z.string().min(1).max(2000).trim().optional(),
   prescription:   z.string().max(5000).optional(),
@@ -57,7 +57,7 @@ function toResponse(v: IOPDVisit) {
     tenantId:       v.tenantId,
     patientId:      v.patientId,
     fullName:       v.fullName,
-    doctorId:       v.doctorId,
+    doctorIds:      v.doctorIds,
     departmentId:   v.departmentId ?? null,
     visitDate:      v.visitDate,
     queueNumber:    v.queueNumber,

@@ -156,6 +156,14 @@ interface PatientFormModalProps {
   onSuccess?: (p: PatientResponse) => void;
 }
 
+const REG_PAYMENT_MODES = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI',  label: 'UPI'  },
+  { value: 'CARD', label: 'Card' },
+] as const;
+
+type RegPaymentMode = 'CASH' | 'UPI' | 'CARD';
+
 function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModalProps) {
   const [form, setForm] = useState<CreatePatientRequest>({
     fullName:               initial?.fullName               ?? '',
@@ -169,6 +177,11 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     bloodGroup:             initial?.bloodGroup             ?? undefined,
     forceCreate:            false,
   });
+
+  const [regType,    setRegType]    = useState<'free' | 'paid'>('free');
+  const [regFee,     setRegFee]     = useState('');
+  const [regPayMode, setRegPayMode] = useState<RegPaymentMode | ''>('');
+  const [regFeeErr,  setRegFeeErr]  = useState('');
 
   const [touched,       setTouched]       = useState<Partial<Record<string, boolean>>>({});
   const [submitted,     setSubmitted]     = useState(false);
@@ -200,6 +213,15 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     return fe(field) ? 'border-destructive focus-visible:ring-destructive' : '';
   }
 
+  function buildRegPayment(): { registrationFee?: number; registrationPaymentMethod?: string } {
+    if (mode !== 'register' || regType !== 'paid') return {};
+    const amount = parseFloat(regFee);
+    if (!regFee || isNaN(amount) || amount <= 0) { setRegFeeErr('Enter a valid fee amount.'); return {}; }
+    if (!regPayMode) { setRegFeeErr('Select a payment mode.'); return {}; }
+    setRegFeeErr('');
+    return { registrationFee: amount, registrationPaymentMethod: regPayMode };
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
@@ -207,6 +229,13 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     setDuplicateInfo(null);
 
     if (hasErrors) return;
+
+    if (mode === 'register' && regType === 'paid') {
+      const amount = parseFloat(regFee);
+      if (!regFee || isNaN(amount) || amount <= 0) { setRegFeeErr('Enter a valid fee amount.'); return; }
+      if (!regPayMode) { setRegFeeErr('Select a payment mode.'); return; }
+      setRegFeeErr('');
+    }
 
     try {
       if (mode === 'edit' && initial) {
@@ -231,6 +260,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
           bloodGroup:             form.bloodGroup             || undefined,
+          ...buildRegPayment(),
         };
         const result = await createPatient(body).unwrap();
         onSuccess?.(result);
@@ -256,6 +286,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
         emergencyContactName:   form.emergencyContactName   || undefined,
         emergencyContactMobile: form.emergencyContactMobile || undefined,
         bloodGroup:             form.bloodGroup             || undefined,
+        ...buildRegPayment(),
         forceCreate:            true,
       };
       const result = await createPatient(body).unwrap();
@@ -452,6 +483,67 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
             </div>
           </details>
 
+          {/* Registration fee — only on register mode */}
+          {mode === 'register' && (
+            <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
+              <p className="text-sm font-medium">Registration Type *</p>
+              <div className="flex gap-2">
+                {(['free', 'paid'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { setRegType(t); setRegFeeErr(''); }}
+                    className={[
+                      'flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize transition-colors',
+                      regType === t
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background hover:bg-muted',
+                    ].join(' ')}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              {regType === 'paid' && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="reg-fee">Registration Fee (₹) *</Label>
+                    <Input
+                      id="reg-fee"
+                      type="number"
+                      min="1"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={regFee}
+                      onChange={(e) => { setRegFee(e.target.value); setRegFeeErr(''); }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Payment Mode *</Label>
+                    <div className="flex gap-2">
+                      {REG_PAYMENT_MODES.map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => { setRegPayMode(value); setRegFeeErr(''); }}
+                          className={[
+                            'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                            regPayMode === value
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-input bg-background hover:bg-muted',
+                          ].join(' ')}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {regFeeErr && <p className="text-xs text-destructive">{regFeeErr}</p>}
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
               Cancel
@@ -595,6 +687,17 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
               {row('EC Name',       patient.emergencyContactName)}
               {row('EC Mobile',     patient.emergencyContactMobile)}
               {row('Registered',    formatDate(patient.createdAt))}
+              <div className="pt-2 border-t mt-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Registration</p>
+                {patient.registrationFee != null ? (
+                  <>
+                    {row('Fee', <span className="font-semibold">₹{patient.registrationFee.toLocaleString('en-IN')}</span>)}
+                    {row('Payment Mode', patient.registrationPaymentMethod ?? '—')}
+                  </>
+                ) : (
+                  row('Fee', <span className="text-muted-foreground">Free</span>)
+                )}
+              </div>
             </div>
           )}
 

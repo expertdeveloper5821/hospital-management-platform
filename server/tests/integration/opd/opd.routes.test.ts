@@ -98,16 +98,16 @@ async function seedPatient(tenantId: string, patientId = 'PAT-TEST0001') {
 }
 
 async function seedVisit(tenantId: string, overrides: Partial<{
-  visitId:  string;
+  visitId:   string;
   patientId: string;
-  status:   OPDVisitStatus;
-  doctorId: string;
+  status:    OPDVisitStatus;
+  doctorIds: string[];
 }> = {}) {
   return OPDVisitModel.create({
     visitId:        overrides.visitId   ?? 'OPD-TEST0001',
     tenantId,
     patientId:      overrides.patientId ?? 'PAT-TEST0001',
-    doctorId:       overrides.doctorId  ?? null,
+    doctorIds:      overrides.doctorIds ?? [],
     visitDate:      new Date('2026-05-15T00:00:00.000Z'),
     queueNumber:    1,
     status:         overrides.status    ?? OPDVisitStatus.OPEN,
@@ -272,8 +272,8 @@ describe('GET /api/opd/visits', () => {
   test('200 — filters queue by doctorId', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
-    await seedVisit(tid, { visitId: 'OPD-DOC10001', doctorId: 'doc-1' });
-    await seedVisit(tid, { visitId: 'OPD-DOC20001', doctorId: 'doc-2' });
+    await seedVisit(tid, { visitId: 'OPD-DOC10001', doctorIds: ['doc-1'] });
+    await seedVisit(tid, { visitId: 'OPD-DOC20001', doctorIds: ['doc-2'] });
 
     const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
     const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
@@ -658,7 +658,7 @@ describe('GET /api/opd/patients/:patientId/history', () => {
       visitId:        'OPD-DONE0001',
       tenantId:       tid,
       patientId:      'PAT-TEST0001',
-      doctorId:       null,
+      doctorIds:      [],
       visitDate:      new Date('2026-03-01T00:00:00.000Z'),
       queueNumber:    2,
       status:         OPDVisitStatus.COMPLETED,
@@ -689,7 +689,7 @@ describe('GET /api/opd/patients/:patientId/history', () => {
       visitId:        'OPD-SRCH0002',
       tenantId:       tid,
       patientId:      'PAT-TEST0001',
-      doctorId:       null,
+      doctorIds:      [],
       visitDate:      new Date('2026-04-01T00:00:00.000Z'),
       queueNumber:    2,
       status:         OPDVisitStatus.OPEN,
