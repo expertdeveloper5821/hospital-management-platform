@@ -2,6 +2,70 @@
 
 ---
 
+## Feature — Mandatory Payment on OPD Visit and IPD Admission Creation (Post-Construction)
+**Timestamp**: 2026-06-18T02:00:00Z
+**User Input**: "Check also if fee option while creating opd and ipd is added in md files or not, code is implemented, just check in md files"
+**AI Response**: "Code was already implemented; aidlc-docs had no record of these features. Added documentation across requirements.md (FR-07.7 for OPD, FR-08.9 for IPD), component-methods.md (amount + paymentMethod on CreateVisitInput and CreateAdmissionInput), aidlc-state.md changelog, and this audit entry. OPD: visit creation form has mandatory Amount (₹) and Payment Mode (Cash/UPI/Card); after visit is saved, a COMPLETED manual payment is created via POST /api/payments/manual with description 'OPD Consultation – Visit #<queueNumber>'; VisitPanel view mode fetches and displays payment amount and mode for the visit date via GET /api/payments?patientId=&dateFrom=&dateTo=. IPD: admission creation form has mandatory Amount (₹) and Payment Mode (Cash/UPI/Card); after admission is saved, a COMPLETED manual payment is created with description 'IPD Admission'; AdmissionPanel view mode fetches and displays payment amount and mode for the admission date via GET /api/payments?patientId=&dateFrom=&dateTo=. Payment endpoint supports patientId query filter."
+**Files changed** (documentation only — code already implemented):
+- `aidlc-docs/inception/requirements/requirements.md` — FR-07.7 (OPD payment) and FR-08.9 (IPD payment) added; old FR-08.9 renumbered to FR-08.11
+- `aidlc-docs/inception/application-design/component-methods.md` — `amount` and `paymentMethod` added to `CreateVisitInput` and `CreateAdmissionInput`
+- `aidlc-docs/aidlc-state.md` — changelog entries added
+- `aidlc-docs/audit.md` — this entry
+**Context**: CONSTRUCTION PHASE — Post-Construction Documentation Sync — OPD/IPD payment on creation
+
+---
+
+## Feature — Optional Registration Fee on Patient Registration (Post-Construction)
+**Timestamp**: 2026-06-18T01:00:00Z
+**User Input**: "You also add optional fee option while registering patient, also add in md files"
+**AI Response**: "Added optional registration fee to the patient registration flow. Backend: `IPatient` schema gains `registrationFee: number | null` and `registrationPaymentMethod: string | null` (both default `null`). Zod validator in `patient.controller.ts` accepts optional `registrationFee` (positive number) and `registrationPaymentMethod` (CASH | UPI | CARD). After saving the patient, if both fields are present, `createPatient` controller calls `paymentService.createManualPayment` with description `'Patient Registration Fee'`; payment failure does not roll back patient creation. `pdfService.generateMedicalCard` renders fee + payment mode in the PDF footer when `registrationFee` is set. Frontend: registration form has a **Registration Type** toggle (Free / Paid); selecting Paid reveals **Fee (₹)** input and **Payment Mode** (Cash / UPI / Card) buttons — both mandatory when Paid. Patient detail panel shows Fee and Payment Mode in the Details tab; existing patients without a fee show 'Free'. Frontend types include `registrationFee: number | null` and `registrationPaymentMethod: string | null` on `PatientResponse` and `registrationFee?: number` / `registrationPaymentMethod?: string` on `CreatePatientRequest`."
+**Files changed**:
+- `server/src/modules/patient/patient.model.ts` — `registrationFee: { type: Number, default: null }`, `registrationPaymentMethod: { type: String, default: null }`
+- `server/src/modules/patient/patient.types.ts` — `registrationFee?: number`, `registrationPaymentMethod?: string` on `CreatePatientRequest`; `registrationFee: number | null`, `registrationPaymentMethod: string | null` on response shape
+- `server/src/modules/patient/patient.controller.ts` — Zod schema with optional `registrationFee` + `registrationPaymentMethod`; `toResponse` maps both fields; post-save payment creation
+- `server/src/shared/services/pdf.service.ts` — `generateMedicalCard` footer shows fee + payment mode when set
+- `client/store/types.ts` — `PatientResponse.registrationFee`, `PatientResponse.registrationPaymentMethod`, `CreatePatientRequest.registrationFee`, `CreatePatientRequest.registrationPaymentMethod`
+- `client/app/(dashboard)/patients/page.tsx` — Registration Type toggle (Free/Paid), Fee input, Payment Mode buttons; patient detail panel Fee + Payment Mode rows
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — enhancement log updated
+- `aidlc-docs/inception/requirements/requirements.md` — FR-06.8 added
+- `aidlc-docs/inception/application-design/component-methods.md` — `CreatePatientInput.registrationFee?` and `registrationPaymentMethod?` added
+**Context**: CONSTRUCTION PHASE — Post-Construction Feature — Optional patient registration fee with automatic payment record creation
+
+---
+
+## Feature — Multi-Doctor Support on OPD Visits and IPD Admissions (Post-Construction)
+**Timestamp**: 2026-06-18T00:00:00Z
+**User Input**: "In OPD, and in IPD, there can be multiple doctors can assign to single patient from multiple departments or from single department, also update in md files"
+**AI Response**: "Replaced singular `doctorId: string | null` on `IOPDVisit` with `doctorIds: string[]` (default `[]`), and replaced singular `assignedDoctorId: string | null` on `IIPDAdmission` with `assignedDoctorIds: string[]` (default `[]`). Full-stack change: Mongoose schemas, TypeScript interfaces/types, Zod validators, service logic (loops through array to validate each doctor, stamps `departmentId` from first doctor's `departmentIds[0]`), repository filters (`$in` for doctor-scoped queries), frontend client types, OPD/IPD page UI (multi-doctor chip add/remove: department dropdown → add-dropdown + 'Add' button → chips with × to remove), and all affected unit + integration tests. Doctor-scoped filtering for DOCTOR role updated to use `{ doctorIds: { $in: [userId] } }` (OPD) and `{ assignedDoctorIds: { $in: [userId] } }` (IPD)."
+**Files changed**:
+- `server/src/modules/opd/opd.model.ts` — `doctorId: { type: String, default: null }` → `doctorIds: { type: [String], default: [] }`
+- `server/src/modules/opd/opd.types.ts` — `CreateOPDVisitRequest.doctorId?` → `doctorIds?: string[]`; `UpdateOPDVisitRequest.doctorId?` → `doctorIds?: string[]`; `OPDVisitResponse.doctorId` → `doctorIds: string[]`
+- `server/src/modules/opd/opd.service.ts` — `doctorId: data.doctorId ?? null` → `doctorIds: data.doctorIds ?? []`; updated copyable fields array
+- `server/src/modules/opd/opd.controller.ts` — Zod schema: `doctorId: z.string()` → `doctorIds: z.array(z.string())`; `toResponse` updated
+- `server/src/modules/opd/opd.repository.ts` — `query.doctorId = doctorId` → `query.doctorIds = { $in: [doctorId] }`
+- `server/src/modules/ipd/ipd.model.ts` — `assignedDoctorId: { type: String, default: null }` → `assignedDoctorIds: { type: [String], default: [] }`
+- `server/src/modules/ipd/ipd.types.ts` — `CreateAdmissionSchema.assignedDoctorId` → `assignedDoctorIds: z.array(z.string())`; `AdmissionResponse.assignedDoctorId` → `assignedDoctorIds: string[]`
+- `server/src/modules/ipd/ipd.service.ts` — `createAdmission` loops through `assignedDoctorIds[]`, validates each is DOCTOR, stamps `departmentId` from first doctor; `updateAdmission` same pattern
+- `server/src/modules/ipd/ipd.repository.ts` — `updateAdmissionFields` type updated; `findActiveAdmissions` uses `assignedDoctorIds: { $in: [assignedDoctorId] }`
+- `server/src/modules/ipd/ipd.controller.ts` — `updateAdmissionSchema.assignedDoctorId` → `assignedDoctorIds: z.array(z.string())`
+- `client/store/types.ts` — all OPD and IPD doctor fields updated to arrays
+- `client/app/(dashboard)/opd/page.tsx` — `NewVisitModal` + `VisitPanel`: multi-doctor chip add/remove UI; `doctorNames()` helper
+- `client/app/(dashboard)/ipd/page.tsx` — `NewAdmissionModal` + `AdmissionPanel`: multi-doctor chip add/remove UI; replaced `DoctorSearch` typeahead
+- `client/app/(dashboard)/opd/[visitId]/page.tsx` — `visit.doctorIds?.join(', ')`
+- `client/app/(dashboard)/ipd/[admissionId]/page.tsx` — `admission.assignedDoctorIds?.join(', ')`
+- `server/tests/unit/opd/opd.service.test.ts` — `makeVisit` helper + assertion updated to use `doctorIds[]`
+- `server/tests/unit/ipd/ipd.service.test.ts` — `BASE_ADMISSION` + `validInput` updated to use `assignedDoctorIds[]`
+- `server/tests/integration/opd/opd.routes.test.ts` — `seedVisit` helper + all `OPDVisitModel.create` calls updated
+- `server/tests/integration/payment/payment.routes.test.ts` — UPI manual payment test updated to expect 201 (UPI/CARD now valid for manual payments)
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — enhancement log updated
+- `aidlc-docs/inception/application-design/component-methods.md` — `CreateVisitInput.doctorId` → `doctorIds?: string[]`; `UpdateVisitInput` + `doctorIds`; `CreateAdmissionInput.doctorId` → `assignedDoctorIds?: string[]`
+- `aidlc-docs/inception/application-design/components.md` — OPD queue filter description updated
+**Context**: CONSTRUCTION PHASE — Post-Construction Feature — Multi-doctor team-based care for OPD visits and IPD admissions
+
+---
+
 ## Feature — Doctor-Scoped Filtering for OPD and IPD (Post-Construction)
 **Timestamp**: 2026-06-12T14:00:00Z
 **User Input**: "When we logged in as doctor, In opd and ipd, Make like that doctor can view only their own opds and ipds patients not whole department patients."

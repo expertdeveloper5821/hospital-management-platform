@@ -152,6 +152,7 @@
 5. When a patient record is created, the Patient_Service SHALL generate a Medical_Card as a downloadable PDF (using PDFKit) containing: hospital logo, hospital name, patient full name, patient ID, date of birth, gender, blood group (if provided), and mobile number.
 6. The Patient_Service SHALL allow the Receptionist to search for existing patients by patient ID, full name, or mobile number within the same Tenant.
 7. When a Receptionist updates a patient's demographic information, the Patient_Service SHALL record the previous values in an audit log with the timestamp and the Receptionist's user ID.
+8. The patient registration form SHALL include an optional **Registration Type** toggle (Free / Paid). When Paid is selected, the Receptionist SHALL provide a **Fee (₹)** (positive number, required) and a **Payment Mode** (Cash / UPI / Card, required). On submission, `registrationFee` and `registrationPaymentMethod` SHALL be stored on the patient record. The Patient_Service SHALL automatically create a `COMPLETED` manual payment record (description: `"Patient Registration Fee"`) via the Payment_Service; payment failure SHALL NOT roll back patient creation. The Medical_Card PDF footer SHALL display the fee and payment mode when `registrationFee` is set. The patient detail panel SHALL show Fee and Payment Mode in the Details tab; existing patients without a fee SHALL display "Free".
 
 ---
 
@@ -165,6 +166,7 @@
 4. The OPD_Service SHALL allow a Receptionist or Manager to view the OPD queue for the current day, filtered by Doctor.
 5. If a Doctor attempts to update an OPD visit with status `COMPLETED`, the OPD_Service SHALL reject the update and return a descriptive error.
 6. The OPD_Service SHALL allow a Hospital Admin, Receptionist, Nurse, Manager, or Doctor to retrieve the full visit history for a patient within the same Tenant. The history SHALL be accessible from the Patient detail panel as an "OPD History" tab, paginated at 10 visits per page, and SHALL display visit date, queue number, status, chief complaint, diagnosis, prescription, and notes for each visit.
+7. The OPD visit creation form SHALL include a mandatory **Payment** section: **Amount (₹)** (required, > 0) and **Payment Mode** (Cash / UPI / Card, required). On submission, the visit is created first, then the OPD_Service SHALL create a `COMPLETED` manual payment record via the Payment_Service (description: `"OPD Consultation – Visit #<queueNumber>"`). The OPD VisitPanel (view mode) SHALL fetch and display the payment amount and mode for the visit date.
 
 ---
 
@@ -180,7 +182,8 @@
 6. When a Doctor, Hospital Admin, Admin, or Receptionist discharges a patient, the IPD_Service SHALL set the admission status to `DISCHARGED`, record the discharge date, and release the bed for future assignments.
 7. The IPD_Service SHALL allow a Nurse or Doctor to view all currently admitted patients within the same Tenant, filterable by ward.
 8. The IPD_Service SHALL allow a Manager to view a summary of bed occupancy per ward, showing total beds, occupied beds, and available beds.
-9. The IPD_Service SHALL expose `GET /api/ipd/patients/:patientId/history` to retrieve all IPD admissions for a patient (both ADMITTED and DISCHARGED), paginated at 10 per page, filterable by status. Allowed roles: Hospital Admin, Admin, Manager, Doctor, Nurse, Receptionist. The history SHALL be accessible from the Patient detail panel as an "IPD History" tab alongside the existing "OPD History" tab, displaying ward, bed number, admission date, discharge date, and status for each admission.
+9. The IPD admission creation form SHALL include a mandatory **Payment** section: **Amount (₹)** (required, > 0) and **Payment Mode** (Cash / UPI / Card, required). On submission, the admission is created first, then the IPD_Service SHALL create a `COMPLETED` manual payment record via the Payment_Service (description: `"IPD Admission"`). The IPD AdmissionPanel (view mode) SHALL fetch and display the payment amount and mode for the admission date.
+11. The IPD_Service SHALL expose `GET /api/ipd/patients/:patientId/history` to retrieve all IPD admissions for a patient (both ADMITTED and DISCHARGED), paginated at 10 per page, filterable by status. Allowed roles: Hospital Admin, Admin, Manager, Doctor, Nurse, Receptionist. The history SHALL be accessible from the Patient detail panel as an "IPD History" tab alongside the existing "OPD History" tab, displaying ward, bed number, admission date, discharge date, and status for each admission.
 
 ---
 
