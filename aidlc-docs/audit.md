@@ -2,6 +2,40 @@
 
 ---
 
+## Feature — Nurse Assignment to Wards (Post-Construction)
+**Timestamp**: 2026-06-19T01:00:00Z
+**User Input**: "Now in wards module, I want hospital admin and doctor can assign nurses to wards, also update in md files"
+**AI Response**: "Added full-stack nurse assignment to wards. Backend: `IWard` schema gains `assignedNurseIds: string[]` (default `[]`). New repository method `updateWardNurses(tenantId, wardId, nurseIds)` uses `findOneAndUpdate` with `$set`. New service method `assignNursesToWard` validates the ward exists, validates each ID is a NURSE role user, calls the repository, writes an audit log. New controller `assignNurses` with Zod schema `{ nurseIds: z.array(z.string()).max(50) }`. New route `PATCH /api/ipd/wards/:wardId/nurses` restricted to HOSPITAL_ADMIN and DOCTOR. `toWardResponse` updated to include `assignedNurseIds`. Frontend: `WardResponse` gains `assignedNurseIds: string[]`. New RTK Query mutation `assignNursesToWard` → `useAssignNursesToWardMutation`. `WardRow` in Wards page updated: expanded state shows Beds + Nurses sections; Nurses section shows assigned nurse chips (with × remove button for authorized roles) and a dropdown + Add button + Save button (appears only when dirty); `useListUsersQuery({ role: NURSE })` fetched on expand; `canAssignNurses` flag (HOSPITAL_ADMIN and DOCTOR) controls visibility of add/remove controls; collapsed row header shows a nurse count badge when nurses are assigned."
+**Files changed**:
+- `server/src/modules/ipd/ward.model.ts` — `assignedNurseIds: { type: [String], default: [] }` added to `IWard` and `WardSchema`
+- `server/src/modules/ipd/ipd.repository.ts` — `updateWardNurses(tenantId, wardId, nurseIds)` added
+- `server/src/modules/ipd/ipd.service.ts` — `assignNursesToWard(tenantId, wardId, nurseIds, actorId)` added with nurse role validation
+- `server/src/modules/ipd/ipd.controller.ts` — `assignNurses` controller added; `toWardResponse` updated with `assignedNurseIds`
+- `server/src/modules/ipd/ipd.routes.ts` — `PATCH /wards/:wardId/nurses` route added (HOSPITAL_ADMIN, DOCTOR); `assignNurses` imported
+- `client/store/types.ts` — `WardResponse.assignedNurseIds: string[]` added
+- `client/store/api/ipd.api.ts` — `assignNursesToWard` mutation + `useAssignNursesToWardMutation` hook added
+- `client/app/(dashboard)/wards/page.tsx` — `WardRow` updated with nurse chips + add/remove + Save; `WardsSection` passes `canAssignNurses`; `WardsPage` computes `canAssignNurses`
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — changelog updated
+**Context**: CONSTRUCTION PHASE — Post-Construction Feature — Nurse assignment to wards by HOSPITAL_ADMIN and DOCTOR
+
+---
+
+## Feature — Wards Module Extracted to Sidebar (Post-Construction)
+**Timestamp**: 2026-06-19T00:00:00Z
+**User Input**: "Make diff module in sidebar menu names as wards and move that wards & bed functionality & component and occupancy summary inside wards module to sidebar menu, Just render that component there and also update in md files"
+**AI Response**: "Created a new `/wards` page at `client/app/(dashboard)/wards/page.tsx` containing `WardsSection` (ward list + expandable bed grid + Create Ward + Add Beds modals), `OccupancySection` (occupancy summary cards with progress bars), `WardRow`, `CreateWardModal`, and `AddBedsModal` — all moved from the IPD page. The Wards page has two tabs (Wards & Beds / Occupancy Summary); Occupancy tab is visible to HOSPITAL_ADMIN, ADMIN, MANAGER, NURSE; Create Ward / Add Beds management is restricted to HOSPITAL_ADMIN and ADMIN. IPD page simplified: removed all ward/occupancy components, removed tab bar, now renders only `AdmissionsTab` directly. `client/lib/rbac-nav.ts` updated to add `{ label: 'Wards', href: '/wards', icon: 'layout-grid' }` to HOSPITAL_ADMIN, ADMIN, MANAGER, DOCTOR, NURSE, RECEPTIONIST (all roles that have IPD access). `client/components/shared/Sidebar.tsx` updated to import `LayoutGrid` and register `'layout-grid': LayoutGrid` in ICON_MAP."
+**Files changed**:
+- `client/app/(dashboard)/wards/page.tsx` — new Wards page (WardsSection, OccupancySection, WardRow, CreateWardModal, AddBedsModal)
+- `client/app/(dashboard)/ipd/page.tsx` — removed wards/occupancy tabs and components; simplified to admissions-only; removed unused imports (useCreateWardMutation, useAddBedsMutation, useGetOccupancySummaryQuery, Building2, ChevronDown, ChevronRight, BarChart3, ClipboardList)
+- `client/lib/rbac-nav.ts` — Wards nav item added to HOSPITAL_ADMIN, ADMIN, MANAGER, DOCTOR, NURSE, RECEPTIONIST
+- `client/components/shared/Sidebar.tsx` — LayoutGrid imported; `'layout-grid': LayoutGrid` added to ICON_MAP
+- `aidlc-docs/audit.md` — this entry
+- `aidlc-docs/aidlc-state.md` — changelog updated
+**Context**: CONSTRUCTION PHASE — Post-Construction Refactor — Wards module extracted from IPD into dedicated sidebar page
+
+---
+
 ## Feature — Mandatory Payment on OPD Visit and IPD Admission Creation (Post-Construction)
 **Timestamp**: 2026-06-18T02:00:00Z
 **User Input**: "Check also if fee option while creating opd and ipd is added in md files or not, code is implemented, just check in md files"

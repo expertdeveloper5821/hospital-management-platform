@@ -283,11 +283,12 @@ export interface LabListResult<T> {
 export type AdmissionStatus = 'ADMITTED' | 'DISCHARGED';
  
 export interface WardResponse {
-  wardId:    string;
-  name:      string;
-  floor:     string | null;
-  tenantId:  string;
-  createdAt: string;
+  wardId:           string;
+  name:             string;
+  floor:            string | null;
+  assignedNurseIds: string[];
+  tenantId:         string;
+  createdAt:        string;
 }
  
 export interface BedResponse {

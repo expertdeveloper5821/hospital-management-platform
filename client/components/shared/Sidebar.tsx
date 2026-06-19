@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
+  LayoutGrid,
   Building2,
   Users,
   HeartPulse,
@@ -27,6 +28,7 @@ import type { UserRole } from '@/store/types';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   'layout-dashboard': LayoutDashboard,
+  'layout-grid':      LayoutGrid,
   'building-2':       Building2,
   'users':            Users,
   'heart-pulse':      HeartPulse,

@@ -30,11 +30,12 @@ const addBedsSchema = z.object({
 
 function toWardResponse(w: IWard) {
   return {
-    wardId:    (w._id as mongoose.Types.ObjectId).toString(),
-    name:      w.name,
-    floor:     w.floor ?? null,
-    tenantId:  w.tenantId,
-    createdAt: w.createdAt,
+    wardId:           (w._id as mongoose.Types.ObjectId).toString(),
+    name:             w.name,
+    floor:            w.floor ?? null,
+    assignedNurseIds: w.assignedNurseIds ?? [],
+    tenantId:         w.tenantId,
+    createdAt:        w.createdAt,
   };
 }
 
@@ -269,6 +270,21 @@ export async function listWards(req: Request, res: Response, next: NextFunction)
   try {
     const wards = await ipdService.listWards(req.user!.tenantId!);
     res.status(200).json({ status: 'success', data: wards.map(toWardResponse) });
+  } catch (err) { next(err); }
+}
+
+export async function assignNurses(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = z.object({ nurseIds: z.array(z.string().min(1)).max(50) }).safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const ward = await ipdService.assignNursesToWard(
+      req.user!.tenantId!,
+      req.params.wardId,
+      body.data.nurseIds,
+      req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: toWardResponse(ward) });
   } catch (err) { next(err); }
 }
 

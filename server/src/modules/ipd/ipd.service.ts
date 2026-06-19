@@ -437,6 +437,40 @@ export class IPDService {
     return ipdRepository.listWards(tenantId);
   }
 
+  async assignNursesToWard(
+    tenantId: string,
+    wardId:   string,
+    nurseIds: string[],
+    actorId:  string,
+  ): Promise<IWard> {
+    const ward = await ipdRepository.findWardById(tenantId, wardId);
+    if (!ward) throw new NotFoundError(`Ward ${wardId} not found`);
+
+    for (const id of nurseIds) {
+      const user = await userRepository.findById(tenantId, id);
+      if (!user) throw new NotFoundError(`User ${id} not found`);
+      if (user.role !== UserRole.NURSE) {
+        throw new AppError(`User ${id} is not a NURSE`, 400);
+      }
+    }
+
+    const updated = await ipdRepository.updateWardNurses(tenantId, wardId, nurseIds);
+    if (!updated) throw new NotFoundError(`Ward ${wardId} not found`);
+
+    try {
+      await auditService.log({
+        entityType: AuditEntityType.IPD_ADMISSION,
+        entityId:   wardId,
+        action:     'UPDATE',
+        userId:     actorId,
+        tenantId,
+        newValue:   { assignedNurseIds: nurseIds },
+      });
+    } catch { /* swallow */ }
+
+    return updated;
+  }
+
   // ─── U3-A: Bed Management ───────────────────────────────────────────────────
 
   async addBedsToWard(
