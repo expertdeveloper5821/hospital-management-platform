@@ -31,6 +31,10 @@ import paymentRouter from './modules/payment/payment.routes';
 import webhookRouter from './modules/payment/payment.webhook.routes';
 import auditRouter from './modules/audit/audit.routes';
 import dashboardRouter from './modules/dashboard/dashboard.routes';
+import packagesRouter       from './modules/packages/packages.routes';
+import staffIdCardRouter    from './modules/staff-id-card/staff-id-card.routes';
+import staffDocumentsRouter from './modules/staff-documents/staff-documents.routes';
+import chargesRouter        from './modules/charges/charges.routes';
 import searchRouter      from './modules/search/search.routes';
 import departmentRouter  from './modules/department/department.routes';
 
@@ -145,6 +149,10 @@ app.use('/api/notifications', notificationRouter);
 app.use('/api/payments', paymentRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/packages',       packagesRouter);
+app.use('/api/staff-id-cards', staffIdCardRouter);
+app.use('/api/staff-documents', staffDocumentsRouter);
+app.use('/api/charges',        chargesRouter);
 app.use('/api/search',      searchRouter);
 app.use('/api/departments', departmentRouter);
 

@@ -12,6 +12,10 @@ import {
   deletePatient,
   getMedicalCard,
 } from './patient.controller';
+import { getPatientBill }   from '../charges/charges.controller';
+import { packageService }   from '../packages/packages.service';
+
+import type { Request, Response, NextFunction } from 'express';
 
 const router  = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
@@ -39,12 +43,51 @@ router.get('/',
   searchPatients,
 );
 
-// /medical-card must be registered before /:patientId so Express matches the
-// literal segment first, not the parameter.
+// Roles that can download patient medical cards.
+const MEDICAL_CARD_ROLES = [
+  UserRole.RECEPTIONIST,
+  UserRole.HOSPITAL_ADMIN,
+  UserRole.ADMIN,
+  UserRole.MANAGER,
+  UserRole.DOCTOR,
+];
+
+// Literal sub-routes must be before /:patientId to avoid Express treating them as params
 router.get('/:patientId/medical-card',
   ...protect,
-  requireRole(...READERS),
+  requireRole(...MEDICAL_CARD_ROLES),
   getMedicalCard,
+);
+
+const BILL_READERS = [
+  UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE_MANAGER,
+  UserRole.DOCTOR, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST,
+  UserRole.RECEPTIONIST,
+];
+
+router.get('/:patientId/bill',
+  ...protect,
+  requireRole(...BILL_READERS),
+  getPatientBill,
+);
+
+const ASSIGNMENT_READERS = [
+  UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER,
+  UserRole.FINANCE_MANAGER, UserRole.RECEPTIONIST, UserRole.DOCTOR,
+];
+
+router.get('/:patientId/assignments',
+  ...protect,
+  requireRole(...ASSIGNMENT_READERS),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const assignments = await packageService.listAssignmentsByPatient(
+        req.user!.tenantId!,
+        req.params.patientId,
+      );
+      res.status(200).json({ status: 'success', data: assignments });
+    } catch (err) { next(err); }
+  },
 );
 
 router.get('/:patientId',
