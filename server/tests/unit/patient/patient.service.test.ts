@@ -2,13 +2,15 @@ jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/tenant/tenant.repository');
 jest.mock('../../../src/modules/ipd/ipd.repository');
 jest.mock('../../../src/shared/services/audit.service');
-jest.mock('../../../src/shared/services/pdf.service');
+jest.mock('../../../src/modules/patient/medical-card.pdf');
+jest.mock('../../../src/shared/services/s3.service');
 
 import * as fc from 'fast-check';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
 import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
-import { pdfService }        from '../../../src/shared/services/pdf.service';
+import { buildMedicalCardPdf } from '../../../src/modules/patient/medical-card.pdf';
+import { s3Service }           from '../../../src/shared/services/s3.service';
 import { PatientService, DuplicateWarningError } from '../../../src/modules/patient/patient.service';
 import { NotFoundError, ConflictError } from '../../../src/shared/middleware/error-handler';
 import { Gender, BloodGroup } from '../../../src/modules/patient/patient.types';
@@ -16,7 +18,8 @@ import { Gender, BloodGroup } from '../../../src/modules/patient/patient.types';
 const mockRepo      = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockTenantRepo = tenantRepository as jest.Mocked<typeof tenantRepository>;
 const mockIpdRepo   = ipdRepository    as jest.Mocked<typeof ipdRepository>;
-const mockPdfSvc    = pdfService        as jest.Mocked<typeof pdfService>;
+const mockBuildPdf  = buildMedicalCardPdf as jest.MockedFunction<typeof buildMedicalCardPdf>;
+const mockS3        = s3Service as jest.Mocked<typeof s3Service>;
 
 const BASE_PATIENT = {
   _id:                    { toString: () => 'mongo-id-1' },
@@ -287,17 +290,21 @@ describe('PatientService — example-based', () => {
 
   // ── generateMedicalCard ────────────────────────────────────────────────────
   describe('generateMedicalCard', () => {
-    test('returns buffer from pdfService', async () => {
+    test('uploads PDF to S3 and returns PDF buffer', async () => {
       mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
       mockTenantRepo.findById.mockResolvedValue({ ...BASE_TENANT } as never);
-      const stubPdf = Buffer.from('PDF-STUB');
-      mockPdfSvc.generateMedicalCard.mockResolvedValue(stubPdf);
+      mockBuildPdf.mockResolvedValue(Buffer.from('PDF-STUB'));
+      mockS3.getPresignedUrl
+        .mockRejectedValueOnce(new Error('not found'))      // existence check → CREATE
+        .mockResolvedValueOnce('https://s3.example.com/presigned');
+      mockS3.uploadFile.mockResolvedValue(undefined as never);
 
       const result = await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
-      expect(result).toBe(stubPdf);
-      expect(mockPdfSvc.generateMedicalCard).toHaveBeenCalledWith(
-        expect.objectContaining({ patientId: 'PAT-ABCD1234', hospitalName: 'Apollo' }),
+      expect(result).toEqual(Buffer.from('PDF-STUB'));
+      expect(mockBuildPdf).toHaveBeenCalledWith(
+        expect.objectContaining({ patientId: 'PAT-ABCD1234' }),
+        expect.objectContaining({ displayName: 'Apollo' }),
       );
     });
 
@@ -315,18 +322,23 @@ describe('PatientService — example-based', () => {
       await expect(service.generateMedicalCard('t1', 'PAT-ABCD1234')).rejects.toThrow(NotFoundError);
     });
 
-    test('uses branding.displayName as hospitalName when set', async () => {
+    test('uses branding.displayName when set', async () => {
       mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT } as never);
       mockTenantRepo.findById.mockResolvedValue({
         ...BASE_TENANT,
         branding: { displayName: 'Apollo Branded', primaryColor: '#fff', logoUrl: null },
       } as never);
-      mockPdfSvc.generateMedicalCard.mockResolvedValue(Buffer.from(''));
+      mockBuildPdf.mockResolvedValue(Buffer.from(''));
+      mockS3.getPresignedUrl
+        .mockRejectedValueOnce(new Error('not found'))
+        .mockResolvedValueOnce('https://s3.example.com/presigned');
+      mockS3.uploadFile.mockResolvedValue(undefined as never);
 
       await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
-      expect(mockPdfSvc.generateMedicalCard).toHaveBeenCalledWith(
-        expect.objectContaining({ hospitalName: 'Apollo Branded' }),
+      expect(mockBuildPdf).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ displayName: 'Apollo Branded' }),
       );
     });
 
@@ -337,12 +349,17 @@ describe('PatientService — example-based', () => {
         name:     'Apollo Hospital',
         branding: { displayName: '', primaryColor: '#fff', logoUrl: null },
       } as never);
-      mockPdfSvc.generateMedicalCard.mockResolvedValue(Buffer.from(''));
+      mockBuildPdf.mockResolvedValue(Buffer.from(''));
+      mockS3.getPresignedUrl
+        .mockRejectedValueOnce(new Error('not found'))
+        .mockResolvedValueOnce('https://s3.example.com/presigned');
+      mockS3.uploadFile.mockResolvedValue(undefined as never);
 
       await service.generateMedicalCard('t1', 'PAT-ABCD1234');
 
-      expect(mockPdfSvc.generateMedicalCard).toHaveBeenCalledWith(
-        expect.objectContaining({ hospitalName: 'Apollo Hospital' }),
+      expect(mockBuildPdf).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ displayName: 'Apollo Hospital' }),
       );
     });
   });
