@@ -166,6 +166,16 @@ export class IPDRepository {
     return WardModel.find({ tenantId }).sort({ name: 1 });
   }
 
+  async updateWardNurses(tenantId: string, wardId: string, nurseIds: string[]): Promise<IWard | null> {
+    assertDbConnected();
+    if (!mongoose.isValidObjectId(wardId)) return null;
+    return WardModel.findOneAndUpdate(
+      { tenantId, _id: wardId },
+      { $set: { assignedNurseIds: nurseIds } },
+      { new: true },
+    );
+  }
+
   // ─── Bed ───────────────────────────────────────────────────────────────────
 
   async addBed(data: { tenantId: string; wardId: string; bedNumber: string }): Promise<IBed> {

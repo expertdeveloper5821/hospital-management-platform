@@ -18,6 +18,7 @@ import {
   addBeds,
   listBeds,
   getOccupancySummary,
+  assignNurses,
 } from './ipd.controller';
 
 const router  = Router();
@@ -157,6 +158,13 @@ router.get('/wards',
   ...protect,
   requireRole(...WARD_READERS),
   listWards,
+);
+
+// PATCH /api/ipd/wards/:wardId/nurses — HOSPITAL_ADMIN and DOCTOR assign nurses
+router.patch('/wards/:wardId/nurses',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.DOCTOR),
+  assignNurses,
 );
 
 // ─── Bed routes ───────────────────────────────────────────────────────────────

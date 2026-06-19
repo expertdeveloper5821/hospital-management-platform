@@ -49,6 +49,16 @@ export const ipdApi = baseApi.injectEndpoints({
       invalidatesTags: ['IPD'],
     }),
 
+    assignNursesToWard: build.mutation<WardResponse, { wardId: string; nurseIds: string[] }>({
+      query: ({ wardId, nurseIds }) => ({
+        url:    `/api/ipd/wards/${wardId}/nurses`,
+        method: 'PATCH',
+        body:   { nurseIds },
+      }),
+      transformResponse: (raw: ApiSuccess<WardResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
     // ── Admissions ────────────────────────────────────────────────────────────
 
     getAdmissionById: build.query<AdmissionResponse, string>({
@@ -158,6 +168,7 @@ export const {
   useCreateWardMutation,
   useListBedsQuery,
   useAddBedsMutation,
+  useAssignNursesToWardMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
