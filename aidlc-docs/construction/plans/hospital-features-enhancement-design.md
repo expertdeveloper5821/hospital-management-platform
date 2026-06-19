@@ -1346,8 +1346,6 @@ The `voidedByName` is looked up from `userRepository.findByUserId(tenantId, void
 
 ## Correctness Properties
 
-*A property is a characteristic or behavior that should hold true across all valid executions of a system — essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
-
 Property-based testing is applicable to this feature for the following subsystems: PDF generation helpers (pure functions for date arithmetic, masking, QR encoding), validation logic (role-category permissions, package validation rules), business invariants (bill totals, sort order), and file handling utilities (magic byte detection, S3 key generation). These are pure or near-pure functions whose correctness holds across an infinite input space.
 
 PBT is **not** applied to: S3 upload/download operations (infrastructure), MongoDB persistence (integration), or full HTTP request/response flows (better covered by integration tests).
@@ -1539,7 +1537,7 @@ Each module gets a `*.service.test.ts` file that mocks the repository and extern
 
 ### Property-Based Tests
 
-Using **fast-check** (already available in the JS ecosystem; install via `npm install -D fast-check`).
+Using **fast-check** (install via `npm install -D fast-check`).
 
 Each property test runs a minimum of **100 iterations**. Test files live alongside their respective service files, named `*.property.test.ts`.
 
@@ -1569,18 +1567,6 @@ test('Bill grand total equals sum of category subtotals', () => {
     { numRuns: 100 },
   );
 });
-```
-
-Tags in test comments reference the property they validate:
-```typescript
-// Feature: hospital-features-enhancement, Property 4: Expiry date is exactly 365 days after issue date
-// Feature: hospital-features-enhancement, Property 5: Aadhaar masking preserves only last 4 digits
-// Feature: hospital-features-enhancement, Property 6: QR code round-trip correctness
-// Feature: hospital-features-enhancement, Property 12: Magic byte MIME validation
-// Feature: hospital-features-enhancement, Property 13: S3 key structure and no path traversal
-// Feature: hospital-features-enhancement, Property 15: Role-to-category permission matrix
-// Feature: hospital-features-enhancement, Property 16: Bill totals arithmetic invariant
-// Feature: hospital-features-enhancement, Property 17: Automatic PACKAGE charge creation
 ```
 
 ### Integration Tests

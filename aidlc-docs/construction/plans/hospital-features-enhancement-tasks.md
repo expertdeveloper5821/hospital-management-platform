@@ -524,7 +524,6 @@ The implementation language is **TypeScript** (matching the existing codebase).
   - Open `server/src/modules/patient/patient.routes.ts`
   - Import `packageService` (or add a thin controller handler that calls `packageService.listAssignmentsByPatient`)
   - Register `GET /:patientId/assignments` with `requireRole(['HOSPITAL_ADMIN','ADMIN','MANAGER','FINANCE_MANAGER','RECEPTIONIST','DOCTOR'])`
-  - This mirrors the `GET /api/patients/:patientId/bill` pattern — the list assignments endpoint is served from the patient router, not the packages router
   - _Requirements: 4.7, NFR-G_
 
 - [ ]* 10.9 Write unit tests for `ChargeService`
