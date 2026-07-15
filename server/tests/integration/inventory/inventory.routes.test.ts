@@ -142,6 +142,28 @@ describe('POST /api/inventory', () => {
     expect(res.status).toBe(400);
   });
 
+  test.each(['Equipment', 'Consumable', 'Medication', 'PPE', 'Fluids', 'Medical Supplies', 'Other'])(
+    'accepts predefined category "%s" (201)',
+    async (category) => {
+      const res = await request(app)
+        .post('/api/inventory')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...validPayload, category });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.category).toBe(category);
+    },
+  );
+
+  test('returns 400 for a custom/invalid category', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, category: 'Not A Real Category' });
+
+    expect(res.status).toBe(400);
+  });
+
   test('returns 400 for missing required fields', async () => {
     const res = await request(app)
       .post('/api/inventory')
@@ -149,6 +171,35 @@ describe('POST /api/inventory', () => {
       .send({ name: 'Item without category' });
 
     expect(res.status).toBe(400);
+  });
+
+  test('creates an item with no description (optional field left empty)', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send(validPayload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.description ?? null).toBeNull();
+  });
+
+  test('returns 400 for description exceeding maximum length', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, description: 'A'.repeat(1001) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('trims leading/trailing whitespace from description', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, description: '  Sterile packaging  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.description).toBe('Sterile packaging');
   });
 });
 
@@ -335,6 +386,15 @@ describe('PATCH /api/inventory/:itemId (metadata)', () => {
     expect(res.body.data.name).toBe('Premium Bandages');
     expect(res.body.data.category).toBe('Medical Supplies');
     expect(res.body.data.quantity).toBe(200); // unchanged
+  });
+
+  test('returns 400 for a custom/invalid category on update', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ category: 'Not A Real Category' });
+
+    expect(res.status).toBe(400);
   });
 
   test('manager can edit item (200)', async () => {

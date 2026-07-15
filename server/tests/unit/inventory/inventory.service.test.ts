@@ -210,20 +210,20 @@ describe('InventoryService — updateMetadata', () => {
   });
 
   test('updates metadata fields and returns updated item', async () => {
-    const before  = makeItem({ name: 'Old Name', category: 'Old Cat' });
-    const updated = makeItem({ name: 'New Name', category: 'New Cat' });
+    const before  = makeItem({ name: 'Old Name', category: 'Equipment' });
+    const updated = makeItem({ name: 'New Name', category: 'Consumable' });
 
     mockRepo.findById        = jest.fn().mockResolvedValue(before);
     mockRepo.updateMetadata  = jest.fn().mockResolvedValue(updated);
 
     const result = await service.updateMetadata(
       'item-001', TENANT, ADMIN,
-      { name: 'New Name', category: 'New Cat' },
+      { name: 'New Name', category: 'Consumable' },
     );
 
     expect(result.name).toBe('New Name');
-    expect(result.category).toBe('New Cat');
-    expect(mockRepo.updateMetadata).toHaveBeenCalledWith('item-001', TENANT, { name: 'New Name', category: 'New Cat' });
+    expect(result.category).toBe('Consumable');
+    expect(mockRepo.updateMetadata).toHaveBeenCalledWith('item-001', TENANT, { name: 'New Name', category: 'Consumable' });
   });
 
   test('throws NotFoundError when item does not exist', async () => {

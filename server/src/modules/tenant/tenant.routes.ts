@@ -11,6 +11,7 @@ import {
   listTenants,
   approveTenant,
   deactivateTenant,
+  reactivateTenant,
   resendInvite,
   completeTenantSetup,
   getBranding,
@@ -64,6 +65,7 @@ router.post('/',                        authenticateJWT, requireFirstPasswordCha
 router.get('/',                         authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), listTenants);
 router.patch('/:tenantId/approve',      authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), approveTenant);
 router.patch('/:tenantId/deactivate',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), deactivateTenant);
+router.patch('/:tenantId/reactivate',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), reactivateTenant);
 router.post('/:tenantId/resend-invite', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), resendInvite);
 
 // Public — invite consumption (rate-limited, no auth)

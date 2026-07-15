@@ -6,13 +6,13 @@ import { ValidationError } from '../../shared/middleware/error-handler';
 
 const createDepartmentSchema = z.object({
   name:         z.string().min(1).max(200).trim(),
-  description:  z.string().min(1).max(1000).trim().optional(),
+  description:  z.string().min(1, 'Description cannot be empty.').max(1000, 'Description cannot exceed 1000 characters.').trim().optional(),
   headDoctorId: z.string().min(1).optional(),
 });
 
 const updateDepartmentSchema = z.object({
   name:         z.string().min(1).max(200).trim().optional(),
-  description:  z.string().min(1).max(1000).trim().nullable().optional(),
+  description:  z.string().min(1, 'Description cannot be empty.').max(1000, 'Description cannot exceed 1000 characters.').trim().nullable().optional(),
   headDoctorId: z.string().min(1).nullable().optional(),
 });
 

@@ -153,6 +153,25 @@ describe('POST /api/lab/pathology', () => {
     const res = await request(app).post('/api/lab/pathology').send({ patientId: 'PAT-001', testType: 'CBC' });
     expect(res.status).toBe(401);
   });
+
+  test('returns 400 for notes exceeding maximum length', async () => {
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'CBC', notes: 'A'.repeat(2001) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('trims leading/trailing whitespace from notes', async () => {
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'CBC', notes: '  fasting sample  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.notes).toBe('fasting sample');
+  });
 });
 
 describe('GET /api/lab/pathology', () => {

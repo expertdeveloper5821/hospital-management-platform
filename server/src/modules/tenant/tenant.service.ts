@@ -18,13 +18,25 @@ const MAX_LOGO_BYTES   = 2 * 1024 * 1024;       // 2 MB
 
 export class TenantService {
   async createTenant(data: CreateTenantRequest, superAdminId: string): Promise<ITenant> {
-    const tenant = await tenantRepository.save({
-      name:                data.name,
-      adminEmail:          data.adminEmail,
-      status:              TenantStatus.PENDING_VERIFICATION,
-      onboardingDocuments: data.onboardingDocuments,
-      branding:            { displayName: data.name, primaryColor: '#1A73E8' },
-    });
+    const normalizedEmail = data.adminEmail.trim().toLowerCase();
+    const existing = await tenantRepository.findByAdminEmail(normalizedEmail);
+    if (existing) throw new ConflictError('A hospital with this email already exists.');
+
+    let tenant: ITenant;
+    try {
+      tenant = await tenantRepository.save({
+        name:                data.name,
+        adminEmail:          normalizedEmail,
+        status:              TenantStatus.PENDING_VERIFICATION,
+        onboardingDocuments: data.onboardingDocuments,
+        branding:            { displayName: data.name, primaryColor: '#1A73E8' },
+      });
+    } catch (err: unknown) {
+      if ((err as { code?: number }).code === 11000) {
+        throw new ConflictError('A hospital with this email already exists.');
+      }
+      throw err;
+    }
 
     await auditService.log({
       entityType: AuditEntityType.TENANT,
@@ -81,6 +93,25 @@ export class TenantService {
       tenantId:      null,
       previousValue: { status: tenant.status },
       newValue:      { status: TenantStatus.INACTIVE },
+    });
+  }
+
+  async reactivateTenant(tenantId: string, superAdminId: string): Promise<void> {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Tenant not found');
+    if (tenant.status !== TenantStatus.INACTIVE) throw new ConflictError('Tenant must be INACTIVE to reactivate');
+
+    await tenantRepository.updateStatus(tenantId, TenantStatus.ACTIVE);
+    tenantCache.invalidate(tenantId); // Force cache invalidation immediately
+
+    await auditService.log({
+      entityType:    AuditEntityType.TENANT,
+      entityId:      tenantId,
+      action:        'UPDATE',
+      userId:        superAdminId,
+      tenantId:      null,
+      previousValue: { status: tenant.status },
+      newValue:      { status: TenantStatus.ACTIVE },
     });
   }
 

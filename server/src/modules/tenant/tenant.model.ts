@@ -17,7 +17,7 @@ export interface ITenant extends Document {
 const TenantSchema = new Schema<ITenant>(
   {
     name:       { type: String, required: true, trim: true },
-    adminEmail: { type: String, required: true, lowercase: true, trim: true },
+    adminEmail: { type: String, required: true, lowercase: true, trim: true, unique: true },
     status:     { type: String, required: true, enum: Object.values(TenantStatus), default: TenantStatus.PENDING_VERIFICATION },
     onboardingDocuments: {
       registrationCertificate: { type: String, required: true },

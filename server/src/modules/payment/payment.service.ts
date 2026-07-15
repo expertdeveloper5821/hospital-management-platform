@@ -85,21 +85,25 @@ export class PaymentService {
 
     const paymentId = uuidv4();
 
-    // Generate receipt PDF and upload to S3 (SECURITY: receipt linked only to this payment)
-    const receiptBuffer = await pdfService.generateReceipt({
-      receiptNumber:  paymentId,
-      patientName:    patient.fullName,
-      patientId:      patient.patientId,
-      paymentDate:    new Date(),
-      amountInr:      input.amount,
-      paymentMethod:  input.paymentMethod,
-      description:    input.description,
-      hospitalName:   tenant?.branding.displayName || tenant?.name || 'Hospital',
-      primaryColor:   tenant?.branding.primaryColor || '#1A73E8',
-    });
-
-    const s3Key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
-    await s3Service.uploadFile(s3Key, receiptBuffer, 'application/pdf');
+    // Generate receipt PDF and upload to S3 (SECURITY: receipt linked only to this payment).
+    // Receipt failure must not fail the payment — same non-fatal handling as the Razorpay webhook.
+    let receiptS3Key: string | null = null;
+    try {
+      const receiptBuffer = await pdfService.generateReceipt({
+        receiptNumber:  paymentId,
+        patientName:    patient.fullName,
+        patientId:      patient.patientId,
+        paymentDate:    new Date(),
+        amountInr:      input.amount,
+        paymentMethod:  input.paymentMethod,
+        description:    input.description,
+        hospitalName:   tenant?.branding.displayName || tenant?.name || 'Hospital',
+        primaryColor:   tenant?.branding.primaryColor || '#1A73E8',
+      });
+      const key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
+      await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
+      receiptS3Key = key; // only recorded once the upload actually succeeds
+    } catch { /* receipt generation failure must not fail the payment */ }
 
     const payment = await paymentRepository.save({
       paymentId,
@@ -110,7 +114,7 @@ export class PaymentService {
       paymentMethod: input.paymentMethod,
       description:   input.description,
       status:        PaymentStatus.COMPLETED,
-      receiptS3Key:  s3Key,
+      receiptS3Key,
       razorpayOrderId:   null,
       razorpayPaymentId: null,
       createdBy:     userId,

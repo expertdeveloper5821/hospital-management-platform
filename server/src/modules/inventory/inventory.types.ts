@@ -1,13 +1,30 @@
 import { z } from 'zod';
 
+// ─── Category ─────────────────────────────────────────────────────────────────
+export const INVENTORY_CATEGORIES = [
+  'Equipment',
+  'Consumable',
+  'Medication',
+  'PPE',
+  'Fluids',
+  'Medical Supplies',
+  'Other',
+] as const;
+
+export type InventoryCategory = typeof INVENTORY_CATEGORIES[number];
+
+const categorySchema = z.enum(INVENTORY_CATEGORIES, {
+  errorMap: () => ({ message: `category must be one of: ${INVENTORY_CATEGORIES.join(', ')}` }),
+});
+
 // ─── Create Item ──────────────────────────────────────────────────────────────
 export const CreateInventoryItemSchema = z.object({
   name:              z.string().min(1, 'name is required').max(200).trim(),
-  category:          z.string().min(1, 'category is required').max(100).trim(),
+  category:          categorySchema,
   unit:              z.string().min(1, 'unit is required').max(50).trim(),
   quantity:          z.number().int().min(0, 'Initial quantity cannot be negative'),
   lowStockThreshold: z.number().int().min(0, 'Threshold cannot be negative'),
-  description:       z.string().max(1000).trim().optional(),
+  description:       z.string().max(1000, 'Description cannot exceed 1000 characters.').trim().optional(),
 });
 
 export type CreateInventoryItemInput = z.infer<typeof CreateInventoryItemSchema>;
@@ -26,10 +43,10 @@ export type UpdateStockInput = z.infer<typeof UpdateStockSchema>;
 // ─── Update Item Metadata ─────────────────────────────────────────────────────
 export const UpdateInventoryItemSchema = z.object({
   name:              z.string().min(1).max(200).trim().optional(),
-  category:          z.string().min(1).max(100).trim().optional(),
+  category:          categorySchema.optional(),
   unit:              z.string().min(1).max(50).trim().optional(),
   lowStockThreshold: z.number().int().min(0).optional(),
-  description:       z.string().max(1000).trim().nullable().optional(),
+  description:       z.string().max(1000, 'Description cannot exceed 1000 characters.').trim().nullable().optional(),
 }).refine(
   (data) => Object.values(data).some((v) => v !== undefined),
   { message: 'At least one field must be provided' },

@@ -211,6 +211,52 @@ describe('POST /api/opd/visits', () => {
     expect(res.status).toBe(401);
   });
 
+  test('400 — chiefComplaint exceeds maximum length', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, chiefComplaint: 'A'.repeat(1001) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('400 — whitespace-only chiefComplaint is rejected', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, chiefComplaint: '   ' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — notes with leading/trailing whitespace are trimmed', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, notes: '  routine visit  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.notes).toBe('routine visit');
+  });
+
   test('403 — Manager role cannot create visits', async () => {
     const tenant  = await seedTenant();
     const tid     = tenant._id.toString();
@@ -385,6 +431,36 @@ describe('PATCH /api/opd/visits/:visitId', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.notes).toBe('BP: 120/80, temp: 99F');
+  });
+
+  test('400 — notes exceed maximum length on update', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-UPD00002' });
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-UPD00002')
+      .set(bearer(token))
+      .send({ notes: 'A'.repeat(2001) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('400 — prescription exceeds maximum length on update', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-UPD00003' });
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-UPD00003')
+      .set(bearer(token))
+      .send({ prescription: 'A'.repeat(5001) });
+
+    expect(res.status).toBe(400);
   });
 
   test('409 — cannot update a COMPLETED visit', async () => {

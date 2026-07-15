@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { CharCounter } from "@/components/ui/char-counter";
 import {
   CreditCard,
   Plus,
@@ -228,6 +229,10 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
       setError("Description is required.");
       return;
     }
+    if (form.description.trim().length > 500) {
+      setError("Description cannot exceed 500 characters.");
+      return;
+    }
 
     try {
       await createManualPayment(form).unwrap();
@@ -313,9 +318,11 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
               placeholder="e.g. OPD consultation fee, Lab test charges…"
+              maxLength={500}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
             />
+            <CharCounter value={form.description} max={500} />
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -376,6 +383,10 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
     }
     if (!form.description.trim()) {
       setError("Description is required.");
+      return;
+    }
+    if (form.description.trim().length > 500) {
+      setError("Description cannot exceed 500 characters.");
       return;
     }
 
@@ -498,9 +509,11 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
               placeholder="e.g. IPD admission fee, Surgery charges…"
+              maxLength={500}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
             />
+            <CharCounter value={form.description} max={500} />
           </div>
 
           <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">

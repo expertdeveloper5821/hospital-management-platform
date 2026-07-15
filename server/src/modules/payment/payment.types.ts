@@ -28,7 +28,7 @@ export const CreateManualPaymentSchema = z.object({
   paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.CHEQUE, PaymentMethod.UPI, PaymentMethod.CARD], {
     errorMap: () => ({ message: 'paymentMethod must be CASH, CHEQUE, UPI, or CARD for manual payments' }),
   }),
-  description:   z.string().min(1, 'description is required').max(500).trim(),
+  description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
 });
 
 export type CreateManualPaymentInput = z.infer<typeof CreateManualPaymentSchema>;
@@ -40,7 +40,7 @@ export const CreateRazorpayOrderSchema = z.object({
   paymentMethod: z.enum([PaymentMethod.UPI, PaymentMethod.CARD], {
     errorMap: () => ({ message: 'paymentMethod must be UPI or CARD for Razorpay payments' }),
   }),
-  description:   z.string().min(1, 'description is required').max(500).trim(),
+  description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
 });
 
 export type CreateRazorpayOrderInput = z.infer<typeof CreateRazorpayOrderSchema>;

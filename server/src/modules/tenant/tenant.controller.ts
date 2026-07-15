@@ -62,6 +62,14 @@ export async function deactivateTenant(req: Request, res: Response, next: NextFu
   } catch (err) { next(err); }
 }
 
+export async function reactivateTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    await tenantService.reactivateTenant(tenantId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: { message: 'Tenant reactivated' } });
+  } catch (err) { next(err); }
+}
+
 export async function resendInvite(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { tenantId } = tenantIdParamSchema.parse(req.params);

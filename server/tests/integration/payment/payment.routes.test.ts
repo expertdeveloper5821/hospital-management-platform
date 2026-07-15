@@ -185,6 +185,34 @@ describe('POST /api/payments/manual', () => {
 
     expect(res.status).toBe(403);
   });
+
+  test('rejects empty description with 400', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 100, paymentMethod: 'CASH', description: '' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects description exceeding maximum length (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 100, paymentMethod: 'CASH', description: 'A'.repeat(501) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('trims leading/trailing whitespace from description', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 100, paymentMethod: 'CASH', description: '  Consultation fee  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.description).toBe('Consultation fee');
+  });
 });
 
 // ─── U5-C-06: Razorpay order creation ────────────────────────────────────────

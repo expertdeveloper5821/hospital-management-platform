@@ -28,6 +28,7 @@ import { Input }                         from '@/components/ui/input';
 import { Label }                         from '@/components/ui/label';
 import { Badge }                         from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { CharCounter } from '@/components/ui/char-counter';
 import {
   FlaskConical,
   Plus,
@@ -159,6 +160,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
     setError('');
     if (!patient)           { setError('Please select a patient.'); return; }
     if (!testType.trim())   { setError(`${fieldLabel} is required.`); return; }
+    if (notes.trim().length > 2000) { setError('Clinical notes cannot exceed 2000 characters.'); return; }
 
     try {
       if (type === 'pathology') {
@@ -225,8 +227,10 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Any relevant clinical information for the lab…"
+              maxLength={2000}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            <CharCounter value={notes} max={2000} />
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -367,6 +371,10 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    if (notes.trim().length > 2000) {
+      setError('Clinical notes cannot exceed 2000 characters.');
+      return;
+    }
     try {
       if (isPathology) {
         await editPathology({
@@ -428,8 +436,10 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              maxLength={2000}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            <CharCounter value={notes} max={2000} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

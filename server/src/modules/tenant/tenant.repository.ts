@@ -11,6 +11,12 @@ export class TenantRepository {
     return TenantModel.findById(tenantId);
   }
 
+  async findByAdminEmail(adminEmail: string): Promise<ITenant | null> {
+    assertDbConnected();
+    const normalized = adminEmail.trim().toLowerCase();
+    return TenantModel.findOne({ adminEmail: normalized });
+  }
+
   async findAll(page: number, limit: number, search?: string): Promise<PaginatedResult<ITenant>> {
     assertDbConnected();
     const skip  = (page - 1) * limit;
