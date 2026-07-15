@@ -149,6 +149,21 @@ describe('PaymentService — createManualPayment', () => {
 
     expect(result.paymentMethod).toBe(PaymentMethod.CHEQUE);
   });
+
+  test('receipt upload failure does not fail the payment (non-fatal, like the webhook path)', async () => {
+    mockS3.uploadFile = jest.fn().mockRejectedValue(new Error('S3 unavailable'));
+    mockPayRepo.save  = jest.fn().mockResolvedValue(makePayment({ receiptS3Key: null }));
+
+    const result = await service.createManualPayment(
+      { patientId: PATIENT_ID, amount: 500, paymentMethod: PaymentMethod.CASH, description: 'Consultation fee' },
+      TENANT, USER,
+    );
+
+    expect(result.status).toBe(PaymentStatus.COMPLETED);
+    expect(mockPayRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: PaymentStatus.COMPLETED, receiptS3Key: null }),
+    );
+  });
 });
 
 // ─── handleRazorpayWebhook ────────────────────────────────────────────────────

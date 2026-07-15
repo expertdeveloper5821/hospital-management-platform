@@ -5,14 +5,14 @@ import { ValidationError } from '../../shared/middleware/error-handler';
 
 const createPackageSchema = z.object({
   name:             z.string().min(1).max(200),
-  description:      z.string().min(0).max(500).optional(),
+  description:      z.string().max(500, 'Description cannot exceed 500 characters.').trim().optional(),
   price:            z.number().min(0),
   includedServices: z.array(z.string().min(1).max(300)).min(1).max(50),
 });
 
 const updatePackageSchema = z.object({
   name:             z.string().min(1).max(200).optional(),
-  description:      z.string().min(0).max(500).optional(),
+  description:      z.string().max(500, 'Description cannot exceed 500 characters.').trim().optional(),
   price:            z.number().min(0).optional(),
   includedServices: z.array(z.string().min(1).max(300)).min(1).max(50).optional(),
   status:           z.enum(['ACTIVE', 'INACTIVE']).optional(),

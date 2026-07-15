@@ -22,6 +22,7 @@ import { Input }                         from '@/components/ui/input';
 import { Label }                         from '@/components/ui/label';
 import { Badge }                         from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { CharCounter } from '@/components/ui/char-counter';
 import {
   Package,
   Plus,
@@ -38,6 +39,19 @@ import {
   History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Must match INVENTORY_CATEGORIES in server/src/modules/inventory/inventory.types.ts
+const INVENTORY_CATEGORIES = [
+  'Equipment',
+  'Consumable',
+  'Medication',
+  'PPE',
+  'Fluids',
+  'Medical Supplies',
+  'Other',
+] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -122,13 +136,18 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
 
             <div className="space-y-1.5">
               <Label htmlFor="ci-category">Category *</Label>
-              <Input
+              <select
                 id="ci-category"
                 value={form.category}
                 onChange={(e) => set('category', e.target.value)}
-                placeholder="e.g. Consumable, Equipment, Medicine…"
                 required
-              />
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="" disabled>Select a category…</option>
+                {INVENTORY_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1.5">
@@ -176,8 +195,10 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
                 value={form.description ?? ''}
                 onChange={(e) => set('description', e.target.value)}
                 placeholder="Additional details about this item…"
+                maxLength={1000}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               />
+              <CharCounter value={form.description ?? ''} max={1000} />
             </div>
           </div>
 
@@ -266,12 +287,21 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
 
             <div className="space-y-1.5">
               <Label htmlFor="ei-category">Category *</Label>
-              <Input
+              <select
                 id="ei-category"
                 value={form.category ?? ''}
                 onChange={(e) => set('category', e.target.value)}
                 required
-              />
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="" disabled>Select a category…</option>
+                {!(INVENTORY_CATEGORIES as readonly string[]).includes(item.category) && (
+                  <option value={item.category}>{item.category}</option>
+                )}
+                {INVENTORY_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1.5">
@@ -304,8 +334,10 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
                 rows={2}
                 value={form.description ?? ''}
                 onChange={(e) => set('description', e.target.value)}
+                maxLength={1000}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               />
+              <CharCounter value={form.description ?? ''} max={1000} />
             </div>
           </div>
 

@@ -36,7 +36,7 @@ const SuperAdminModel = mongoose.models.SuperAdmin
   ?? mongoose.model('SuperAdmin', SuperAdminSchema);
 
 async function seed() {
-  await mongoose.connect(MONGODB_URI);
+  await mongoose.connect(MONGODB_URI!);
   console.log('Connected to MongoDB');
 
   const existing = await SuperAdminModel.findOne({ email: EMAIL });

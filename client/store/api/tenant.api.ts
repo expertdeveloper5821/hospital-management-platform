@@ -63,6 +63,12 @@ export const tenantApi = baseApi.injectEndpoints({
       invalidatesTags: ['Tenant'],
     }),
 
+    reactivateTenant: build.mutation<{ message: string }, string>({
+      query: (tenantId) => ({ url: `/api/tenants/${tenantId}/reactivate`, method: 'PATCH' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Tenant'],
+    }),
+
     resendInvite: build.mutation<{ message: string }, string>({
       query: (tenantId) => ({ url: `/api/tenants/${tenantId}/resend-invite`, method: 'POST' }),
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
@@ -99,6 +105,7 @@ export const {
   useCreateTenantMutation,
   useApproveTenantMutation,
   useDeactivateTenantMutation,
+  useReactivateTenantMutation,
   useResendInviteMutation,
   useUpdateBrandingMutation,
   useGetBrandingQuery,

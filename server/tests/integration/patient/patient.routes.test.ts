@@ -296,6 +296,85 @@ describe('POST /api/patients', () => {
     expect(res.status).toBe(401);
   });
 
+  test('400 — address below minimum length (9 chars)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: 'Short St.' }); // 9 chars
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — address at exactly minimum length (10 chars)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: '1234567890' }); // exactly 10 chars
+
+    expect(res.status).toBe(201);
+  });
+
+  test('400 — address exceeds maximum length (301 chars)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(301) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — address at exactly maximum length (300 chars)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(300) });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('400 — whitespace-only address is rejected', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: '   '.repeat(5) }); // 15 whitespace chars, trims to empty
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — address with leading/trailing whitespace is trimmed and stored trimmed', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, address: '  5 Park Street, Mumbai  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.address).toBe('5 Park Street, Mumbai');
+  });
+
   test('403 — Doctor role cannot create patients', async () => {
     const tenant = await seedTenant();
     const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
@@ -521,6 +600,36 @@ describe('PATCH /api/patients/:patientId', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.address).toBe('Admin Updated Address');
+  });
+
+  test('400 — update rejects address below minimum length', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-UPD00004' });
+
+    const res = await request(app)
+      .patch('/api/patients/PAT-UPD00004')
+      .set(bearer(token))
+      .send({ address: 'Too Short' }); // 9 chars
+
+    expect(res.status).toBe(400);
+  });
+
+  test('400 — update rejects address exceeding maximum length', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-UPD00005' });
+
+    const res = await request(app)
+      .patch('/api/patients/PAT-UPD00005')
+      .set(bearer(token))
+      .send({ address: 'A'.repeat(301) });
+
+    expect(res.status).toBe(400);
   });
 
   test('404 — update on non-existent patientId', async () => {

@@ -1,11 +1,13 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Settings, Upload, Loader2, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { useAppSelector } from '@/store/hooks';
 import {
   useGetPlatformSettingsQuery,
   useUpdatePlatformTitleMutation,
@@ -226,6 +228,14 @@ function TitleSection({ currentTitle }: { currentTitle: string }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function PlatformSettingsPage() {
+  const router  = useRouter();
+  const profile = useAppSelector((s) => s.auth.profile);
+
+  if (profile && profile.role !== 'SUPER_ADMIN') {
+    router.replace('/dashboard');
+    return null;
+  }
+
   const { data, isLoading, isError } = useGetPlatformSettingsQuery();
 
   if (isLoading) {

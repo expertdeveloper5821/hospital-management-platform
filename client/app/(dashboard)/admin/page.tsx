@@ -550,11 +550,11 @@ function UsersTab() {
                     ? <UserTableSkeleton />
                     : users.map((user) => (
                         <tr key={user.userId} className="hover:bg-muted/30 transition-colors">
-                          <td className="px-4 py-3">
-                            <div className="font-medium">{user.name}</div>
+                          <td className="px-4 py-3 max-w-[200px]">
+                            <div className="font-medium truncate" title={user.name}>{user.name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{user.userId}</div>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
+                          <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={user.email}>{user.email}</td>
                           <td className="px-4 py-3">
                             {editingRoleId === user.userId ? (
                               <div className="flex items-center gap-2">

@@ -2,6 +2,17 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+// ─── Mock routing / auth ──────────────────────────────────────────────────────
+
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: jest.fn() }),
+}));
+
+jest.mock('@/store/hooks', () => ({
+  useAppSelector: (selector: (s: unknown) => unknown) =>
+    selector({ auth: { profile: { role: 'SUPER_ADMIN' } } }),
+}));
+
 // ─── Mock RTK Query hooks ─────────────────────────────────────────────────────
 
 const mockUpdateTitle  = jest.fn();

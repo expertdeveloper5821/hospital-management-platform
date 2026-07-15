@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { CharCounter } from '@/components/ui/char-counter';
 import {
   Card,
   CardHeader,
@@ -748,11 +749,11 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b shrink-0">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs text-muted-foreground">{patient.patientId}</p>
-            <h2 className="text-base font-semibold">{patient.fullName}</h2>
+            <h2 className="text-base font-semibold truncate">{patient.fullName}</h2>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -1066,7 +1067,7 @@ export default function PatientsPage() {
                       onClick={() => { setSelected(p); setEditing(false); }}
                     >
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.patientId}</td>
-                      <td className="px-4 py-3 font-medium">{p.fullName}</td>
+                      <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={p.fullName}>{p.fullName}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground">
                         {calcAge(p.dateOfBirth)} yrs · {genderLabel(p.gender)}
                       </td>

@@ -56,6 +56,7 @@ async function seed() {
       await UserModel.create({
         tenantId,
         email,
+        name: `${role.charAt(0)}${role.slice(1).toLowerCase().replace(/_/g, ' ')}`,
         passwordHash,
         role,
         isActive:     true,
