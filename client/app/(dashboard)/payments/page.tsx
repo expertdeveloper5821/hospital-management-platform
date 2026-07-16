@@ -239,7 +239,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md rounded-lg bg-background shadow-xl">
+      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
             <h2 className="text-base font-semibold">Record Manual Payment</h2>
@@ -426,7 +426,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md rounded-lg bg-background shadow-xl">
+      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
             <h2 className="text-base font-semibold">Pay via Razorpay</h2>

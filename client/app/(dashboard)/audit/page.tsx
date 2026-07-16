@@ -22,6 +22,12 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function todayLocalISO(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
@@ -210,6 +216,7 @@ export default function AuditPage() {
               <Input
                 id="dateFrom"
                 type="date"
+                max={todayLocalISO()}
                 value={filters.dateFrom}
                 onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
               />
@@ -221,6 +228,7 @@ export default function AuditPage() {
               <Input
                 id="dateTo"
                 type="date"
+                max={todayLocalISO()}
                 value={filters.dateTo}
                 onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
               />

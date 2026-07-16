@@ -566,8 +566,8 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-4">
-                  <div className="relative flex-shrink-0">
-                    <ResponsiveContainer width={120} height={120}>
+                  <div className="relative flex-shrink-0 w-[120px] h-[120px]">
+                    <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={bedPieData}
@@ -590,7 +590,7 @@ export default function DashboardPage() {
                       <span className="text-lg font-bold">{occupancyPct}%</span>
                     </div>
                   </div>
-                  <div className="space-y-2 flex-1">
+                  <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex items-center justify-between text-sm">
                       <div className="flex items-center gap-1.5">
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />

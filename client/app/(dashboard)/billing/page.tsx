@@ -13,6 +13,12 @@ import { Label } from '@/components/ui/label';
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
 ];
+function todayLocalISO(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 export default function BillingPage() {
   const router  = useRouter();
@@ -67,11 +73,11 @@ export default function BillingPage() {
         </div>
         <div>
           <Label>Start Date</Label>
-          <Input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} />
+          <Input type="date" max={todayLocalISO()} value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} />
         </div>
         <div>
           <Label>End Date</Label>
-          <Input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} />
+          <Input type="date" max={todayLocalISO()} value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} />
         </div>
       </div>
 
