@@ -24,6 +24,8 @@ export class PaymentRepository {
 
     if (query.patientId)     filter['patientId']     = query.patientId;
     if (query.paymentMethod) filter['paymentMethod'] = query.paymentMethod;
+    if (query.referenceType) filter['referenceType'] = query.referenceType;
+    if (query.referenceId)   filter['referenceId']   = query.referenceId;
 
     if (query.dateFrom || query.dateTo) {
       const dateFilter: Record<string, Date> = {};

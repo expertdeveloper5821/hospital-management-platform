@@ -50,6 +50,12 @@ function formatINR(amount: number) {
   }).format(amount);
 }
 
+const MAX_AMOUNT_DIGITS = 10;
+
+function digitCount(value: string) {
+  return (value.match(/[0-9]/g) ?? []).length;
+}
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -253,6 +259,10 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
       setError("Amount must be greater than zero.");
       return;
     }
+    if (digitCount(String(form.amount)) > MAX_AMOUNT_DIGITS) {
+      setError("Amount cannot exceed 10 digits.");
+      return;
+    }
     if (!form.description.trim()) {
       setError("Description is required.");
       return;
@@ -311,7 +321,14 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
               min={1}
               step={0.01}
               value={form.amount || ""}
-              onChange={(e) => set("amount", parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                  setError("Amount cannot exceed 10 digits.");
+                  return;
+                }
+                set("amount", parseFloat(raw) || 0);
+              }}
               placeholder="e.g. 500"
               required
             />
@@ -409,6 +426,10 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
       setError("Amount must be greater than zero.");
       return;
     }
+    if (digitCount(String(form.amount)) > MAX_AMOUNT_DIGITS) {
+      setError("Amount cannot exceed 10 digits.");
+      return;
+    }
     if (!form.description.trim()) {
       setError("Description is required.");
       return;
@@ -502,7 +523,14 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
               min={1}
               step={0.01}
               value={form.amount || ""}
-              onChange={(e) => set("amount", parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                  setError("Amount cannot exceed 10 digits.");
+                  return;
+                }
+                set("amount", parseFloat(raw) || 0);
+              }}
               placeholder="e.g. 1000"
               required
             />

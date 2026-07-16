@@ -13,6 +13,12 @@ export interface IPayment extends Document {
   receiptS3Key:       string | null;
   razorpayOrderId:    string | null;
   razorpayPaymentId:  string | null;
+  // Direct link to the record this payment was collected for (e.g. a specific
+  // OPD visit) — lets consumers look up "the payment for visit X" exactly,
+  // instead of guessing from patientId + calendar date (ambiguous whenever a
+  // patient has more than one payment on the same day).
+  referenceType:      string | null;
+  referenceId:        string | null;
   createdBy:          string;
   createdAt:          Date;
   updatedAt:          Date;
@@ -31,6 +37,8 @@ const PaymentSchema = new Schema<IPayment>(
     receiptS3Key:      { type: String, default: null },
     razorpayOrderId:   { type: String, default: null },
     razorpayPaymentId: { type: String, default: null },
+    referenceType:     { type: String, default: null },
+    referenceId:       { type: String, default: null },
     createdBy:         { type: String, required: true },
   },
   { timestamps: true, collection: 'payments' },
@@ -40,6 +48,7 @@ const PaymentSchema = new Schema<IPayment>(
 PaymentSchema.index({ tenantId: 1, patientId: 1 });
 PaymentSchema.index({ tenantId: 1, paymentMethod: 1 });
 PaymentSchema.index({ tenantId: 1, createdAt: 1 });
+PaymentSchema.index({ tenantId: 1, referenceType: 1, referenceId: 1 });
 PaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
 
 export const PaymentModel = mongoose.model<IPayment>('Payment', PaymentSchema);

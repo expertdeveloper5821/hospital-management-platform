@@ -66,6 +66,14 @@ function formatDateTime(iso: string) {
   });
 }
 
+// Strips everything but digits so a controlled number input never keeps a stale
+// leading zero (or a pasted "-"/"e"/letter) — e.g. typing "3" while the field
+// reads "0" can no longer produce "03".
+function parseDigits(raw: string): number | null {
+  const digits = raw.replace(/\D/g, '');
+  return digits === '' ? null : parseInt(digits, 10);
+}
+
 // ─── Create Item Modal ────────────────────────────────────────────────────────
 
 interface CreateItemModalProps {
@@ -166,11 +174,12 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               <Input
                 id="ci-qty"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.quantity}
-                onChange={(e) => set('quantity', parseInt(e.target.value, 10) || 0)}
-                required
+                value={form.quantity === 0 ? '' : form.quantity}
+                onChange={(e) => set('quantity', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
             </div>
 
@@ -179,11 +188,12 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               <Input
                 id="ci-threshold"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.lowStockThreshold}
-                onChange={(e) => set('lowStockThreshold', parseInt(e.target.value, 10) || 0)}
-                required
+                value={form.lowStockThreshold === 0 ? '' : form.lowStockThreshold}
+                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
             </div>
 
@@ -319,10 +329,12 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
               <Input
                 id="ei-threshold"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.lowStockThreshold ?? 0}
-                onChange={(e) => set('lowStockThreshold', parseInt(e.target.value, 10) || 0)}
+                value={!form.lowStockThreshold ? '' : form.lowStockThreshold}
+                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
               <p className="text-xs text-muted-foreground">To update stock quantity, use the Update Stock action.</p>
             </div>
@@ -617,11 +629,12 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
             <Input
               id="su-qty"
               type="number"
+              inputMode="numeric"
               min={1}
               step={1}
-              value={quantityChange}
-              onChange={(e) => setQuantityChange(parseInt(e.target.value, 10) || 1)}
-              required
+              value={quantityChange === 0 ? '' : quantityChange}
+              onChange={(e) => setQuantityChange(parseDigits(e.target.value) ?? 0)}
+              placeholder="1"
             />
           </div>
 
@@ -705,11 +718,12 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
             <Input
               id="ut-threshold"
               type="number"
+              inputMode="numeric"
               min={0}
               step={1}
-              value={threshold}
-              onChange={(e) => setThreshold(parseInt(e.target.value, 10) || 0)}
-              required
+              value={threshold === 0 ? '' : threshold}
+              onChange={(e) => setThreshold(parseDigits(e.target.value) ?? 0)}
+              placeholder="0"
             />
             <p className="text-xs text-muted-foreground">
               An alert fires when stock falls below this quantity.
@@ -971,6 +985,7 @@ export default function InventoryPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Quantity</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Threshold</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Unit</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
                   </tr>
@@ -994,10 +1009,13 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums">
                         {item.quantity}
-                        <span className="text-xs font-normal text-muted-foreground ml-1">{item.unit}</span>
+                        <span className="text-xs font-normal text-muted-foreground ml-1 md:hidden">{item.unit}</span>
                       </td>
                       <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground tabular-nums">
-                        {item.lowStockThreshold} {item.unit}
+                        {item.lowStockThreshold}
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
+                        {item.unit}
                       </td>
                       <td className="px-4 py-3">
                         {item.isLowStock ? (

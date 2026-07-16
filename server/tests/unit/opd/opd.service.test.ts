@@ -6,7 +6,8 @@ import { opdRepository }     from '../../../src/modules/opd/opd.repository';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
 import { OPDVisitStatus }    from '../../../src/modules/opd/opd.types';
-import { NotFoundError, ConflictError } from '../../../src/shared/middleware/error-handler';
+import { UserRole }          from '../../../src/shared/types/common.types';
+import { NotFoundError, ConflictError, ValidationError } from '../../../src/shared/middleware/error-handler';
 
 const mockOpdRepo     = opdRepository     as jest.Mocked<typeof opdRepository>;
 const mockPatientRepo = patientRepository as jest.Mocked<typeof patientRepository>;
@@ -60,7 +61,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.countByDate.mockResolvedValue(0);
       mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
 
-      const result = await service.createVisit('t1', VALID_CREATE_REQ, 'user-1');
+      const result = await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
 
       expect(result.status).toBe(OPDVisitStatus.OPEN);
       expect(mockOpdRepo.save).toHaveBeenCalledWith(
@@ -83,7 +84,7 @@ describe('OPDService — example-based', () => {
         return makeVisit() as never;
       });
 
-      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1');
+      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
 
       expect(savedQueueNumber).toBe(5);
     });
@@ -97,7 +98,7 @@ describe('OPDService — example-based', () => {
         return makeVisit({ visitId: savedVisitId }) as never;
       });
 
-      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1');
+      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
 
       expect(savedVisitId).toMatch(/^OPD-[A-F0-9]{8}$/);
     });
@@ -105,7 +106,7 @@ describe('OPDService — example-based', () => {
     test('throws NotFoundError when patient does not exist', async () => {
       mockPatientRepo.findByPatientId.mockResolvedValue(null);
 
-      await expect(service.createVisit('t1', VALID_CREATE_REQ, 'user-1'))
+      await expect(service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN))
         .rejects.toThrow(NotFoundError);
 
       expect(mockOpdRepo.save).not.toHaveBeenCalled();
@@ -116,7 +117,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.countByDate.mockResolvedValue(0);
       mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
 
-      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1');
+      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
 
       expect(mockOpdRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ doctorIds: [], notes: null, diagnosis: null, prescription: null }),
@@ -130,10 +131,70 @@ describe('OPDService — example-based', () => {
       const before = new Date();
       before.setHours(0, 0, 0, 0);
 
-      await service.createVisit('t1', { patientId: 'PAT-ABCD1234', chiefComplaint: 'Cough' }, 'user-1');
+      await service.createVisit('t1', { patientId: 'PAT-ABCD1234', chiefComplaint: 'Cough' }, 'user-1', UserRole.RECEPTIONIST);
 
       const savedDate = (mockOpdRepo.save.mock.calls[0] as unknown[])[0] as { visitDate: Date };
       expect(savedDate.visitDate.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    });
+
+    // ── past-date validation ──────────────────────────────────────────────────
+    test('rejects a past visitDate for a normal role (RECEPTIONIST)', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: '2020-01-01' }, 'user-1', UserRole.RECEPTIONIST),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: '2020-01-01' }, 'user-1', UserRole.RECEPTIONIST),
+      ).rejects.toThrow('Past dates are not allowed for OPD visits.');
+
+      expect(mockOpdRepo.save).not.toHaveBeenCalled();
+    });
+
+    test('rejects a past visitDate for DOCTOR and NURSE roles', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: '2020-01-01' }, 'user-1', UserRole.DOCTOR),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: '2020-01-01' }, 'user-1', UserRole.NURSE),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    test('allows a past visitDate for an authorized role (HOSPITAL_ADMIN)', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: '2020-01-01' }, 'admin-1', UserRole.HOSPITAL_ADMIN),
+      ).resolves.toBeDefined();
+      expect(mockOpdRepo.save).toHaveBeenCalled();
+    });
+
+    test('allows today\'s date for a normal role', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+      const todayStr = new Date().toISOString().substring(0, 10);
+
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: todayStr }, 'user-1', UserRole.RECEPTIONIST),
+      ).resolves.toBeDefined();
+    });
+
+    test('allows a future date for a normal role', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+      const future = new Date();
+      future.setDate(future.getDate() + 7);
+      const futureStr = future.toISOString().substring(0, 10);
+
+      await expect(
+        service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: futureStr }, 'user-1', UserRole.RECEPTIONIST),
+      ).resolves.toBeDefined();
     });
   });
 
@@ -145,7 +206,7 @@ describe('OPDService — example-based', () => {
         makeVisit({ status: OPDVisitStatus.OPEN }) as never,
       );
 
-      await service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: 'Viral fever' }, 'doctor-1');
+      await service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: 'Viral fever' }, 'doctor-1', UserRole.DOCTOR);
 
       expect(mockOpdRepo.update).toHaveBeenCalledWith(
         't1', 'OPD-TEST0001',
@@ -158,7 +219,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.update.mockResolvedValue(makeVisit({ status: OPDVisitStatus.IN_PROGRESS }) as never);
 
       await expect(
-        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'BP normal' }, 'doctor-1'),
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'BP normal' }, 'doctor-1', UserRole.DOCTOR),
       ).resolves.toBeDefined();
     });
 
@@ -166,7 +227,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ status: OPDVisitStatus.COMPLETED }) as never);
 
       await expect(
-        service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: 'Updated' }, 'doctor-1'),
+        service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: 'Updated' }, 'doctor-1', UserRole.DOCTOR),
       ).rejects.toThrow(ConflictError);
 
       expect(mockOpdRepo.update).not.toHaveBeenCalled();
@@ -176,7 +237,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ status: OPDVisitStatus.CANCELLED }) as never);
 
       await expect(
-        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Should fail' }, 'doctor-1'),
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Should fail' }, 'doctor-1', UserRole.DOCTOR),
       ).rejects.toThrow(ConflictError);
 
       expect(mockOpdRepo.update).not.toHaveBeenCalled();
@@ -186,7 +247,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.findByVisitId.mockResolvedValue(null);
 
       await expect(
-        service.updateVisit('t1', 'OPD-MISSING', { diagnosis: 'X' }, 'doctor-1'),
+        service.updateVisit('t1', 'OPD-MISSING', { diagnosis: 'X' }, 'doctor-1', UserRole.DOCTOR),
       ).rejects.toThrow(NotFoundError);
     });
 
@@ -195,7 +256,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.countByDate.mockResolvedValue(2);
       mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
 
-      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-06-01' }, 'doctor-1');
+      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-06-01' }, 'doctor-1', UserRole.HOSPITAL_ADMIN);
 
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg.visitDate).toBeInstanceOf(Date);
@@ -207,7 +268,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.countByDate.mockResolvedValue(3); // 3 visits already on new date
       mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
 
-      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-06-01' }, 'doctor-1');
+      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-06-01' }, 'doctor-1', UserRole.HOSPITAL_ADMIN);
 
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg.queueNumber).toBe(4); // count+1
@@ -219,7 +280,7 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
       mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
 
-      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-05-15' }, 'doctor-1');
+      await service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2026-05-15' }, 'doctor-1', UserRole.HOSPITAL_ADMIN);
 
       expect(mockOpdRepo.countByDate).not.toHaveBeenCalled();
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
@@ -230,12 +291,36 @@ describe('OPDService — example-based', () => {
       mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
       mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
 
-      await service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Mild fever' }, 'doctor-1');
+      await service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Mild fever' }, 'doctor-1', UserRole.DOCTOR);
 
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg).toHaveProperty('notes', 'Mild fever');
       expect(updateArg).not.toHaveProperty('diagnosis');
       expect(updateArg).not.toHaveProperty('chiefComplaint');
+    });
+
+    // ── past-date validation ──────────────────────────────────────────────────
+    test('rejects moving visitDate to the past for a normal role', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2020-01-01' }, 'doctor-1', UserRole.DOCTOR),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2020-01-01' }, 'doctor-1', UserRole.DOCTOR),
+      ).rejects.toThrow('Past dates are not allowed for OPD visits.');
+
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    test('allows moving visitDate to the past for an authorized role (HOSPITAL_ADMIN)', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2020-01-01' }, 'admin-1', UserRole.HOSPITAL_ADMIN),
+      ).resolves.toBeDefined();
     });
   });
 

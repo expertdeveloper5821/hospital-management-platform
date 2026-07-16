@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   useGetOPDQueueQuery,
   useCreateOPDVisitMutation,
@@ -50,6 +50,10 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function formatINR(amount: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
+}
+
 function statusVariant(s: OPDVisitStatus): 'default' | 'secondary' | 'outline' | 'destructive' {
   if (s === 'OPEN')        return 'default';
   if (s === 'IN_PROGRESS') return 'secondary';
@@ -59,6 +63,19 @@ function statusVariant(s: OPDVisitStatus): 'default' | 'secondary' | 'outline' |
 
 function statusLabel(s: OPDVisitStatus) {
   return s.replace('_', ' ');
+}
+
+// The backend returns 409 with a ready-to-display message when the same patient
+// already has an active appointment with the selected doctor/date; fall back to
+// that exact wording if the response body is ever missing a message.
+function opdErrorMessage(err: any, fallback: string): string {
+  if (err?.status === 409) {
+    return (
+      err?.data?.message ??
+      'An appointment already exists for this patient with the selected doctor, date, and time slot.'
+    );
+  }
+  return err?.data?.message ?? fallback;
 }
 
 const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED']);
@@ -83,12 +100,14 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorNames, allDoctors }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
-  const visitDateStr = new Date(visit.visitDate).toISOString().substring(0, 10);
+  // Look up the payment linked directly to this visit (referenceId) rather than
+  // guessing from patientId + calendar date — a patient can have other payments
+  // (registration fee, another same-day visit) on the same date, which would
+  // otherwise surface the wrong amount here.
   const { data: paymentData } = useListPaymentsQuery({
-    patientId: visit.patientId,
-    dateFrom:  visitDateStr,
-    dateTo:    visitDateStr,
-    limit:     10,
+    referenceType: 'OPD_VISIT',
+    referenceId:   visit.visitId,
+    limit:         1,
   });
   const visitPayment = paymentData?.data?.[0] ?? null;
 
@@ -124,8 +143,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
   const [cancelVisit,   { isLoading: cancelling }] = useCancelOPDVisitMutation();
 
+  // Synchronous guard against a double-click firing two update requests before
+  // the mutation's isLoading flag has propagated through a render.
+  const updatingRef = useRef(false);
+
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
+    if (updating || updatingRef.current) return;
     setError('');
     if ((form.chiefComplaint ?? '').trim().length > 1000) {
       setError('Chief complaint cannot exceed 1000 characters.');
@@ -143,6 +167,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       setError('Notes cannot exceed 2000 characters.');
       return;
     }
+    updatingRef.current = true;
     try {
       // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
       const body: UpdateOPDVisitRequest = {
@@ -156,7 +181,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       onUpdate(updated);
       setMode('view');
     } catch (err: any) {
-      setError(err?.data?.message ?? 'Failed to update visit.');
+      setError(opdErrorMessage(err, 'Failed to update visit.'));
+    } finally {
+      updatingRef.current = false;
     }
   }
 
@@ -248,7 +275,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
                 {visitPayment ? (
                   <>
-                    {f('Amount',       <span className="font-semibold">₹{visitPayment.amount.toLocaleString('en-IN')}</span>)}
+                    {f('Amount',       <span className="font-semibold">{formatINR(visitPayment.amount)}</span>)}
                     {f('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[visitPayment.paymentMethod] ?? visitPayment.paymentMethod}</span>)}
                   </>
                 ) : (
@@ -516,6 +543,11 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
   const [error, setError] = useState('');
 
+  // Only Hospital Admins may backdate an OPD visit (e.g. paper-register backfill);
+  // every other role is restricted to today/future dates, both here and on the backend.
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const canBackdate = role === 'HOSPITAL_ADMIN';
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedPSearch(patientSearch), 400);
     return () => clearTimeout(t);
@@ -540,11 +572,21 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
   const isLoading = creatingVisit || creatingPayment;
 
+  // Belt-and-braces against double submission: React state (isLoading) only
+  // reflects the mutation after the next render, so a very fast double-click or
+  // duplicate submit/keydown event can slip both calls through before the button
+  // disables. A synchronous ref closes that gap.
+  const submittingRef = useRef(false);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isLoading) return;
+    if (isLoading || submittingRef.current) return;
     setError('');
     if (!selectedPatient) { setError('Please select a patient.'); return; }
+    if (!canBackdate && form.visitDate && form.visitDate < todayISO()) {
+      setError('Past dates are not allowed for OPD visits.');
+      return;
+    }
     if (!form.chiefComplaint.trim()) { setError('Chief complaint is required.'); return; }
     if (form.chiefComplaint.trim().length > 1000) {
       setError('Chief complaint cannot exceed 1000 characters.');
@@ -561,33 +603,40 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
     }
     if (!paymentMode) { setError('Payment mode is required.'); return; }
 
-    let visit: OPDVisitResponse;
+    submittingRef.current = true;
     try {
-      const body: CreateOPDVisitRequest = {
-        patientId:      selectedPatient.patientId,
-        chiefComplaint: form.chiefComplaint,
-        doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
-        visitDate:      form.visitDate || undefined,
-        notes:          form.notes    || undefined,
-      };
-      visit = await createVisit(body).unwrap();
-    } catch (err: any) {
-      setError(err?.data?.message ?? 'Failed to create visit.');
-      return;
-    }
+      let visit: OPDVisitResponse;
+      try {
+        const body: CreateOPDVisitRequest = {
+          patientId:      selectedPatient.patientId,
+          chiefComplaint: form.chiefComplaint,
+          doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
+          visitDate:      form.visitDate || undefined,
+          notes:          form.notes    || undefined,
+        };
+        visit = await createVisit(body).unwrap();
+      } catch (err: any) {
+        setError(opdErrorMessage(err, 'Failed to create visit.'));
+        return;
+      }
 
-    try {
-      await createManualPayment({
-        patientId:     selectedPatient.patientId,
-        amount,
-        paymentMethod: paymentMode,
-        description:   `OPD Consultation – Visit #${visit.queueNumber}`,
-      }).unwrap();
-      onClose();
-    } catch (err: any) {
-      setError(
-        `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
-      );
+      try {
+        await createManualPayment({
+          patientId:     selectedPatient.patientId,
+          amount,
+          paymentMethod: paymentMode,
+          description:   `OPD Consultation – Visit #${visit.queueNumber}`,
+          referenceType: 'OPD_VISIT',
+          referenceId:   visit.visitId,
+        }).unwrap();
+        onClose();
+      } catch (err: any) {
+        setError(
+          `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
+        );
+      }
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -724,6 +773,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             <Input
               id="nv-date"
               type="date"
+              min={canBackdate ? undefined : todayISO()}
               value={form.visitDate ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
             />

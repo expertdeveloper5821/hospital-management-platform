@@ -2,9 +2,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
 import { patientRepository } from '../patient/patient.repository';
 import { IOPDVisit } from './opd.model';
-import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
+import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { auditService } from '../../shared/services/audit.service';
-import { NotFoundError, ConflictError } from '../../shared/middleware/error-handler';
+import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import {
   OPDVisitStatus,
   TERMINAL_STATUSES,
@@ -18,17 +18,43 @@ function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { f
   return Object.assign(visit, { fullName });
 }
 
+// Roles trusted to record a backdated OPD visit (e.g. paper-register backfill).
+// Every other role is restricted to today/future dates.
+const BACKDATE_ALLOWED_ROLES: ReadonlySet<UserRole> = new Set([UserRole.HOSPITAL_ADMIN]);
+
+function isPastDate(date: Date): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
+}
+
+function assertNotPastDateUnlessAuthorized(date: Date, role: UserRole): void {
+  if (isPastDate(date) && !BACKDATE_ALLOWED_ROLES.has(role)) {
+    throw new ValidationError('Past dates are not allowed for OPD visits.');
+  }
+}
+
 export class OPDService {
   async createVisit(
     tenantId:  string,
     data:      CreateOPDVisitRequest,
     createdBy: string,
+    role:      UserRole,
   ): Promise<IOPDVisit & { fullName?: string }> {
     const patient = await patientRepository.findByPatientId(tenantId, data.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
     const visitDate = data.visitDate ? new Date(data.visitDate) : new Date();
     visitDate.setHours(0, 0, 0, 0);
+    assertNotPastDateUnlessAuthorized(visitDate, role);
+
+    const doctorIds = data.doctorIds ?? [];
+    const duplicate = await opdRepository.findActiveDuplicate(tenantId, data.patientId, visitDate, doctorIds);
+    if (duplicate) {
+      throw new ConflictError(
+        'An appointment already exists for this patient with the selected doctor, date, and time slot.',
+      );
+    }
 
     const queueNumber = (await opdRepository.countByDate(tenantId, visitDate)) + 1;
     const visitId = `OPD-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`;
@@ -37,7 +63,7 @@ export class OPDService {
       visitId,
       tenantId,
       patientId:      data.patientId,
-      doctorIds:      data.doctorIds     ?? [],
+      doctorIds,
       departmentId:   patient.departmentId ?? null,
       visitDate,
       queueNumber,
@@ -65,6 +91,7 @@ export class OPDService {
     visitId:   string,
     data:      UpdateOPDVisitRequest,
     updatedBy: string,
+    role:      UserRole,
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
@@ -91,6 +118,7 @@ export class OPDService {
     if (data.visitDate !== undefined) {
       const newDate = new Date(data.visitDate);
       newDate.setHours(0, 0, 0, 0);
+      assertNotPastDateUnlessAuthorized(newDate, role);
 
       previousValue.visitDate = visit.visitDate;
       newValue.visitDate      = newDate;
@@ -103,6 +131,21 @@ export class OPDService {
         previousValue.queueNumber   = visit.queueNumber;
         newValue.queueNumber        = newQueueNumber;
         updateData.queueNumber      = newQueueNumber;
+      }
+    }
+
+    // Re-run the duplicate-appointment guard whenever the doctor assignment or
+    // date is changing — an edit can create the same clash a create can.
+    if (data.doctorIds !== undefined || data.visitDate !== undefined) {
+      const effectiveDoctorIds = data.doctorIds ?? visit.doctorIds;
+      const effectiveDate      = (updateData.visitDate as Date | undefined) ?? visit.visitDate;
+      const duplicate = await opdRepository.findActiveDuplicate(
+        tenantId, visit.patientId, effectiveDate, effectiveDoctorIds, visitId,
+      );
+      if (duplicate) {
+        throw new ConflictError(
+          'An appointment already exists for this patient with the selected doctor, date, and time slot.',
+        );
       }
     }
 

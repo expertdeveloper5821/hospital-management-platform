@@ -213,6 +213,128 @@ describe('POST /api/payments/manual', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.description).toBe('Consultation fee');
   });
+
+  // ─── OPD payment amount fix ─────────────────────────────────────────────────
+
+  test.each(['CASH', 'UPI', 'CARD'] as const)(
+    'saves and returns the exact ₹500 amount entered for %s',
+    async (paymentMethod) => {
+      const res = await request(app)
+        .post('/api/payments/manual')
+        .set('Authorization', `Bearer ${receptionistToken}`)
+        .send({
+          patientId, amount: 500, paymentMethod, description: 'OPD Consultation – Visit #1',
+          referenceType: 'OPD_VISIT', referenceId: 'OPD-TESTVISIT1',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.amount).toBe(500);
+
+      const stored = await PaymentModel.findOne({ paymentId: res.body.data.paymentId });
+      expect(stored?.amount).toBe(500);
+    },
+  );
+
+  test('saves and returns a decimal amount (₹500.50) exactly', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 500.5, paymentMethod: 'CASH', description: 'OPD Consultation' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.amount).toBe(500.5);
+
+    const stored = await PaymentModel.findOne({ paymentId: res.body.data.paymentId });
+    expect(stored?.amount).toBe(500.5);
+  });
+
+  test('rejects an amount with more than 2 decimal places (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 500.505, paymentMethod: 'CASH', description: 'Fee' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('accepts a 10-digit amount (201)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 9999999999, paymentMethod: 'CASH', description: 'Fee' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.amount).toBe(9999999999);
+  });
+
+  test('rejects an amount exceeding 10 digits (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 12345678901, paymentMethod: 'CASH', description: 'Fee' });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/Amount cannot exceed 10 digits\./);
+  });
+
+  test('rejects a non-numeric amount (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: '500', paymentMethod: 'CASH', description: 'Fee' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('rejects an empty/missing amount (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, paymentMethod: 'CASH', description: 'Fee' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('stores referenceType/referenceId when provided, so the payment can be looked up by exact visit', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({
+        patientId, amount: 500, paymentMethod: 'UPI', description: 'OPD Consultation – Visit #1',
+        referenceType: 'OPD_VISIT', referenceId: 'OPD-ABCD1234',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.referenceType).toBe('OPD_VISIT');
+    expect(res.body.data.referenceId).toBe('OPD-ABCD1234');
+  });
+
+  // Reproduces the reported bug: a patient with a same-day registration-fee
+  // payment AND an OPD consultation payment must not have the two amounts
+  // conflated when looking up "the payment for this visit".
+  test('a same-day registration-fee payment does not leak into the OPD visit payment lookup', async () => {
+    await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 3, paymentMethod: 'CASH', description: 'Patient Registration Fee' });
+
+    const opdPayment = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({
+        patientId, amount: 500, paymentMethod: 'UPI', description: 'OPD Consultation – Visit #1',
+        referenceType: 'OPD_VISIT', referenceId: 'OPD-SAMEDAY01',
+      });
+    expect(opdPayment.status).toBe(201);
+
+    const res = await request(app)
+      .get('/api/payments?referenceType=OPD_VISIT&referenceId=OPD-SAMEDAY01')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].amount).toBe(500);
+  });
 });
 
 // ─── U5-C-06: Razorpay order creation ────────────────────────────────────────
@@ -240,6 +362,16 @@ describe('POST /api/payments/razorpay-order', () => {
       .send({ patientId, amount: 100, paymentMethod: 'CASH', description: 'Fee' });
 
     expect(res.status).toBe(400);
+  });
+
+  test('rejects an amount exceeding 10 digits (400)', async () => {
+    const res = await request(app)
+      .post('/api/payments/razorpay-order')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 12345678901, paymentMethod: 'UPI', description: 'Fee' });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/Amount cannot exceed 10 digits\./);
   });
 });
 

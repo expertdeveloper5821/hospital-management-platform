@@ -76,7 +76,7 @@ export async function createVisit(req: Request, res: Response, next: NextFunctio
     const body = createVisitSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
-    const visit = await opdService.createVisit(req.user!.tenantId!, body.data, req.user!.userId);
+    const visit = await opdService.createVisit(req.user!.tenantId!, body.data, req.user!.userId, req.user!.role);
     res.status(201).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
 }
@@ -117,6 +117,7 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
       req.params.visitId,
       body.data,
       req.user!.userId,
+      req.user!.role,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }

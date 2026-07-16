@@ -118,10 +118,14 @@ async function seedVisit(tenantId: string, overrides: Partial<{
   });
 }
 
+function todayDateStr(): string {
+  return new Date().toISOString().substring(0, 10);
+}
+
 const VALID_VISIT_BODY = {
   patientId:      'PAT-TEST0001',
   chiefComplaint: 'Fever and headache',
-  visitDate:      '2026-05-15',
+  visitDate:      todayDateStr(),
 };
 
 // ─── POST /api/opd/visits ─────────────────────────────────────────────────────
@@ -286,6 +290,176 @@ describe('POST /api/opd/visits', () => {
       .send({ ...VALID_VISIT_BODY, patientId: 'PAT-TENB0001' });
 
     expect(res.status).toBe(404);
+  });
+
+  test('409 — duplicate visit for same patient, doctor, and date is rejected', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const first = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
+
+    expect(second.status).toBe(409);
+    expect(second.body.message).toMatch(/already exists/i);
+  });
+
+  test('201 — same patient/doctor/date is allowed once the earlier visit is cancelled', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const first = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
+    expect(first.status).toBe(201);
+
+    await request(app)
+      .patch(`/api/opd/visits/${first.body.data.visitId}/cancel`)
+      .set(bearer(token));
+
+    const second = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
+
+    expect(second.status).toBe(201);
+  });
+
+  test('201 — same patient/date but a different doctor is allowed', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const first = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-2'] });
+
+    expect(second.status).toBe(201);
+  });
+
+  test('201 — visits without a doctor assigned are not treated as duplicates', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const first  = await request(app).post('/api/opd/visits').set(bearer(token)).send(VALID_VISIT_BODY);
+    const second = await request(app).post('/api/opd/visits').set(bearer(token)).send(VALID_VISIT_BODY);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+  });
+
+  // ─── Past-date validation ───────────────────────────────────────────────────
+
+  test('400 — Receptionist cannot create a visit for a past date', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/Past dates are not allowed for OPD visits\./);
+  });
+
+  test('400 — Doctor and Nurse cannot create a visit for a past date', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+
+    const resDoctor = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR)))
+      .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
+    expect(resDoctor.status).toBe(400);
+
+    const resNurse = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(tokenFor(nurse._id.toString(), tid, UserRole.NURSE)))
+      .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
+    expect(resNurse.status).toBe(400);
+  });
+
+  test('201 — Hospital Admin can create a backdated visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
+
+    expect(res.status).toBe(201);
+    const expectedDate = new Date('2020-01-01');
+    expectedDate.setHours(0, 0, 0, 0);
+    expect(new Date(res.body.data.visitDate).getTime()).toBe(expectedDate.getTime());
+  });
+
+  test('201 — today\'s date is allowed for a normal role', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, visitDate: todayDateStr() });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('201 — a future date is allowed for a normal role', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const future = new Date();
+    future.setDate(future.getDate() + 14);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, visitDate: future.toISOString().substring(0, 10) });
+
+    expect(res.status).toBe(201);
   });
 });
 
@@ -520,6 +694,75 @@ describe('PATCH /api/opd/visits/:visitId', () => {
       .send({ notes: 'Test' });
 
     expect(res.status).toBe(404);
+  });
+
+  test('409 — assigning a doctor already booked for this patient/date on another visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DUP00001', doctorIds: ['doc-1'] });
+    await seedVisit(tid, { visitId: 'OPD-DUP00002', doctorIds: ['doc-2'] });
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-DUP00002')
+      .set(bearer(token))
+      .send({ doctorIds: ['doc-1'] });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/already exists/i);
+  });
+
+  test('200 — re-saving a visit with its own unchanged doctor does not trip the duplicate guard', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-SELF0001', doctorIds: ['doc-1'] });
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-SELF0001')
+      .set(bearer(token))
+      .send({ doctorIds: ['doc-1'], notes: 'Follow-up note' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.notes).toBe('Follow-up note');
+  });
+
+  // ─── Past-date validation ───────────────────────────────────────────────────
+
+  test('400 — Doctor cannot move visitDate to a past date', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-PASTUPD1' });
+    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-PASTUPD1')
+      .set(bearer(token))
+      .send({ visitDate: '2020-01-01' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/Past dates are not allowed for OPD visits\./);
+  });
+
+  test('200 — Hospital Admin can move visitDate to a past date', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-PASTUPD2' });
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-PASTUPD2')
+      .set(bearer(token))
+      .send({ visitDate: '2020-01-01' });
+
+    expect(res.status).toBe(200);
+    const expectedDate = new Date('2020-01-01');
+    expectedDate.setHours(0, 0, 0, 0);
+    expect(new Date(res.body.data.visitDate).getTime()).toBe(expectedDate.getTime());
   });
 });
 
