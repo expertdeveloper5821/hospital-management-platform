@@ -31,7 +31,9 @@ const RECEIPT_URL_EXPIRY_SECONDS = 3600;
 
 async function resolveReceiptUrl(s3Key: string | null): Promise<string | null> {
   if (!s3Key) return null;
-  return s3Service.getPresignedUrl(s3Key, RECEIPT_URL_EXPIRY_SECONDS);
+  // A presign failure (e.g. transient S3 issue) must not break payment creation/listing —
+  // the receipt link is secondary to the payment record itself.
+  return s3Service.getPresignedUrl(s3Key, RECEIPT_URL_EXPIRY_SECONDS).catch(() => null);
 }
 
 async function toResponse(doc: IPayment): Promise<PaymentResponse> {
@@ -49,6 +51,8 @@ async function toResponse(doc: IPayment): Promise<PaymentResponse> {
     receiptUrl:        await resolveReceiptUrl(doc.receiptS3Key),
     razorpayOrderId:   doc.razorpayOrderId,
     razorpayPaymentId: doc.razorpayPaymentId,
+    referenceType:     (doc.referenceType as PaymentResponse['referenceType']) ?? null,
+    referenceId:       doc.referenceId ?? null,
     createdBy:         doc.createdBy,
     createdAt:         doc.createdAt.toISOString(),
     updatedAt:         doc.updatedAt.toISOString(),
@@ -117,6 +121,8 @@ export class PaymentService {
       receiptS3Key,
       razorpayOrderId:   null,
       razorpayPaymentId: null,
+      referenceType: input.referenceType ?? null,
+      referenceId:   input.referenceId   ?? null,
       createdBy:     userId,
     });
 

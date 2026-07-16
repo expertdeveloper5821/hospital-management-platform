@@ -45,4 +45,18 @@ OPDVisitSchema.index({ tenantId: 1, visitDate: 1, status: 1 });      // queue qu
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, doctorIds: 1 });   // doctor's queue
 OPDVisitSchema.index({ tenantId: 1, departmentId: 1, visitDate: -1 }); // department queue
 
+// Duplicate-appointment guard: for a given patient + calendar date, the same
+// doctor cannot appear on two non-cancelled visits (multikey unique index — one
+// entry per doctorIds element, so it also blocks concurrent/racing requests that
+// slip past the service-layer check). Visits with no doctor assigned (empty
+// array) produce no index entries and are therefore not constrained by this.
+OPDVisitSchema.index(
+  { tenantId: 1, patientId: 1, visitDate: 1, doctorIds: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $ne: OPDVisitStatus.CANCELLED } },
+    name: 'uniq_active_patient_doctor_date',
+  },
+);
+
 export const OPDVisitModel = mongoose.model<IOPDVisit>('OPDVisit', OPDVisitSchema);

@@ -415,7 +415,8 @@ export interface InventoryListResult {
  
 export type PaymentMethod = 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
 export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
- 
+export type PaymentReferenceType = 'OPD_VISIT' | 'IPD_ADMISSION' | 'REGISTRATION';
+
 export interface PaymentResponse {
   paymentId:         string;
   tenantId:          string;
@@ -428,16 +429,20 @@ export interface PaymentResponse {
   receiptUrl:        string | null;
   razorpayOrderId:   string | null;
   razorpayPaymentId: string | null;
+  referenceType:     PaymentReferenceType | null;
+  referenceId:       string | null;
   createdBy:         string;
   createdAt:         string;
   updatedAt:         string;
 }
- 
+
 export interface CreateManualPaymentRequest {
-  patientId:     string;
-  amount:        number;
-  paymentMethod: 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
-  description:   string;
+  patientId:      string;
+  amount:         number;
+  paymentMethod:  'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
+  description:    string;
+  referenceType?: PaymentReferenceType;
+  referenceId?:   string;
 }
  
 export interface CreateRazorpayOrderRequest {

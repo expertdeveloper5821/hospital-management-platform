@@ -241,6 +241,101 @@ describe('GET /api/inventory', () => {
   });
 });
 
+// ─── Category search: case-insensitive partial match ─────────────────────────
+
+describe('GET /api/inventory — category search', () => {
+  beforeEach(async () => {
+    await InventoryItemModel.create([
+      { itemId: uuidv4(), tenantId, name: 'Surgical Gloves', category: 'PPE',              unit: 'pairs', quantity: 100, lowStockThreshold: 20 },
+      { itemId: uuidv4(), tenantId, name: 'Gauze Rolls',     category: 'Medical Supplies', unit: 'rolls', quantity: 40,  lowStockThreshold: 10 },
+      { itemId: uuidv4(), tenantId, name: 'Paracetamol',     category: 'Medication',       unit: 'strips', quantity: 200, lowStockThreshold: 30 },
+    ]);
+  });
+
+  test('exact match still works', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=PPE')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('PPE');
+  });
+
+  test('partial match returns items whose category contains the text', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=Supplies')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('Medical Supplies');
+  });
+
+  test('mixed-case input matches regardless of case', async () => {
+    const lower = await request(app).get('/api/inventory?category=medical').set('Authorization', `Bearer ${adminToken}`);
+    const upper = await request(app).get('/api/inventory?category=MEDICAL').set('Authorization', `Bearer ${adminToken}`);
+    const mixed = await request(app).get('/api/inventory?category=MeDiCaL').set('Authorization', `Bearer ${adminToken}`);
+
+    for (const res of [lower, upper, mixed]) {
+      expect(res.status).toBe(200);
+      expect(res.body.data.data).toHaveLength(1);
+      expect(res.body.data.data[0].category).toBe('Medical Supplies');
+    }
+  });
+
+  test('leading/trailing spaces are trimmed before matching', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=' + encodeURIComponent('  ppe  '))
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('PPE');
+  });
+
+  test('no-match input returns an empty list, not an error', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=nonexistentcategory')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('category search input is treated as a literal substring, not a regex', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=' + encodeURIComponent('.*'))
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+  });
+
+  test('pagination still works correctly together with the category filter', async () => {
+    await InventoryItemModel.create([
+      { itemId: uuidv4(), tenantId, name: 'Nitrile Gloves', category: 'PPE', unit: 'pairs', quantity: 60, lowStockThreshold: 15 },
+      { itemId: uuidv4(), tenantId, name: 'Face Masks',     category: 'PPE', unit: 'boxes', quantity: 80, lowStockThreshold: 10 },
+    ]);
+
+    const res = await request(app)
+      .get('/api/inventory?category=ppe&page=1&limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.totalPages).toBe(2);
+
+    const page2 = await request(app)
+      .get('/api/inventory?category=ppe&page=2&limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(page2.body.data.data).toHaveLength(1);
+  });
+});
+
 // ─── Get by ID ────────────────────────────────────────────────────────────────
 
 describe('GET /api/inventory/:itemId', () => {
