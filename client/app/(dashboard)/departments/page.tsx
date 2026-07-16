@@ -224,7 +224,7 @@ function DeleteModal({ dept, onConfirm, onClose, isLoading, error }: DeleteModal
 
 export default function DepartmentsPage() {
   const { data: departments, isLoading, refetch } = useListDepartmentsQuery();
-  const { data: usersResult, isLoading: doctorsLoading } = useListUsersQuery({ role: 'DOCTOR', limit: 100 });
+  const { data: usersResult, isLoading: doctorsLoading } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
   const [deleteDepartment] = useDeleteDepartmentMutation();
 
   const [showCreate, setShowCreate]     = useState(false);

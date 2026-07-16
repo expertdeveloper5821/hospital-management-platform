@@ -119,6 +119,9 @@ export class DepartmentService {
         if (!(CLINICAL_ROLES as UserRole[]).includes(u.role)) {
           throw new AppError('Only clinical staff can be assigned to departments', 400);
         }
+        if (!u.isActive) {
+          throw new AppError('Cannot assign a deactivated staff member to a department', 400);
+        }
       }
       await userRepository.addDepartmentToUsers(tenantId, add, departmentId);
     }

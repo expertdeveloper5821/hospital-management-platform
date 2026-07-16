@@ -43,9 +43,9 @@ import { UserRole } from '@/store/types';
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-// Matches backend: z.string().min(7).max(15).regex(/^\+?[0-9]+$/)
-// Total length 7–15 chars; optional leading +; digits only.
-const MOBILE_RE   = /^\+?[0-9]+$/;
+// Matches backend: z.string().regex(/^\d{10}$/) — exactly 10 digits.
+// The national number is stored bare; the +91 country code is shown in the UI only.
+const MOBILE_RE   = /^\d{10}$/;
 const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
 const AADHAAR_RE  = /^\d{12}$/;
 
@@ -62,11 +62,11 @@ function calcAge(dob: string) {
   return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
 }
 
+// Keep digits only; drop a leading 91 country code (e.g. legacy +91XXXXXXXXXX); cap at 10.
 function sanitizeMobile(value: string) {
-  const cleaned = value.replace(/[^\d+]/g, '');
-  return cleaned.startsWith('+')
-    ? `+${cleaned.slice(1).replace(/\+/g, '')}`.slice(0, 16)
-    : cleaned.replace(/\+/g, '').slice(0, 15);
+  let digits = value.replace(/\D/g, '');
+  if (digits.length > 10 && digits.startsWith('91')) digits = digits.slice(2);
+  return digits.slice(0, 10);
 }
 
 type PatientFormErrors = Partial<Record<string, string>>;
@@ -101,12 +101,8 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
 
   if (!form.mobileNumber) {
     errors.mobileNumber = 'Mobile number is required.';
-  } else if (
-    !MOBILE_RE.test(form.mobileNumber) ||
-    form.mobileNumber.length < 9 ||
-    form.mobileNumber.length > 12
-  ) {
-    errors.mobileNumber = 'Enter a valid mobile number (9–12 characters, optional leading +).';
+  } else if (!MOBILE_RE.test(form.mobileNumber)) {
+    errors.mobileNumber = 'Enter a valid 10-digit mobile number.';
   }
 
   const addr = form.address.trim();
@@ -126,13 +122,8 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     errors.emergencyContactName = 'Name must be at least 2 characters.';
   }
 
-  if (
-    form.emergencyContactMobile &&
-    (!MOBILE_RE.test(form.emergencyContactMobile) ||
-     form.emergencyContactMobile.length < 9 ||
-     form.emergencyContactMobile.length > 12)
-  ) {
-    errors.emergencyContactMobile = 'Enter a valid mobile number (9–12 characters, optional leading +).';
+  if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
+    errors.emergencyContactMobile = 'Enter a valid 10-digit mobile number.';
   }
 
   return errors;
@@ -382,18 +373,21 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
             <div className="space-y-1">
               <Label htmlFor="mobile">Mobile Number *</Label>
-              <Input
-                id="mobile"
-                type="tel"
-                inputMode="tel"
-                maxLength={16}
-                value={form.mobileNumber}
-                onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
-                onBlur={() => touch('mobileNumber')}
-                placeholder="+91XXXXXXXXXX"
-                aria-invalid={!!fe('mobileNumber')}
-                className={inputClass('mobileNumber')}
-              />
+              <div className="flex">
+                <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                <Input
+                  id="mobile"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.mobileNumber}
+                  onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
+                  onBlur={() => touch('mobileNumber')}
+                  placeholder="XXXXXXXXXX"
+                  aria-invalid={!!fe('mobileNumber')}
+                  className={`${inputClass('mobileNumber')} rounded-l-none`}
+                />
+              </div>
               {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
             </div>
 
@@ -466,18 +460,21 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
               <div className="space-y-1">
                 <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
-                <Input
-                  id="ecMobile"
-                  type="tel"
-                  inputMode="tel"
-                  maxLength={16}
-                  value={form.emergencyContactMobile ?? ''}
-                  onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
-                  onBlur={() => touch('emergencyContactMobile')}
-                  placeholder="+91XXXXXXXXXX"
-                  aria-invalid={!!fe('emergencyContactMobile')}
-                  className={inputClass('emergencyContactMobile')}
-                />
+                <div className="flex">
+                  <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                  <Input
+                    id="ecMobile"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={form.emergencyContactMobile ?? ''}
+                    onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
+                    onBlur={() => touch('emergencyContactMobile')}
+                    placeholder="XXXXXXXXXX"
+                    aria-invalid={!!fe('emergencyContactMobile')}
+                    className={`${inputClass('emergencyContactMobile')} rounded-l-none`}
+                  />
+                </div>
                 {fe('emergencyContactMobile') && <p className="text-xs text-destructive">{fe('emergencyContactMobile')}</p>}
               </div>
             </div>
