@@ -20,14 +20,9 @@ import { Label }  from '@/components/ui/label';
 import { Badge }  from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { todayLocalISO, clampToToday } from '@/lib/date';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function todayLocalISO(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
@@ -89,8 +84,8 @@ export default function AuditPage() {
     ...(applied.entityType && { entityType: applied.entityType }),
     ...(applied.entityId   && { entityId:   applied.entityId   }),
     ...(applied.userId     && { userId:      applied.userId     }),
-    ...(applied.dateFrom   && { dateFrom:    applied.dateFrom   }),
-    ...(applied.dateTo     && { dateTo:      applied.dateTo     }),
+    ...(applied.dateFrom   && { dateFrom:    clampToToday(applied.dateFrom) }),
+    ...(applied.dateTo     && { dateTo:      clampToToday(applied.dateTo)   }),
     page,
     limit: LIMIT,
   };

@@ -9,16 +9,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { todayLocalISO, clampToToday } from '@/lib/date';
 
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
 ];
-function todayLocalISO(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 export default function BillingPage() {
   const router  = useRouter();
@@ -40,8 +35,8 @@ export default function BillingPage() {
   const { data, isLoading, isError } = useListChargesQuery({
     patientId: patientId || undefined,
     category:  category  || undefined,
-    startDate: startDate || undefined,
-    endDate:   endDate   || undefined,
+    startDate: startDate ? clampToToday(startDate) : undefined,
+    endDate:   endDate   ? clampToToday(endDate)   : undefined,
     addedBy:   addedBy   || undefined,
     page,
     limit: 20,

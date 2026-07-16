@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   useListPaymentsQuery,
   useCreateManualPaymentMutation,
@@ -107,6 +108,8 @@ function PatientSearchInput({ value, onChange }: PatientSearchInputProps) {
   const [open, setOpen] = useState(false);
   const [selectedName, setSelectedName] = useState("");
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const [search, { data, isFetching }] = useLazySearchPatientsQuery();
 
@@ -121,13 +124,33 @@ function PatientSearchInput({ value, onChange }: PatientSearchInputProps) {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      // The dropdown is portaled outside wrapperRef, so check it too.
+      if (wrapperRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Position the portaled dropdown under the input; recompute while open so it
+  // tracks scrolling (including the modal's own overflow scroll) and viewport resize.
+  useEffect(() => {
+    if (!open) { setMenuRect(null); return; }
+    const update = () => {
+      const el = wrapperRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setMenuRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
 
   function handleSelect(patient: PatientResponse) {
     onChange(patient.patientId);
@@ -164,8 +187,12 @@ function PatientSearchInput({ value, onChange }: PatientSearchInputProps) {
         />
       )}
 
-      {open && (
-        <div className="absolute top-full left-0 right-0 mt-1 rounded-md border-2 border-border bg-background shadow-2xl max-h-52 overflow-y-auto">
+      {open && menuRect && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menuRect.top, left: menuRect.left, width: menuRect.width, zIndex: 60 }}
+          className="rounded-md border-2 border-border bg-background shadow-2xl max-h-52 overflow-y-auto"
+        >
           {isFetching ? (
             <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
           ) : (data?.data?.length ?? 0) === 0 ? (
@@ -183,7 +210,8 @@ function PatientSearchInput({ value, onChange }: PatientSearchInputProps) {
               </button>
             ))
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
