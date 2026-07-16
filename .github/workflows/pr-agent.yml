@@ -1,30 +1,24 @@
-name: PR-Agent
-
+name: PR Agent (Gemini)
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened, ready_for_review]
   issue_comment:
-    types: [created, edited]
-
-permissions:
-  pull-requests: write
-  issues: write
-  contents: write
-
 jobs:
   pr_agent_job:
     if: ${{ github.event.sender.type != 'Bot' }}
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
     steps:
-      - id: pr-agent
-        name: PR Agent action step
-        uses: The-PR-Agent/pr-agent@main
+      - name: PR Agent action step
+        uses: the-pr-agent/pr-agent@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-          # Tell PR-Agent to use Gemini models
-          config.model: "gemini/gemini-1.5-pro"
-          config.fallback_models: "[\"gemini/gemini-1.5-flash\"]"
-          
-          # Pass your Gemini API Key
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          config.model: "gemini/gemini-1.5-flash"
+          config.fallback_models: '["gemini/gemini-1.5-flash"]'
+          GOOGLE_AI_STUDIO.GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
