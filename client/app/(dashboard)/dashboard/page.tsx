@@ -15,7 +15,8 @@ import {
 
 import { useGetDashboardStatsQuery } from '@/store/api/dashboard.api';
 import type { RecentActivity }       from '@/store/api/dashboard.api';
-import { useAppSelector }            from '@/store/hooks';
+import { useAppSelector, useAppDispatch } from '@/store/hooks';
+import { logout }        from '@/store/slices/auth.slice';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn }     from '@/lib/utils';
@@ -41,6 +42,20 @@ function fmtTime(iso: string): string {
 
 function fmtDate(d: Date): string {
   return d.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+// Narrow an RTK Query error (FetchBaseQueryError | SerializedError | undefined) down to
+// the fields we care about, without assuming either shape.
+function getErrorInfo(error: unknown): { status?: number; message?: string } {
+  if (!error || typeof error !== 'object') return {};
+  const status = 'status' in error && typeof (error as { status?: unknown }).status === 'number'
+    ? (error as { status: number }).status
+    : undefined;
+  const data = 'data' in error ? (error as { data?: unknown }).data : undefined;
+  const message = data && typeof data === 'object' && 'message' in data
+    ? (data as { message?: string }).message
+    : undefined;
+  return { status, message };
 }
 
 function activityLabel(a: RecentActivity): string {
@@ -144,10 +159,11 @@ function QuickAction({ icon: Icon, label, href, color }: {
 export default function DashboardPage() {
   const role         = useAppSelector((s) => s.auth.profile?.role);
   const hospitalName = useAppSelector((s) => s.auth.branding?.displayName ?? 'Hospital');
+  const dispatch     = useAppDispatch();
 
   const [refreshArg, setRefreshArg] = useState<{ refresh?: boolean } | void>(undefined);
   const [currentTime, setCurrentTime] = useState(new Date());
-  // Set once the backend confirms the tenant/account is deactivated (401/403) —
+  // Set only once the backend confirms the tenant itself is deactivated —
   // captured into state because `skip` below clears the live query's data/error.
   const [inactiveMessage, setInactiveMessage] = useState<string | null>(null);
 
@@ -161,16 +177,19 @@ export default function DashboardPage() {
     skip: !!inactiveMessage,
   });
 
-  // @ts-expect-error RTK error shape
-  const errorStatus: number | undefined = error?.status;
-  // @ts-expect-error RTK error shape
-  const errorMessage: string | undefined = error?.data?.message;
+  const { status: errorStatus, message: errorMessage } = getErrorInfo(error);
 
   useEffect(() => {
-    if (errorStatus === 401 || errorStatus === 403) {
-      setInactiveMessage(errorMessage ?? 'Your account is inactive.');
+    if (errorStatus === 401 && errorMessage === 'Tenant account is inactive') {
+      // Tenant deactivated — stop polling permanently for this mount.
+      setInactiveMessage(errorMessage);
+    } else if (errorStatus === 401 && errorMessage === 'Authentication required') {
+      // Session missing/expired — log out so the dashboard layout guard redirects to /login.
+      dispatch(logout());
     }
-  }, [errorStatus, errorMessage]);
+    // 403 (Insufficient permissions) is not an inactivity/auth condition — leave the
+    // query running so the banner can clear once permissions or role change.
+  }, [errorStatus, errorMessage, dispatch]);
 
   function handleRefresh() {
     setRefreshArg({ refresh: true });
