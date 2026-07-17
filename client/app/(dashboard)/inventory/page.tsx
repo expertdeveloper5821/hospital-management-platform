@@ -39,6 +39,7 @@ import {
   History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { buildUpdateInventoryItemPayload } from './update-item-payload';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -255,14 +256,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
     if (!form.unit?.trim())     { setError('Unit is required.'); return; }
 
     try {
-      await updateItem({
-        itemId:      item.itemId,
-        name:        form.name?.trim(),
-        category:    form.category?.trim(),
-        unit:        form.unit?.trim(),
-        lowStockThreshold: form.lowStockThreshold,
-        description: form.description?.trim() || null,
-      }).unwrap();
+      await updateItem(buildUpdateInventoryItemPayload(item, form)).unwrap();
       onClose();
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to update item.');

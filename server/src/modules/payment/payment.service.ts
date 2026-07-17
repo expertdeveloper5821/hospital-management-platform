@@ -107,7 +107,17 @@ export class PaymentService {
       const key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
       await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
       receiptS3Key = key; // only recorded once the upload actually succeeds
-    } catch { /* receipt generation failure must not fail the payment */ }
+    } catch (err) {
+      console.warn(JSON.stringify({
+        level:     'warn',
+        event:     'manual_payment_receipt_failed',
+        tenantId,
+        paymentId,
+        patientId: input.patientId,
+        message:   err instanceof Error ? err.message : 'Unknown receipt generation/upload failure',
+        timestamp: new Date().toISOString(),
+      }));
+    }
 
     const payment = await paymentRepository.save({
       paymentId,

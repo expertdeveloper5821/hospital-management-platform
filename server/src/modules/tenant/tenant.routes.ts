@@ -3,6 +3,7 @@ import multer, { FileFilterCallback } from 'multer';
 import rateLimit from 'express-rate-limit';
 import config from '../../shared/config/env';
 import { authenticateJWT } from '../../shared/middleware/authenticate-jwt';
+import { authenticateSuperAdmin } from '../../shared/middleware/authenticate-super-admin';
 import { requireRole } from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
 import { UserRole } from '../../shared/types/common.types';
@@ -65,7 +66,7 @@ router.post('/',                        authenticateJWT, requireFirstPasswordCha
 router.get('/',                         authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), listTenants);
 router.patch('/:tenantId/approve',      authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), approveTenant);
 router.patch('/:tenantId/deactivate',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), deactivateTenant);
-router.patch('/:tenantId/reactivate',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), reactivateTenant);
+router.patch('/:tenantId/reactivate',   authenticateSuperAdmin, reactivateTenant);
 router.post('/:tenantId/resend-invite', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.SUPER_ADMIN), resendInvite);
 
 // Public — invite consumption (rate-limited, no auth)
