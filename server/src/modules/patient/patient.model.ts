@@ -10,6 +10,12 @@ export interface IPatient extends Document {
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
+  addressLine1:           string | null;
+  addressLine2:           string | null;
+  city:                   string | null;
+  state:                  string | null;
+  country:                string | null;
+  pincode:                string | null;
   aadhaarNumber:          string | null;
   emergencyContactName:   string | null;
   emergencyContactMobile: string | null;
@@ -37,6 +43,12 @@ const PatientSchema = new Schema<IPatient>(
     gender:                 { type: String, required: true, enum: Object.values(Gender) },
     mobileNumber:           { type: String, required: true, trim: true },
     address:                { type: String, required: true, trim: true },
+    addressLine1:           { type: String, default: null, trim: true },
+    addressLine2:           { type: String, default: null, trim: true },
+    city:                   { type: String, default: null, trim: true },
+    state:                  { type: String, default: null, trim: true },
+    country:                { type: String, default: null, trim: true },
+    pincode:                { type: String, default: null, trim: true },
     aadhaarNumber:          { type: String, default: null },
     emergencyContactName:   { type: String, default: null },
     emergencyContactMobile: { type: String, default: null },

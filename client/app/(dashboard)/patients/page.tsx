@@ -38,14 +38,15 @@ import {
 } from 'lucide-react';
 import { toastSuccess } from '@/lib/toast';
 import { UserRole } from '@/store/types';
+import { INDIAN_STATES } from '@/lib/constants';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const GENDERS: Gender[] = ['MALE', 'FEMALE', 'OTHER'];
 const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-// Matches backend: z.string().min(7).max(15).regex(/^\+?[0-9]+$/)
-// Total length 7–15 chars; optional leading +; digits only.
-const MOBILE_RE   = /^\+?[0-9]+$/;
+// Matches backend: z.string().regex(/^\d{10}$/) — exactly 10 digits.
+// The national number is stored bare; the +91 country code is shown in the UI only.
+const MOBILE_RE   = /^\d{10}$/;
 const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
 const AADHAAR_RE  = /^\d{12}$/;
 
@@ -62,11 +63,39 @@ function calcAge(dob: string) {
   return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
 }
 
+// Keep digits only; drop a leading 91 country code (e.g. legacy +91XXXXXXXXXX); cap at 10.
 function sanitizeMobile(value: string) {
-  const cleaned = value.replace(/[^\d+]/g, '');
-  return cleaned.startsWith('+')
-    ? `+${cleaned.slice(1).replace(/\+/g, '')}`.slice(0, 16)
-    : cleaned.replace(/\+/g, '').slice(0, 15);
+  let digits = value.replace(/\D/g, '');
+  if (digits.length > 10 && digits.startsWith('91')) digits = digits.slice(2);
+  return digits.slice(0, 10);
+}
+
+// Compose the structured address fields into the single `address` string that the
+// backend stores and the medical card / detail view render.
+function composeAddress(f: CreatePatientRequest): string {
+  const parts = [f.addressLine1, f.addressLine2, f.city, f.state]
+    .map((s) => (s ?? '').trim())
+    .filter(Boolean);
+  let out = parts.join(', ');
+  const pin = (f.pincode ?? '').trim();
+  if (pin) out += ` - ${pin}`;
+  const country = (f.country ?? '').trim();
+  if (country) out += `${out ? ', ' : ''}${country}`;
+  return out;
+}
+
+// Address payload sent on create/update: the derived `address` plus the structured
+// fields (empty optionals normalised to undefined so backend validation passes).
+function addressPayload(f: CreatePatientRequest) {
+  return {
+    address:      composeAddress(f),
+    addressLine1: f.addressLine1?.trim() || undefined,
+    addressLine2: f.addressLine2?.trim() || undefined,
+    city:         f.city?.trim()         || undefined,
+    state:        f.state?.trim()        || undefined,
+    country:      f.country?.trim()      || undefined,
+    pincode:      f.pincode?.trim()      || undefined,
+  };
 }
 
 type PatientFormErrors = Partial<Record<string, string>>;
@@ -101,21 +130,25 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
 
   if (!form.mobileNumber) {
     errors.mobileNumber = 'Mobile number is required.';
-  } else if (
-    !MOBILE_RE.test(form.mobileNumber) ||
-    form.mobileNumber.length < 9 ||
-    form.mobileNumber.length > 12
-  ) {
-    errors.mobileNumber = 'Enter a valid mobile number (9–12 characters, optional leading +).';
+  } else if (!MOBILE_RE.test(form.mobileNumber)) {
+    errors.mobileNumber = 'Enter a valid 10-digit mobile number.';
   }
 
-  const addr = form.address.trim();
-  if (!addr) {
-    errors.address = 'Address is required.';
-  } else if (addr.length < 10) {
-    errors.address = 'Address must be at least 10 characters.';
-  } else if (addr.length > 300) {
-    errors.address = 'Address must be 300 characters or fewer.';
+  if (!form.addressLine1 || !form.addressLine1.trim()) {
+    errors.addressLine1 = 'Address line 1 is required.';
+  } else if (form.addressLine1.trim().length > 200) {
+    errors.addressLine1 = 'Address line 1 must be 200 characters or fewer.';
+  }
+  if (!form.city || !form.city.trim()) {
+    errors.city = 'City is required.';
+  }
+  if (!form.state || !form.state.trim()) {
+    errors.state = 'State is required.';
+  }
+  if (!form.pincode || !form.pincode.trim()) {
+    errors.pincode = 'Pincode is required.';
+  } else if (!/^\d{6}$/.test(form.pincode.trim())) {
+    errors.pincode = 'Pincode must be exactly 6 digits.';
   }
 
   if (form.aadhaarNumber && !AADHAAR_RE.test(form.aadhaarNumber)) {
@@ -126,13 +159,8 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     errors.emergencyContactName = 'Name must be at least 2 characters.';
   }
 
-  if (
-    form.emergencyContactMobile &&
-    (!MOBILE_RE.test(form.emergencyContactMobile) ||
-     form.emergencyContactMobile.length < 9 ||
-     form.emergencyContactMobile.length > 12)
-  ) {
-    errors.emergencyContactMobile = 'Enter a valid mobile number (9–12 characters, optional leading +).';
+  if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
+    errors.emergencyContactMobile = 'Enter a valid 10-digit mobile number.';
   }
 
   return errors;
@@ -171,6 +199,12 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
     gender:                 initial?.gender                 ?? 'MALE',
     mobileNumber:           sanitizeMobile(initial?.mobileNumber ?? ''),
     address:                initial?.address                ?? '',
+    addressLine1:           initial?.addressLine1           ?? '',
+    addressLine2:           initial?.addressLine2           ?? '',
+    city:                   initial?.city                   ?? '',
+    state:                  initial?.state                  ?? '',
+    country:                'India',
+    pincode:                initial?.pincode                ?? '',
     aadhaarNumber:          initial?.aadhaarNumber          ?? '',
     emergencyContactName:   initial?.emergencyContactName   ?? '',
     emergencyContactMobile: sanitizeMobile(initial?.emergencyContactMobile ?? ''),
@@ -244,7 +278,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           dateOfBirth:            form.dateOfBirth,
           gender:                 form.gender,
           mobileNumber:           form.mobileNumber,
-          address:                form.address,
+          ...addressPayload(form),
           aadhaarNumber:          form.aadhaarNumber          || undefined,
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
@@ -260,6 +294,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
           bloodGroup:             form.bloodGroup             || undefined,
+          ...addressPayload(form),
           ...buildRegPayment(),
         };
         const result = await createPatient(body).unwrap();
@@ -382,18 +417,21 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
             <div className="space-y-1">
               <Label htmlFor="mobile">Mobile Number *</Label>
-              <Input
-                id="mobile"
-                type="tel"
-                inputMode="tel"
-                maxLength={16}
-                value={form.mobileNumber}
-                onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
-                onBlur={() => touch('mobileNumber')}
-                placeholder="+91XXXXXXXXXX"
-                aria-invalid={!!fe('mobileNumber')}
-                className={inputClass('mobileNumber')}
-              />
+              <div className="flex">
+                <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                <Input
+                  id="mobile"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={form.mobileNumber}
+                  onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
+                  onBlur={() => touch('mobileNumber')}
+                  placeholder="XXXXXXXXXX"
+                  aria-invalid={!!fe('mobileNumber')}
+                  className={`${inputClass('mobileNumber')} rounded-l-none`}
+                />
+              </div>
               {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
             </div>
 
@@ -412,19 +450,83 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
               </select>
             </div>
 
-            <div className="sm:col-span-2 space-y-1">
-              <Label htmlFor="address">Address *</Label>
-              <textarea
-                id="address"
-                value={form.address}
-                onChange={(e) => set('address', e.target.value)}
-                onBlur={() => touch('address')}
-                placeholder="Full address"
-                rows={2}
-                aria-invalid={!!fe('address')}
-                className={`flex w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none ${fe('address') ? 'border-destructive focus:ring-destructive' : 'border-input'}`}
-              />
-              {fe('address') && <p className="text-xs text-destructive">{fe('address')}</p>}
+            <div className="sm:col-span-2 space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="addressLine1">Address Line 1 *</Label>
+                <Input
+                  id="addressLine1"
+                  value={form.addressLine1 ?? ''}
+                  onChange={(e) => set('addressLine1', e.target.value)}
+                  onBlur={() => touch('addressLine1')}
+                  placeholder="House/Flat No., Building, Street"
+                  maxLength={200}
+                  aria-invalid={!!fe('addressLine1')}
+                  className={inputClass('addressLine1')}
+                />
+                {fe('addressLine1') && <p className="text-xs text-destructive">{fe('addressLine1')}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="addressLine2">Address Line 2</Label>
+                <Input
+                  id="addressLine2"
+                  value={form.addressLine2 ?? ''}
+                  onChange={(e) => set('addressLine2', e.target.value)}
+                  placeholder="Area, Landmark - Optional"
+                  maxLength={200}
+                  className={inputClass('addressLine2')}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="pincode">Pincode *</Label>
+                  <Input
+                    id="pincode"
+                    inputMode="numeric"
+                    value={form.pincode ?? ''}
+                    onChange={(e) => set('pincode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onBlur={() => touch('pincode')}
+                    placeholder="6-digit PIN"
+                    maxLength={6}
+                    aria-invalid={!!fe('pincode')}
+                    className={inputClass('pincode')}
+                  />
+                  {fe('pincode') && <p className="text-xs text-destructive">{fe('pincode')}</p>}
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="city">City *</Label>
+                  <Input
+                    id="city"
+                    value={form.city ?? ''}
+                    onChange={(e) => set('city', e.target.value)}
+                    onBlur={() => touch('city')}
+                    placeholder="City"
+                    maxLength={100}
+                    aria-invalid={!!fe('city')}
+                    className={inputClass('city')}
+                  />
+                  {fe('city') && <p className="text-xs text-destructive">{fe('city')}</p>}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="state">State *</Label>
+                <select
+                  id="state"
+                  value={form.state ?? ''}
+                  onChange={(e) => set('state', e.target.value)}
+                  onBlur={() => touch('state')}
+                  aria-invalid={!!fe('state')}
+                  className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${inputClass('state')}`}
+                >
+                  <option value="">— Select state —</option>
+                  {INDIAN_STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {fe('state') && <p className="text-xs text-destructive">{fe('state')}</p>}
+              </div>
             </div>
           </div>
 
@@ -466,18 +568,21 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
 
               <div className="space-y-1">
                 <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
-                <Input
-                  id="ecMobile"
-                  type="tel"
-                  inputMode="tel"
-                  maxLength={16}
-                  value={form.emergencyContactMobile ?? ''}
-                  onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
-                  onBlur={() => touch('emergencyContactMobile')}
-                  placeholder="+91XXXXXXXXXX"
-                  aria-invalid={!!fe('emergencyContactMobile')}
-                  className={inputClass('emergencyContactMobile')}
-                />
+                <div className="flex">
+                  <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                  <Input
+                    id="ecMobile"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={form.emergencyContactMobile ?? ''}
+                    onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
+                    onBlur={() => touch('emergencyContactMobile')}
+                    placeholder="XXXXXXXXXX"
+                    aria-invalid={!!fe('emergencyContactMobile')}
+                    className={`${inputClass('emergencyContactMobile')} rounded-l-none`}
+                  />
+                </div>
                 {fe('emergencyContactMobile') && <p className="text-xs text-destructive">{fe('emergencyContactMobile')}</p>}
               </div>
             </div>
@@ -548,7 +653,7 @@ function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModa
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || !!duplicateInfo}>
+            <Button type="submit" disabled={isLoading || !!duplicateInfo || hasErrors}>
               {isLoading ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Register Patient'}
             </Button>
           </div>
@@ -683,7 +788,17 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
               {row('Mobile',        patient.mobileNumber)}
               {row('Blood Group',   patient.bloodGroup)}
               {row('Aadhaar',       patient.aadhaarNumber)}
-              {row('Address',       patient.address)}
+              {patient.addressLine1 ? (
+                <>
+                  {row('Address Line 1', patient.addressLine1)}
+                  {patient.addressLine2 && row('Address Line 2', patient.addressLine2)}
+                  {patient.pincode && row('Pincode', patient.pincode)}
+                  {row('City',  patient.city)}
+                  {row('State', patient.state)}
+                </>
+              ) : (
+                row('Address', patient.address)
+              )}
               {row('EC Name',       patient.emergencyContactName)}
               {row('EC Mobile',     patient.emergencyContactMobile)}
               {row('Registered',    formatDate(patient.createdAt))}

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { todayLocalISO, clampToToday } from '@/lib/date';
 
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
@@ -34,8 +35,8 @@ export default function BillingPage() {
   const { data, isLoading, isError } = useListChargesQuery({
     patientId: patientId || undefined,
     category:  category  || undefined,
-    startDate: startDate || undefined,
-    endDate:   endDate   || undefined,
+    startDate: startDate ? clampToToday(startDate) : undefined,
+    endDate:   endDate   ? clampToToday(endDate)   : undefined,
     addedBy:   addedBy   || undefined,
     page,
     limit: 20,
@@ -67,11 +68,11 @@ export default function BillingPage() {
         </div>
         <div>
           <Label>Start Date</Label>
-          <Input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} />
+          <Input type="date" max={todayLocalISO()} value={startDate} onChange={e => { setStartDate(e.target.value); setPage(1); }} />
         </div>
         <div>
           <Label>End Date</Label>
-          <Input type="date" value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} />
+          <Input type="date" max={todayLocalISO()} value={endDate} onChange={e => { setEndDate(e.target.value); setPage(1); }} />
         </div>
       </div>
 

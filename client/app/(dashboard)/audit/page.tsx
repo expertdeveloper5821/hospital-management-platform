@@ -20,6 +20,7 @@ import { Label }  from '@/components/ui/label';
 import { Badge }  from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { todayLocalISO, clampToToday } from '@/lib/date';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,8 +84,8 @@ export default function AuditPage() {
     ...(applied.entityType && { entityType: applied.entityType }),
     ...(applied.entityId   && { entityId:   applied.entityId   }),
     ...(applied.userId     && { userId:      applied.userId     }),
-    ...(applied.dateFrom   && { dateFrom:    applied.dateFrom   }),
-    ...(applied.dateTo     && { dateTo:      applied.dateTo     }),
+    ...(applied.dateFrom   && { dateFrom:    clampToToday(applied.dateFrom) }),
+    ...(applied.dateTo     && { dateTo:      clampToToday(applied.dateTo)   }),
     page,
     limit: LIMIT,
   };
@@ -210,6 +211,7 @@ export default function AuditPage() {
               <Input
                 id="dateFrom"
                 type="date"
+                max={todayLocalISO()}
                 value={filters.dateFrom}
                 onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
               />
@@ -221,6 +223,7 @@ export default function AuditPage() {
               <Input
                 id="dateTo"
                 type="date"
+                max={todayLocalISO()}
                 value={filters.dateTo}
                 onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
               />

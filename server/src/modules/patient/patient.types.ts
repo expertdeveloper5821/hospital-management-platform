@@ -25,6 +25,12 @@ export interface CreatePatientRequest {
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
+  addressLine1?:          string;
+  addressLine2?:          string;
+  city?:                  string;
+  state?:                 string;
+  country?:               string;
+  pincode?:               string;
   aadhaarNumber?:         string;
   emergencyContactName?:  string;
   emergencyContactMobile?: string;
@@ -41,6 +47,12 @@ export interface UpdatePatientRequest {
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;
+  addressLine1?:           string;
+  addressLine2?:           string;
+  city?:                   string;
+  state?:                  string;
+  country?:                string;
+  pincode?:                string;
   aadhaarNumber?:          string;
   emergencyContactName?:   string;
   emergencyContactMobile?: string;
