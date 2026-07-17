@@ -374,6 +374,21 @@ describe('PATCH /api/tenants/:tenantId/branding', () => {
     expect(res.status).toBe(200);
   });
 
+  test('200 — updating displayName also syncs the top-level name (Super Admin reads name)', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = hospitalAdminToken(tenant._id.toString());
+
+    await request(app)
+      .patch(`/api/tenants/${tenant._id}/branding`)
+      .set(bearer(token))
+      .send({ displayName: 'Renamed Hospital' })
+      .expect(200);
+
+    const updated = await TenantModel.findById(tenant._id).lean();
+    expect(updated?.name).toBe('Renamed Hospital');
+    expect(updated?.branding?.displayName).toBe('Renamed Hospital');
+  });
+
   test('400 — invalid primaryColor format', async () => {
     const tenant = await seedActiveTenant();
     const token  = hospitalAdminToken(tenant._id.toString());

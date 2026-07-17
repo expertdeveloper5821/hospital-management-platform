@@ -103,6 +103,32 @@ describe('POST /api/users', () => {
     expect(res.body.data.role).toBe(UserRole.DOCTOR);
   });
 
+  test('403 — cannot create a user with the Hospital Admin role', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'newadmin@h.com', name: 'New Admin', role: UserRole.HOSPITAL_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — cannot create a user with the Super Admin role (no privilege escalation)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'super@h.com', name: 'Escalation', role: UserRole.SUPER_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
   test('201 — HR can create users', async () => {
     const tenant = await seedTenant();
     const hr     = await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
@@ -418,7 +444,7 @@ describe('PATCH /api/users/:userId/role', () => {
     expect(res.status).toBe(200);
   });
 
-  test('409 — cannot demote last Hospital Admin', async () => {
+  test('403 — cannot change your own role', async () => {
     const tenant = await seedTenant();
     const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
     const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
@@ -426,6 +452,48 @@ describe('PATCH /api/users/:userId/role', () => {
     const res = await request(app)
       .patch(`/api/users/${admin._id}/role`)
       .set(bearer(token))
+      .send({ role: UserRole.NURSE });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — cannot assign the Hospital Admin role via role update', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurse._id}/role`)
+      .set(bearer(token))
+      .send({ role: UserRole.HOSPITAL_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — cannot assign the Super Admin role via role update (no privilege escalation)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurse._id}/role`)
+      .set(bearer(token))
+      .send({ role: UserRole.SUPER_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('409 — cannot demote the last Hospital Admin (non-self actor)', async () => {
+    const tenant  = await seedTenant();
+    const admin   = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const hr      = await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
+    const hrToken = tokenFor(hr._id.toString(), tenant._id.toString(), UserRole.HR);
+
+    const res = await request(app)
+      .patch(`/api/users/${admin._id}/role`)
+      .set(bearer(hrToken))
       .send({ role: UserRole.NURSE });
 
     expect(res.status).toBe(409);

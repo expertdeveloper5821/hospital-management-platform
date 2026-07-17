@@ -28,6 +28,8 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// HOSPITAL_ADMIN is intentionally excluded — it cannot be assigned via user
+// management (enforced on the backend too). Tenant admins come from onboarding.
 const ASSIGNABLE_ROLES = [
   UserRole.MANAGER,
   UserRole.DOCTOR,
@@ -39,7 +41,6 @@ const ASSIGNABLE_ROLES = [
   UserRole.HR,
   UserRole.ADMIN,
   UserRole.STAFF,
-  UserRole.HOSPITAL_ADMIN,
 ] as const;
 
 const USER_NAME_RE = /^[A-Za-z][A-Za-z .'-]{1,199}$/;
@@ -306,6 +307,7 @@ function UserTableSkeleton() {
 
 function UsersTab() {
   const currentUserRole = useAppSelector((s) => s.auth.profile?.role);
+  const currentUserId   = useAppSelector((s) => s.auth.profile?.userId);
   const canDeactivate   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
 
   const [page,          setPage]          = useState(1);
@@ -505,9 +507,11 @@ function UsersTab() {
                       ) : (
                         user.isActive && (
                           <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                              Edit Role
-                            </Button>
+                            {user.userId !== currentUserId && (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                                Edit Role
+                              </Button>
+                            )}
                             {canDeactivate && (
                               <Button
                                 size="sm"
@@ -592,9 +596,11 @@ function UsersTab() {
                             <div className="flex items-center justify-end gap-2">
                               {user.isActive && editingRoleId !== user.userId && (
                                 <>
-                                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                                    Edit Role
-                                  </Button>
+                                  {user.userId !== currentUserId && (
+                                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                                      Edit Role
+                                    </Button>
+                                  )}
                                   {canDeactivate && (
                                     <Button
                                       size="sm"

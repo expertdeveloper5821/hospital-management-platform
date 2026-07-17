@@ -220,7 +220,11 @@ export class TenantService {
     if (data.displayName)  update.displayName  = data.displayName;
     if (data.primaryColor) update.primaryColor = data.primaryColor;
 
-    await tenantRepository.updateBranding(tenantId, update);
+    // Business rule: the top-level tenant name mirrors the display name so the
+    // Super Admin portal (which reads `name`) reflects hospital renames.
+    const syncedName = data.displayName;
+
+    await tenantRepository.updateBranding(tenantId, update, syncedName);
 
     await auditService.log({
       entityType:    AuditEntityType.TENANT,
@@ -228,8 +232,8 @@ export class TenantService {
       action:        'UPDATE',
       userId:        adminId ?? 'unknown',
       tenantId,
-      previousValue: { branding: tenant.branding },
-      newValue:      { branding: update },
+      previousValue: { branding: tenant.branding, ...(syncedName !== undefined && { name: tenant.name }) },
+      newValue:      { branding: update, ...(syncedName !== undefined && { name: syncedName }) },
     });
   }
 }
