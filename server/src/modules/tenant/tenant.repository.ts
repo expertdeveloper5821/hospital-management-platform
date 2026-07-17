@@ -47,7 +47,13 @@ export class TenantRepository {
     assertDbConnected();
     const update: Record<string, unknown> = {};
     if (branding.logoUrl)     update['branding.logoUrl']     = branding.logoUrl;
-    if (branding.displayName) update['branding.displayName'] = branding.displayName;
+    if (branding.displayName) {
+      update['branding.displayName'] = branding.displayName;
+      // Keep the top-level `name` in sync. It equals branding.displayName at
+      // onboarding, and the Super Admin list reads `name` — so without this the
+      // updated hospital name never reaches the Super Admin portal.
+      update['name'] = branding.displayName;
+    }
     if (branding.primaryColor) update['branding.primaryColor'] = branding.primaryColor;
     await TenantModel.findByIdAndUpdate(tenantId, { $set: update });
   }

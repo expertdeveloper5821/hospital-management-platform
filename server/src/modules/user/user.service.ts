@@ -10,11 +10,17 @@ import { auditService } from '../../shared/services/audit.service';
 import { s3Service } from '../../shared/services/s3.service';
 import { addToDenylist } from '../../shared/middleware/token-denylist';
 import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
+import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
 
 export class UserService {
   async createUser(tenantId: string, data: CreateUserRequest, createdBy: string): Promise<IUser> {
+    // The Hospital Admin role cannot be assigned via user management; the tenant's
+    // admin is provisioned only through tenant onboarding (SUPER_ADMIN flow).
+    if (data.role === UserRole.HOSPITAL_ADMIN) {
+      throw new ForbiddenError('The Hospital Admin role cannot be assigned to a user.');
+    }
+
     // Check for duplicate email within tenant
     const existing = await userRepository.findByEmail(tenantId, data.email);
     if (existing) throw new ConflictError('A user with this email already exists in this tenant');
@@ -82,11 +88,21 @@ export class UserService {
     newRole: UserRole,
     requestedBy: string,
   ): Promise<void> {
+    // A Hospital Admin cannot change their own role.
+    if (userId === requestedBy) {
+      throw new ForbiddenError('You cannot change your own role.');
+    }
+    // The Hospital Admin role cannot be assigned to any user.
+    if (newRole === UserRole.HOSPITAL_ADMIN) {
+      throw new ForbiddenError('The Hospital Admin role cannot be assigned to a user.');
+    }
+
     const user = await userRepository.findById(tenantId, userId);
     if (!user) throw new NotFoundError('User not found');
 
-    // Last-admin guard when demoting an admin (FR-04.7)
-    if (user.role === UserRole.HOSPITAL_ADMIN && newRole !== UserRole.HOSPITAL_ADMIN) {
+    // Last-admin guard when demoting an admin (FR-04.7). newRole can no longer be
+    // HOSPITAL_ADMIN (blocked above), so any role change on an admin is a demotion.
+    if (user.role === UserRole.HOSPITAL_ADMIN) {
       const activeAdminCount = await userRepository.countActiveAdmins(tenantId);
       if (activeAdminCount <= 1) {
         throw new ConflictError(
