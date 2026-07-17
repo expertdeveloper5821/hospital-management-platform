@@ -13,12 +13,17 @@ import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../sh
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
 
+// Roles that must never be created or assigned through tenant user-management.
+// SUPER_ADMIN would escalate privileges outside tenant scope; HOSPITAL_ADMIN is
+// provisioned only through tenant onboarding.
+const NON_ASSIGNABLE_ROLES: readonly UserRole[] = [UserRole.SUPER_ADMIN, UserRole.HOSPITAL_ADMIN];
+
 export class UserService {
   async createUser(tenantId: string, data: CreateUserRequest, createdBy: string): Promise<IUser> {
-    // The Hospital Admin role cannot be assigned via user management; the tenant's
-    // admin is provisioned only through tenant onboarding (SUPER_ADMIN flow).
-    if (data.role === UserRole.HOSPITAL_ADMIN) {
-      throw new ForbiddenError('The Hospital Admin role cannot be assigned to a user.');
+    // SUPER_ADMIN / HOSPITAL_ADMIN cannot be created via tenant user-management —
+    // prevents privilege escalation and enforces admin-onboarding-only.
+    if (NON_ASSIGNABLE_ROLES.includes(data.role)) {
+      throw new ForbiddenError(`The ${data.role} role cannot be assigned to a user.`);
     }
 
     // Check for duplicate email within tenant
@@ -88,13 +93,14 @@ export class UserService {
     newRole: UserRole,
     requestedBy: string,
   ): Promise<void> {
-    // A Hospital Admin cannot change their own role.
+    // A user cannot change their own role.
     if (userId === requestedBy) {
       throw new ForbiddenError('You cannot change your own role.');
     }
-    // The Hospital Admin role cannot be assigned to any user.
-    if (newRole === UserRole.HOSPITAL_ADMIN) {
-      throw new ForbiddenError('The Hospital Admin role cannot be assigned to a user.');
+    // SUPER_ADMIN / HOSPITAL_ADMIN cannot be assigned to any user (privilege
+    // escalation / onboarding-only).
+    if (NON_ASSIGNABLE_ROLES.includes(newRole)) {
+      throw new ForbiddenError(`The ${newRole} role cannot be assigned to a user.`);
     }
 
     const user = await userRepository.findById(tenantId, userId);

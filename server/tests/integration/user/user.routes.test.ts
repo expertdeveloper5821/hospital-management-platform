@@ -116,6 +116,19 @@ describe('POST /api/users', () => {
     expect(res.status).toBe(403);
   });
 
+  test('403 — cannot create a user with the Super Admin role (no privilege escalation)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'super@h.com', name: 'Escalation', role: UserRole.SUPER_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
   test('201 — HR can create users', async () => {
     const tenant = await seedTenant();
     const hr     = await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
@@ -454,6 +467,20 @@ describe('PATCH /api/users/:userId/role', () => {
       .patch(`/api/users/${nurse._id}/role`)
       .set(bearer(token))
       .send({ role: UserRole.HOSPITAL_ADMIN });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — cannot assign the Super Admin role via role update (no privilege escalation)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurse._id}/role`)
+      .set(bearer(token))
+      .send({ role: UserRole.SUPER_ADMIN });
 
     expect(res.status).toBe(403);
   });
