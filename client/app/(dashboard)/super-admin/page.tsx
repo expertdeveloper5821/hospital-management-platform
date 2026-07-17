@@ -1,12 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   useListTenantsQuery,
   useApproveTenantMutation,
   useDeactivateTenantMutation,
+  useReactivateTenantMutation,
   useResendInviteMutation,
 } from '@/store/api/tenant.api';
+import { useAppSelector } from '@/store/hooks';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +32,14 @@ function statusExtraClass(status: string): string {
 }
 
 export default function SuperAdminPage() {
+  const router  = useRouter();
+  const profile = useAppSelector((s) => s.auth.profile);
+
+  if (profile && profile.role !== 'SUPER_ADMIN') {
+    router.replace('/dashboard');
+    return null;
+  }
+
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -45,13 +56,22 @@ export default function SuperAdminPage() {
   const { data, isLoading, isFetching, refetch } = useListTenantsQuery({ page, limit, search: search || undefined });
   const [approveTenant,    { isLoading: approving   }] = useApproveTenantMutation();
   const [deactivateTenant, { isLoading: deactivating }] = useDeactivateTenantMutation();
+  const [reactivateTenant, { isLoading: reactivating }] = useReactivateTenantMutation();
   const [resendInvite,     { isLoading: resending    }] = useResendInviteMutation();
 
   const tenants    = data?.data ?? [];
   const total      = data?.total ?? 0;
   const totalPages = Math.ceil(total / limit);
 
-  const isBusy = approving || deactivating || resending;
+  const isBusy = approving || deactivating || reactivating || resending;
+
+  function handleDeactivate(tenant: typeof tenants[0]) {
+    const confirmed = window.confirm(
+      'Are you sure you want to deactivate this hospital? Hospital users may lose access.',
+    );
+    if (!confirmed) return;
+    deactivateTenant(tenant._id);
+  }
 
   function TenantActions({ tenant }: { tenant: typeof tenants[0] }) {
     return (
@@ -85,12 +105,24 @@ export default function SuperAdminPage() {
               variant="outline"
               className="h-7 px-2 text-xs text-destructive hover:text-destructive"
               disabled={isBusy}
-              onClick={() => deactivateTenant(tenant._id)}
+              onClick={() => handleDeactivate(tenant)}
             >
               <XCircle className="h-3.5 w-3.5 mr-1" />
               Deactivate
             </Button>
           </>
+        )}
+        {tenant.status === 'INACTIVE' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
+            disabled={isBusy}
+            onClick={() => reactivateTenant(tenant._id)}
+          >
+            <CheckCircle className="h-3.5 w-3.5 mr-1" />
+            Reactivate
+          </Button>
         )}
       </>
     );

@@ -1,4 +1,5 @@
 export { authenticateJWT } from './authenticate-jwt';
+export { authenticateSuperAdmin } from './authenticate-super-admin';
 export { scopeTenant }     from './scope-tenant';
 export { requireRole }     from './require-role';
 export { requireFirstPasswordChange } from './require-first-password-change';

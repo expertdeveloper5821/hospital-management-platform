@@ -67,10 +67,10 @@ function bearer(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
-async function seedPendingTenant(name = 'Test Hospital') {
+async function seedPendingTenant(name = 'Test Hospital', adminEmail = 'admin@testhospital.com') {
   return TenantModel.create({
     name,
-    adminEmail: 'admin@testhospital.com',
+    adminEmail,
     status: TenantStatus.PENDING_VERIFICATION,
     onboardingDocuments: {
       registrationCertificate: 's3-key-1',
@@ -87,6 +87,21 @@ async function seedActiveTenant(name = 'Active Hospital') {
     name,
     adminEmail: 'admin@activehospital.com',
     status: TenantStatus.ACTIVE,
+    onboardingDocuments: {
+      registrationCertificate: 's3-key-1',
+      gstNumber:               'GST123',
+      panCard:                 's3-key-2',
+      addressProof:            's3-key-3',
+    },
+    branding: { displayName: name, primaryColor: '#1A73E8' },
+  });
+}
+
+async function seedInactiveTenant(name = 'Inactive Hospital') {
+  return TenantModel.create({
+    name,
+    adminEmail: 'admin@inactivehospital.com',
+    status: TenantStatus.INACTIVE,
     onboardingDocuments: {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
@@ -160,13 +175,56 @@ describe('POST /api/tenants', () => {
 
     expect(res.status).toBe(400);
   });
+
+  test('409 — duplicate adminEmail is rejected', async () => {
+    await seedActiveTenant();
+    const token = superAdminToken();
+
+    const res = await request(app)
+      .post('/api/tenants')
+      .set(bearer(token))
+      .send({
+        name:       'Duplicate Hospital',
+        adminEmail: 'admin@activehospital.com',
+        onboardingDocuments: {
+          registrationCertificate: 's3-reg-cert',
+          gstNumber:               'GST999',
+          panCard:                 's3-pan',
+          addressProof:            's3-addr',
+        },
+      });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/already exists/i);
+  });
+
+  test('409 — duplicate adminEmail rejected regardless of case', async () => {
+    await seedActiveTenant();
+    const token = superAdminToken();
+
+    const res = await request(app)
+      .post('/api/tenants')
+      .set(bearer(token))
+      .send({
+        name:       'Duplicate Hospital 2',
+        adminEmail: 'Admin@ActiveHospital.com',
+        onboardingDocuments: {
+          registrationCertificate: 's3-reg-cert',
+          gstNumber:               'GST998',
+          panCard:                 's3-pan',
+          addressProof:            's3-addr',
+        },
+      });
+
+    expect(res.status).toBe(409);
+  });
 });
 
 // ─── GET /api/tenants ─────────────────────────────────────────────────────────
 describe('GET /api/tenants', () => {
   test('200 — Super Admin lists tenants', async () => {
-    await seedPendingTenant('Hospital A');
-    await seedPendingTenant('Hospital B');
+    await seedPendingTenant('Hospital A', 'admin@hospitala.com');
+    await seedPendingTenant('Hospital B', 'admin@hospitalb.com');
     const token = superAdminToken();
 
     const res = await request(app)
@@ -241,6 +299,51 @@ describe('PATCH /api/tenants/:tenantId/deactivate', () => {
   test('401 — unauthenticated request', async () => {
     const tenant = await seedActiveTenant();
     const res    = await request(app).patch(`/api/tenants/${tenant._id}/deactivate`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── PATCH /api/tenants/:tenantId/reactivate ─────────────────────────────────
+describe('PATCH /api/tenants/:tenantId/reactivate', () => {
+  test('200 — reactivates an INACTIVE tenant', async () => {
+    const tenant = await seedInactiveTenant();
+    const token  = superAdminToken();
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/reactivate`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+
+    const updated = await TenantModel.findById(tenant._id);
+    expect(updated?.status).toBe(TenantStatus.ACTIVE);
+  });
+
+  test('409 — cannot reactivate a tenant that is not INACTIVE', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = superAdminToken();
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/reactivate`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+  });
+
+  test('404 — unknown tenantId returns 404', async () => {
+    const fakeId = new mongoose.Types.ObjectId().toString();
+    const token  = superAdminToken();
+
+    const res = await request(app)
+      .patch(`/api/tenants/${fakeId}/reactivate`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('401 — unauthenticated request', async () => {
+    const tenant = await seedInactiveTenant();
+    const res    = await request(app).patch(`/api/tenants/${tenant._id}/reactivate`);
     expect(res.status).toBe(401);
   });
 });

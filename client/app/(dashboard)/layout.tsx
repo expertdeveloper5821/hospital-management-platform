@@ -93,16 +93,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex flex-col flex-1 overflow-hidden min-w-0">
           <header className="flex items-center justify-between h-16 px-4 sm:px-6 border-b bg-background shrink-0">
             {/* Left: hamburger (mobile) + greeting (desktop) */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <button
-                className="md:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                className="md:hidden p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
                 onClick={() => setSidebarOpen(true)}
                 aria-label="Open navigation"
               >
                 <Menu className="h-5 w-5" />
               </button>
               {!isSuperAdmin && (
-                <p className="hidden md:block text-sm font-medium text-foreground">
+                <p className="hidden md:block text-sm font-medium text-foreground truncate">
                   Hi, {getTimeGreeting()}{myProfile?.name ? `, ${myProfile.name}` : ''}.
                 </p>
               )}

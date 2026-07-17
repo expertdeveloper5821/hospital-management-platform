@@ -22,6 +22,7 @@ import { Input }                         from '@/components/ui/input';
 import { Label }                         from '@/components/ui/label';
 import { Badge }                         from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { CharCounter } from '@/components/ui/char-counter';
 import {
   Package,
   Plus,
@@ -38,6 +39,20 @@ import {
   History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { buildUpdateInventoryItemPayload } from './update-item-payload';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+// Must match INVENTORY_CATEGORIES in server/src/modules/inventory/inventory.types.ts
+const INVENTORY_CATEGORIES = [
+  'Equipment',
+  'Consumable',
+  'Medication',
+  'PPE',
+  'Fluids',
+  'Medical Supplies',
+  'Other',
+] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +65,14 @@ function formatDateTime(iso: string) {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+}
+
+// Strips everything but digits so a controlled number input never keeps a stale
+// leading zero (or a pasted "-"/"e"/letter) — e.g. typing "3" while the field
+// reads "0" can no longer produce "03".
+function parseDigits(raw: string): number | null {
+  const digits = raw.replace(/\D/g, '');
+  return digits === '' ? null : parseInt(digits, 10);
 }
 
 // ─── Create Item Modal ────────────────────────────────────────────────────────
@@ -122,13 +145,18 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
 
             <div className="space-y-1.5">
               <Label htmlFor="ci-category">Category *</Label>
-              <Input
+              <select
                 id="ci-category"
                 value={form.category}
                 onChange={(e) => set('category', e.target.value)}
-                placeholder="e.g. Consumable, Equipment, Medicine…"
                 required
-              />
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="" disabled>Select a category…</option>
+                {INVENTORY_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1.5">
@@ -147,11 +175,12 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               <Input
                 id="ci-qty"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.quantity}
-                onChange={(e) => set('quantity', parseInt(e.target.value, 10) || 0)}
-                required
+                value={form.quantity === 0 ? '' : form.quantity}
+                onChange={(e) => set('quantity', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
             </div>
 
@@ -160,11 +189,12 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               <Input
                 id="ci-threshold"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.lowStockThreshold}
-                onChange={(e) => set('lowStockThreshold', parseInt(e.target.value, 10) || 0)}
-                required
+                value={form.lowStockThreshold === 0 ? '' : form.lowStockThreshold}
+                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
             </div>
 
@@ -176,8 +206,10 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
                 value={form.description ?? ''}
                 onChange={(e) => set('description', e.target.value)}
                 placeholder="Additional details about this item…"
+                maxLength={1000}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               />
+              <CharCounter value={form.description ?? ''} max={1000} />
             </div>
           </div>
 
@@ -224,14 +256,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
     if (!form.unit?.trim())     { setError('Unit is required.'); return; }
 
     try {
-      await updateItem({
-        itemId:      item.itemId,
-        name:        form.name?.trim(),
-        category:    form.category?.trim(),
-        unit:        form.unit?.trim(),
-        lowStockThreshold: form.lowStockThreshold,
-        description: form.description?.trim() || null,
-      }).unwrap();
+      await updateItem(buildUpdateInventoryItemPayload(item, form)).unwrap();
       onClose();
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to update item.');
@@ -266,12 +291,21 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
 
             <div className="space-y-1.5">
               <Label htmlFor="ei-category">Category *</Label>
-              <Input
+              <select
                 id="ei-category"
                 value={form.category ?? ''}
                 onChange={(e) => set('category', e.target.value)}
                 required
-              />
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="" disabled>Select a category…</option>
+                {!(INVENTORY_CATEGORIES as readonly string[]).includes(item.category) && (
+                  <option value={item.category}>{item.category}</option>
+                )}
+                {INVENTORY_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1.5">
@@ -289,10 +323,12 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
               <Input
                 id="ei-threshold"
                 type="number"
+                inputMode="numeric"
                 min={0}
                 step={1}
-                value={form.lowStockThreshold ?? 0}
-                onChange={(e) => set('lowStockThreshold', parseInt(e.target.value, 10) || 0)}
+                value={!form.lowStockThreshold ? '' : form.lowStockThreshold}
+                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                placeholder="0"
               />
               <p className="text-xs text-muted-foreground">To update stock quantity, use the Update Stock action.</p>
             </div>
@@ -304,8 +340,10 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
                 rows={2}
                 value={form.description ?? ''}
                 onChange={(e) => set('description', e.target.value)}
+                maxLength={1000}
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               />
+              <CharCounter value={form.description ?? ''} max={1000} />
             </div>
           </div>
 
@@ -585,11 +623,12 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
             <Input
               id="su-qty"
               type="number"
+              inputMode="numeric"
               min={1}
               step={1}
-              value={quantityChange}
-              onChange={(e) => setQuantityChange(parseInt(e.target.value, 10) || 1)}
-              required
+              value={quantityChange === 0 ? '' : quantityChange}
+              onChange={(e) => setQuantityChange(parseDigits(e.target.value) ?? 0)}
+              placeholder="1"
             />
           </div>
 
@@ -673,11 +712,12 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
             <Input
               id="ut-threshold"
               type="number"
+              inputMode="numeric"
               min={0}
               step={1}
-              value={threshold}
-              onChange={(e) => setThreshold(parseInt(e.target.value, 10) || 0)}
-              required
+              value={threshold === 0 ? '' : threshold}
+              onChange={(e) => setThreshold(parseDigits(e.target.value) ?? 0)}
+              placeholder="0"
             />
             <p className="text-xs text-muted-foreground">
               An alert fires when stock falls below this quantity.
@@ -939,6 +979,7 @@ export default function InventoryPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Quantity</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground hidden md:table-cell">Threshold</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Unit</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
                   </tr>
@@ -962,10 +1003,13 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums">
                         {item.quantity}
-                        <span className="text-xs font-normal text-muted-foreground ml-1">{item.unit}</span>
+                        <span className="text-xs font-normal text-muted-foreground ml-1 md:hidden">{item.unit}</span>
                       </td>
                       <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground tabular-nums">
-                        {item.lowStockThreshold} {item.unit}
+                        {item.lowStockThreshold}
+                      </td>
+                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
+                        {item.unit}
                       </td>
                       <td className="px-4 py-3">
                         {item.isLowStock ? (

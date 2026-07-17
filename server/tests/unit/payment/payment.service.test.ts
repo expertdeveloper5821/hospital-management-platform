@@ -149,6 +149,63 @@ describe('PaymentService — createManualPayment', () => {
 
     expect(result.paymentMethod).toBe(PaymentMethod.CHEQUE);
   });
+
+  test('receipt upload failure does not fail the payment and logs payment-correlated context', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockS3.uploadFile = jest.fn().mockRejectedValue(new Error('S3 unavailable'));
+    mockPayRepo.save  = jest.fn().mockResolvedValue(makePayment({ receiptS3Key: null }));
+
+    try {
+      const result = await service.createManualPayment(
+        { patientId: PATIENT_ID, amount: 500, paymentMethod: PaymentMethod.CASH, description: 'Consultation fee' },
+        TENANT, USER,
+      );
+
+      expect(result.status).toBe(PaymentStatus.COMPLETED);
+      expect(mockPayRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: PaymentStatus.COMPLETED, receiptS3Key: null }),
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.any(String));
+      const log = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(log).toEqual(expect.objectContaining({
+        level:    'warn',
+        event:    'manual_payment_receipt_failed',
+        tenantId: TENANT,
+        patientId: PATIENT_ID,
+        message:  'S3 unavailable',
+      }));
+      expect(log.paymentId).toEqual(expect.any(String));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('receipt PDF generation failure does not fail the payment and is logged', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockPdf.generateReceipt = jest.fn().mockRejectedValue(new Error('PDF failed'));
+    mockPayRepo.save        = jest.fn().mockResolvedValue(makePayment({ receiptS3Key: null }));
+
+    try {
+      const result = await service.createManualPayment(
+        { patientId: PATIENT_ID, amount: 500, paymentMethod: PaymentMethod.CASH, description: 'Consultation fee' },
+        TENANT, USER,
+      );
+
+      expect(result.status).toBe(PaymentStatus.COMPLETED);
+      expect(mockS3.uploadFile).not.toHaveBeenCalled();
+
+      const log = JSON.parse(warnSpy.mock.calls[0][0] as string);
+      expect(log).toEqual(expect.objectContaining({
+        event:     'manual_payment_receipt_failed',
+        tenantId:  TENANT,
+        patientId: PATIENT_ID,
+        message:   'PDF failed',
+      }));
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 // ─── handleRazorpayWebhook ────────────────────────────────────────────────────

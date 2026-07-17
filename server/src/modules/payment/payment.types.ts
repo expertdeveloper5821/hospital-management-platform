@@ -19,28 +19,52 @@ export const PaymentStatus = {
 
 export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
+// ─── PaymentReferenceType ─────────────────────────────────────────────────────
+// What this payment was collected for — lets a caller look up "the payment for
+// visit X" by exact reference instead of guessing from patientId + date.
+export const PaymentReferenceType = {
+  OPD_VISIT:    'OPD_VISIT',
+  IPD_ADMISSION: 'IPD_ADMISSION',
+  REGISTRATION: 'REGISTRATION',
+} as const;
+
+export type PaymentReferenceType = typeof PaymentReferenceType[keyof typeof PaymentReferenceType];
+
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
+
+const MAX_AMOUNT_DIGITS = 10;
+
+// Amount must be a positive number with at most 2 decimal places (paise/cents) —
+// rejects garbage like 500.505 that would silently round differently on save vs. display.
+// Also capped at 10 total digits to match the frontend's input limit.
+const amountSchema = z.number({ invalid_type_error: 'amount must be a number' })
+  .positive('Amount must be greater than zero')
+  .refine((val) => Math.round(val * 100) === val * 100, 'Amount cannot have more than 2 decimal places')
+  .refine(
+    (val) => String(val).replace(/[^0-9]/g, '').length <= MAX_AMOUNT_DIGITS,
+    'Amount cannot exceed 10 digits.',
+  );
 
 export const CreateManualPaymentSchema = z.object({
   patientId:     z.string().min(1, 'patientId is required'),
-  amount:        z.number({ invalid_type_error: 'amount must be a number' })
-                  .positive('Amount must be greater than zero'),
+  amount:        amountSchema,
   paymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.CHEQUE, PaymentMethod.UPI, PaymentMethod.CARD], {
     errorMap: () => ({ message: 'paymentMethod must be CASH, CHEQUE, UPI, or CARD for manual payments' }),
   }),
-  description:   z.string().min(1, 'description is required').max(500).trim(),
+  description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
+  referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
+  referenceId:   z.string().min(1).optional(),
 });
 
 export type CreateManualPaymentInput = z.infer<typeof CreateManualPaymentSchema>;
 
 export const CreateRazorpayOrderSchema = z.object({
   patientId:     z.string().min(1, 'patientId is required'),
-  amount:        z.number({ invalid_type_error: 'amount must be a number' })
-                  .positive('Amount must be greater than zero'),
+  amount:        amountSchema,
   paymentMethod: z.enum([PaymentMethod.UPI, PaymentMethod.CARD], {
     errorMap: () => ({ message: 'paymentMethod must be UPI or CARD for Razorpay payments' }),
   }),
-  description:   z.string().min(1, 'description is required').max(500).trim(),
+  description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
 });
 
 export type CreateRazorpayOrderInput = z.infer<typeof CreateRazorpayOrderSchema>;
@@ -50,6 +74,8 @@ export const ListPaymentsQuerySchema = z.object({
   dateFrom:      z.string().datetime({ offset: true }).optional(),
   dateTo:        z.string().datetime({ offset: true }).optional(),
   paymentMethod: z.enum(['CASH', 'CHEQUE', 'UPI', 'CARD']).optional(),
+  referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
+  referenceId:   z.string().min(1).optional(),
   page:          z.coerce.number().int().min(1).default(1),
   limit:         z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -77,6 +103,8 @@ export interface PaymentResponse {
   receiptUrl:        string | null;
   razorpayOrderId:   string | null;
   razorpayPaymentId: string | null;
+  referenceType:     PaymentReferenceType | null;
+  referenceId:       string | null;
   createdBy:         string;
   createdAt:         string;
   updatedAt:         string;

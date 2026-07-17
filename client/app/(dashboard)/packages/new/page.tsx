@@ -7,6 +7,7 @@ import { useCreatePackageMutation } from '@/store/api/packages.api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { CharCounter } from '@/components/ui/char-counter';
 
 export default function NewPackagePage() {
   const router  = useRouter();
@@ -63,6 +64,7 @@ export default function NewPackagePage() {
             value={description}
             onChange={e => setDescription(e.target.value)}
           />
+          <CharCounter value={description} max={500} />
         </div>
 
         <div>

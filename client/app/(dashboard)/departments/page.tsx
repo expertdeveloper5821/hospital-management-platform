@@ -13,6 +13,7 @@ import type { DepartmentResponse, UserResponse } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { CharCounter } from '@/components/ui/char-counter';
 import { Building2, Plus, Pencil, Trash2, X, RefreshCw } from 'lucide-react';
 
 // ─── Create / Edit Modal ──────────────────────────────────────────────────────
@@ -123,6 +124,7 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
               onChange={(e) => setDescription(e.target.value)}
               maxLength={1000}
             />
+            <CharCounter value={description} max={1000} />
           </div>
 
           {/* Doctors section — only when editing (need a departmentId to assign) */}
@@ -313,8 +315,8 @@ export default function DepartmentsPage() {
               const names = doctorsByDept[dept.departmentId] ?? [];
               return (
                 <tr key={dept.departmentId} className="border-b hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-3 font-medium">{dept.name}</td>
-                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                  <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={dept.name}>{dept.name}</td>
+                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell max-w-xs truncate" title={dept.description ?? undefined}>
                     {dept.description ?? <span className="italic">—</span>}
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell">
@@ -325,7 +327,9 @@ export default function DepartmentsPage() {
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {names.map((n) => (
-                          <span key={n} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">{n}</span>
+                          <span key={n} className="inline-flex max-w-[160px] items-center px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">
+                            <span className="truncate min-w-0" title={n}>{n}</span>
+                          </span>
                         ))}
                       </div>
                     )}

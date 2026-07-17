@@ -21,7 +21,7 @@ export type LabRequestPriority = typeof LabRequestPriority[keyof typeof LabReque
 export const CreatePathologyRequestSchema = z.object({
   patientId: z.string().min(1, 'patientId is required'),
   testType:  z.string().min(1, 'testType is required').max(200).trim(),
-  notes:     z.string().max(2000).trim().optional(),
+  notes:     z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestSchema>;
@@ -30,7 +30,7 @@ export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestS
 export const CreateRadiologyRequestSchema = z.object({
   patientId:   z.string().min(1, 'patientId is required'),
   imagingType: z.string().min(1, 'imagingType is required').max(200).trim(),
-  notes:       z.string().max(2000).trim().optional(),
+  notes:       z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 export type CreateRadiologyRequestInput = z.infer<typeof CreateRadiologyRequestSchema>;
@@ -45,7 +45,7 @@ export type UpdateLabStatusInput = z.infer<typeof UpdateLabStatusSchema>;
 // ─── Edit schemas ─────────────────────────────────────────────────────────────
 export const EditPathologyRequestSchema = z.object({
   testType: z.string().min(1).max(200).trim().optional(),
-  notes:    z.string().max(2000).trim().nullable().optional(),
+  notes:    z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().nullable().optional(),
   priority: z.enum(['NORMAL', 'URGENT']).optional(),
   status:   z.enum(['PENDING', 'IN_PROGRESS']).optional(),
 });
@@ -54,7 +54,7 @@ export type EditPathologyRequestInput = z.infer<typeof EditPathologyRequestSchem
 
 export const EditRadiologyRequestSchema = z.object({
   imagingType: z.string().min(1).max(200).trim().optional(),
-  notes:       z.string().max(2000).trim().nullable().optional(),
+  notes:       z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().nullable().optional(),
   priority:    z.enum(['NORMAL', 'URGENT']).optional(),
   status:      z.enum(['PENDING', 'IN_PROGRESS']).optional(),
 });

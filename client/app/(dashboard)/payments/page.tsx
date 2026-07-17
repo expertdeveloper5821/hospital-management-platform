@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { CharCounter } from "@/components/ui/char-counter";
 import {
   CreditCard,
   Plus,
@@ -47,6 +48,12 @@ function formatINR(amount: number) {
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+const MAX_AMOUNT_DIGITS = 10;
+
+function digitCount(value: string) {
+  return (value.match(/[0-9]/g) ?? []).length;
 }
 
 function formatDate(iso: string) {
@@ -252,8 +259,16 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
       setError("Amount must be greater than zero.");
       return;
     }
+    if (digitCount(String(form.amount)) > MAX_AMOUNT_DIGITS) {
+      setError("Amount cannot exceed 10 digits.");
+      return;
+    }
     if (!form.description.trim()) {
       setError("Description is required.");
+      return;
+    }
+    if (form.description.trim().length > 500) {
+      setError("Description cannot exceed 500 characters.");
       return;
     }
 
@@ -306,7 +321,14 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
               min={1}
               step={0.01}
               value={form.amount || ""}
-              onChange={(e) => set("amount", parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                  setError("Amount cannot exceed 10 digits.");
+                  return;
+                }
+                set("amount", parseFloat(raw) || 0);
+              }}
               placeholder="e.g. 500"
               required
             />
@@ -341,9 +363,11 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
               placeholder="e.g. OPD consultation fee, Lab test charges…"
+              maxLength={500}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
             />
+            <CharCounter value={form.description} max={500} />
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -402,8 +426,16 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
       setError("Amount must be greater than zero.");
       return;
     }
+    if (digitCount(String(form.amount)) > MAX_AMOUNT_DIGITS) {
+      setError("Amount cannot exceed 10 digits.");
+      return;
+    }
     if (!form.description.trim()) {
       setError("Description is required.");
+      return;
+    }
+    if (form.description.trim().length > 500) {
+      setError("Description cannot exceed 500 characters.");
       return;
     }
 
@@ -491,7 +523,14 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
               min={1}
               step={0.01}
               value={form.amount || ""}
-              onChange={(e) => set("amount", parseFloat(e.target.value) || 0)}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                  setError("Amount cannot exceed 10 digits.");
+                  return;
+                }
+                set("amount", parseFloat(raw) || 0);
+              }}
               placeholder="e.g. 1000"
               required
             />
@@ -526,9 +565,11 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
               placeholder="e.g. IPD admission fee, Surgery charges…"
+              maxLength={500}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
             />
+            <CharCounter value={form.description} max={500} />
           </div>
 
           <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">

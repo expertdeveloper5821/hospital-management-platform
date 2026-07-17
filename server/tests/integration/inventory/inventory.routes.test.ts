@@ -142,6 +142,28 @@ describe('POST /api/inventory', () => {
     expect(res.status).toBe(400);
   });
 
+  test.each(['Equipment', 'Consumable', 'Medication', 'PPE', 'Fluids', 'Medical Supplies', 'Other'])(
+    'accepts predefined category "%s" (201)',
+    async (category) => {
+      const res = await request(app)
+        .post('/api/inventory')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ...validPayload, category });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data.category).toBe(category);
+    },
+  );
+
+  test('returns 400 for a custom/invalid category', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, category: 'Not A Real Category' });
+
+    expect(res.status).toBe(400);
+  });
+
   test('returns 400 for missing required fields', async () => {
     const res = await request(app)
       .post('/api/inventory')
@@ -149,6 +171,35 @@ describe('POST /api/inventory', () => {
       .send({ name: 'Item without category' });
 
     expect(res.status).toBe(400);
+  });
+
+  test('creates an item with no description (optional field left empty)', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send(validPayload);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.description ?? null).toBeNull();
+  });
+
+  test('returns 400 for description exceeding maximum length', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, description: 'A'.repeat(1001) });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('trims leading/trailing whitespace from description', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ ...validPayload, description: '  Sterile packaging  ' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.description).toBe('Sterile packaging');
   });
 });
 
@@ -187,6 +238,101 @@ describe('GET /api/inventory', () => {
       .set('Authorization', `Bearer ${doctorToken}`);
 
     expect(res.status).toBe(200);
+  });
+});
+
+// ─── Category search: case-insensitive partial match ─────────────────────────
+
+describe('GET /api/inventory — category search', () => {
+  beforeEach(async () => {
+    await InventoryItemModel.create([
+      { itemId: uuidv4(), tenantId, name: 'Surgical Gloves', category: 'PPE',              unit: 'pairs', quantity: 100, lowStockThreshold: 20 },
+      { itemId: uuidv4(), tenantId, name: 'Gauze Rolls',     category: 'Medical Supplies', unit: 'rolls', quantity: 40,  lowStockThreshold: 10 },
+      { itemId: uuidv4(), tenantId, name: 'Paracetamol',     category: 'Medication',       unit: 'strips', quantity: 200, lowStockThreshold: 30 },
+    ]);
+  });
+
+  test('exact match still works', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=PPE')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('PPE');
+  });
+
+  test('partial match returns items whose category contains the text', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=Supplies')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('Medical Supplies');
+  });
+
+  test('mixed-case input matches regardless of case', async () => {
+    const lower = await request(app).get('/api/inventory?category=medical').set('Authorization', `Bearer ${adminToken}`);
+    const upper = await request(app).get('/api/inventory?category=MEDICAL').set('Authorization', `Bearer ${adminToken}`);
+    const mixed = await request(app).get('/api/inventory?category=MeDiCaL').set('Authorization', `Bearer ${adminToken}`);
+
+    for (const res of [lower, upper, mixed]) {
+      expect(res.status).toBe(200);
+      expect(res.body.data.data).toHaveLength(1);
+      expect(res.body.data.data[0].category).toBe('Medical Supplies');
+    }
+  });
+
+  test('leading/trailing spaces are trimmed before matching', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=' + encodeURIComponent('  ppe  '))
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].category).toBe('PPE');
+  });
+
+  test('no-match input returns an empty list, not an error', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=nonexistentcategory')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('category search input is treated as a literal substring, not a regex', async () => {
+    const res = await request(app)
+      .get('/api/inventory?category=' + encodeURIComponent('.*'))
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+  });
+
+  test('pagination still works correctly together with the category filter', async () => {
+    await InventoryItemModel.create([
+      { itemId: uuidv4(), tenantId, name: 'Nitrile Gloves', category: 'PPE', unit: 'pairs', quantity: 60, lowStockThreshold: 15 },
+      { itemId: uuidv4(), tenantId, name: 'Face Masks',     category: 'PPE', unit: 'boxes', quantity: 80, lowStockThreshold: 10 },
+    ]);
+
+    const res = await request(app)
+      .get('/api/inventory?category=ppe&page=1&limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+    expect(res.body.data.total).toBe(3);
+    expect(res.body.data.totalPages).toBe(2);
+
+    const page2 = await request(app)
+      .get('/api/inventory?category=ppe&page=2&limit=2')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(page2.body.data.data).toHaveLength(1);
   });
 });
 
@@ -335,6 +481,15 @@ describe('PATCH /api/inventory/:itemId (metadata)', () => {
     expect(res.body.data.name).toBe('Premium Bandages');
     expect(res.body.data.category).toBe('Medical Supplies');
     expect(res.body.data.quantity).toBe(200); // unchanged
+  });
+
+  test('returns 400 for a custom/invalid category on update', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ category: 'Not A Real Category' });
+
+    expect(res.status).toBe(400);
   });
 
   test('manager can edit item (200)', async () => {

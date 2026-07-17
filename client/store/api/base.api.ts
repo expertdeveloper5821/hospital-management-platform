@@ -32,6 +32,10 @@ const endpointSuccessMessages: Record<string, string> = {
 const quietSuccessEndpoints = new Set([
   'createRazorpayOrder',
   'markNotificationRead',
+  // New OPD Visit runs createOPDVisit then createManualPayment as one logical submission —
+  // silence the intermediate visit-created toast so the user isn't shown a success toast
+  // followed by a failure toast for what they perceive as a single action.
+  'createOPDVisit',
 ]);
 
 function extractErrorMessage(error: FetchBaseQueryError) {

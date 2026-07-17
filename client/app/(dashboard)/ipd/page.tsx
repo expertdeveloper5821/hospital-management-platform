@@ -348,16 +348,16 @@ function AdmissionPanel({
       >
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b shrink-0">
-          <div className="space-y-1">
+          <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2">
               <Badge variant={admission.status === 'ADMITTED' ? 'default' : 'secondary'}>
                 {admission.status}
               </Badge>
             </div>
-            <p className="text-sm font-semibold">{admission.fullName ?? admission.patientId}</p>
+            <p className="text-sm font-semibold truncate">{admission.fullName ?? admission.patientId}</p>
             <p className="text-xs text-muted-foreground font-mono">{admission.patientId}</p>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -426,9 +426,9 @@ function AdmissionPanel({
                 {editDoctors.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {editDoctors.map((d) => (
-                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                        {d.name}
-                        <button type="button" onClick={() => setEditDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 hover:text-destructive">
+                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                        <span className="truncate min-w-0" title={d.name}>{d.name}</span>
+                        <button type="button" onClick={() => setEditDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
                           <X className="h-3 w-3" />
                         </button>
                       </span>
@@ -749,9 +749,9 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             {selectedDoctors.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {selectedDoctors.map((d) => (
-                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                    {d.name}
-                    <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 hover:text-destructive">
+                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                    <span className="truncate min-w-0" title={d.name}>{d.name}</span>
+                    <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
                       <X className="h-3 w-3" />
                     </button>
                   </span>
@@ -1187,18 +1187,23 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                 <tbody className="divide-y">
                   {admissions.map((a) => (
                     <tr key={a.admissionId} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="font-medium">
+                      <td className="px-4 py-3 max-w-[180px]">
+                        <div className="font-medium truncate" title={(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}>
                           {(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}
                         </div>
                         <div className="font-mono text-xs text-muted-foreground mt-0.5">{a.patientId}</div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium">{a.wardName}</div>
+                      <td className="px-4 py-3 max-w-[140px]">
+                        <div className="font-medium truncate" title={a.wardName}>{a.wardName}</div>
                         <div className="text-xs text-muted-foreground">Bed {a.bedNumber}</div>
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="text-sm font-medium">{a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : '—'}</div>
+                      <td className="px-4 py-3 max-w-[180px]">
+                        <div
+                          className="text-sm font-medium truncate"
+                          title={a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : undefined}
+                        >
+                          {a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : '—'}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'}>

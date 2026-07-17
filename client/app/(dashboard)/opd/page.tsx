@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   useGetOPDQueueQuery,
   useCreateOPDVisitMutation,
@@ -27,6 +27,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { CharCounter } from '@/components/ui/char-counter';
 import {
   Stethoscope,
   Plus,
@@ -49,6 +50,10 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function formatINR(amount: number) {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
+}
+
 function statusVariant(s: OPDVisitStatus): 'default' | 'secondary' | 'outline' | 'destructive' {
   if (s === 'OPEN')        return 'default';
   if (s === 'IN_PROGRESS') return 'secondary';
@@ -58,6 +63,19 @@ function statusVariant(s: OPDVisitStatus): 'default' | 'secondary' | 'outline' |
 
 function statusLabel(s: OPDVisitStatus) {
   return s.replace('_', ' ');
+}
+
+// The backend returns 409 with a ready-to-display message when the same patient
+// already has an active appointment with the selected doctor/date; fall back to
+// that exact wording if the response body is ever missing a message.
+function opdErrorMessage(err: any, fallback: string): string {
+  if (err?.status === 409) {
+    return (
+      err?.data?.message ??
+      'An appointment already exists for this patient with the selected doctor, date, and time slot.'
+    );
+  }
+  return err?.data?.message ?? fallback;
 }
 
 const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED']);
@@ -82,12 +100,14 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorNames, allDoctors }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
-  const visitDateStr = new Date(visit.visitDate).toISOString().substring(0, 10);
+  // Look up the payment linked directly to this visit (referenceId) rather than
+  // guessing from patientId + calendar date — a patient can have other payments
+  // (registration fee, another same-day visit) on the same date, which would
+  // otherwise surface the wrong amount here.
   const { data: paymentData } = useListPaymentsQuery({
-    patientId: visit.patientId,
-    dateFrom:  visitDateStr,
-    dateTo:    visitDateStr,
-    limit:     10,
+    referenceType: 'OPD_VISIT',
+    referenceId:   visit.visitId,
+    limit:         1,
   });
   const visitPayment = paymentData?.data?.[0] ?? null;
 
@@ -123,9 +143,31 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
   const [cancelVisit,   { isLoading: cancelling }] = useCancelOPDVisitMutation();
 
+  // Synchronous guard against a double-click firing two update requests before
+  // the mutation's isLoading flag has propagated through a render.
+  const updatingRef = useRef(false);
+
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
+    if (updating || updatingRef.current) return;
     setError('');
+    if ((form.chiefComplaint ?? '').trim().length > 1000) {
+      setError('Chief complaint cannot exceed 1000 characters.');
+      return;
+    }
+    if ((form.diagnosis ?? '').trim().length > 2000) {
+      setError('Diagnosis cannot exceed 2000 characters.');
+      return;
+    }
+    if ((form.prescription ?? '').length > 5000) {
+      setError('Prescription cannot exceed 5000 characters.');
+      return;
+    }
+    if ((form.notes ?? '').trim().length > 2000) {
+      setError('Notes cannot exceed 2000 characters.');
+      return;
+    }
+    updatingRef.current = true;
     try {
       // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
       const body: UpdateOPDVisitRequest = {
@@ -139,7 +181,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       onUpdate(updated);
       setMode('view');
     } catch (err: any) {
-      setError(err?.data?.message ?? 'Failed to update visit.');
+      setError(opdErrorMessage(err, 'Failed to update visit.'));
+    } finally {
+      updatingRef.current = false;
     }
   }
 
@@ -148,6 +192,18 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     setError('');
     if (!completeForm.diagnosis.trim()) {
       setError('Diagnosis is required to complete a visit.');
+      return;
+    }
+    if (completeForm.diagnosis.trim().length > 2000) {
+      setError('Diagnosis cannot exceed 2000 characters.');
+      return;
+    }
+    if ((completeForm.prescription ?? '').length > 5000) {
+      setError('Prescription cannot exceed 5000 characters.');
+      return;
+    }
+    if ((completeForm.notes ?? '').trim().length > 2000) {
+      setError('Notes cannot exceed 2000 characters.');
       return;
     }
     try {
@@ -185,15 +241,15 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       >
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b shrink-0">
-          <div className="space-y-1">
+          <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono text-muted-foreground">#{visit.queueNumber}</span>
               <Badge variant={statusVariant(visit.status)}>{statusLabel(visit.status)}</Badge>
             </div>
-            <p className="text-sm font-semibold">{visit.fullName ?? visit.patientId}</p>
+            <p className="text-sm font-semibold truncate">{visit.fullName ?? visit.patientId}</p>
             <p className="text-xs text-muted-foreground">{visit.patientId} · {formatDate(visit.visitDate)}</p>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors shrink-0">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -219,7 +275,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
                 {visitPayment ? (
                   <>
-                    {f('Amount',       <span className="font-semibold">₹{visitPayment.amount.toLocaleString('en-IN')}</span>)}
+                    {f('Amount',       <span className="font-semibold">{formatINR(visitPayment.amount)}</span>)}
                     {f('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[visitPayment.paymentMethod] ?? visitPayment.paymentMethod}</span>)}
                   </>
                 ) : (
@@ -253,9 +309,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                     {editDoctorIds.map((id) => {
                       const d = allDoctors.find((u) => u.userId === id);
                       return (
-                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                          {d?.name ?? id}
-                          <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 hover:text-destructive">
+                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                          <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
+                          <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
                             <X className="h-3 w-3" />
                           </button>
                         </span>
@@ -295,8 +351,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   id="ep-complaint"
                   value={form.chiefComplaint ?? ''}
                   onChange={(e) => setForm((f) => ({ ...f, chiefComplaint: e.target.value }))}
+                  maxLength={1000}
                   required
                 />
+                <CharCounter value={form.chiefComplaint ?? ''} max={1000} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-diagnosis">Diagnosis</Label>
@@ -305,8 +363,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={3}
                   value={form.diagnosis ?? ''}
                   onChange={(e) => setForm((f) => ({ ...f, diagnosis: e.target.value }))}
+                  maxLength={2000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
+                <CharCounter value={form.diagnosis ?? ''} max={2000} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-prescription">Prescription</Label>
@@ -315,8 +375,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={4}
                   value={form.prescription ?? ''}
                   onChange={(e) => setForm((f) => ({ ...f, prescription: e.target.value }))}
+                  maxLength={5000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
+                <CharCounter value={form.prescription ?? ''} max={5000} trimmed={false} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-notes">Notes</Label>
@@ -325,8 +387,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={2}
                   value={form.notes ?? ''}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  maxLength={2000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
+                <CharCounter value={form.notes ?? ''} max={2000} />
               </div>
             </form>
           )}
@@ -344,9 +408,11 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={3}
                   value={completeForm.diagnosis}
                   onChange={(e) => setCompleteForm((f) => ({ ...f, diagnosis: e.target.value }))}
+                  maxLength={2000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                   required
                 />
+                <CharCounter value={completeForm.diagnosis} max={2000} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cp-prescription">Prescription</Label>
@@ -355,8 +421,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={4}
                   value={completeForm.prescription ?? ''}
                   onChange={(e) => setCompleteForm((f) => ({ ...f, prescription: e.target.value }))}
+                  maxLength={5000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
+                <CharCounter value={completeForm.prescription ?? ''} max={5000} trimmed={false} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cp-notes">Notes</Label>
@@ -365,8 +433,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   rows={2}
                   value={completeForm.notes ?? ''}
                   onChange={(e) => setCompleteForm((f) => ({ ...f, notes: e.target.value }))}
+                  maxLength={2000}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
+                <CharCounter value={completeForm.notes ?? ''} max={2000} />
               </div>
             </form>
           )}
@@ -473,6 +543,11 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
   const [error, setError] = useState('');
 
+  // Only Hospital Admins may backdate an OPD visit (e.g. paper-register backfill);
+  // every other role is restricted to today/future dates, both here and on the backend.
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const canBackdate = role === 'HOSPITAL_ADMIN';
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedPSearch(patientSearch), 400);
     return () => clearTimeout(t);
@@ -497,35 +572,71 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
   const isLoading = creatingVisit || creatingPayment;
 
+  // Belt-and-braces against double submission: React state (isLoading) only
+  // reflects the mutation after the next render, so a very fast double-click or
+  // duplicate submit/keydown event can slip both calls through before the button
+  // disables. A synchronous ref closes that gap.
+  const submittingRef = useRef(false);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (isLoading || submittingRef.current) return;
     setError('');
     if (!selectedPatient) { setError('Please select a patient.'); return; }
+    if (!canBackdate && form.visitDate && form.visitDate < todayISO()) {
+      setError('Past dates are not allowed for OPD visits.');
+      return;
+    }
     if (!form.chiefComplaint.trim()) { setError('Chief complaint is required.'); return; }
+    if (form.chiefComplaint.trim().length > 1000) {
+      setError('Chief complaint cannot exceed 1000 characters.');
+      return;
+    }
+    if ((form.notes ?? '').trim().length > 2000) {
+      setError('Notes cannot exceed 2000 characters.');
+      return;
+    }
     const amount = parseFloat(paymentAmount);
     if (!paymentAmount || isNaN(amount) || amount <= 0) {
       setError('Payment amount is required and must be greater than zero.');
       return;
     }
     if (!paymentMode) { setError('Payment mode is required.'); return; }
+
+    submittingRef.current = true;
     try {
-      const body: CreateOPDVisitRequest = {
-        patientId:      selectedPatient.patientId,
-        chiefComplaint: form.chiefComplaint,
-        doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
-        visitDate:      form.visitDate || undefined,
-        notes:          form.notes    || undefined,
-      };
-      const visit = await createVisit(body).unwrap();
-      await createManualPayment({
-        patientId:     selectedPatient.patientId,
-        amount,
-        paymentMethod: paymentMode,
-        description:   `OPD Consultation – Visit #${visit.queueNumber}`,
-      }).unwrap();
-      onClose();
-    } catch (err: any) {
-      setError(err?.data?.message ?? 'Failed to create visit.');
+      let visit: OPDVisitResponse;
+      try {
+        const body: CreateOPDVisitRequest = {
+          patientId:      selectedPatient.patientId,
+          chiefComplaint: form.chiefComplaint,
+          doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
+          visitDate:      form.visitDate || undefined,
+          notes:          form.notes    || undefined,
+        };
+        visit = await createVisit(body).unwrap();
+      } catch (err: any) {
+        setError(opdErrorMessage(err, 'Failed to create visit.'));
+        return;
+      }
+
+      try {
+        await createManualPayment({
+          patientId:     selectedPatient.patientId,
+          amount,
+          paymentMethod: paymentMode,
+          description:   `OPD Consultation – Visit #${visit.queueNumber}`,
+          referenceType: 'OPD_VISIT',
+          referenceId:   visit.visitId,
+        }).unwrap();
+        onClose();
+      } catch (err: any) {
+        setError(
+          `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
+        );
+      }
+    } finally {
+      submittingRef.current = false;
     }
   }
 
@@ -619,9 +730,9 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                 {selectedDoctorIds.map((id) => {
                   const d = allDoctors.find((u) => u.userId === id);
                   return (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                      {d?.name ?? id}
-                      <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 hover:text-destructive">
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                      <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
+                      <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
                         <X className="h-3 w-3" />
                       </button>
                     </span>
@@ -662,6 +773,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             <Input
               id="nv-date"
               type="date"
+              min={canBackdate ? undefined : todayISO()}
               value={form.visitDate ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
             />
@@ -676,9 +788,11 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
               value={form.chiefComplaint}
               onChange={(e) => setForm((f) => ({ ...f, chiefComplaint: e.target.value }))}
               placeholder="Describe the patient's chief complaint…"
+              maxLength={1000}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
             />
+            <CharCounter value={form.chiefComplaint} max={1000} />
           </div>
 
           {/* Notes */}
@@ -689,8 +803,10 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
               rows={2}
               value={form.notes ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              maxLength={2000}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
+            <CharCounter value={form.notes ?? ''} max={2000} />
           </div>
 
           {/* Payment */}
@@ -917,8 +1033,8 @@ export default function OPDPage() {
                       onClick={() => setSelectedVisit(v)}
                     >
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{v.queueNumber}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium">{v.fullName ?? v.patientId}</p>
+                      <td className="px-4 py-3 max-w-[180px]">
+                        <p className="font-medium truncate" title={v.fullName ?? v.patientId}>{v.fullName ?? v.patientId}</p>
                         <p className="text-xs text-muted-foreground">
                           {v.patientId} · {formatDate(v.visitDate)}
                         </p>
@@ -926,7 +1042,7 @@ export default function OPDPage() {
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground max-w-xs truncate">
                         {v.chiefComplaint}
                       </td>
-                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
+                      <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground max-w-[180px] truncate" title={doctorNames(v.doctorIds ?? [])}>
                         {doctorNames(v.doctorIds ?? [])}
                       </td>
                       <td className="px-4 py-3">

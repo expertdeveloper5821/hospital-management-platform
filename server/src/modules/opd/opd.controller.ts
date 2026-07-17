@@ -7,25 +7,25 @@ import { UserRole } from '../../shared/types/common.types';
 
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
-  chiefComplaint: z.string().min(1).max(1000).trim(),
+  chiefComplaint: z.string().min(1, 'Chief complaint is required.').max(1000, 'Chief complaint cannot exceed 1000 characters.').trim(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  notes:          z.string().max(2000).optional(),
+  notes:          z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 const updateVisitSchema = z.object({
-  chiefComplaint: z.string().min(1).max(1000).trim().optional(),
+  chiefComplaint: z.string().min(1, 'Chief complaint is required.').max(1000, 'Chief complaint cannot exceed 1000 characters.').trim().optional(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  diagnosis:      z.string().min(1).max(2000).trim().optional(),
-  prescription:   z.string().max(5000).optional(),
-  notes:          z.string().max(2000).optional(),
+  diagnosis:      z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
+  prescription:   z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
+  notes:          z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 const completeVisitSchema = z.object({
-  diagnosis:    z.string().min(1).max(2000).trim(),
-  prescription: z.string().max(5000).optional(),
-  notes:        z.string().max(2000).optional(),
+  diagnosis:    z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim(),
+  prescription: z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
+  notes:        z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 const queueQuerySchema = z.object({
@@ -76,7 +76,7 @@ export async function createVisit(req: Request, res: Response, next: NextFunctio
     const body = createVisitSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
-    const visit = await opdService.createVisit(req.user!.tenantId!, body.data, req.user!.userId);
+    const visit = await opdService.createVisit(req.user!.tenantId!, body.data, req.user!.userId, req.user!.role);
     res.status(201).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
 }
@@ -117,6 +117,7 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
       req.params.visitId,
       body.data,
       req.user!.userId,
+      req.user!.role,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }

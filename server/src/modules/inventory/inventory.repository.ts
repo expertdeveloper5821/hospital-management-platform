@@ -5,6 +5,10 @@ import { assertDbConnected } from '../../shared/utils/db-guard';
 
 const NOT_DELETED = { isDeleted: { $ne: true } };
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class InventoryRepository {
   async findById(itemId: string, tenantId: string): Promise<IInventoryItem | null> {
     assertDbConnected();
@@ -19,7 +23,8 @@ export class InventoryRepository {
     const { category, lowStock, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, ...NOT_DELETED };
-    if (category) filter['category'] = category;
+    // Case-insensitive partial match: "glov" must match a category of "Gloves".
+    if (category) filter['category'] = { $regex: escapeRegex(category), $options: 'i' };
 
     let q = InventoryItemModel.find(filter);
 

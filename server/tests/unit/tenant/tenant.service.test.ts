@@ -39,6 +39,49 @@ describe('TenantService — example-based', () => {
     expect(result.status).toBe(TenantStatus.PENDING_VERIFICATION);
   });
 
+  test('createTenant throws ConflictError when adminEmail already exists', async () => {
+    mockRepo.findByAdminEmail.mockResolvedValue({ _id: 'tid0', status: TenantStatus.ACTIVE, toString: () => 'tid0' } as never);
+
+    await expect(
+      service.createTenant(
+        { name: 'Hospital B', adminEmail: 'Admin@H.com ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressProof: 'k3' } },
+        'sa-1',
+      ),
+    ).rejects.toThrow(ConflictError);
+    expect(mockRepo.save).not.toHaveBeenCalled();
+  });
+
+  test('createTenant normalizes email casing/whitespace before duplicate lookup', async () => {
+    mockRepo.findByAdminEmail.mockResolvedValue(null);
+    const mockTenant = { _id: 'tid1', name: 'Hospital A', status: TenantStatus.PENDING_VERIFICATION, toString: () => 'tid1' };
+    mockRepo.save.mockResolvedValue(mockTenant as never);
+
+    await service.createTenant(
+      { name: 'Hospital A', adminEmail: '  Admin@H.com  ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressProof: 'k3' } },
+      'sa-1',
+    );
+    expect(mockRepo.findByAdminEmail).toHaveBeenCalledWith('admin@h.com');
+  });
+
+  test('reactivateTenant sets status back to ACTIVE and invalidates cache', async () => {
+    mockRepo.findById.mockResolvedValue({ _id: 'tid1', status: TenantStatus.INACTIVE, toString: () => 'tid1' } as never);
+    mockRepo.updateStatus.mockResolvedValue(undefined);
+
+    await service.reactivateTenant('tid1', 'sa-1');
+    expect(mockRepo.updateStatus).toHaveBeenCalledWith('tid1', TenantStatus.ACTIVE);
+    expect(mockCache.invalidate).toHaveBeenCalledWith('tid1');
+  });
+
+  test('reactivateTenant throws ConflictError if tenant is not INACTIVE', async () => {
+    mockRepo.findById.mockResolvedValue({ _id: 'tid1', status: TenantStatus.ACTIVE, toString: () => 'tid1' } as never);
+    await expect(service.reactivateTenant('tid1', 'sa-1')).rejects.toThrow(ConflictError);
+  });
+
+  test('reactivateTenant throws NotFoundError for unknown tenant', async () => {
+    mockRepo.findById.mockResolvedValue(null);
+    await expect(service.reactivateTenant('unknown', 'sa-1')).rejects.toThrow(NotFoundError);
+  });
+
   test('approveTenant throws ConflictError if already ACTIVE', async () => {
     mockRepo.findById.mockResolvedValue({ _id: 'tid1', status: TenantStatus.ACTIVE, toString: () => 'tid1' } as never);
     await expect(service.approveTenant('tid1', 'sa-1')).rejects.toThrow(ConflictError);

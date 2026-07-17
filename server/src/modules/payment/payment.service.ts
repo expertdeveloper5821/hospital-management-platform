@@ -31,7 +31,9 @@ const RECEIPT_URL_EXPIRY_SECONDS = 3600;
 
 async function resolveReceiptUrl(s3Key: string | null): Promise<string | null> {
   if (!s3Key) return null;
-  return s3Service.getPresignedUrl(s3Key, RECEIPT_URL_EXPIRY_SECONDS);
+  // A presign failure (e.g. transient S3 issue) must not break payment creation/listing —
+  // the receipt link is secondary to the payment record itself.
+  return s3Service.getPresignedUrl(s3Key, RECEIPT_URL_EXPIRY_SECONDS).catch(() => null);
 }
 
 async function toResponse(doc: IPayment): Promise<PaymentResponse> {
@@ -49,6 +51,8 @@ async function toResponse(doc: IPayment): Promise<PaymentResponse> {
     receiptUrl:        await resolveReceiptUrl(doc.receiptS3Key),
     razorpayOrderId:   doc.razorpayOrderId,
     razorpayPaymentId: doc.razorpayPaymentId,
+    referenceType:     (doc.referenceType as PaymentResponse['referenceType']) ?? null,
+    referenceId:       doc.referenceId ?? null,
     createdBy:         doc.createdBy,
     createdAt:         doc.createdAt.toISOString(),
     updatedAt:         doc.updatedAt.toISOString(),
@@ -85,21 +89,35 @@ export class PaymentService {
 
     const paymentId = uuidv4();
 
-    // Generate receipt PDF and upload to S3 (SECURITY: receipt linked only to this payment)
-    const receiptBuffer = await pdfService.generateReceipt({
-      receiptNumber:  paymentId,
-      patientName:    patient.fullName,
-      patientId:      patient.patientId,
-      paymentDate:    new Date(),
-      amountInr:      input.amount,
-      paymentMethod:  input.paymentMethod,
-      description:    input.description,
-      hospitalName:   tenant?.branding.displayName || tenant?.name || 'Hospital',
-      primaryColor:   tenant?.branding.primaryColor || '#1A73E8',
-    });
-
-    const s3Key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
-    await s3Service.uploadFile(s3Key, receiptBuffer, 'application/pdf');
+    // Generate receipt PDF and upload to S3 (SECURITY: receipt linked only to this payment).
+    // Receipt failure must not fail the payment — same non-fatal handling as the Razorpay webhook.
+    let receiptS3Key: string | null = null;
+    try {
+      const receiptBuffer = await pdfService.generateReceipt({
+        receiptNumber:  paymentId,
+        patientName:    patient.fullName,
+        patientId:      patient.patientId,
+        paymentDate:    new Date(),
+        amountInr:      input.amount,
+        paymentMethod:  input.paymentMethod,
+        description:    input.description,
+        hospitalName:   tenant?.branding.displayName || tenant?.name || 'Hospital',
+        primaryColor:   tenant?.branding.primaryColor || '#1A73E8',
+      });
+      const key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
+      await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
+      receiptS3Key = key; // only recorded once the upload actually succeeds
+    } catch (err) {
+      console.warn(JSON.stringify({
+        level:     'warn',
+        event:     'manual_payment_receipt_failed',
+        tenantId,
+        paymentId,
+        patientId: input.patientId,
+        message:   err instanceof Error ? err.message : 'Unknown receipt generation/upload failure',
+        timestamp: new Date().toISOString(),
+      }));
+    }
 
     const payment = await paymentRepository.save({
       paymentId,
@@ -110,9 +128,11 @@ export class PaymentService {
       paymentMethod: input.paymentMethod,
       description:   input.description,
       status:        PaymentStatus.COMPLETED,
-      receiptS3Key:  s3Key,
+      receiptS3Key,
       razorpayOrderId:   null,
       razorpayPaymentId: null,
+      referenceType: input.referenceType ?? null,
+      referenceId:   input.referenceId   ?? null,
       createdBy:     userId,
     });
 

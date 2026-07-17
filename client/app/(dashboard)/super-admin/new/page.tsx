@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCreateTenantMutation } from '@/store/api/tenant.api';
+import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -88,7 +89,14 @@ function validate(form: FormState): FormErrors {
 }
 
 export default function NewTenantPage() {
-  const router = useRouter();
+  const router  = useRouter();
+  const profile = useAppSelector((s) => s.auth.profile);
+
+  if (profile && profile.role !== 'SUPER_ADMIN') {
+    router.replace('/dashboard');
+    return null;
+  }
+
   const [form, setForm]       = useState<FormState>(EMPTY);
   const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [submitted, setSubmitted] = useState(false);

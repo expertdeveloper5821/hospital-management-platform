@@ -2,6 +2,10 @@ import { OPDVisitModel, IOPDVisit } from './opd.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { OPDVisitStatus } from './opd.types';
+import { ConflictError } from '../../shared/middleware/error-handler';
+
+const DUPLICATE_APPOINTMENT_MESSAGE =
+  'An appointment already exists for this patient with the selected doctor, date, and time slot.';
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -90,9 +94,46 @@ export class OPDRepository {
     };
   }
 
+  // Active (non-cancelled) visit for the same patient + calendar date that shares
+  // at least one of the given doctors — the duplicate-appointment guard.
+  // excludeVisitId lets an in-progress edit exclude itself from the check.
+  async findActiveDuplicate(
+    tenantId:        string,
+    patientId:       string,
+    visitDate:       Date,
+    doctorIds:       string[],
+    excludeVisitId?: string,
+  ): Promise<IOPDVisit | null> {
+    assertDbConnected();
+    if (!doctorIds.length) return null;
+
+    const start = new Date(visitDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(visitDate);
+    end.setHours(23, 59, 59, 999);
+
+    const query: Record<string, unknown> = {
+      tenantId,
+      patientId,
+      visitDate: { $gte: start, $lte: end },
+      doctorIds: { $in: doctorIds },
+      status:    { $ne: OPDVisitStatus.CANCELLED },
+    };
+    if (excludeVisitId) query.visitId = { $ne: excludeVisitId };
+
+    return OPDVisitModel.findOne(query);
+  }
+
   async save(data: Partial<IOPDVisit>): Promise<IOPDVisit> {
     assertDbConnected();
-    return OPDVisitModel.create(data);
+    try {
+      return await OPDVisitModel.create(data);
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        throw new ConflictError(DUPLICATE_APPOINTMENT_MESSAGE);
+      }
+      throw err;
+    }
   }
 
   async update(
@@ -101,11 +142,18 @@ export class OPDRepository {
     data: Partial<IOPDVisit>,
   ): Promise<IOPDVisit | null> {
     assertDbConnected();
-    return OPDVisitModel.findOneAndUpdate(
-      { tenantId, visitId },
-      { $set: data },
-      { new: true },
-    );
+    try {
+      return await OPDVisitModel.findOneAndUpdate(
+        { tenantId, visitId },
+        { $set: data },
+        { new: true },
+      );
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        throw new ConflictError(DUPLICATE_APPOINTMENT_MESSAGE);
+      }
+      throw err;
+    }
   }
 
   async countByDate(tenantId: string, date: Date): Promise<number> {
