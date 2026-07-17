@@ -46,6 +46,12 @@ export class PatientService {
       gender:                    data.gender,
       mobileNumber:              data.mobileNumber,
       address:                   data.address,
+      addressLine1:              data.addressLine1              ?? null,
+      addressLine2:              data.addressLine2              ?? null,
+      city:                      data.city                      ?? null,
+      state:                     data.state                     ?? null,
+      country:                   data.country                   ?? null,
+      pincode:                   data.pincode                   ?? null,
       aadhaarNumber:             data.aadhaarNumber             ?? null,
       emergencyContactName:      data.emergencyContactName      ?? null,
       emergencyContactMobile:    data.emergencyContactMobile    ?? null,
@@ -83,6 +89,7 @@ export class PatientService {
 
     const fields = [
       'fullName', 'gender', 'mobileNumber', 'address',
+      'addressLine1', 'addressLine2', 'city', 'state', 'country', 'pincode',
       'aadhaarNumber', 'emergencyContactName', 'emergencyContactMobile', 'bloodGroup',
       'departmentId',
     ] as const;

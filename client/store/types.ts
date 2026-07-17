@@ -106,6 +106,12 @@ export interface PatientResponse {
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
+  addressLine1:              string | null;
+  addressLine2:              string | null;
+  city:                      string | null;
+  state:                     string | null;
+  country:                   string | null;
+  pincode:                   string | null;
   aadhaarNumber:             string | null;
   emergencyContactName:      string | null;
   emergencyContactMobile:    string | null;
@@ -124,6 +130,12 @@ export interface CreatePatientRequest {
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
+  addressLine1?:             string;
+  addressLine2?:             string;
+  city?:                     string;
+  state?:                    string;
+  country?:                  string;
+  pincode?:                  string;
   aadhaarNumber?:            string;
   emergencyContactName?:     string;
   emergencyContactMobile?:   string;
@@ -140,6 +152,12 @@ export interface UpdatePatientRequest {
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;
+  addressLine1?:           string;
+  addressLine2?:           string;
+  city?:                   string;
+  state?:                  string;
+  country?:                string;
+  pincode?:                string;
   aadhaarNumber?:          string;
   emergencyContactName?:   string;
   emergencyContactMobile?: string;
