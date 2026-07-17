@@ -66,10 +66,6 @@ export default function SuperAdminPage() {
   const isBusy = approving || deactivating || reactivating || resending;
 
   function handleDeactivate(tenant: typeof tenants[0]) {
-    const confirmed = window.confirm(
-      'Are you sure you want to deactivate this hospital? Hospital users may lose access.',
-    );
-    if (!confirmed) return;
     deactivateTenant(tenant._id);
   }
 

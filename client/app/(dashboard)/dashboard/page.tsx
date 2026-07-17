@@ -147,15 +147,30 @@ export default function DashboardPage() {
 
   const [refreshArg, setRefreshArg] = useState<{ refresh?: boolean } | void>(undefined);
   const [currentTime, setCurrentTime] = useState(new Date());
+  // Set once the backend confirms the tenant/account is deactivated (401/403) —
+  // captured into state because `skip` below clears the live query's data/error.
+  const [inactiveMessage, setInactiveMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => clearInterval(t);
   }, []);
 
-  const { data, isLoading, isFetching, isError, refetch } = useGetDashboardStatsQuery(refreshArg, {
-    pollingInterval: POLL_MS,
+  const { data, isLoading, isFetching, isError, error, refetch } = useGetDashboardStatsQuery(refreshArg, {
+    pollingInterval: inactiveMessage ? 0 : POLL_MS,
+    skip: !!inactiveMessage,
   });
+
+  // @ts-expect-error RTK error shape
+  const errorStatus: number | undefined = error?.status;
+  // @ts-expect-error RTK error shape
+  const errorMessage: string | undefined = error?.data?.message;
+
+  useEffect(() => {
+    if (errorStatus === 401 || errorStatus === 403) {
+      setInactiveMessage(errorMessage ?? 'Your account is inactive.');
+    }
+  }, [errorStatus, errorMessage]);
 
   function handleRefresh() {
     setRefreshArg({ refresh: true });
@@ -245,10 +260,12 @@ export default function DashboardPage() {
       </div>
 
       {/* Error banner */}
-      {isError && (
+      {(inactiveMessage || isError) && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          Unable to load dashboard statistics. Retrying…
+          {inactiveMessage
+            ? inactiveMessage
+            : (errorMessage ? `${errorMessage} Retrying…` : 'Unable to load dashboard statistics. Retrying…')}
         </div>
       )}
 
