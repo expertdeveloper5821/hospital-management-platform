@@ -1013,9 +1013,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
 
   const canAdmit =
     role === UserRole.RECEPTIONIST ||
-    role === UserRole.NURSE ||
-    role === UserRole.HOSPITAL_ADMIN ||
-    role === UserRole.ADMIN;
+    role === UserRole.HOSPITAL_ADMIN;
   const canProgress  = role === UserRole.DOCTOR || role === UserRole.NURSE;
   const canEdit =
     role === UserRole.RECEPTIONIST ||

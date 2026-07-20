@@ -16,6 +16,7 @@ import {
   FileText,
   Settings,
   LogOut,
+  Loader2,
   X,
   FileBadge,
   Receipt,
@@ -57,7 +58,7 @@ export function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
   const profile  = useAppSelector((s) => s.auth.profile);
   const branding = useAppSelector((s) => s.auth.branding);
-  const [logout] = useLogoutMutation();
+  const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
   const { data: platformSettings } = useGetPlatformSettingsQuery();
 
   if (!profile) return null;
@@ -72,6 +73,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     : (branding?.displayName ?? 'HMS');
 
   async function handleLogout() {
+    if (isLoggingOut) return;
     await logout({ isSuperAdmin: profile?.role === 'SUPER_ADMIN' });
   }
 
@@ -133,10 +135,15 @@ export function Sidebar({ onClose }: SidebarProps) {
         <p className="text-xs text-sidebar-foreground/50">{profile.role}</p>
         <button
           onClick={handleLogout}
-          className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+          disabled={isLoggingOut}
+          className="mt-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
         >
-          <LogOut className="h-4 w-4" aria-hidden="true" />
-          Sign out
+          {isLoggingOut ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+          )}
+          {isLoggingOut ? 'Signing out…' : 'Sign out'}
         </button>
       </div>
 

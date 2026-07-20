@@ -1,17 +1,18 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockPush    = jest.fn();
 const mockLogout  = jest.fn().mockResolvedValue({});
+let mockIsLoggingOut = false;
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
 jest.mock('@/store/api/auth.api', () => ({
-  useLogoutMutation: () => [mockLogout],
+  useLogoutMutation: () => [mockLogout, { isLoading: mockIsLoggingOut }],
 }));
 
 // Mock auth store selector
@@ -36,6 +37,7 @@ import { ProfileDropdown } from '@/components/header/ProfileDropdown';
 describe('ProfileDropdown', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsLoggingOut = false;
   });
 
   test('renders initials avatar from email', () => {
@@ -88,12 +90,13 @@ describe('ProfileDropdown', () => {
     expect(mockPush).toHaveBeenCalledWith('/profile/change-password');
   });
 
-  test('calls logout when Logout is clicked', () => {
+  test('calls logout when Logout is clicked', async () => {
     render(<ProfileDropdown />);
     fireEvent.click(screen.getByLabelText('Open profile menu'));
     fireEvent.click(screen.getByRole('menuitem', { name: /logout/i }));
 
     expect(mockLogout).toHaveBeenCalled();
+    await waitFor(() => expect(mockPush).not.toHaveBeenCalled());
   });
 
   test('closes dropdown after navigation', () => {
@@ -112,5 +115,24 @@ describe('ProfileDropdown', () => {
 
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  test('shows a loader and disables the Logout item while logout is in progress', () => {
+    mockIsLoggingOut = true;
+    render(<ProfileDropdown />);
+    fireEvent.click(screen.getByLabelText('Open profile menu'));
+
+    const logoutItem = screen.getByRole('menuitem', { name: /signing out/i });
+    expect(logoutItem).toBeInTheDocument();
+    expect(logoutItem).toBeDisabled();
+  });
+
+  test('does not call logout again when already logging out', () => {
+    mockIsLoggingOut = true;
+    render(<ProfileDropdown />);
+    fireEvent.click(screen.getByLabelText('Open profile menu'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /signing out/i }));
+
+    expect(mockLogout).not.toHaveBeenCalled();
   });
 });
