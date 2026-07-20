@@ -93,7 +93,7 @@ async function seedActiveTenant(name = 'Active Hospital') {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressLine1:            '123 Test Street',
+      addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
     },
@@ -110,7 +110,7 @@ async function seedInactiveTenant(name = 'Inactive Hospital') {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressLine1:            '123 Test Street',
+      addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
     },
@@ -133,7 +133,7 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST999',
           panCard:                 's3-pan',
-          addressLine1:            '123 Main Street',
+          addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
         },
@@ -157,14 +157,14 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST998',
           panCard:                 's3-pan',
-          addressLine1:            '123 Main Street',
+          addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
         },
       });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.onboardingDocuments.addressLine1).toBe('123 Main Street');
+    expect(res.body.data.onboardingDocuments.addressLine).toBe('123 Main Street');
     expect(res.body.data.onboardingDocuments.city).toBe('Mumbai');
     expect(res.body.data.onboardingDocuments.state).toBe('Maharashtra');
   });
@@ -191,7 +191,7 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 'k1',
           gstNumber:               'G1',
           panCard:                 'k2',
-          addressLine1:            '100 Test Road',
+          addressLine:            '100 Test Road',
           city:                    'Pune',
           state:                   'Maharashtra',
         },
@@ -225,7 +225,7 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST999',
           panCard:                 's3-pan',
-          addressLine1:            '123 Main Street',
+          addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
         },
@@ -249,7 +249,7 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST998',
           panCard:                 's3-pan',
-          addressLine1:            '456 Main Street',
+          addressLine:            '456 Main Street',
           city:                    'Delhi',
           state:                   'Delhi',
         },

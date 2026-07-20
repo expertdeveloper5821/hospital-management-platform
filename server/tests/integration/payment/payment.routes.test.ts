@@ -81,7 +81,9 @@ beforeEach(async () => {
       registrationCertificate: 'cert-001',
       gstNumber:               'GST001',
       panCard:                 'PAN001',
-      addressProof:            'addr-001',
+      addressLine:            '111 Payment Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: 'Pay Test Hospital', primaryColor: '#1A73E8', logoUrl: null },
   });
