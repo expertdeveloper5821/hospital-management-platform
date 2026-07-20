@@ -76,7 +76,9 @@ async function seedPendingTenant(name = 'Test Hospital', adminEmail = 'admin@tes
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressProof:            's3-key-3',
+      addressLine:            '123 Test Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -91,7 +93,9 @@ async function seedActiveTenant(name = 'Active Hospital') {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressProof:            's3-key-3',
+      addressLine:            '123 Test Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -106,7 +110,9 @@ async function seedInactiveTenant(name = 'Inactive Hospital') {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressProof:            's3-key-3',
+      addressLine:            '123 Test Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -127,13 +133,40 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST999',
           panCard:                 's3-pan',
-          addressProof:            's3-addr',
+          addressLine:            '123 Main Street',
+          city:                    'Mumbai',
+          state:                   'Maharashtra',
         },
       });
 
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe(TenantStatus.PENDING_VERIFICATION);
     expect(res.body.data.name).toBe('New Hospital');
+  });
+
+  test('201 — accepts structured address fields in onboarding documents', async () => {
+    const token = superAdminToken();
+
+    const res = await request(app)
+      .post('/api/tenants')
+      .set(bearer(token))
+      .send({
+        name:       'Address Hospital',
+        adminEmail: 'address@hospital.com',
+        onboardingDocuments: {
+          registrationCertificate: 's3-reg-cert',
+          gstNumber:               'GST998',
+          panCard:                 's3-pan',
+          addressLine:            '123 Main Street',
+          city:                    'Mumbai',
+          state:                   'Maharashtra',
+        },
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.onboardingDocuments.addressLine).toBe('123 Main Street');
+    expect(res.body.data.onboardingDocuments.city).toBe('Mumbai');
+    expect(res.body.data.onboardingDocuments.state).toBe('Maharashtra');
   });
 
   test('401 — unauthenticated request', async () => {
@@ -158,7 +191,9 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 'k1',
           gstNumber:               'G1',
           panCard:                 'k2',
-          addressProof:            'k3',
+          addressLine:            '100 Test Road',
+          city:                    'Pune',
+          state:                   'Maharashtra',
         },
       });
 
@@ -190,7 +225,9 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST999',
           panCard:                 's3-pan',
-          addressProof:            's3-addr',
+          addressLine:            '123 Main Street',
+          city:                    'Mumbai',
+          state:                   'Maharashtra',
         },
       });
 
@@ -212,7 +249,9 @@ describe('POST /api/tenants', () => {
           registrationCertificate: 's3-reg-cert',
           gstNumber:               'GST998',
           panCard:                 's3-pan',
-          addressProof:            's3-addr',
+          addressLine:            '456 Main Street',
+          city:                    'Delhi',
+          state:                   'Delhi',
         },
       });
 

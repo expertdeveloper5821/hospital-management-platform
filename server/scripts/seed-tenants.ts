@@ -18,7 +18,9 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant1/reg-cert.pdf',
       gstNumber:               '27AABCT1234A1Z5',
       panCard:                 'docs/tenant1/pan.pdf',
-      addressProof:            'docs/tenant1/address.pdf',
+      addressLine:            '123 Main Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: {
       displayName:  'City General Hospital',
@@ -33,7 +35,9 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant2/reg-cert.pdf',
       gstNumber:               '29AABCS5678B1Z3',
       panCard:                 'docs/tenant2/pan.pdf',
-      addressProof:            'docs/tenant2/address.pdf',
+      addressLine:            '456 Park Avenue',
+      city:                    'Pune',
+      state:                   'Maharashtra',
     },
     branding: {
       displayName:  'Sunrise Clinic',
@@ -48,7 +52,9 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant3/reg-cert.pdf',
       gstNumber:               '07AABCM9012C1Z1',
       panCard:                 'docs/tenant3/pan.pdf',
-      addressProof:            'docs/tenant3/address.pdf',
+      addressLine:            '789 Sector 15',
+      city:                    'Delhi',
+      state:                   'Delhi',
     },
     branding: {
       displayName:  'Metro Health Centre',

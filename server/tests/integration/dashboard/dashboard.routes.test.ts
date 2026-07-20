@@ -62,7 +62,9 @@ beforeEach(async () => {
       registrationCertificate: 'reg-001',
       gstNumber:               'GST001',
       panCard:                 'PAN001',
-      addressProof:            'addr-001',
+      addressLine:            '123 Dashboard Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
   });
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();

@@ -16,7 +16,9 @@ interface CreateTenantRequest {
     registrationCertificate: string;
     gstNumber:               string;
     panCard:                 string;
-    addressProof:            string;
+    addressLine:             string;
+    city:                    string;
+    state:                   string;
   };
 }
 

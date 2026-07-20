@@ -23,7 +23,9 @@ const TenantSchema = new Schema<ITenant>(
       registrationCertificate: { type: String, required: true },
       gstNumber:               { type: String, required: true },
       panCard:                 { type: String, required: true },
-      addressProof:            { type: String, required: true },
+      addressLine:            { type: String, required: true, trim: true },
+      city:                    { type: String, required: true, trim: true },
+      state:                   { type: String, required: true, trim: true },
     },
     branding: {
       logoUrl:      { type: String, default: null },

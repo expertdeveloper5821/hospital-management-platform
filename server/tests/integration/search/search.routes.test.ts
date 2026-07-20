@@ -61,7 +61,9 @@ beforeEach(async () => {
       registrationCertificate: 'reg-001',
       gstNumber:               'GST001',
       panCard:                 'PAN001',
-      addressProof:            'addr-001',
+      addressLine:            '777 Search Lane',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
   });
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
@@ -229,7 +231,9 @@ describe('GET /api/search — tenant isolation', () => {
         registrationCertificate: 'reg-002',
         gstNumber:               'GST002',
         panCard:                 'PAN002',
-        addressProof:            'addr-002',
+        addressLine:            '888 Other Street',
+        city:                    'Delhi',
+        state:                   'Delhi',
       },
     });
     const otherTenantId = (otherTenant._id as mongoose.Types.ObjectId).toString();

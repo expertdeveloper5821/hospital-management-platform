@@ -69,7 +69,9 @@ async function seedTenant() {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressProof:            's3-key-3',
+      addressLine:            '789 IPD Avenue',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: 'Integration Hospital', primaryColor: '#000', logoUrl: null },
   });

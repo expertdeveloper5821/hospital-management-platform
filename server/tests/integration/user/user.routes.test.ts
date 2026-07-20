@@ -58,7 +58,9 @@ async function seedTenant(name = 'Test Hospital') {
       registrationCertificate: 'k1',
       gstNumber:               'GST1',
       panCard:                 'k2',
-      addressProof:            'k3',
+      addressLine:            '987 User Road',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
