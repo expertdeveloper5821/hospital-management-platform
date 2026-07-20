@@ -166,7 +166,7 @@ class ChargeService {
 
   async getBill(tenantId: string, patientId: string): Promise<BillResponse> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
-    if (!patient) throw new ForbiddenError('Patient not found in this tenant');
+    if (!patient) throw new NotFoundError('Patient not found');
 
     const charges = await chargeRepository.findByPatient(tenantId, patientId);
     const { categorySubtotals, grandTotal } = computeBillTotals(charges);

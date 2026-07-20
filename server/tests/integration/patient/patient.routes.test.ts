@@ -296,7 +296,7 @@ describe('POST /api/patients', () => {
     expect(res.status).toBe(401);
   });
 
-  test('400 — address below minimum length (9 chars)', async () => {
+  test('400 — empty address is rejected (min 1 char)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -304,12 +304,12 @@ describe('POST /api/patients', () => {
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
-      .send({ ...VALID_PATIENT_BODY, address: 'Short St.' }); // 9 chars
+      .send({ ...VALID_PATIENT_BODY, address: '' });
 
     expect(res.status).toBe(400);
   });
 
-  test('201 — address at exactly minimum length (10 chars)', async () => {
+  test('201 — short address is accepted (schema min is 1 char)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -317,12 +317,12 @@ describe('POST /api/patients', () => {
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
-      .send({ ...VALID_PATIENT_BODY, address: '1234567890' }); // exactly 10 chars
+      .send({ ...VALID_PATIENT_BODY, address: 'Short St.' }); // 9 chars — now valid
 
     expect(res.status).toBe(201);
   });
 
-  test('400 — address exceeds maximum length (301 chars)', async () => {
+  test('400 — address exceeds maximum length (501 chars)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -330,12 +330,12 @@ describe('POST /api/patients', () => {
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
-      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(301) });
+      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(501) });
 
     expect(res.status).toBe(400);
   });
 
-  test('201 — address at exactly maximum length (300 chars)', async () => {
+  test('201 — address at exactly maximum length (500 chars)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -343,7 +343,7 @@ describe('POST /api/patients', () => {
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
-      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(300) });
+      .send({ ...VALID_PATIENT_BODY, address: 'A'.repeat(500) });
 
     expect(res.status).toBe(201);
   });
@@ -602,7 +602,7 @@ describe('PATCH /api/patients/:patientId', () => {
     expect(res.body.data.address).toBe('Admin Updated Address');
   });
 
-  test('400 — update rejects address below minimum length', async () => {
+  test('400 — update rejects an empty address (min 1 char)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -612,12 +612,12 @@ describe('PATCH /api/patients/:patientId', () => {
     const res = await request(app)
       .patch('/api/patients/PAT-UPD00004')
       .set(bearer(token))
-      .send({ address: 'Too Short' }); // 9 chars
+      .send({ address: '' });
 
     expect(res.status).toBe(400);
   });
 
-  test('400 — update rejects address exceeding maximum length', async () => {
+  test('400 — update rejects address exceeding maximum length (501 chars)', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -627,7 +627,7 @@ describe('PATCH /api/patients/:patientId', () => {
     const res = await request(app)
       .patch('/api/patients/PAT-UPD00005')
       .set(bearer(token))
-      .send({ address: 'A'.repeat(301) });
+      .send({ address: 'A'.repeat(501) });
 
     expect(res.status).toBe(400);
   });
@@ -844,5 +844,65 @@ describe('DELETE /api/patients/:patientId', () => {
   test('401 — unauthenticated', async () => {
     const res = await request(app).delete('/api/patients/PAT-TEST0001');
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── Regression: error-status correctness (D1 / D2) ─────────────────────────────
+describe('Error-status regressions', () => {
+  // D1: a malformed patient id makes patientIdSchema.parse() throw a ZodError.
+  // Previously the global handler returned 500; it must now be a 400.
+  test('400 — GET /api/patients/:id with a malformed ID (ZodError → 400, not 500)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'a@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .get('/api/patients/6a59c8683604b4dd8754dcfb') // a Mongo _id, not a PAT- id
+      .set(bearer(token));
+
+    expect(res.status).toBe(400);
+    expect(res.body.status).toBe('error');
+  });
+
+  // A well-formed but non-existent PAT- id must still surface as 404 (not 400/500).
+  test('404 — GET /api/patients/:id well-formed but not found', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'a@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .get('/api/patients/PAT-ZZZZZZZZ')
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  // D2: getBill for a missing patient previously threw ForbiddenError (403).
+  // A not-found patient must now be a 404.
+  test('404 — GET /api/patients/:id/bill for a missing patient (was 403)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'a@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .get('/api/patients/PAT-ZZZZZZZZ/bill')
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  // Sanity: the bill endpoint still returns 200 for a real patient.
+  test('200 — GET /api/patients/:id/bill for an existing patient', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'a@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-TEST0001' });
+
+    const res = await request(app)
+      .get('/api/patients/PAT-TEST0001/bill')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.grandTotal).toBe(0);
   });
 });
