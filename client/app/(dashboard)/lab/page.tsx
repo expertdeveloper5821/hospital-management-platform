@@ -923,7 +923,7 @@ export default function LabPage() {
     }
   }, [role, router]);
 
-  const canCreate = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
+  const canCreate = ['DOCTOR', 'HOSPITAL_ADMIN', 'NURSE'].includes(role ?? '');
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;

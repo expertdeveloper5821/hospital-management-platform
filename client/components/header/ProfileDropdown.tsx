@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter }                   from 'next/navigation';
-import { User, KeyRound, LogOut, Palette } from 'lucide-react';
+import { User, KeyRound, LogOut, Loader2, Palette } from 'lucide-react';
 import { cn }                          from '@/lib/utils';
 import { useAppSelector }              from '@/store/hooks';
 import { useLogoutMutation }           from '@/store/api/auth.api';
@@ -29,7 +29,7 @@ export function ProfileDropdown() {
   const profile = useAppSelector((s) => s.auth.profile);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [logout] = useLogoutMutation();
+  const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
 
   // Close on outside click
   useEffect(() => {
@@ -48,8 +48,9 @@ export function ProfileDropdown() {
   const initials = getInitials(profile.email);
 
   async function handleLogout() {
-    setOpen(false);
+    if (isLoggingOut) return;
     await logout({ isSuperAdmin: profile?.role === 'SUPER_ADMIN' });
+    setOpen(false);
   }
 
   function navigate(href: string) {
@@ -121,10 +122,15 @@ export function ProfileDropdown() {
             <button
               role="menuitem"
               onClick={handleLogout}
-              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-muted transition-colors"
+              disabled={isLoggingOut}
+              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-muted transition-colors disabled:opacity-50 disabled:pointer-events-none"
             >
-              <LogOut className="h-4 w-4" aria-hidden="true" />
-              Logout
+              {isLoggingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <LogOut className="h-4 w-4" aria-hidden="true" />
+              )}
+              {isLoggingOut ? 'Signing out…' : 'Logout'}
             </button>
           </div>
         </div>

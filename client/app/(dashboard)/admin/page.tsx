@@ -307,6 +307,7 @@ function UserTableSkeleton() {
 function UsersTab() {
   const currentUserRole = useAppSelector((s) => s.auth.profile?.role);
   const canDeactivate   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
+  const canCreateUser   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
 
   const [page,          setPage]          = useState(1);
   const [filterRole,    setFilterRole]    = useState<UserRole | ''>('');
@@ -437,10 +438,12 @@ function UsersTab() {
               <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
             </Button>
           </div>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Add User
-          </Button>
+          {canCreateUser && (
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Add User
+            </Button>
+          )}
         </div>
       </div>
 
