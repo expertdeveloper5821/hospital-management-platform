@@ -86,6 +86,9 @@ export function errorHandler(
 
   let statusCode = 500;
   let message    = 'An unexpected error occurred';
+  // Field-level validation details surfaced for bad-input errors thrown outside
+  // of AppError (e.g. a Zod schema `.parse()` inside a controller).
+  let zodDetails: Record<string, unknown> | undefined;
 
   if (err instanceof AppError) {
     statusCode = err.statusCode;
@@ -96,6 +99,20 @@ export function errorHandler(
     message    = multerCode === 'LIMIT_FILE_SIZE'
       ? 'Uploaded file exceeds the maximum allowed size for this report type'
       : `File upload error: ${err.message}`;
+  } else if (err.name === 'ZodError') {
+    // Zod validation error from a controller `.parse()` that reached next(err).
+    // Without this branch it would fall through to a generic 500.
+    statusCode = 400;
+    message    = 'Validation failed';
+    const flatten = (err as unknown as { flatten?: () => unknown }).flatten;
+    if (typeof flatten === 'function') {
+      zodDetails = { errors: flatten.call(err) };
+    }
+  } else if (err.name === 'CastError') {
+    // Mongoose failed to cast a malformed path/query value (e.g. a bad ObjectId).
+    // This is a client input error, not a server fault.
+    statusCode = 400;
+    message    = 'Invalid identifier format';
   } else if (MONGO_NETWORK_ERRORS.has(err.name)) {
     statusCode = 503;
     message    = 'Database temporarily unavailable — please retry shortly';
@@ -107,7 +124,7 @@ export function errorHandler(
 
   // Always include field-level validation errors so clients can fix their requests.
   // These come from Zod via ValidationError.details and contain no sensitive internals.
-  const appDetails = err instanceof AppError ? err.details : undefined;
+  const appDetails = err instanceof AppError ? err.details : zodDetails;
 
   if (config.nodeEnv === 'production') {
     const body: Record<string, unknown> = { status: 'error', message };

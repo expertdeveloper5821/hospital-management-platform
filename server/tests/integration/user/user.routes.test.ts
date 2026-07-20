@@ -217,6 +217,12 @@ describe('GET /api/users', () => {
     expect(res.status).toBe(200);
     // Only returns users from tenantA (admin + 2 users = 3)
     expect(res.body.data.total).toBe(3);
+    // Security: the list response must never leak credential material or internals.
+    for (const u of res.body.data.data) {
+      expect(u).not.toHaveProperty('passwordHash');
+      expect(u).not.toHaveProperty('failedLoginAttempts');
+      expect(u).toHaveProperty('email');
+    }
   });
 
   test('200 — tenant isolation: different tenant sees 0 from tenant A', async () => {

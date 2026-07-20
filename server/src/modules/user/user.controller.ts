@@ -207,9 +207,26 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
       clampedLimit,
     );
 
+    // Never expose sensitive/internal fields (passwordHash, failedLoginAttempts,
+    // lockout timestamps, __v) over the API. Shape each user to a safe subset.
+    const safeUsers = result.data.map((user) => ({
+      userId:          user._id,
+      tenantId:        user.tenantId,
+      email:           user.email,
+      name:            user.name,
+      phone:           user.phone ?? null,
+      role:            user.role,
+      departmentIds:   user.departmentIds ?? [],
+      profileImageUrl: user.profileImageUrl ?? null,
+      isActive:        user.isActive,
+      isFirstLogin:    user.isFirstLogin,
+      createdAt:       user.createdAt,
+      updatedAt:       user.updatedAt,
+    }));
+
     const responseData = clampedLimit < limit
-      ? { ...result, warning: 'limit clamped to 100' }
-      : result;
+      ? { ...result, data: safeUsers, warning: 'limit clamped to 100' }
+      : { ...result, data: safeUsers };
 
     res.status(200).json({ status: 'success', data: responseData });
   } catch (err) { next(err); }
