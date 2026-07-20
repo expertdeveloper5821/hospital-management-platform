@@ -2,7 +2,9 @@ export interface OnboardingDocuments {
   registrationCertificate: string; // S3 key
   gstNumber:               string;
   panCard:                 string; // S3 key
-  addressProof:            string; // S3 key
+  addressLine:            string;
+  city:                    string;
+  state:                   string;
 }
 
 export interface BrandingConfig {
