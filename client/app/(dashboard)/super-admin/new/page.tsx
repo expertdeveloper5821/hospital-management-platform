@@ -20,6 +20,7 @@ interface FormState {
   addressLine:             string;
   city:                    string;
   state:                   string;
+  pincode:                 string;
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>;
@@ -33,6 +34,7 @@ const EMPTY: FormState = {
   addressLine:             '',
   city:                    '',
   state:                   '',
+  pincode:                 '',
 };
 
 const GST_REGEX = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z0-9]{1}Z[A-Z0-9]{1}$/;
@@ -102,6 +104,13 @@ function validate(form: FormState): FormErrors {
     errors.state = 'State must be 100 characters or fewer.';
   }
 
+  const pincode = form.pincode.trim();
+  if (!pincode) {
+    errors.pincode = 'Pincode is required.';
+  } else if (!/^\d{6}$/.test(pincode)) {
+    errors.pincode = 'Pincode must be 6 digits.';
+  }
+
   return errors;
 }
 
@@ -153,6 +162,7 @@ export default function NewTenantPage() {
           addressLine:             form.addressLine.trim(),
           city:                    form.city.trim(),
           state:                   form.state.trim(),
+          pincode:                 form.pincode.trim(),
         },
       }).unwrap();
       router.push('/super-admin');
@@ -325,6 +335,24 @@ export default function NewTenantPage() {
               </select>
               {fieldError('state') && (
                 <p className="text-xs text-destructive">{fieldError('state')}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pincode">Pincode</Label>
+              <Input
+                id="pincode"
+                name="pincode"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="400001"
+                value={form.pincode}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                aria-invalid={!!fieldError('pincode')}
+                className={fieldError('pincode') ? 'border-destructive focus-visible:ring-destructive' : ''}
+              />
+              {fieldError('pincode') && (
+                <p className="text-xs text-destructive">{fieldError('pincode')}</p>
               )}
             </div>
           </div>

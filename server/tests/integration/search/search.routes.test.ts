@@ -64,6 +64,7 @@ beforeEach(async () => {
       addressLine:            '777 Search Lane',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
   });
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
@@ -234,6 +235,7 @@ describe('GET /api/search — tenant isolation', () => {
         addressLine:            '888 Other Street',
         city:                    'Delhi',
         state:                   'Delhi',
+        pincode:                 '400001',
       },
     });
     const otherTenantId = (otherTenant._id as mongoose.Types.ObjectId).toString();

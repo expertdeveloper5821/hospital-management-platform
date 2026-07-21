@@ -33,7 +33,7 @@ describe('TenantService — example-based', () => {
     mockRepo.save.mockResolvedValue(mockTenant as never);
 
     const result = await service.createTenant(
-      { name: 'Hospital A', adminEmail: 'admin@h.com', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra' } },
+      { name: 'Hospital A', adminEmail: 'admin@h.com', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra', pincode: '400001' } },
       'sa-1',
     );
     expect(result.status).toBe(TenantStatus.PENDING_VERIFICATION);
@@ -44,7 +44,7 @@ describe('TenantService — example-based', () => {
 
     await expect(
       service.createTenant(
-        { name: 'Hospital B', adminEmail: 'Admin@H.com ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra' } },
+        { name: 'Hospital B', adminEmail: 'Admin@H.com ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra', pincode: '400001' } },
         'sa-1',
       ),
     ).rejects.toThrow(ConflictError);
@@ -57,7 +57,7 @@ describe('TenantService — example-based', () => {
     mockRepo.save.mockResolvedValue(mockTenant as never);
 
     await service.createTenant(
-      { name: 'Hospital A', adminEmail: '  Admin@H.com  ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra' } },
+      { name: 'Hospital A', adminEmail: '  Admin@H.com  ', onboardingDocuments: { registrationCertificate: 'k1', gstNumber: 'GST1', panCard: 'k2', addressLine: '123 Test Street', city: 'Mumbai', state: 'Maharashtra', pincode: '400001' } },
       'sa-1',
     );
     expect(mockRepo.findByAdminEmail).toHaveBeenCalledWith('admin@h.com');

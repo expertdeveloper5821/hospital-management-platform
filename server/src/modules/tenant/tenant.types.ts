@@ -5,6 +5,7 @@ export interface OnboardingDocuments {
   addressLine:            string;
   city:                    string;
   state:                   string;
+  pincode:                 string; // 6-digit Indian PIN
 }
 
 export interface BrandingConfig {

@@ -19,6 +19,7 @@ interface CreateTenantRequest {
     addressLine:             string;
     city:                    string;
     state:                   string;
+    pincode:                 string;
   };
 }
 

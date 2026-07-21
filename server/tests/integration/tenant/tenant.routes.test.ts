@@ -79,6 +79,7 @@ async function seedPendingTenant(name = 'Test Hospital', adminEmail = 'admin@tes
       addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -96,6 +97,7 @@ async function seedActiveTenant(name = 'Active Hospital') {
       addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -113,6 +115,7 @@ async function seedInactiveTenant(name = 'Inactive Hospital') {
       addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });
@@ -136,6 +139,7 @@ describe('POST /api/tenants', () => {
           addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
+          pincode:                 '400001',
         },
       });
 
@@ -160,6 +164,7 @@ describe('POST /api/tenants', () => {
           addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
+          pincode:                 '400001',
         },
       });
 
@@ -194,6 +199,7 @@ describe('POST /api/tenants', () => {
           addressLine:            '100 Test Road',
           city:                    'Pune',
           state:                   'Maharashtra',
+          pincode:                 '400001',
         },
       });
 
@@ -228,6 +234,7 @@ describe('POST /api/tenants', () => {
           addressLine:            '123 Main Street',
           city:                    'Mumbai',
           state:                   'Maharashtra',
+          pincode:                 '400001',
         },
       });
 
@@ -252,6 +259,7 @@ describe('POST /api/tenants', () => {
           addressLine:            '456 Main Street',
           city:                    'Delhi',
           state:                   'Delhi',
+          pincode:                 '400001',
         },
       });
 

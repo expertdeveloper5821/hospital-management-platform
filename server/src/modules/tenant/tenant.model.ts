@@ -26,6 +26,7 @@ const TenantSchema = new Schema<ITenant>(
       addressLine:            { type: String, required: true, trim: true },
       city:                    { type: String, required: true, trim: true },
       state:                   { type: String, required: true, trim: true },
+      pincode:                 { type: String, required: true, trim: true },
     },
     branding: {
       logoUrl:      { type: String, default: null },

@@ -65,6 +65,7 @@ beforeEach(async () => {
       addressLine:            '123 Dashboard Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
   });
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();

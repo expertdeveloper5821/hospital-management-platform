@@ -18,6 +18,7 @@ const createTenantSchema = z.object({
     addressLine:            z.string().min(1),
     city:                    z.string().min(1),
     state:                   z.string().min(1),
+    pincode:                 z.string().regex(/^\d{6}$/, 'Pincode must be 6 digits'),
   }),
 });
 
