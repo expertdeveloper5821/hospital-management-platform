@@ -285,6 +285,22 @@ describe('PaymentService — handleRazorpayWebhook', () => {
     expect(mockPayRepo.update).not.toHaveBeenCalled();
   });
 
+  test('does not overwrite a CANCELLED payment when payment.failed arrives', async () => {
+    const orderId = 'order_cancelled';
+    const cancelled = makePayment({ status: PaymentStatus.CANCELLED, razorpayOrderId: orderId });
+    mockPayRepo.findByRazorpayOrderId = jest.fn().mockResolvedValue(cancelled);
+
+    const body = Buffer.from(JSON.stringify({
+      event: 'payment.failed',
+      payload: { payment: { entity: { id: 'pay_rzp_failed', order_id: orderId, amount: 50000, method: 'upi' } } },
+    }));
+    const sig = signBody(body);
+
+    await service.handleRazorpayWebhook(body, sig);
+
+    expect(mockPayRepo.update).not.toHaveBeenCalled();
+  });
+
   test('ignores unknown order IDs (no payment record found)', async () => {
     mockPayRepo.findByRazorpayOrderId = jest.fn().mockResolvedValue(null);
 

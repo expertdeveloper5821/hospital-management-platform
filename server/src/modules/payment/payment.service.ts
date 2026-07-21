@@ -236,7 +236,8 @@ export class PaymentService {
 
     if (event === 'payment.failed') {
       // A captured payment (webhook/verify) always wins; never downgrade it.
-      if (record.status === PaymentStatus.COMPLETED || record.status === PaymentStatus.FAILED) return;
+      // An explicitly cancelled checkout must remain CANCELLED even if a late failure event arrives.
+      if (record.status === PaymentStatus.COMPLETED || record.status === PaymentStatus.FAILED || record.status === PaymentStatus.CANCELLED) return;
       await paymentRepository.update(record.paymentId, record.tenantId, {
         status:            PaymentStatus.FAILED,
         razorpayPaymentId: rzpPayId,
