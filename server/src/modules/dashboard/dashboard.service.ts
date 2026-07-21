@@ -99,7 +99,8 @@ function last30DaysStart(): Date {
 // ─── Aggregation functions ────────────────────────────────────────────────────
 
 async function getTotalPatients(tenantId: string): Promise<number> {
-  return (await PatientModel.countDocuments({ tenantId })) ?? 0;
+  // Exclude soft-deleted patients so this matches the Patients list count.
+  return (await PatientModel.countDocuments({ tenantId, isDeleted: { $ne: true } })) ?? 0;
 }
 
 async function getTodayOpdCount(tenantId: string): Promise<number> {
@@ -118,13 +119,15 @@ async function getAdmissionsToday(tenantId: string): Promise<number> {
 
 async function getNewRegistrationsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return PatientModel.countDocuments({ tenantId, createdAt: { $gte: start, $lte: end } });
+  // Exclude soft-deleted patients (a patient registered then deleted today should not count).
+  return PatientModel.countDocuments({ tenantId, isDeleted: { $ne: true }, createdAt: { $gte: start, $lte: end } });
 }
 
 async function getPendingLabCount(tenantId: string): Promise<number> {
+  // Exclude soft-deleted requests so this matches the Lab module’s own queries.
   const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
+    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
+    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
   ]);
   return (path ?? 0) + (rad ?? 0);
 }
@@ -132,8 +135,8 @@ async function getPendingLabCount(tenantId: string): Promise<number> {
 async function getLabReportsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
   const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
+    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
+    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
   ]);
   return (path ?? 0) + (rad ?? 0);
 }
@@ -206,40 +209,55 @@ async function getBedStats(tenantId: string): Promise<{ total: number; occupied:
   return { total, occupied };
 }
 
+// The server's timezone. Visit/payment dates are stored at local-midnight
+// (see opd.service), and "today"/"last-30-days" ranges are computed in local time,
+// so the trend charts must bucket days in the SAME timezone — otherwise a visit
+// added "today" in, e.g., IST lands on the previous UTC day and shows as 0.
+const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+// Local-timezone YYYY-MM-DD key (matches Mongo's $dateToString with SERVER_TZ).
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Turn a sparse day→value map into a continuous 30-day series ending today (in the
+// server timezone), filling days with no activity as 0 — so "Last 30 Days" charts
+// always span the full window and include today. Returns [] when there is no data
+// at all, so the UI can still show a clean "No data yet" state for new hospitals.
+function buildDailySeries(byDate: Map<string, number>): { date: string; value: number }[] {
+  if (byDate.size === 0) return [];
+  const today = new Date();
+  const out: { date: string; value: number }[] = [];
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const key = localDayKey(d);
+    out.push({ date: key, value: byDate.get(key) ?? 0 });
+  }
+  return out;
+}
+
 async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
   const since = last30DaysStart();
+  // Cap at "now" so a Last-30-Days trend never includes future-scheduled visits.
   const results = await OPDVisitModel.aggregate([
-    { $match: { tenantId, visitDate: { $gte: since } } },
-    {
-      $group: {
-        _id: { year: { $year: '$visitDate' }, month: { $month: '$visitDate' }, day: { $dayOfMonth: '$visitDate' } },
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
+    { $match: { tenantId, visitDate: { $gte: since, $lte: new Date() } } },
+    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate', timezone: SERVER_TZ } }, count: { $sum: 1 } } },
   ]);
-  return results.map((r) => ({
-    date:  `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
-    count: r.count,
-  }));
+  const byDate = new Map<string, number>(results.map((r) => [r._id as string, r.count]));
+  return buildDailySeries(byDate).map((e) => ({ date: e.date, count: e.value }));
 }
 
 async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoint[]> {
   const since = last30DaysStart();
   const results = await PaymentModel.aggregate([
     { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
-    {
-      $group: {
-        _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } },
-        amount: { $sum: '$amount' },
-      },
-    },
-    { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
+    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: SERVER_TZ } }, amount: { $sum: '$amount' } } },
   ]);
-  return results.map((r) => ({
-    date:   `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
-    amount: r.amount,
-  }));
+  const byDate = new Map<string, number>(results.map((r) => [r._id as string, r.amount]));
+  return buildDailySeries(byDate).map((e) => ({ date: e.date, amount: e.value }));
 }
 
 // When `userId` is provided the feed is restricted to that user's own actions;

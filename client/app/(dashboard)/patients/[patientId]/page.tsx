@@ -12,7 +12,6 @@ import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
-import { toastSuccess } from '@/lib/toast';
 import { UserRole } from '@/store/types';
 
 function formatDate(iso: string | Date): string {
@@ -345,7 +344,7 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
     setDeleteError(undefined);
     try {
       await deletePatient(patientId).unwrap();
-      toastSuccess('Patient record deleted.');
+      // Success toast is shown globally by the base API mutation handler.
       setShowDeleteModal(false);
       router.push('/patients');
     } catch (err: unknown) {
