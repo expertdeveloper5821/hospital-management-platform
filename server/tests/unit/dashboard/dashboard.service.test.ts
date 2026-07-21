@@ -283,6 +283,14 @@ describe('DashboardService.getStats', () => {
       expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-1' });
     });
 
+    test('fail closed: a non-admin role WITHOUT a userId never falls back to tenant-wide activity', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true); // userId omitted
+      const filterArg = (AuditLogModel.find as jest.Mock).mock.calls[0][0];
+      // Must be scoped (has a userId), and must NOT be the tenant-wide query.
+      expect(filterArg).toHaveProperty('userId');
+      expect(filterArg).not.toEqual({ tenantId: TENANT });
+    });
+
     test('two users of the same role do not share cached activity', async () => {
       // Doctor A caches, then Doctor B (same role, different user) must query fresh
       // with its own userId — never served Doctor A's cached feed.

@@ -29,6 +29,11 @@ interface CacheEntry {
 
 const statsCache = new Map<string, CacheEntry>();
 
+// Sentinel used when a self-scoped role is queried without a userId. It cannot
+// match any real audit-log userId, so the activity feed comes back empty
+// (fail closed) instead of falling back to tenant-wide activity.
+const NO_ACTIVITY_SENTINEL = '__no_user__';
+
 // `activityScope` isolates the cache per recent-activity view: 'ALL' for roles
 // that see every user's activity (Hospital Admin), or the acting userId for
 // self-scoped roles — so two users of the same role never share cached activity.
@@ -45,10 +50,22 @@ function getFromCache(tenantId: string, role: UserRole, activityScope: string): 
   return entry.stats;
 }
 
+// Remove every expired entry. Because keys now include the acting userId, one-off
+// user scopes would otherwise linger in the Map until their exact key is read
+// again (which may never happen). Sweeping on write keeps resident entries bounded
+// to those still within their TTL, with no timer and no unbounded growth.
+function pruneExpiredEntries(now: number): void {
+  for (const [key, entry] of statsCache) {
+    if (now > entry.expiresAt) statsCache.delete(key);
+  }
+}
+
 function setInCache(tenantId: string, role: UserRole, activityScope: string, stats: DashboardStats): void {
+  const now = Date.now();
+  pruneExpiredEntries(now);
   statsCache.set(cacheKey(tenantId, role, activityScope), {
     stats,
-    expiresAt: Date.now() + config.dashboard.cacheTtlSeconds * 1000,
+    expiresAt: now + config.dashboard.cacheTtlSeconds * 1000,
   });
 }
 
@@ -253,7 +270,12 @@ export class DashboardService {
   ): Promise<DashboardStats> {
     // Recent Activities scope: Hospital Admin sees the whole hospital; every other
     // role sees only their own actions. Enforced here on the backend.
-    const activityUserId = role === UserRole.HOSPITAL_ADMIN ? undefined : userId;
+    // Fail closed: a self-scoped role with no userId resolves to a sentinel that
+    // matches no audit log, so omitting userId can never leak other users' activity
+    // (nor share a cross-user cache entry) — it simply returns an empty feed.
+    const activityUserId = role === UserRole.HOSPITAL_ADMIN
+      ? undefined                       // Hospital Admin: whole-tenant activity
+      : (userId ?? NO_ACTIVITY_SENTINEL);
     const activityScope  = activityUserId ?? 'ALL';
 
     if (!bypassCache) {
