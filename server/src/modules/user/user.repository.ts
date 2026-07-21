@@ -36,10 +36,18 @@ export class UserRepository {
   }
 
   // Return ids of users whose name matches a case-insensitive substring (tenant-scoped).
+  // Capped so a very short query (e.g. "a") can't return an unbounded id set that
+  // then becomes a huge $in filter downstream.
+  static readonly NAME_SEARCH_MAX = 200;
   async findIdsByNameSearch(tenantId: string, nameQuery: string): Promise<string[]> {
     assertDbConnected();
-    const re = new RegExp(escapeRegex(nameQuery.trim()), 'i');
-    const docs = await UserModel.find({ tenantId, name: re }).select('_id').lean();
+    const trimmed = nameQuery.trim();
+    if (!trimmed) return [];
+    const re = new RegExp(escapeRegex(trimmed), 'i');
+    const docs = await UserModel.find({ tenantId, name: re })
+      .select('_id')
+      .limit(UserRepository.NAME_SEARCH_MAX)
+      .lean();
     return docs.map((u) => (u._id as { toString(): string }).toString());
   }
 

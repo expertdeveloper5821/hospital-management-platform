@@ -465,21 +465,26 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
         description: form.description,
         prefill: { contact: "", email: "" },
         theme: { color: "#1A73E8" },
-        handler: (response: {
+        handler: async (response: {
           razorpay_order_id: string;
           razorpay_payment_id: string;
           razorpay_signature: string;
         }) => {
-          // Authoritative confirmation: verify the signature server-side before
-          // treating the payment as complete (don't rely on the webhook alone).
-          verifyPayment({
-            razorpayOrderId:   response.razorpay_order_id,
-            razorpayPaymentId: response.razorpay_payment_id,
-            razorpaySignature: response.razorpay_signature,
-          })
-            .unwrap()
-            .catch(() => {/* toast surfaces the error; webhook is the backstop */});
-          onSuccess();
+          // Authoritative confirmation: only treat the payment as successful once
+          // the server has verified the signature. Do NOT show success optimistically.
+          try {
+            await verifyPayment({
+              razorpayOrderId:   response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            }).unwrap();
+            onSuccess();
+          } catch {
+            setError(
+              "We could not confirm this payment. If money was debited it will be reconciled shortly — please check the payment status before retrying.",
+            );
+            setLaunching(false);
+          }
         },
         modal: {
           ondismiss: () => {
