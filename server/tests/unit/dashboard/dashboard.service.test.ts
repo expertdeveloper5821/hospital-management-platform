@@ -270,4 +270,44 @@ describe('DashboardService.getStats', () => {
       expect((PatientModel.countDocuments as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
     });
   });
+
+  // ─── Recent Activities role-based scoping ────────────────────────────────────
+  describe('recent activities — role-based scoping', () => {
+    test('HOSPITAL_ADMIN queries all activity for the tenant (no userId filter)', async () => {
+      await service.getStats(TENANT, UserRole.HOSPITAL_ADMIN, true, 'admin-1');
+      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT });
+    });
+
+    test('a non-admin role is restricted to its own userId', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true, 'doc-1');
+      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-1' });
+    });
+
+    test('fail closed: a non-admin role WITHOUT a userId never falls back to tenant-wide activity', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true); // userId omitted
+      const filterArg = (AuditLogModel.find as jest.Mock).mock.calls[0][0];
+      // Must be scoped (has a userId), and must NOT be the tenant-wide query.
+      expect(filterArg).toHaveProperty('userId');
+      expect(filterArg).not.toEqual({ tenantId: TENANT });
+    });
+
+    test('two users of the same role do not share cached activity', async () => {
+      // Doctor A caches, then Doctor B (same role, different user) must query fresh
+      // with its own userId — never served Doctor A's cached feed.
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-A');
+      (AuditLogModel.find as jest.Mock).mockClear();
+
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-B');
+      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-B' });
+      expect(AuditLogModel.find).not.toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-A' });
+    });
+
+    test('same user hits cache on the second call (no new activity query)', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1');
+      (AuditLogModel.find as jest.Mock).mockClear();
+
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1'); // cached
+      expect(AuditLogModel.find).not.toHaveBeenCalled();
+    });
+  });
 });

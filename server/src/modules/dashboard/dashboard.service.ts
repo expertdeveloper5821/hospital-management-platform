@@ -29,23 +29,43 @@ interface CacheEntry {
 
 const statsCache = new Map<string, CacheEntry>();
 
-function cacheKey(tenantId: string, role: UserRole): string {
-  return `${tenantId}:${role}`;
+// Sentinel used when a self-scoped role is queried without a userId. It cannot
+// match any real audit-log userId, so the activity feed comes back empty
+// (fail closed) instead of falling back to tenant-wide activity.
+const NO_ACTIVITY_SENTINEL = '__no_user__';
+
+// `activityScope` isolates the cache per recent-activity view: 'ALL' for roles
+// that see every user's activity (Hospital Admin), or the acting userId for
+// self-scoped roles — so two users of the same role never share cached activity.
+function cacheKey(tenantId: string, role: UserRole, activityScope: string): string {
+  return `${tenantId}:${role}:${activityScope}`;
 }
 
-function getFromCache(tenantId: string, role: UserRole): DashboardStats | null {
-  const entry = statsCache.get(cacheKey(tenantId, role));
+function getFromCache(tenantId: string, role: UserRole, activityScope: string): DashboardStats | null {
+  const entry = statsCache.get(cacheKey(tenantId, role, activityScope));
   if (!entry || Date.now() > entry.expiresAt) {
-    statsCache.delete(cacheKey(tenantId, role));
+    statsCache.delete(cacheKey(tenantId, role, activityScope));
     return null;
   }
   return entry.stats;
 }
 
-function setInCache(tenantId: string, role: UserRole, stats: DashboardStats): void {
-  statsCache.set(cacheKey(tenantId, role), {
+// Remove every expired entry. Because keys now include the acting userId, one-off
+// user scopes would otherwise linger in the Map until their exact key is read
+// again (which may never happen). Sweeping on write keeps resident entries bounded
+// to those still within their TTL, with no timer and no unbounded growth.
+function pruneExpiredEntries(now: number): void {
+  for (const [key, entry] of statsCache) {
+    if (now > entry.expiresAt) statsCache.delete(key);
+  }
+}
+
+function setInCache(tenantId: string, role: UserRole, activityScope: string, stats: DashboardStats): void {
+  const now = Date.now();
+  pruneExpiredEntries(now);
+  statsCache.set(cacheKey(tenantId, role, activityScope), {
     stats,
-    expiresAt: Date.now() + config.dashboard.cacheTtlSeconds * 1000,
+    expiresAt: now + config.dashboard.cacheTtlSeconds * 1000,
   });
 }
 
@@ -222,8 +242,12 @@ async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoi
   }));
 }
 
-async function getRecentActivities(tenantId: string): Promise<RecentActivity[]> {
-  const logs = await AuditLogModel.find({ tenantId })
+// When `userId` is provided the feed is restricted to that user's own actions;
+// otherwise it returns the whole tenant's activity (Hospital Admin view).
+async function getRecentActivities(tenantId: string, userId?: string): Promise<RecentActivity[]> {
+  const filter: Record<string, unknown> = { tenantId };
+  if (userId) filter.userId = userId;
+  const logs = await AuditLogModel.find(filter)
     .sort({ timestamp: -1 })
     .limit(10)
     .lean();
@@ -242,9 +266,20 @@ export class DashboardService {
     tenantId:    string,
     role:        UserRole,
     bypassCache: boolean = false,
+    userId?:     string,
   ): Promise<DashboardStats> {
+    // Recent Activities scope: Hospital Admin sees the whole hospital; every other
+    // role sees only their own actions. Enforced here on the backend.
+    // Fail closed: a self-scoped role with no userId resolves to a sentinel that
+    // matches no audit log, so omitting userId can never leak other users' activity
+    // (nor share a cross-user cache entry) — it simply returns an empty feed.
+    const activityUserId = role === UserRole.HOSPITAL_ADMIN
+      ? undefined                       // Hospital Admin: whole-tenant activity
+      : (userId ?? NO_ACTIVITY_SENTINEL);
+    const activityScope  = activityUserId ?? 'ALL';
+
     if (!bypassCache) {
-      const cached = getFromCache(tenantId, role);
+      const cached = getFromCache(tenantId, role, activityScope);
       if (cached) return cached;
     }
 
@@ -299,7 +334,7 @@ export class DashboardService {
         ? getBedStats(tenantId) : Promise.resolve(undefined),
       needs('monthlyOpdTrend')       ? getMonthlyOpdTrend(tenantId)       : Promise.resolve(undefined),
       needs('monthlyRevenueTrend')   ? getMonthlyRevenueTrend(tenantId)   : Promise.resolve(undefined),
-      needs('recentActivities')      ? getRecentActivities(tenantId)      : Promise.resolve(undefined),
+      needs('recentActivities')      ? getRecentActivities(tenantId, activityUserId) : Promise.resolve(undefined),
     ]));
 
     const stats: DashboardStats = { lastUpdated: new Date().toISOString() };
@@ -325,7 +360,7 @@ export class DashboardService {
     if (needs('monthlyRevenueTrend')   && monthlyRevenueTrend   !== undefined) stats.monthlyRevenueTrend   = monthlyRevenueTrend as RevenueTrendPoint[];
     if (needs('recentActivities')      && recentActivities      !== undefined) stats.recentActivities      = recentActivities as RecentActivity[];
 
-    setInCache(tenantId, role, stats);
+    setInCache(tenantId, role, activityScope, stats);
     return stats;
   }
 }
