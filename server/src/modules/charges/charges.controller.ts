@@ -19,6 +19,7 @@ const listChargesSchema = z.object({
   startDate:  z.string().optional(),
   endDate:    z.string().optional(),
   addedBy:    z.string().optional(),
+  addedByName: z.string().max(100).optional(),
   page:       z.coerce.number().int().min(1).default(1),
   limit:      z.coerce.number().int().min(1).max(20).default(20),
 });
@@ -69,6 +70,7 @@ export async function listCharges(req: Request, res: Response, next: NextFunctio
       startDate: query.data.startDate,
       endDate:   query.data.endDate,
       addedBy:   query.data.addedBy,
+      addedByName: query.data.addedByName,
       page:      query.data.page,
       limit:     query.data.limit,
     });

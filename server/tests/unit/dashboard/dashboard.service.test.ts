@@ -18,6 +18,7 @@ import { InventoryItemModel }    from '../../../src/modules/inventory/inventory.
 import { PaymentModel }          from '../../../src/modules/payment/payment.model';
 import { UserModel }             from '../../../src/modules/user/user.model';
 import { AuditLogModel }         from '../../../src/modules/audit/audit.model';
+import { auditRepository }       from '../../../src/modules/audit/audit.repository';
 import { DashboardService, clearDashboardCache } from '../../../src/modules/dashboard/dashboard.service';
 import { UserRole }              from '../../../src/shared/types/common.types';
 
@@ -34,6 +35,7 @@ function mockAggregate(model: unknown, values: Record<string, unknown>[]) {
 function mockFind(model: unknown, values: unknown[]) {
   (model as { find: jest.Mock }).find = jest.fn().mockReturnValue({
     sort:  jest.fn().mockReturnThis(),
+    skip:  jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
     lean:  jest.fn().mockResolvedValue(values),
   });
@@ -59,10 +61,15 @@ describe('DashboardService.getStats', () => {
     mockCount(BedModel,               0);
     mockCount(InventoryItemModel,     0);
     mockCount(PaymentModel,           0);
+    mockCount(AuditLogModel,          0);
     mockAggregate(PaymentModel,       []);
     mockAggregate(OPDVisitModel,      []);
     mockAggregate(InventoryItemModel, []);
     mockFind(AuditLogModel,           []);
+
+    // Recent activities now go through the audit repository — mock it directly.
+    (auditRepository as unknown as { query: jest.Mock }).query = jest.fn()
+      .mockResolvedValue({ data: [], total: 0, page: 1, limit: 10, totalPages: 0 });
   });
 
   // ─── Role filtering ────────────────────────────────────────────────────────
@@ -273,41 +280,44 @@ describe('DashboardService.getStats', () => {
 
   // ─── Recent Activities role-based scoping ────────────────────────────────────
   describe('recent activities — role-based scoping', () => {
+    const auditQuery = () => auditRepository.query as jest.Mock;
+
     test('HOSPITAL_ADMIN queries all activity for the tenant (no userId filter)', async () => {
       await service.getStats(TENANT, UserRole.HOSPITAL_ADMIN, true, 'admin-1');
-      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT });
+      const [tenantArg, filters] = auditQuery().mock.calls[0];
+      expect(tenantArg).toBe(TENANT);
+      expect(filters).not.toHaveProperty('userId');
     });
 
     test('a non-admin role is restricted to its own userId', async () => {
       await service.getStats(TENANT, UserRole.DOCTOR, true, 'doc-1');
-      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-1' });
+      expect(auditQuery()).toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-1' }));
     });
 
     test('fail closed: a non-admin role WITHOUT a userId never falls back to tenant-wide activity', async () => {
       await service.getStats(TENANT, UserRole.DOCTOR, true); // userId omitted
-      const filterArg = (AuditLogModel.find as jest.Mock).mock.calls[0][0];
-      // Must be scoped (has a userId), and must NOT be the tenant-wide query.
-      expect(filterArg).toHaveProperty('userId');
-      expect(filterArg).not.toEqual({ tenantId: TENANT });
+      const filters = auditQuery().mock.calls[0][1];
+      // Must be scoped (has a userId sentinel), never the tenant-wide (no-userId) query.
+      expect(filters).toHaveProperty('userId');
     });
 
     test('two users of the same role do not share cached activity', async () => {
       // Doctor A caches, then Doctor B (same role, different user) must query fresh
       // with its own userId — never served Doctor A's cached feed.
       await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-A');
-      (AuditLogModel.find as jest.Mock).mockClear();
+      auditQuery().mockClear();
 
       await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-B');
-      expect(AuditLogModel.find).toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-B' });
-      expect(AuditLogModel.find).not.toHaveBeenCalledWith({ tenantId: TENANT, userId: 'doc-A' });
+      expect(auditQuery()).toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-B' }));
+      expect(auditQuery()).not.toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-A' }));
     });
 
     test('same user hits cache on the second call (no new activity query)', async () => {
       await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1');
-      (AuditLogModel.find as jest.Mock).mockClear();
+      auditQuery().mockClear();
 
       await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1'); // cached
-      expect(AuditLogModel.find).not.toHaveBeenCalled();
+      expect(auditQuery()).not.toHaveBeenCalled();
     });
   });
 });

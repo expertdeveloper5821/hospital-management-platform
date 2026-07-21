@@ -87,6 +87,7 @@ async function seedTenant(name = 'Test Hospital') {
       addressLine:            '123 Patient Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: name, primaryColor: '#1A73E8' },
   });

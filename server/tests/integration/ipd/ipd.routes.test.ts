@@ -72,6 +72,7 @@ async function seedTenant() {
       addressLine:            '789 IPD Avenue',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: 'Integration Hospital', primaryColor: '#000', logoUrl: null },
   });

@@ -67,6 +67,7 @@ async function seedTenant() {
       addressLine:            '123 Test Street',
       city:                    'Mumbai',
       state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: 'Test Hospital', primaryColor: '#1A73E8' },
   });

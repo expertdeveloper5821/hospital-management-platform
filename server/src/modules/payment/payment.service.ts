@@ -217,22 +217,53 @@ export class PaymentService {
     }
 
     const payload = JSON.parse(rawBody.toString()) as Record<string, unknown>;
+    const event   = payload['event'];
 
-    if (payload['event'] !== 'payment.captured') return;
-
-    const entity   = (payload['payload'] as Record<string, unknown>);
-    const payment  = ((entity['payment'] as Record<string, unknown>)['entity']) as Record<string, unknown>;
+    const entity   = (payload['payload'] as Record<string, unknown> | undefined);
+    const payment  = entity && ((entity['payment'] as Record<string, unknown> | undefined)?.['entity']) as Record<string, unknown> | undefined;
+    if (!payment) return;
     const orderId  = payment['order_id'] as string;
     const rzpPayId = payment['id']       as string;
 
     const record = await paymentRepository.findByRazorpayOrderId(orderId);
-    if (!record || record.status === PaymentStatus.COMPLETED) return; // idempotent
+    if (!record) return;
 
+    if (event === 'payment.captured') {
+      if (record.status === PaymentStatus.COMPLETED) return; // idempotent
+      await this.completePaymentRecord(record, rzpPayId);
+      return;
+    }
+
+    if (event === 'payment.failed') {
+      // A captured payment (webhook/verify) always wins; never downgrade it.
+      if (record.status === PaymentStatus.COMPLETED || record.status === PaymentStatus.FAILED) return;
+      await paymentRepository.update(record.paymentId, record.tenantId, {
+        status:            PaymentStatus.FAILED,
+        razorpayPaymentId: rzpPayId,
+      } as Partial<IPayment>);
+      try {
+        await auditService.log({
+          entityType: AuditEntityType.PAYMENT_RECORD,
+          entityId:   record.paymentId,
+          action:     'UPDATE',
+          userId:     record.createdBy,
+          tenantId:   record.tenantId,
+          previousValue: { status: record.status },
+          newValue:      { status: PaymentStatus.FAILED },
+        });
+      } catch { /* swallow */ }
+      return;
+    }
+    // other events ignored
+  }
+
+  // Mark a PENDING record COMPLETED and generate its receipt. Shared by the
+  // webhook (payment.captured) and the client-verify path.
+  private async completePaymentRecord(record: IPayment, rzpPayId: string): Promise<IPayment | null> {
     const tenant  = await tenantRepository.findById(record.tenantId);
     const patient = await patientRepository.findByPatientId(record.tenantId, record.patientId);
 
     let receiptS3Key: string | null = null;
-
     if (patient) {
       try {
         const receiptBuffer = await pdfService.generateReceipt({
@@ -248,10 +279,10 @@ export class PaymentService {
         });
         receiptS3Key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
         await s3Service.uploadFile(receiptS3Key, receiptBuffer, 'application/pdf');
-      } catch { /* receipt generation failure must not fail the webhook */ }
+      } catch { /* receipt generation failure must not fail completion */ }
     }
 
-    await paymentRepository.update(record.paymentId, record.tenantId, {
+    const updated = await paymentRepository.update(record.paymentId, record.tenantId, {
       status:            PaymentStatus.COMPLETED,
       razorpayPaymentId: rzpPayId,
       receiptS3Key,
@@ -264,10 +295,70 @@ export class PaymentService {
         action:     'UPDATE',
         userId:     record.createdBy,
         tenantId:   record.tenantId,
-        previousValue: { status: PaymentStatus.PENDING },
+        previousValue: { status: record.status },
         newValue:      { status: PaymentStatus.COMPLETED, razorpayPaymentId: rzpPayId },
       });
     } catch { /* swallow */ }
+
+    return updated;
+  }
+
+  // ─── Verify a Razorpay checkout success (client handler → authoritative) ──────
+  // Validates the HMAC signature Razorpay returns to the browser so success does
+  // not rely solely on the webhook. Idempotent.
+  async verifyRazorpayPayment(
+    tenantId: string,
+    data: { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string },
+  ): Promise<PaymentResponse> {
+    const expected = crypto
+      .createHmac('sha256', config.razorpay.keySecret)
+      .update(`${data.razorpayOrderId}|${data.razorpayPaymentId}`)
+      .digest('hex');
+
+    const sig = data.razorpaySignature;
+    if (!/^[0-9a-f]{64}$/i.test(sig) ||
+        !crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(sig, 'hex'))) {
+      throw new AppError('Invalid payment signature', 400);
+    }
+
+    const record = await paymentRepository.findByRazorpayOrderId(data.razorpayOrderId);
+    if (!record || record.tenantId !== tenantId) throw new NotFoundError('Payment not found');
+    if (record.status === PaymentStatus.COMPLETED) return toResponse(record);
+
+    const updated = await this.completePaymentRecord(record, data.razorpayPaymentId);
+    return toResponse(updated ?? record);
+  }
+
+  // ─── Cancel an abandoned Razorpay checkout (client ondismiss) ─────────────────
+  // Only a still-PENDING order is cancelled. If the payment was actually captured,
+  // the payment.captured webhook (which ignores the COMPLETED check for CANCELLED)
+  // still corrects it to COMPLETED — reality wins.
+  async cancelRazorpayOrder(
+    tenantId: string,
+    razorpayOrderId: string,
+    userId: string,
+  ): Promise<PaymentResponse> {
+    const record = await paymentRepository.findByRazorpayOrderId(razorpayOrderId);
+    if (!record || record.tenantId !== tenantId) throw new NotFoundError('Payment not found');
+    if (record.status !== PaymentStatus.PENDING) return toResponse(record);
+
+    const updated = await paymentRepository.update(record.paymentId, tenantId, {
+      status: PaymentStatus.CANCELLED,
+    } as Partial<IPayment>);
+
+    try {
+      await auditService.log({
+        entityType: AuditEntityType.PAYMENT_RECORD,
+        entityId:   record.paymentId,
+        action:     'UPDATE',
+        userId,
+        tenantId,
+        previousValue: { status: PaymentStatus.PENDING },
+        newValue:      { status: PaymentStatus.CANCELLED },
+      });
+    } catch { /* swallow */ }
+
+    return toResponse(updated ?? record);
   }
 
   // ─── U5-B-04: List payments ────────────────────────────────────────────────

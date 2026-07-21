@@ -24,6 +24,33 @@ export class UserRepository {
     return UserModel.findOne({ tenantId, email: email.toLowerCase() });
   }
 
+  // Resolve a set of user ids to their display names (tenant-scoped).
+  async findNamesByIds(tenantId: string, userIds: string[]): Promise<Map<string, string>> {
+    assertDbConnected();
+    if (userIds.length === 0) return new Map();
+    const valid = userIds.filter((id) => /^[a-fA-F0-9]{24}$/.test(id));
+    if (valid.length === 0) return new Map();
+    const docs = await UserModel.find({ _id: { $in: valid }, tenantId })
+      .select('_id name').lean();
+    return new Map(docs.map((u) => [(u._id as { toString(): string }).toString(), u.name as string]));
+  }
+
+  // Return ids of users whose name matches a case-insensitive substring (tenant-scoped).
+  // Capped so a very short query (e.g. "a") can't return an unbounded id set that
+  // then becomes a huge $in filter downstream.
+  static readonly NAME_SEARCH_MAX = 200;
+  async findIdsByNameSearch(tenantId: string, nameQuery: string): Promise<string[]> {
+    assertDbConnected();
+    const trimmed = nameQuery.trim();
+    if (!trimmed) return [];
+    const re = new RegExp(escapeRegex(trimmed), 'i');
+    const docs = await UserModel.find({ tenantId, name: re })
+      .select('_id')
+      .limit(UserRepository.NAME_SEARCH_MAX)
+      .lean();
+    return docs.map((u) => (u._id as { toString(): string }).toString());
+  }
+
   async findAll(
     tenantId: string,
     filters: ListUsersFilters,

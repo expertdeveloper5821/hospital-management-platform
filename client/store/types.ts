@@ -432,7 +432,7 @@ export interface InventoryListResult {
 // ─── Payment ──────────────────────────────────────────────────────────────────
  
 export type PaymentMethod = 'CASH' | 'CHEQUE' | 'UPI' | 'CARD';
-export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED';
+export type PaymentStatus = 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type PaymentReferenceType = 'OPD_VISIT' | 'IPD_ADMISSION' | 'REGISTRATION';
 
 export interface PaymentResponse {
@@ -653,6 +653,8 @@ export interface ChargeResponse {
   amount:             number;
   encounterReference: string | null;
   addedBy:            string;
+  // Only the charge-list endpoint enriches this; add/void/bill responses omit it.
+  addedByName?:       string | null;
   status:             ChargeStatus;
   voidedBy:           string | null;
   voidedAt:           string | null;

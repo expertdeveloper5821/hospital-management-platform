@@ -29,23 +29,25 @@ export const chargesApi = baseApi.injectEndpoints({
     }),
 
     listCharges: build.query<ChargeListResult, {
-      patientId?: string;
-      category?:  ChargeCategory;
-      startDate?: string;
-      endDate?:   string;
-      addedBy?:   string;
-      page?:      number;
-      limit?:     number;
+      patientId?:   string;
+      category?:    ChargeCategory;
+      startDate?:   string;
+      endDate?:     string;
+      addedBy?:     string;
+      addedByName?: string;
+      page?:        number;
+      limit?:       number;
     } | void>({
       query: (args) => {
         const params = new URLSearchParams();
-        if (args?.patientId) params.set('patientId', args.patientId);
-        if (args?.category)  params.set('category',  args.category);
-        if (args?.startDate) params.set('startDate', args.startDate);
-        if (args?.endDate)   params.set('endDate',   args.endDate);
-        if (args?.addedBy)   params.set('addedBy',   args.addedBy);
-        if (args?.page)      params.set('page',      String(args.page));
-        if (args?.limit)     params.set('limit',     String(args.limit));
+        if (args?.patientId)   params.set('patientId', args.patientId);
+        if (args?.category)    params.set('category',  args.category);
+        if (args?.startDate)   params.set('startDate', args.startDate);
+        if (args?.endDate)     params.set('endDate',   args.endDate);
+        if (args?.addedBy)     params.set('addedBy',   args.addedBy);
+        if (args?.addedByName) params.set('addedByName', args.addedByName);
+        if (args?.page)        params.set('page',      String(args.page));
+        if (args?.limit)       params.set('limit',     String(args.limit));
         const qs = params.toString();
         return `/api/charges${qs ? `?${qs}` : ''}`;
       },

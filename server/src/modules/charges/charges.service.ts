@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { chargeRepository, ChargeListFilters } from './charges.repository';
 import { ICharge, ChargeCategory, CHARGE_CATEGORIES } from './charges.model';
 import { patientRepository } from '../patient/patient.repository';
+import { userRepository } from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
 import { auditService }  from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
@@ -182,8 +183,31 @@ class ChargeService {
   async listCharges(
     tenantId: string,
     filters:  ChargeListFilters,
-  ): Promise<PaginatedResult<ICharge>> {
-    return chargeRepository.list(tenantId, filters);
+  ): Promise<PaginatedResult<ICharge & { addedByName: string | null }>> {
+    // Name search: resolve the typed name to the matching actor ids. No match →
+    // empty result (rather than ignoring the filter).
+    let repoFilters = filters;
+    if (filters.addedByName && filters.addedByName.trim()) {
+      const ids = await userRepository.findIdsByNameSearch(tenantId, filters.addedByName);
+      if (ids.length === 0) {
+        return { data: [], total: 0, page: filters.page ?? 1, limit: filters.limit ?? 20, totalPages: 0 };
+      }
+      repoFilters = { ...filters, addedByIds: ids };
+    }
+
+    const result = await chargeRepository.list(tenantId, repoFilters);
+
+    // Enrich each charge with the actor's display name for the UI.
+    const actorIds = [...new Set(result.data.map((c) => c.addedBy))];
+    const names = await userRepository.findNamesByIds(tenantId, actorIds);
+    // result.data are lean (plain) objects despite the ICharge typing.
+    const data = result.data.map((c) => ({
+      ...(c as unknown as Record<string, unknown>),
+      // Auto-generated charges (e.g. package assignment) have a synthetic actor.
+      addedByName: c.addedBy === 'SYSTEM_AUTO' ? 'System' : (names.get(c.addedBy) ?? null),
+    })) as unknown as (ICharge & { addedByName: string | null })[];
+
+    return { ...result, data };
   }
 
   async createPackageCharge(

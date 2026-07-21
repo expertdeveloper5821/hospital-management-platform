@@ -6,7 +6,7 @@ import { PathologyRequestModel, RadiologyRequestModel } from '../lab/lab.model';
 import { InventoryItemModel }    from '../inventory/inventory.model';
 import { PaymentModel }          from '../payment/payment.model';
 import { UserModel }             from '../user/user.model';
-import { AuditLogModel }         from '../audit/audit.model';
+import { auditRepository }       from '../audit/audit.repository';
 import { AppError }              from '../../shared/middleware/error-handler';
 import config                    from '../../shared/config/env';
 import {
@@ -244,14 +244,14 @@ async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoi
 
 // When `userId` is provided the feed is restricted to that user's own actions;
 // otherwise it returns the whole tenant's activity (Hospital Admin view).
+// Data access goes through the audit repository (no direct model queries here).
 async function getRecentActivities(tenantId: string, userId?: string): Promise<RecentActivity[]> {
-  const filter: Record<string, unknown> = { tenantId };
-  if (userId) filter.userId = userId;
-  const logs = await AuditLogModel.find(filter)
-    .sort({ timestamp: -1 })
-    .limit(10)
-    .lean();
-  return logs.map((l) => ({
+  const { data } = await auditRepository.query(tenantId, {
+    ...(userId ? { userId } : {}),
+    page:  1,
+    limit: 10,
+  });
+  return data.map((l) => ({
     entityType: l.entityType,
     entityId:   l.entityId,
     action:     l.action,
