@@ -24,6 +24,25 @@ export class UserRepository {
     return UserModel.findOne({ tenantId, email: email.toLowerCase() });
   }
 
+  // Resolve a set of user ids to their display names (tenant-scoped).
+  async findNamesByIds(tenantId: string, userIds: string[]): Promise<Map<string, string>> {
+    assertDbConnected();
+    if (userIds.length === 0) return new Map();
+    const valid = userIds.filter((id) => /^[a-fA-F0-9]{24}$/.test(id));
+    if (valid.length === 0) return new Map();
+    const docs = await UserModel.find({ _id: { $in: valid }, tenantId })
+      .select('_id name').lean();
+    return new Map(docs.map((u) => [(u._id as { toString(): string }).toString(), u.name as string]));
+  }
+
+  // Return ids of users whose name matches a case-insensitive substring (tenant-scoped).
+  async findIdsByNameSearch(tenantId: string, nameQuery: string): Promise<string[]> {
+    assertDbConnected();
+    const re = new RegExp(escapeRegex(nameQuery.trim()), 'i');
+    const docs = await UserModel.find({ tenantId, name: re }).select('_id').lean();
+    return docs.map((u) => (u._id as { toString(): string }).toString());
+  }
+
   async findAll(
     tenantId: string,
     filters: ListUsersFilters,

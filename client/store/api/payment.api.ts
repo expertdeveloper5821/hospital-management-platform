@@ -49,6 +49,20 @@ export const paymentApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<RazorpayOrderResponse>) => raw.data,
     }),
 
+    // Confirm a successful Razorpay checkout (signature verified server-side).
+    verifyRazorpayPayment: build.mutation<PaymentResponse, { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string }>({
+      query: (body) => ({ url: '/api/payments/razorpay/verify', method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
+      invalidatesTags: ['Payment'],
+    }),
+
+    // Mark an abandoned Razorpay checkout as CANCELLED (user dismissed the modal).
+    cancelRazorpayOrder: build.mutation<PaymentResponse, { razorpayOrderId: string }>({
+      query: (body) => ({ url: '/api/payments/razorpay/cancel', method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
+      invalidatesTags: ['Payment'],
+    }),
+
     getReceiptUrl: build.query<string, string>({
       query: (paymentId) => `/api/payments/${paymentId}/receipt`,
       transformResponse: (raw: ApiSuccess<{ receiptUrl: string }>) => raw.data.receiptUrl,
@@ -74,6 +88,8 @@ export const {
   useListPaymentsQuery,
   useCreateManualPaymentMutation,
   useCreateRazorpayOrderMutation,
+  useVerifyRazorpayPaymentMutation,
+  useCancelRazorpayOrderMutation,
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
 } = paymentApi;

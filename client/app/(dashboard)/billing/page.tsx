@@ -33,11 +33,11 @@ export default function BillingPage() {
   const [page, setPage]             = useState(1);
 
   const { data, isLoading, isError } = useListChargesQuery({
-    patientId: patientId || undefined,
-    category:  category  || undefined,
-    startDate: startDate ? clampToToday(startDate) : undefined,
-    endDate:   endDate   ? clampToToday(endDate)   : undefined,
-    addedBy:   addedBy   || undefined,
+    patientId:   patientId || undefined,
+    category:    category  || undefined,
+    startDate:   startDate ? clampToToday(startDate) : undefined,
+    endDate:     endDate   ? clampToToday(endDate)   : undefined,
+    addedByName: addedBy   || undefined,
     page,
     limit: 20,
   });
@@ -64,7 +64,7 @@ export default function BillingPage() {
         </div>
         <div>
           <Label>Added By</Label>
-          <Input value={addedBy} onChange={e => { setAddedBy(e.target.value); setPage(1); }} placeholder="User ID" />
+          <Input value={addedBy} onChange={e => { setAddedBy(e.target.value); setPage(1); }} placeholder="Staff name" />
         </div>
         <div>
           <Label>Start Date</Label>
@@ -86,7 +86,9 @@ export default function BillingPage() {
             <div className="space-y-0.5">
               <p className="font-medium">{charge.description}</p>
               <p className="text-muted-foreground">{charge.patientId} · {charge.category.replace(/_/g, ' ')}</p>
-              <p className="text-muted-foreground">{new Date(charge.createdAt).toLocaleDateString()}</p>
+              <p className="text-muted-foreground">
+                {new Date(charge.createdAt).toLocaleDateString()} · Added by {charge.addedByName ?? 'Unknown'}
+              </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="font-medium">₹{charge.amount.toFixed(2)}</span>

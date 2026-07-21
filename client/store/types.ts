@@ -653,6 +653,7 @@ export interface ChargeResponse {
   amount:             number;
   encounterReference: string | null;
   addedBy:            string;
+  addedByName:        string | null;
   status:             ChargeStatus;
   voidedBy:           string | null;
   voidedAt:           string | null;
