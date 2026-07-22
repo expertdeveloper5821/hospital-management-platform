@@ -15,7 +15,8 @@
     "seed:tenants": "ts-node scripts/seed-tenants.ts",
     "seed:hospital-roles": "ts-node scripts/seed-hospital-roles.ts",
     "seed:patients": "ts-node scripts/seed-patients.ts",
-    "seed:all": "npm run seed:super-admin && npm run seed:tenants && npm run seed:hospital-roles && npm run seed:patients"
+    "seed:all": "npm run seed:super-admin && npm run seed:tenants && npm run seed:hospital-roles && npm run seed:patients",
+    "migrate:charge-status": "ts-node scripts/migrate-charge-status.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.575.0",

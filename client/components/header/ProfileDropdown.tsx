@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter }                   from 'next/navigation';
 import { User, KeyRound, LogOut, Loader2, Palette } from 'lucide-react';
-import { cn }                          from '@/lib/utils';
+import { cn, toTitleCase }             from '@/lib/utils';
 import { useAppSelector }              from '@/store/hooks';
 import { useLogoutMutation }           from '@/store/api/auth.api';
 
@@ -19,7 +19,7 @@ function getInitials(email: string): string {
 }
 
 function formatRole(role: string): string {
-  return role.replace(/_/g, ' ');
+  return toTitleCase(role);
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────

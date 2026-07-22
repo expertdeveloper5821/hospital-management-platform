@@ -23,11 +23,11 @@ const ROLE_CATEGORY_PERMISSIONS: Record<ExtendedRole, ChargeCategory[]> = {
   [UserRole.RECEPTIONIST]:    ['CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'PACKAGE', 'OTHER'],
   [UserRole.ADMIN]:           [...CHARGE_CATEGORIES],
   [UserRole.HOSPITAL_ADMIN]:  [...CHARGE_CATEGORIES],
+  [UserRole.FINANCE_MANAGER]: [...CHARGE_CATEGORIES],
   SYSTEM_AUTO:                [...CHARGE_CATEGORIES],
   // Roles not in the permissions map are denied all categories
   [UserRole.SUPER_ADMIN]:     [],
   [UserRole.MANAGER]:         [],
-  [UserRole.FINANCE_MANAGER]: [],
   [UserRole.HR]:              [],
   [UserRole.STAFF]:           [],
 };
@@ -113,54 +113,119 @@ class ChargeService {
     return charge;
   }
 
-  async voidCharge(
-    tenantId:      string,
-    chargeId:      string,
-    voidedBy:      string,
-    voidedByName:  string,
-    role:          ExtendedRole,
+  async cancelCharge(
+    tenantId:        string,
+    chargeId:        string,
+    cancelledBy:     string,
+    cancelledByName: string,
+    role:            ExtendedRole,
   ): Promise<ICharge> {
     const charge = await chargeRepository.findById(tenantId, chargeId);
     if (!charge) throw new NotFoundError('Charge not found');
 
-    const voidRoles: ExtendedRole[] = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST];
-    if (!voidRoles.includes(role)) {
-      throw new ForbiddenError('Only HOSPITAL_ADMIN, ADMIN, or RECEPTIONIST may void charges');
+    const cancelRoles: ExtendedRole[] = [
+      UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER,
+    ];
+    if (!cancelRoles.includes(role)) {
+      throw new ForbiddenError('Only HOSPITAL_ADMIN, ADMIN, RECEPTIONIST, or FINANCE_MANAGER may cancel charges');
     }
 
-    if (charge.status === 'VOIDED') {
-      throw new ConflictError(`Charge ${chargeId} has already been voided.`);
+    // Only UNPAID charges can be cancelled. Explicit checks give clear messages
+    // for the common cases; the atomic write below is the real guard.
+    if (charge.status === 'CANCELLED') {
+      throw new ConflictError(`Charge ${chargeId} has already been cancelled.`);
+    }
+    if (charge.status === 'PAID') {
+      throw new ConflictError(`Charge ${chargeId} is already paid and cannot be cancelled.`);
+    }
+    if (charge.status !== 'UNPAID') {
+      throw new ConflictError(`Charge ${chargeId} cannot be cancelled from status ${charge.status}.`);
     }
 
-    const updated = await chargeRepository.update(tenantId, chargeId, {
-      status:   'VOIDED',
-      voidedBy,
-      voidedAt: new Date(),
+    const updated = await chargeRepository.updateFromStatus(tenantId, chargeId, 'UNPAID', {
+      status:      'CANCELLED',
+      cancelledBy,
+      cancelledAt: new Date(),
     });
+    // Lost the race — another request changed the status between read and write.
+    if (!updated) {
+      throw new ConflictError(`Charge ${chargeId} could not be cancelled; its status changed. Please retry.`);
+    }
 
     await auditService.log({
       entityType: AuditEntityType.CHARGE,
       entityId:   chargeId,
       action:     'UPDATE',
-      userId:     voidedBy,
+      userId:     cancelledBy,
       tenantId,
       previousValue: { status: 'UNPAID' },
-      newValue:      { status: 'VOIDED', voidedBy },
+      newValue:      { status: 'CANCELLED', cancelledBy },
     });
 
-    // Notify original adder if a different user voided the charge
-    if (voidedBy !== charge.addedBy) {
+    // Notify original adder if a different user cancelled the charge
+    if (cancelledBy !== charge.addedBy) {
       try {
         await notificationService.sendNotification(
           charge.addedBy,
           tenantId,
-          'Charge Voided',
-          `Charge ${chargeId} you added was voided by ${voidedByName}.`,
+          'Charge Cancelled',
+          `Charge ${chargeId} you added was cancelled by ${cancelledByName}.`,
           'CHARGE',
           chargeId,
         );
-      } catch { /* notification failure must not block void */ }
+      } catch { /* notification failure must not block cancel */ }
     }
+
+    return updated!;
+  }
+
+  async markPaid(
+    tenantId: string,
+    chargeId: string,
+    paidBy:   string,
+    role:     ExtendedRole,
+  ): Promise<ICharge> {
+    const charge = await chargeRepository.findById(tenantId, chargeId);
+    if (!charge) throw new NotFoundError('Charge not found');
+
+    const payRoles: ExtendedRole[] = [
+      UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER,
+    ];
+    if (!payRoles.includes(role)) {
+      throw new ForbiddenError('Only HOSPITAL_ADMIN, ADMIN, RECEPTIONIST, or FINANCE_MANAGER may mark charges paid');
+    }
+
+    // Only UNPAID charges can be marked paid. Explicit checks give clear
+    // messages for the common cases; the atomic write below is the real guard.
+    if (charge.status === 'PAID') {
+      throw new ConflictError(`Charge ${chargeId} is already paid.`);
+    }
+    if (charge.status === 'CANCELLED') {
+      throw new ConflictError(`Charge ${chargeId} is cancelled and cannot be marked paid.`);
+    }
+    if (charge.status !== 'UNPAID') {
+      throw new ConflictError(`Charge ${chargeId} cannot be marked paid from status ${charge.status}.`);
+    }
+
+    const updated = await chargeRepository.updateFromStatus(tenantId, chargeId, 'UNPAID', {
+      status: 'PAID',
+      paidBy,
+      paidAt: new Date(),
+    });
+    // Lost the race — another request changed the status between read and write.
+    if (!updated) {
+      throw new ConflictError(`Charge ${chargeId} could not be marked paid; its status changed. Please retry.`);
+    }
+
+    await auditService.log({
+      entityType: AuditEntityType.CHARGE,
+      entityId:   chargeId,
+      action:     'UPDATE',
+      userId:     paidBy,
+      tenantId,
+      previousValue: { status: 'UNPAID' },
+      newValue:      { status: 'PAID', paidBy },
+    });
 
     return updated!;
   }

@@ -12,7 +12,7 @@ export const CHARGE_CATEGORIES = [
 ] as const;
 
 export type ChargeCategory = typeof CHARGE_CATEGORIES[number];
-export type ChargeStatus   = 'UNPAID' | 'VOIDED';
+export type ChargeStatus   = 'UNPAID' | 'PAID' | 'CANCELLED';
 
 export interface ICharge extends Document {
   chargeId:           string;
@@ -24,8 +24,10 @@ export interface ICharge extends Document {
   encounterReference: string | null;
   addedBy:            string;
   status:             ChargeStatus;
-  voidedBy:           string | null;
-  voidedAt:           Date | null;
+  paidBy:             string | null;
+  paidAt:             Date | null;
+  cancelledBy:        string | null;
+  cancelledAt:        Date | null;
   createdAt:          Date;
   updatedAt:          Date;
 }
@@ -40,9 +42,11 @@ const ChargeSchema = new Schema<ICharge>(
     amount:             { type: Number, required: true, min: 0.01 },
     encounterReference: { type: String, default: null },
     addedBy:            { type: String, required: true },
-    status:             { type: String, required: true, enum: ['UNPAID', 'VOIDED'], default: 'UNPAID' },
-    voidedBy:           { type: String, default: null },
-    voidedAt:           { type: Date,   default: null },
+    status:             { type: String, required: true, enum: ['UNPAID', 'PAID', 'CANCELLED'], default: 'UNPAID' },
+    paidBy:             { type: String, default: null },
+    paidAt:             { type: Date,   default: null },
+    cancelledBy:        { type: String, default: null },
+    cancelledAt:        { type: Date,   default: null },
   },
   { timestamps: true, collection: 'charges' },
 );

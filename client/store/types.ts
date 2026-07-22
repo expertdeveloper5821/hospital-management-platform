@@ -642,7 +642,7 @@ export type ChargeCategory =
   | 'PACKAGE'
   | 'OTHER';
 
-export type ChargeStatus = 'UNPAID' | 'VOIDED';
+export type ChargeStatus = 'UNPAID' | 'PAID' | 'CANCELLED';
 
 export interface ChargeResponse {
   chargeId:           string;
@@ -653,11 +653,13 @@ export interface ChargeResponse {
   amount:             number;
   encounterReference: string | null;
   addedBy:            string;
-  // Only the charge-list endpoint enriches this; add/void/bill responses omit it.
+  // Only the charge-list endpoint enriches this; add/pay/cancel/bill responses omit it.
   addedByName?:       string | null;
   status:             ChargeStatus;
-  voidedBy:           string | null;
-  voidedAt:           string | null;
+  paidBy:             string | null;
+  paidAt:             string | null;
+  cancelledBy:        string | null;
+  cancelledAt:        string | null;
   createdAt:          string;
   updatedAt:          string;
 }

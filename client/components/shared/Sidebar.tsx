@@ -24,7 +24,7 @@ import {
   Gift,
   type LucideIcon,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, toTitleCase } from '@/lib/utils';
 import { getNavItems } from '@/lib/rbac-nav';
 import { useAppSelector } from '@/store/hooks';
 import { useLogoutMutation } from '@/store/api/auth.api';
@@ -65,6 +65,11 @@ export function Sidebar({ onClose }: SidebarProps) {
 
   const isSuperAdmin = profile.role === 'SUPER_ADMIN';
   const navItems     = getNavItems(profile.role as UserRole);
+
+  // The longest href that matches the current path wins — see isActive below.
+  const activeHref = navItems
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   // Super Admin has no tenant branding — fall back to platform settings
   const headerLogoUrl  = isSuperAdmin ? platformSettings?.logoUrl    : branding?.logoUrl;
@@ -108,7 +113,10 @@ export function Sidebar({ onClose }: SidebarProps) {
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1" aria-label="Primary navigation">
         {navItems.map((item) => {
           const Icon    = ICON_MAP[item.icon] ?? LayoutDashboard;
-          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          // Only the most specific matching item is highlighted, so a nested
+          // route (/super-admin/platform-settings) does not also activate its
+          // parent (/super-admin).
+          const isActive = item.href === activeHref;
           return (
             <Link
               key={item.href}
@@ -132,7 +140,7 @@ export function Sidebar({ onClose }: SidebarProps) {
       {/* User + logout */}
       <div className="shrink-0 border-t border-sidebar-accent/40 p-4 space-y-1">
         <p className="text-xs text-sidebar-foreground/50 truncate">{profile.email}</p>
-        <p className="text-xs text-sidebar-foreground/50">{profile.role}</p>
+        <p className="text-xs text-sidebar-foreground/50">{toTitleCase(profile.role)}</p>
         <button
           onClick={handleLogout}
           disabled={isLoggingOut}
