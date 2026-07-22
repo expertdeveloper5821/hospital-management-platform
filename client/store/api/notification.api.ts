@@ -51,6 +51,59 @@ export const notificationApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<NotificationApiItem>) =>
         mapNotification(raw.data),
       invalidatesTags: ['Notification'],
+      // Optimistically patch the cached list + unread count so notifications
+      // fetched from history (not delivered over WS this session) reflect
+      // "read" immediately instead of waiting on the invalidation refetch.
+      async onQueryStarted(notificationId, { dispatch, queryFulfilled }) {
+        const patches = [
+          dispatch(
+            notificationApi.util.updateQueryData('listNotifications', { limit: 30 }, (draft) => {
+              if (!Array.isArray(draft)) return;
+              const item = draft.find((n) => n.id === notificationId);
+              if (item) item.read = true;
+            }),
+          ),
+          dispatch(
+            notificationApi.util.updateQueryData('getUnreadCount', undefined, (count) =>
+              typeof count === 'number' && Number.isFinite(count)
+                ? Math.max(0, count - 1)
+                : count),
+          ),
+        ];
+        try {
+          await queryFulfilled;
+        } catch {
+          patches.forEach((p) => p.undo());
+        }
+      },
+    }),
+
+    markAllNotificationsRead: build.mutation<{ count: number }, void>({
+      query: () => ({
+        url:    '/api/notifications/mark-all-read',
+        method: 'PATCH',
+      }),
+      transformResponse: (raw: ApiSuccess<{ count: number }>) => raw.data,
+      invalidatesTags: ['Notification'],
+      // Optimistically clear the badge and the visible list immediately —
+      // invalidatesTags reconciles with the server's authoritative state
+      // right after, so any drift self-corrects on the same round trip.
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        const patches = [
+          dispatch(
+            notificationApi.util.updateQueryData('listNotifications', { limit: 30 }, (draft) => {
+              if (!Array.isArray(draft)) return;
+              draft.forEach((n) => { n.read = true; });
+            }),
+          ),
+          dispatch(notificationApi.util.updateQueryData('getUnreadCount', undefined, () => 0)),
+        ];
+        try {
+          await queryFulfilled;
+        } catch {
+          patches.forEach((p) => p.undo());
+        }
+      },
     }),
   }),
 });
@@ -59,4 +112,5 @@ export const {
   useGetUnreadCountQuery,
   useListNotificationsQuery,
   useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
 } = notificationApi;

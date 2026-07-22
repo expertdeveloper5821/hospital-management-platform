@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { notificationService } from './notification.service';
+import { auditService } from '../../shared/services/audit.service';
+import { AuditEntityType } from '../../shared/types/common.types';
 
 const notificationIdSchema = z.string().uuid('notificationId must be a valid UUID');
 const limitSchema = z.coerce.number().int().min(1).max(100).default(20);
@@ -50,5 +52,26 @@ export async function markRead(
       return;
     }
     res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+export async function markAllRead(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const tenantId = req.user!.tenantId as string;
+    const userId = req.user!.userId;
+    const count = await notificationService.markAllRead(tenantId, userId);
+
+    await auditService.log({
+      entityType: AuditEntityType.NOTIFICATION,
+      entityId:   userId,
+      action:     'UPDATE',
+      userId,
+      tenantId,
+      newValue:   { count },
+    });
+
+    res.status(200).json({ status: 'success', data: { count } });
   } catch (err) { next(err); }
 }

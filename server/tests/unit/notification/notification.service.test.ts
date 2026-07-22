@@ -206,3 +206,22 @@ describe('countUnread', () => {
     expect(await service.countUnread(TENANT, USER)).toBe(0);
   });
 });
+
+// ─── markAllRead ──────────────────────────────────────────────────────────────
+
+describe('markAllRead', () => {
+  test('delegates to the repository and returns the number modified', async () => {
+    mockNotifRepo.markAllRead.mockResolvedValue(3);
+
+    const count = await service.markAllRead(TENANT, USER);
+
+    expect(mockNotifRepo.markAllRead).toHaveBeenCalledWith(TENANT, USER);
+    expect(count).toBe(3);
+  });
+
+  test('returns 0 when there is nothing unread', async () => {
+    mockNotifRepo.markAllRead.mockResolvedValue(0);
+
+    expect(await service.markAllRead(TENANT, USER)).toBe(0);
+  });
+});

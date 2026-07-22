@@ -6,6 +6,7 @@
 
 import { store } from '@/store';
 import { messageReceived, setConnected } from '@/store/slices/notification.slice';
+import { notificationApi } from '@/store/api/notification.api';
 
 const WS_BASE = (process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:5000').replace(/\/$/, '');
 
@@ -80,6 +81,13 @@ class WebSocketClient {
             timestamp:  n.createdAt ?? new Date().toISOString(),
             read:       n.isRead,
           }));
+          // Keep the cached unread total (source of truth for the bell badge) in
+          // sync with live pushes, so it doesn't go stale once older/history
+          // notifications get marked read.
+          store.dispatch(
+            notificationApi.util.updateQueryData('getUnreadCount', undefined, (count) =>
+              typeof count === 'number' && Number.isFinite(count) ? count + 1 : count),
+          );
         }
         // 'connected' frame is handled by onopen → setConnected(true); skip here
       } catch {

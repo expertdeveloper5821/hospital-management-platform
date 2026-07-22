@@ -35,6 +35,21 @@ function toResponse(doc: IInventoryItem): InventoryItemResponse {
 // ─── InventoryService ─────────────────────────────────────────────────────────
 
 export class InventoryService {
+  private async notifyLowStockIfCrossed(
+    wasLowStock:   boolean,
+    isNowLowStock: boolean,
+    updated:       IInventoryItem,
+    itemId:        string,
+    tenantId:      string,
+  ): Promise<void> {
+    if (wasLowStock || !isNowLowStock) return;
+    try {
+      const message = `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`;
+      await notificationService.sendToRole(UserRole.MANAGER, tenantId, 'Low Stock Alert', message, 'INVENTORY_ITEM', itemId);
+      await notificationService.sendToRole(UserRole.HOSPITAL_ADMIN, tenantId, 'Low Stock Alert', message, 'INVENTORY_ITEM', itemId);
+    } catch { /* swallow */ }
+  }
+
   async createItem(
     input:    CreateInventoryItemInput,
     tenantId: string,
@@ -50,6 +65,16 @@ export class InventoryService {
       lowStockThreshold: input.lowStockThreshold,
       description:       input.description ?? null,
     });
+
+    // A brand new item can be created already below its own threshold — there's
+    // no "previous" state to cross from, so notify directly off the current one.
+    await this.notifyLowStockIfCrossed(
+      false,
+      doc.lowStockThreshold > 0 && doc.quantity < doc.lowStockThreshold,
+      doc,
+      doc.itemId,
+      tenantId,
+    );
 
     try {
       await auditService.log({
@@ -86,30 +111,13 @@ export class InventoryService {
     if (!updated) throw new NotFoundError('Inventory item not found');
 
     // Send low-stock notification when stock drops to or below the threshold
-    if (
-      updated.lowStockThreshold > 0 &&
-      updated.quantity < updated.lowStockThreshold &&
-      current.quantity >= current.lowStockThreshold
-    ) {
-      try {
-        await notificationService.sendToRole(
-          UserRole.MANAGER,
-          tenantId,
-          'Low Stock Alert',
-          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
-          'INVENTORY_ITEM',
-          itemId,
-        );
-        await notificationService.sendToRole(
-          UserRole.HOSPITAL_ADMIN,
-          tenantId,
-          'Low Stock Alert',
-          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
-          'INVENTORY_ITEM',
-          itemId,
-        );
-      } catch { /* swallow */ }
-    }
+    await this.notifyLowStockIfCrossed(
+      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
+      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
+      updated,
+      itemId,
+      tenantId,
+    );
 
     try {
       await auditService.log({
@@ -142,6 +150,16 @@ export class InventoryService {
     );
     if (!updated) throw new NotFoundError('Inventory item not found');
 
+    // Raising the threshold (or lowering stock elsewhere) can newly cross the
+    // low-stock boundary — this endpoint previously never checked for that.
+    await this.notifyLowStockIfCrossed(
+      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
+      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
+      updated,
+      itemId,
+      tenantId,
+    );
+
     try {
       await auditService.log({
         entityType:    AuditEntityType.INVENTORY_ITEM,
@@ -170,28 +188,13 @@ export class InventoryService {
     if (!updated) throw new NotFoundError('Inventory item not found');
 
     // Trigger low-stock notification when raising threshold causes item to cross the boundary
-    const wasLowStock = current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold;
-    const isNowLowStock = updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold;
-    if (!wasLowStock && isNowLowStock) {
-      try {
-        await notificationService.sendToRole(
-          UserRole.MANAGER,
-          tenantId,
-          'Low Stock Alert',
-          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
-          'INVENTORY_ITEM',
-          itemId,
-        );
-        await notificationService.sendToRole(
-          UserRole.HOSPITAL_ADMIN,
-          tenantId,
-          'Low Stock Alert',
-          `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`,
-          'INVENTORY_ITEM',
-          itemId,
-        );
-      } catch { /* swallow */ }
-    }
+    await this.notifyLowStockIfCrossed(
+      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
+      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
+      updated,
+      itemId,
+      tenantId,
+    );
 
     try {
       await auditService.log({
