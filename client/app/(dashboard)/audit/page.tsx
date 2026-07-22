@@ -19,7 +19,7 @@ import { Input }  from '@/components/ui/input';
 import { Label }  from '@/components/ui/label';
 import { Badge }  from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
+import { cn, toTitleCase } from '@/lib/utils';
 import { todayLocalISO, clampToToday } from '@/lib/date';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -38,15 +38,20 @@ function truncate(str: string, len = 20): string {
   return str.length > len ? `${str.slice(0, len)}…` : str;
 }
 
+// Semantic, low-saturation badges: additive actions green, edits blue,
+// destructive red, security events amber/orange, neutral session events slate.
 const ACTION_COLORS: Record<string, string> = {
-  CREATE:         'bg-emerald-600 text-white',
-  UPDATE:         'bg-blue-600 text-white',
-  DELETE:         'bg-red-600 text-white',
-  LOGIN:          'bg-violet-600 text-white',
-  LOGOUT:         'bg-slate-500 text-white',
-  LOCKOUT:        'bg-orange-600 text-white',
-  PASSWORD_RESET: 'bg-amber-500 text-white',
+  CREATE:         'bg-green-100 text-green-800 ring-green-600/20',
+  UPDATE:         'bg-blue-100 text-blue-800 ring-blue-600/20',
+  DELETE:         'bg-red-100 text-red-800 ring-red-600/20',
+  LOGIN:          'bg-slate-100 text-slate-700 ring-slate-600/20',
+  LOGOUT:         'bg-slate-100 text-slate-700 ring-slate-600/20',
+  LOCKOUT:        'bg-orange-100 text-orange-800 ring-orange-600/20',
+  PASSWORD_RESET: 'bg-amber-100 text-amber-800 ring-amber-600/20',
 };
+
+const ACTION_BADGE_BASE =
+  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap';
 
 const LIMIT = 10;
 
@@ -289,11 +294,11 @@ export default function AuditPage() {
                     <div className="flex items-center justify-between gap-2">
                       <span
                         className={cn(
-                          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
-                          ACTION_COLORS[log.action] ?? 'bg-muted text-muted-foreground',
+                          ACTION_BADGE_BASE,
+                          ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
                         )}
                       >
-                        {log.action}
+                        {toTitleCase(log.action)}
                       </span>
                       <Badge variant="outline" className="text-xs font-normal">
                         {log.entityType.replace(/_/g, ' ')}
@@ -343,11 +348,11 @@ export default function AuditPage() {
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span
                             className={cn(
-                              'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold',
-                              ACTION_COLORS[log.action] ?? 'bg-muted text-muted-foreground',
+                              ACTION_BADGE_BASE,
+                              ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
                             )}
                           >
-                            {log.action}
+                            {toTitleCase(log.action)}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground" title={log.userId}>

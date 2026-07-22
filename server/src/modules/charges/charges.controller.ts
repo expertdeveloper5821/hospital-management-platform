@@ -39,13 +39,25 @@ export async function addCharge(req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 }
 
-export async function voidCharge(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function cancelCharge(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const charge = await chargeService.voidCharge(
+    const charge = await chargeService.cancelCharge(
       req.user!.tenantId!,
       req.params.chargeId,
       req.user!.userId,
       (req.user as { name?: string })?.name ?? req.user!.userId,
+      req.user!.role as UserRole,
+    );
+    res.status(200).json({ status: 'success', data: charge });
+  } catch (err) { next(err); }
+}
+
+export async function markChargePaid(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const charge = await chargeService.markPaid(
+      req.user!.tenantId!,
+      req.params.chargeId,
+      req.user!.userId,
       req.user!.role as UserRole,
     );
     res.status(200).json({ status: 'success', data: charge });
