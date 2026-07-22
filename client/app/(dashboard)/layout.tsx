@@ -13,14 +13,6 @@ import { useGetMyProfileQuery } from '@/store/api/user.api';
 import { wsClient } from '@/lib/websocket-client';
 import { Menu } from 'lucide-react';
 
-function getTimeGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour >= 5  && hour < 12) return 'Good Morning';
-  if (hour >= 12 && hour < 17) return 'Good Afternoon';
-  if (hour >= 17 && hour < 21) return 'Good Evening';
-  return 'Good Night';
-}
-
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router  = useRouter();
   const token    = useAppSelector((s) => s.auth.token);
@@ -103,7 +95,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </button>
               {!isSuperAdmin && (
                 <p className="hidden md:block text-sm font-medium text-foreground truncate">
-                  Hi, {getTimeGreeting()}{myProfile?.name ? `, ${myProfile.name}` : ''}.
+                  Hi{myProfile?.name ? `, ${myProfile.name}` : ''}.
                 </p>
               )}
             </div>

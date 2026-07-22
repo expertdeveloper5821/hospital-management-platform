@@ -28,6 +28,8 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// HOSPITAL_ADMIN is intentionally excluded — it cannot be assigned via user
+// management (enforced on the backend too). Tenant admins come from onboarding.
 const ASSIGNABLE_ROLES = [
   UserRole.MANAGER,
   UserRole.DOCTOR,
@@ -39,7 +41,6 @@ const ASSIGNABLE_ROLES = [
   UserRole.HR,
   UserRole.ADMIN,
   UserRole.STAFF,
-  UserRole.HOSPITAL_ADMIN,
 ] as const;
 
 const USER_NAME_RE = /^[A-Za-z][A-Za-z .'-]{1,199}$/;
@@ -306,6 +307,7 @@ function UserTableSkeleton() {
 
 function UsersTab() {
   const currentUserRole = useAppSelector((s) => s.auth.profile?.role);
+  const currentUserId   = useAppSelector((s) => s.auth.profile?.userId);
   const canDeactivate   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
   const canCreateUser   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
 
@@ -319,6 +321,7 @@ function UsersTab() {
   const [showCreate,    setShowCreate]    = useState(false);
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [newRole,       setNewRole]       = useState<UserRole>(UserRole.STAFF);
+  const [roleError,     setRoleError]     = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<UserResponse | null>(null);
   const [deactivateError,  setDeactivateError]  = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -367,13 +370,27 @@ function UsersTab() {
   }
 
   function openRoleEdit(user: UserResponse) {
+    setRoleError(null);
     setEditingRoleId(user.userId);
     setNewRole(user.role);
   }
 
-  async function handleRoleSave(userId: string) {
-    await updateUserRole({ userId, role: newRole });
+  function cancelRoleEdit() {
+    setRoleError(null);
     setEditingRoleId(null);
+  }
+
+  async function handleRoleSave(userId: string) {
+    setRoleError(null);
+    try {
+      await updateUserRole({ userId, role: newRole }).unwrap();
+      setEditingRoleId(null);
+    } catch (err: unknown) {
+      // Surface backend rejections (e.g. 403 self/escalation, 409 last-admin)
+      // instead of silently closing the editor as if the change succeeded.
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setRoleError(msg ?? 'Failed to update role.');
+    }
   }
 
   async function handleDeactivateConfirm() {
@@ -488,29 +505,34 @@ function UsersTab() {
                       </div>
 
                       {editingRoleId === user.userId ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <select
-                            value={newRole}
-                            onChange={(e) => setNewRole(e.target.value as UserRole)}
-                            className="h-8 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          >
-                            {ASSIGNABLE_ROLES.map((r) => (
-                              <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-                            ))}
-                          </select>
-                          <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
-                            Save
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditingRoleId(null)}>
-                            Cancel
-                          </Button>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select
+                              value={newRole}
+                              onChange={(e) => setNewRole(e.target.value as UserRole)}
+                              className="h-8 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            >
+                              {ASSIGNABLE_ROLES.map((r) => (
+                                <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                              ))}
+                            </select>
+                            <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
+                              Save
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelRoleEdit}>
+                              Cancel
+                            </Button>
+                          </div>
+                          {roleError && <p className="text-xs text-destructive">{roleError}</p>}
                         </div>
                       ) : (
                         user.isActive && (
                           <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                              Edit Role
-                            </Button>
+                            {user.userId !== currentUserId && (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                                Edit Role
+                              </Button>
+                            )}
                             {canDeactivate && (
                               <Button
                                 size="sm"
@@ -560,22 +582,25 @@ function UsersTab() {
                           <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={user.email}>{user.email}</td>
                           <td className="px-4 py-3">
                             {editingRoleId === user.userId ? (
-                              <div className="flex items-center gap-2">
-                                <select
-                                  value={newRole}
-                                  onChange={(e) => setNewRole(e.target.value as UserRole)}
-                                  className="h-7 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                >
-                                  {ASSIGNABLE_ROLES.map((r) => (
-                                    <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-                                  ))}
-                                </select>
-                                <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
-                                  Save
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setEditingRoleId(null)}>
-                                  Cancel
-                                </Button>
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    value={newRole}
+                                    onChange={(e) => setNewRole(e.target.value as UserRole)}
+                                    className="h-7 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  >
+                                    {ASSIGNABLE_ROLES.map((r) => (
+                                      <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                                    ))}
+                                  </select>
+                                  <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
+                                    Save
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelRoleEdit}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                                {roleError && <p className="text-xs text-destructive">{roleError}</p>}
                               </div>
                             ) : (
                               <Badge variant={roleBadgeVariant(user.role)}>
@@ -595,9 +620,11 @@ function UsersTab() {
                             <div className="flex items-center justify-end gap-2">
                               {user.isActive && editingRoleId !== user.userId && (
                                 <>
-                                  <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                                    Edit Role
-                                  </Button>
+                                  {user.userId !== currentUserId && (
+                                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                                      Edit Role
+                                    </Button>
+                                  )}
                                   {canDeactivate && (
                                     <Button
                                       size="sm"

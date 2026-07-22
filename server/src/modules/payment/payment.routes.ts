@@ -8,6 +8,8 @@ import { UserRole } from '../../shared/types/common.types';
 import {
   createManualPayment,
   createRazorpayOrder,
+  verifyRazorpayPayment,
+  cancelRazorpayOrder,
   listPayments,
   getReceiptUrl,
   getPaymentSummary,
@@ -29,6 +31,20 @@ router.post(
   '/razorpay-order',
   requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
   createRazorpayOrder,
+);
+
+// POST /api/payments/razorpay/verify — confirm a successful checkout (client handler)
+router.post(
+  '/razorpay/verify',
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  verifyRazorpayPayment,
+);
+
+// POST /api/payments/razorpay/cancel — mark an abandoned checkout CANCELLED (client dismiss)
+router.post(
+  '/razorpay/cancel',
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  cancelRazorpayOrder,
 );
 
 // GET /api/payments — list with optional filters (U5-B-04)

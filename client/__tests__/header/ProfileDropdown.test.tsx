@@ -62,7 +62,7 @@ describe('ProfileDropdown', () => {
     fireEvent.click(screen.getByLabelText('Open profile menu'));
 
     expect(screen.getByText('john.doe@hospital.com')).toBeInTheDocument();
-    expect(screen.getByText('DOCTOR')).toBeInTheDocument();
+    expect(screen.getByText('Doctor')).toBeInTheDocument();
   });
 
   test('renders My Profile, Change Password, and Logout items', () => {

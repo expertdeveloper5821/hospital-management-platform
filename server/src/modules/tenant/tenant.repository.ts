@@ -43,12 +43,13 @@ export class TenantRepository {
     await TenantModel.findByIdAndUpdate(tenantId, { status });
   }
 
-  async updateBranding(tenantId: string, branding: Partial<BrandingConfig>): Promise<void> {
+  async updateBranding(tenantId: string, branding: Partial<BrandingConfig>, name?: string): Promise<void> {
     assertDbConnected();
     const update: Record<string, unknown> = {};
-    if (branding.logoUrl)     update['branding.logoUrl']     = branding.logoUrl;
-    if (branding.displayName) update['branding.displayName'] = branding.displayName;
+    if (branding.logoUrl)      update['branding.logoUrl']      = branding.logoUrl;
+    if (branding.displayName)  update['branding.displayName']  = branding.displayName;
     if (branding.primaryColor) update['branding.primaryColor'] = branding.primaryColor;
+    if (name !== undefined)    update['name'] = name;
     await TenantModel.findByIdAndUpdate(tenantId, { $set: update });
   }
 

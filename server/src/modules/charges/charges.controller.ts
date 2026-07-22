@@ -19,6 +19,7 @@ const listChargesSchema = z.object({
   startDate:  z.string().optional(),
   endDate:    z.string().optional(),
   addedBy:    z.string().optional(),
+  addedByName: z.string().max(100).optional(),
   page:       z.coerce.number().int().min(1).default(1),
   limit:      z.coerce.number().int().min(1).max(20).default(20),
 });
@@ -38,13 +39,25 @@ export async function addCharge(req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 }
 
-export async function voidCharge(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function cancelCharge(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const charge = await chargeService.voidCharge(
+    const charge = await chargeService.cancelCharge(
       req.user!.tenantId!,
       req.params.chargeId,
       req.user!.userId,
       (req.user as { name?: string })?.name ?? req.user!.userId,
+      req.user!.role as UserRole,
+    );
+    res.status(200).json({ status: 'success', data: charge });
+  } catch (err) { next(err); }
+}
+
+export async function markChargePaid(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const charge = await chargeService.markPaid(
+      req.user!.tenantId!,
+      req.params.chargeId,
+      req.user!.userId,
       req.user!.role as UserRole,
     );
     res.status(200).json({ status: 'success', data: charge });
@@ -69,6 +82,7 @@ export async function listCharges(req: Request, res: Response, next: NextFunctio
       startDate: query.data.startDate,
       endDate:   query.data.endDate,
       addedBy:   query.data.addedBy,
+      addedByName: query.data.addedByName,
       page:      query.data.page,
       limit:     query.data.limit,
     });

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import { INDIAN_STATES } from '@/lib/constants';
 
 interface FormState {
   name:                    string;
@@ -16,7 +17,10 @@ interface FormState {
   registrationCertificate: string;
   gstNumber:               string;
   panCard:                 string;
-  addressProof:            string;
+  addressLine:             string;
+  city:                    string;
+  state:                   string;
+  pincode:                 string;
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>;
@@ -27,7 +31,10 @@ const EMPTY: FormState = {
   registrationCertificate: '',
   gstNumber:               '',
   panCard:                 '',
-  addressProof:            '',
+  addressLine:             '',
+  city:                    '',
+  state:                   '',
+  pincode:                 '',
 };
 
 const GST_REGEX = /^\d{2}[A-Z]{5}\d{4}[A-Z]{1}[A-Z0-9]{1}Z[A-Z0-9]{1}$/;
@@ -76,13 +83,32 @@ function validate(form: FormState): FormErrors {
     errors.panCard = 'Invalid PAN. Expected format: ABCDE1234F (5 letters, 4 digits, 1 letter).';
   }
 
-  const addr = form.addressProof.trim();
-  if (!addr) {
-    errors.addressProof = 'Address proof reference is required.';
-  } else if (addr.length < 3) {
-    errors.addressProof = 'Must be at least 3 characters.';
-  } else if (addr.length > 100) {
-    errors.addressProof = 'Must be 100 characters or fewer.';
+  const addressLine = form.addressLine.trim();
+  if (!addressLine) {
+    errors.addressLine = 'Address line is required.';
+  } else if (addressLine.length > 200) {
+    errors.addressLine = 'Address line must be 200 characters or fewer.';
+  }
+
+  const city = form.city.trim();
+  if (!city) {
+    errors.city = 'City is required.';
+  } else if (city.length > 100) {
+    errors.city = 'City must be 100 characters or fewer.';
+  }
+
+  const state = form.state.trim();
+  if (!state) {
+    errors.state = 'State is required.';
+  } else if (state.length > 100) {
+    errors.state = 'State must be 100 characters or fewer.';
+  }
+
+  const pincode = form.pincode.trim();
+  if (!pincode) {
+    errors.pincode = 'Pincode is required.';
+  } else if (!/^\d{6}$/.test(pincode)) {
+    errors.pincode = 'Pincode must be 6 digits.';
   }
 
   return errors;
@@ -106,11 +132,11 @@ export default function NewTenantPage() {
   const errors = validate(form);
   const hasErrors = Object.keys(errors).length > 0;
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
-  function handleBlur(e: React.FocusEvent<HTMLInputElement>) {
+  function handleBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) {
     setTouched((prev) => ({ ...prev, [e.target.name]: true }));
   }
 
@@ -133,7 +159,10 @@ export default function NewTenantPage() {
           registrationCertificate: form.registrationCertificate.trim(),
           gstNumber:               form.gstNumber.trim().toUpperCase(),
           panCard:                 form.panCard.trim().toUpperCase(),
-          addressProof:            form.addressProof.trim(),
+          addressLine:             form.addressLine.trim(),
+          city:                    form.city.trim(),
+          state:                   form.state.trim(),
+          pincode:                 form.pincode.trim(),
         },
       }).unwrap();
       router.push('/super-admin');
@@ -256,20 +285,74 @@ export default function NewTenantPage() {
                 <p className="text-xs text-destructive">{fieldError('panCard')}</p>
               )}
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="addressProof">Address Proof Ref.</Label>
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="addressLine">Address Line</Label>
               <Input
-                id="addressProof"
-                name="addressProof"
-                placeholder="Utility bill / lease ref."
-                value={form.addressProof}
+                id="addressLine"
+                name="addressLine"
+                placeholder="123 Main Street"
+                value={form.addressLine}
                 onChange={handleChange}
                 onBlur={handleBlur}
-                aria-invalid={!!fieldError('addressProof')}
-                className={fieldError('addressProof') ? 'border-destructive focus-visible:ring-destructive' : ''}
+                aria-invalid={!!fieldError('addressLine')}
+                className={fieldError('addressLine') ? 'border-destructive focus-visible:ring-destructive' : ''}
               />
-              {fieldError('addressProof') && (
-                <p className="text-xs text-destructive">{fieldError('addressProof')}</p>
+              {fieldError('addressLine') && (
+                <p className="text-xs text-destructive">{fieldError('addressLine')}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="city">City</Label>
+              <Input
+                id="city"
+                name="city"
+                placeholder="Mumbai"
+                value={form.city}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                aria-invalid={!!fieldError('city')}
+                className={fieldError('city') ? 'border-destructive focus-visible:ring-destructive' : ''}
+              />
+              {fieldError('city') && (
+                <p className="text-xs text-destructive">{fieldError('city')}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="state">State</Label>
+              <select
+                id="state"
+                name="state"
+                value={form.state}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                aria-invalid={!!fieldError('state')}
+                className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${fieldError('state') ? 'border-destructive focus-visible:ring-destructive' : ''}`}
+              >
+                <option value="">Select state</option>
+                {INDIAN_STATES.map((stateOption) => (
+                  <option key={stateOption} value={stateOption}>{stateOption}</option>
+                ))}
+              </select>
+              {fieldError('state') && (
+                <p className="text-xs text-destructive">{fieldError('state')}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pincode">Pincode</Label>
+              <Input
+                id="pincode"
+                name="pincode"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="400001"
+                value={form.pincode}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                aria-invalid={!!fieldError('pincode')}
+                className={fieldError('pincode') ? 'border-destructive focus-visible:ring-destructive' : ''}
+              />
+              {fieldError('pincode') && (
+                <p className="text-xs text-destructive">{fieldError('pincode')}</p>
               )}
             </div>
           </div>

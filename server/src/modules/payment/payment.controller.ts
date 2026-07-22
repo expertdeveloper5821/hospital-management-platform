@@ -46,6 +46,48 @@ export async function createRazorpayOrder(
   } catch (err) { next(err); }
 }
 
+// ─── Verify Razorpay checkout (client success handler) ───────────────────────
+
+const verifyRazorpaySchema = z.object({
+  razorpayOrderId:   z.string().min(1),
+  razorpayPaymentId: z.string().min(1),
+  razorpaySignature: z.string().min(1),
+});
+
+export async function verifyRazorpayPayment(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const parsed = verifyRazorpaySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+    const result = await paymentService.verifyRazorpayPayment(req.user!.tenantId as string, parsed.data);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── Cancel Razorpay checkout (client dismiss) ────────────────────────────────
+
+const cancelRazorpaySchema = z.object({ razorpayOrderId: z.string().min(1) });
+
+export async function cancelRazorpayOrder(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const parsed = cancelRazorpaySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+    const result = await paymentService.cancelRazorpayOrder(
+      req.user!.tenantId as string, parsed.data.razorpayOrderId, req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
 // ─── List payments ────────────────────────────────────────────────────────────
 
 export async function listPayments(

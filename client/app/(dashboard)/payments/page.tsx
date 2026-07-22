@@ -6,6 +6,8 @@ import {
   useListPaymentsQuery,
   useCreateManualPaymentMutation,
   useCreateRazorpayOrderMutation,
+  useVerifyRazorpayPaymentMutation,
+  useCancelRazorpayOrderMutation,
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
 } from "@/store/api/payment.api";
@@ -406,6 +408,8 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
   const [error, setError] = useState("");
   const [isLaunching, setLaunching] = useState(false);
   const [createOrder] = useCreateRazorpayOrderMutation();
+  const [verifyPayment] = useVerifyRazorpayPaymentMutation();
+  const [cancelOrder] = useCancelRazorpayOrderMutation();
 
   function set<K extends keyof CreateRazorpayOrderRequest>(
     field: K,
@@ -461,12 +465,35 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
         description: form.description,
         prefill: { contact: "", email: "" },
         theme: { color: "#1A73E8" },
-        handler: () => {
-          // Webhook handles backend update; show success on frontend
-          onSuccess();
+        handler: async (response: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
+          // Authoritative confirmation: only treat the payment as successful once
+          // the server has verified the signature. Do NOT show success optimistically.
+          try {
+            await verifyPayment({
+              razorpayOrderId:   response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            }).unwrap();
+            onSuccess();
+          } catch {
+            setError(
+              "We could not confirm this payment. If money was debited it will be reconciled shortly — please check the payment status before retrying.",
+            );
+            setLaunching(false);
+          }
         },
         modal: {
           ondismiss: () => {
+            // User cancelled/closed checkout — mark the pending order CANCELLED so
+            // it doesn't linger as pending. If it was actually captured, the
+            // payment.captured webhook still corrects it to completed.
+            cancelOrder({ razorpayOrderId: order.razorpayOrderId })
+              .unwrap()
+              .catch(() => {/* non-blocking */});
             setLaunching(false);
           },
         },
@@ -475,6 +502,9 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
       const rzp = new (window as any).Razorpay(rzpOptions);
       rzp.on("payment.failed", () => {
         setError("Payment failed. Please try again.");
+        cancelOrder({ razorpayOrderId: order.razorpayOrderId })
+          .unwrap()
+          .catch(() => {/* non-blocking */});
         setLaunching(false);
       });
       rzp.open();
@@ -676,6 +706,7 @@ function PaymentDetailPanel({ payment, onClose }: PaymentDetailPanelProps) {
     COMPLETED: <CheckCircle2 className="h-4 w-4 text-green-600" />,
     PENDING: <Clock className="h-4 w-4 text-yellow-600" />,
     FAILED: <XCircle className="h-4 w-4 text-red-600" />,
+    CANCELLED: <XCircle className="h-4 w-4 text-gray-500" />,
   }[payment.status];
 
   return (
@@ -846,6 +877,17 @@ function StatusBadge({ status }: { status: string }) {
       >
         <Clock className="h-3 w-3" />
         Pending
+      </Badge>
+    );
+  }
+  if (status === "CANCELLED") {
+    return (
+      <Badge
+        variant="outline"
+        className="text-xs text-gray-600 border-gray-300 gap-1"
+      >
+        <XCircle className="h-3 w-3" />
+        Cancelled
       </Badge>
     );
   }

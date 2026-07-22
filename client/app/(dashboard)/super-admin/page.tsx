@@ -12,23 +12,28 @@ import {
 import { useAppSelector } from '@/store/hooks';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { cn, toTitleCase } from '@/lib/utils';
 import { Building2, RefreshCw, CheckCircle, XCircle, Mail, Plus, Search } from 'lucide-react';
 
-function statusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  switch (status) {
-    case 'ACTIVE':               return 'default';
-    case 'PENDING_VERIFICATION': return 'outline';
-    case 'INACTIVE':             return 'destructive';
-    default:                     return 'outline';
-  }
-}
+// Semantic status colours — green = healthy, amber = awaiting action, red = disabled
+const STATUS_STYLES: Record<string, string> = {
+  ACTIVE:               'bg-green-100 text-green-800 ring-green-600/20',
+  PENDING_VERIFICATION: 'bg-amber-100 text-amber-800 ring-amber-600/20',
+  INACTIVE:             'bg-red-100 text-red-800 ring-red-600/20',
+};
 
-function statusExtraClass(status: string): string {
-  return status === 'PENDING_VERIFICATION'
-    ? 'border-transparent bg-orange-500 text-white hover:bg-orange-500'
-    : '';
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap',
+        STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
+      )}
+    >
+      {toTitleCase(status)}
+    </span>
+  );
 }
 
 export default function SuperAdminPage() {
@@ -129,7 +134,7 @@ export default function SuperAdminPage() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Super Admin Console</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Super Admin Panel</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Manage hospital tenants — {total} total
           </p>
@@ -180,9 +185,7 @@ export default function SuperAdminPage() {
                     <p className="font-medium truncate">{tenant.name}</p>
                     <p className="text-xs text-muted-foreground font-mono truncate">{tenant._id}</p>
                   </div>
-                  <Badge variant={statusVariant(tenant.status)} className={`shrink-0 text-xs ${statusExtraClass(tenant.status)}`}>
-                    {tenant.status}
-                  </Badge>
+                  <StatusBadge status={tenant.status} />
                 </div>
                 <div className="text-sm text-muted-foreground truncate">{tenant.adminEmail}</div>
                 <div className="text-xs text-muted-foreground">
@@ -205,7 +208,11 @@ export default function SuperAdminPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Admin Email</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Created</th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
+                    {/* w-px + nowrap collapses the column to its content so the
+                        heading sits directly above the action buttons */}
+                    <th className="w-px px-4 py-3 text-center font-medium text-muted-foreground whitespace-nowrap">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -217,13 +224,13 @@ export default function SuperAdminPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{tenant.adminEmail}</td>
                       <td className="px-4 py-3">
-                        <Badge variant={statusVariant(tenant.status)} className={statusExtraClass(tenant.status)}>{tenant.status}</Badge>
+                        <StatusBadge status={tenant.status} />
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {new Date(tenant.createdAt).toLocaleDateString()}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="w-px px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-2">
                           <TenantActions tenant={tenant} />
                         </div>
                       </td>

@@ -46,7 +46,8 @@ export const packagesApi = baseApi.injectEndpoints({
     assignPackage: build.mutation<AssignmentResponse, AssignPackageRequest>({
       query: ({ packageId, ...body }) => ({ url: `/api/packages/${packageId}/assignments`, method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<AssignmentResponse>) => raw.data,
-      invalidatesTags: ['PackageAssignment'],
+      // Assigning a package auto-creates a charge, so Billing/patient-bill must refresh too.
+      invalidatesTags: ['PackageAssignment', 'Charge', 'Bill'],
     }),
 
     cancelAssignment: build.mutation<AssignmentResponse, { packageId: string; assignmentId: string }>({
@@ -55,7 +56,8 @@ export const packagesApi = baseApi.injectEndpoints({
         method: 'PATCH',
       }),
       transformResponse: (raw: ApiSuccess<AssignmentResponse>) => raw.data,
-      invalidatesTags: ['PackageAssignment'],
+      // Cancelling voids the package charge — refresh Billing/patient-bill too.
+      invalidatesTags: ['PackageAssignment', 'Charge', 'Bill'],
     }),
 
     listPatientAssignments: build.query<AssignmentResponse[], string>({

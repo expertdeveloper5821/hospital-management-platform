@@ -1,12 +1,5 @@
-import { PatientModel }          from '../patient/patient.model';
-import { OPDVisitModel }         from '../opd/opd.model';
-import { IPDAdmissionModel }     from '../ipd/ipd.model';
-import { BedModel }              from '../ipd/bed.model';
-import { PathologyRequestModel, RadiologyRequestModel } from '../lab/lab.model';
-import { InventoryItemModel }    from '../inventory/inventory.model';
-import { PaymentModel }          from '../payment/payment.model';
-import { UserModel }             from '../user/user.model';
-import { AuditLogModel }         from '../audit/audit.model';
+import { dashboardRepository }   from './dashboard.repository';
+import { auditRepository }       from '../audit/audit.repository';
 import { AppError }              from '../../shared/middleware/error-handler';
 import config                    from '../../shared/config/env';
 import {
@@ -17,8 +10,6 @@ import {
   RevenueTrendPoint,
 } from './dashboard.types';
 import { UserRole }              from '../../shared/types/common.types';
-import { PaymentStatus }         from '../payment/payment.types';
-import { LabRequestStatus }      from '../lab/lab.types';
 
 // ─── In-memory TTL cache (keyed by tenantId+role) ────────────────────────────
 
@@ -29,23 +20,43 @@ interface CacheEntry {
 
 const statsCache = new Map<string, CacheEntry>();
 
-function cacheKey(tenantId: string, role: UserRole): string {
-  return `${tenantId}:${role}`;
+// Sentinel used when a self-scoped role is queried without a userId. It cannot
+// match any real audit-log userId, so the activity feed comes back empty
+// (fail closed) instead of falling back to tenant-wide activity.
+const NO_ACTIVITY_SENTINEL = '__no_user__';
+
+// `activityScope` isolates the cache per recent-activity view: 'ALL' for roles
+// that see every user's activity (Hospital Admin), or the acting userId for
+// self-scoped roles — so two users of the same role never share cached activity.
+function cacheKey(tenantId: string, role: UserRole, activityScope: string): string {
+  return `${tenantId}:${role}:${activityScope}`;
 }
 
-function getFromCache(tenantId: string, role: UserRole): DashboardStats | null {
-  const entry = statsCache.get(cacheKey(tenantId, role));
+function getFromCache(tenantId: string, role: UserRole, activityScope: string): DashboardStats | null {
+  const entry = statsCache.get(cacheKey(tenantId, role, activityScope));
   if (!entry || Date.now() > entry.expiresAt) {
-    statsCache.delete(cacheKey(tenantId, role));
+    statsCache.delete(cacheKey(tenantId, role, activityScope));
     return null;
   }
   return entry.stats;
 }
 
-function setInCache(tenantId: string, role: UserRole, stats: DashboardStats): void {
-  statsCache.set(cacheKey(tenantId, role), {
+// Remove every expired entry. Because keys now include the acting userId, one-off
+// user scopes would otherwise linger in the Map until their exact key is read
+// again (which may never happen). Sweeping on write keeps resident entries bounded
+// to those still within their TTL, with no timer and no unbounded growth.
+function pruneExpiredEntries(now: number): void {
+  for (const [key, entry] of statsCache) {
+    if (now > entry.expiresAt) statsCache.delete(key);
+  }
+}
+
+function setInCache(tenantId: string, role: UserRole, activityScope: string, stats: DashboardStats): void {
+  const now = Date.now();
+  pruneExpiredEntries(now);
+  statsCache.set(cacheKey(tenantId, role, activityScope), {
     stats,
-    expiresAt: Date.now() + config.dashboard.cacheTtlSeconds * 1000,
+    expiresAt: now + config.dashboard.cacheTtlSeconds * 1000,
   });
 }
 
@@ -79,155 +90,136 @@ function last30DaysStart(): Date {
 // ─── Aggregation functions ────────────────────────────────────────────────────
 
 async function getTotalPatients(tenantId: string): Promise<number> {
-  return (await PatientModel.countDocuments({ tenantId })) ?? 0;
+  return dashboardRepository.countPatients(tenantId);
 }
 
 async function getTodayOpdCount(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return OPDVisitModel.countDocuments({ tenantId, visitDate: { $gte: start, $lte: end } });
+  return dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
 }
 
 async function getActiveIpdCount(tenantId: string): Promise<number> {
-  return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED' });
+  return dashboardRepository.countActiveIpd(tenantId);
 }
 
 async function getAdmissionsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return IPDAdmissionModel.countDocuments({ tenantId, admissionDate: { $gte: start, $lte: end } });
+  return dashboardRepository.countAdmissionsBetween(tenantId, start, end);
 }
 
 async function getNewRegistrationsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return PatientModel.countDocuments({ tenantId, createdAt: { $gte: start, $lte: end } });
+  return dashboardRepository.countPatientsCreatedBetween(tenantId, start, end);
 }
 
 async function getPendingLabCount(tenantId: string): Promise<number> {
-  const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING }),
-  ]);
-  return (path ?? 0) + (rad ?? 0);
+  const { pathology, radiology } = await dashboardRepository.countPendingLabRequests(tenantId);
+  return pathology + radiology;
 }
 
 async function getLabReportsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end } }),
-  ]);
-  return (path ?? 0) + (rad ?? 0);
+  const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsBetween(tenantId, start, end);
+  return pathology + radiology;
 }
 
 async function getRevenueSummary(tenantId: string): Promise<{ today: number; month: number }> {
   const { start: todayStart, end: todayEnd } = todayRange();
   const { start: monthStart, end: monthEnd } = monthRange();
 
-  const [todayResult, monthResult] = await Promise.all([
-    PaymentModel.aggregate([
-      { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: todayStart, $lte: todayEnd } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
-    PaymentModel.aggregate([
-      { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: monthStart, $lte: monthEnd } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
+  const [today, month] = await Promise.all([
+    dashboardRepository.sumCompletedPaymentsBetween(tenantId, todayStart, todayEnd),
+    dashboardRepository.sumCompletedPaymentsBetween(tenantId, monthStart, monthEnd),
   ]);
 
-  return {
-    today: todayResult[0]?.total ?? 0,
-    month: monthResult[0]?.total ?? 0,
-  };
+  return { today, month };
 }
 
 async function getAverageDailyRevenue(tenantId: string): Promise<number> {
   const since = last30DaysStart();
-  const result = await PaymentModel.aggregate([
-    { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
-    { $group: { _id: null, total: { $sum: '$amount' } } },
-  ]);
-  return Math.round((result[0]?.total ?? 0) / 30);
+  const total = await dashboardRepository.sumCompletedPaymentsSince(tenantId, since);
+  return Math.round(total / 30);
 }
 
 async function getPendingPaymentsCount(tenantId: string): Promise<number> {
-  return PaymentModel.countDocuments({ tenantId, status: PaymentStatus.PENDING });
+  return dashboardRepository.countPendingPayments(tenantId);
 }
 
 async function getLowStockCount(tenantId: string): Promise<number> {
-  const result = await InventoryItemModel.aggregate([
-    {
-      $match: {
-        tenantId,
-        isDeleted: { $ne: true },
-        $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
-      },
-    },
-    { $count: 'total' },
-  ]);
-  return result[0]?.total ?? 0;
+  return dashboardRepository.countLowStock(tenantId);
 }
 
 async function getOutOfStockCount(tenantId: string): Promise<number> {
-  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true }, quantity: 0 });
+  return dashboardRepository.countOutOfStock(tenantId);
 }
 
 async function getTotalInventoryItems(tenantId: string): Promise<number> {
-  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true } });
+  return dashboardRepository.countInventoryItems(tenantId);
 }
 
 async function getTotalActiveStaff(tenantId: string): Promise<number> {
-  return UserModel.countDocuments({ tenantId, isActive: true });
+  return dashboardRepository.countActiveStaff(tenantId);
 }
 
 async function getBedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
-  const [total, occupied] = await Promise.all([
-    BedModel.countDocuments({ tenantId }),
-    BedModel.countDocuments({ tenantId, isOccupied: true }),
-  ]);
-  return { total, occupied };
+  return dashboardRepository.bedStats(tenantId);
+}
+
+// The server's timezone. Visit/payment dates are stored at local-midnight
+// (see opd.service), and "today"/"last-30-days" ranges are computed in local time,
+// so the trend charts must bucket days in the SAME timezone — otherwise a visit
+// added "today" in, e.g., IST lands on the previous UTC day and shows as 0.
+const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+// Local-timezone YYYY-MM-DD key (matches Mongo's $dateToString with SERVER_TZ).
+function localDayKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+// Turn a sparse day→value map into a continuous 30-day series ending today (in the
+// server timezone), filling days with no activity as 0 — so "Last 30 Days" charts
+// always span the full window and include today. Returns [] when there is no data
+// at all, so the UI can still show a clean "No data yet" state for new hospitals.
+function buildDailySeries(byDate: Map<string, number>): { date: string; value: number }[] {
+  if (byDate.size === 0) return [];
+  const today = new Date();
+  const out: { date: string; value: number }[] = [];
+  for (let i = 29; i >= 0; i -= 1) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    const key = localDayKey(d);
+    out.push({ date: key, value: byDate.get(key) ?? 0 });
+  }
+  return out;
 }
 
 async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
   const since = last30DaysStart();
-  const results = await OPDVisitModel.aggregate([
-    { $match: { tenantId, visitDate: { $gte: since } } },
-    {
-      $group: {
-        _id: { year: { $year: '$visitDate' }, month: { $month: '$visitDate' }, day: { $dayOfMonth: '$visitDate' } },
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
-  ]);
-  return results.map((r) => ({
-    date:  `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
-    count: r.count,
-  }));
+  // Cap at "now" so a Last-30-Days trend never includes future-scheduled visits.
+  const results = await dashboardRepository.opdVisitsGroupedByDay(tenantId, since, new Date(), SERVER_TZ);
+  const byDate = new Map<string, number>(results.map((r) => [r._id, r.count]));
+  return buildDailySeries(byDate).map((e) => ({ date: e.date, count: e.value }));
 }
 
 async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoint[]> {
   const since = last30DaysStart();
-  const results = await PaymentModel.aggregate([
-    { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
-    {
-      $group: {
-        _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' }, day: { $dayOfMonth: '$createdAt' } },
-        amount: { $sum: '$amount' },
-      },
-    },
-    { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
-  ]);
-  return results.map((r) => ({
-    date:   `${r._id.year}-${String(r._id.month).padStart(2, '0')}-${String(r._id.day).padStart(2, '0')}`,
-    amount: r.amount,
-  }));
+  const results = await dashboardRepository.paymentsGroupedByDay(tenantId, since, SERVER_TZ);
+  const byDate = new Map<string, number>(results.map((r) => [r._id, r.amount]));
+  return buildDailySeries(byDate).map((e) => ({ date: e.date, amount: e.value }));
 }
 
-async function getRecentActivities(tenantId: string): Promise<RecentActivity[]> {
-  const logs = await AuditLogModel.find({ tenantId })
-    .sort({ timestamp: -1 })
-    .limit(10)
-    .lean();
-  return logs.map((l) => ({
+// When `userId` is provided the feed is restricted to that user's own actions;
+// otherwise it returns the whole tenant's activity (Hospital Admin view).
+// Data access goes through the audit repository (no direct model queries here).
+async function getRecentActivities(tenantId: string, userId?: string): Promise<RecentActivity[]> {
+  const { data } = await auditRepository.query(tenantId, {
+    ...(userId ? { userId } : {}),
+    page:  1,
+    limit: 10,
+  });
+  return data.map((l) => ({
     entityType: l.entityType,
     entityId:   l.entityId,
     action:     l.action,
@@ -242,9 +234,20 @@ export class DashboardService {
     tenantId:    string,
     role:        UserRole,
     bypassCache: boolean = false,
+    userId?:     string,
   ): Promise<DashboardStats> {
+    // Recent Activities scope: Hospital Admin sees the whole hospital; every other
+    // role sees only their own actions. Enforced here on the backend.
+    // Fail closed: a self-scoped role with no userId resolves to a sentinel that
+    // matches no audit log, so omitting userId can never leak other users' activity
+    // (nor share a cross-user cache entry) — it simply returns an empty feed.
+    const activityUserId = role === UserRole.HOSPITAL_ADMIN
+      ? undefined                       // Hospital Admin: whole-tenant activity
+      : (userId ?? NO_ACTIVITY_SENTINEL);
+    const activityScope  = activityUserId ?? 'ALL';
+
     if (!bypassCache) {
-      const cached = getFromCache(tenantId, role);
+      const cached = getFromCache(tenantId, role, activityScope);
       if (cached) return cached;
     }
 
@@ -299,7 +302,7 @@ export class DashboardService {
         ? getBedStats(tenantId) : Promise.resolve(undefined),
       needs('monthlyOpdTrend')       ? getMonthlyOpdTrend(tenantId)       : Promise.resolve(undefined),
       needs('monthlyRevenueTrend')   ? getMonthlyRevenueTrend(tenantId)   : Promise.resolve(undefined),
-      needs('recentActivities')      ? getRecentActivities(tenantId)      : Promise.resolve(undefined),
+      needs('recentActivities')      ? getRecentActivities(tenantId, activityUserId) : Promise.resolve(undefined),
     ]));
 
     const stats: DashboardStats = { lastUpdated: new Date().toISOString() };
@@ -325,7 +328,7 @@ export class DashboardService {
     if (needs('monthlyRevenueTrend')   && monthlyRevenueTrend   !== undefined) stats.monthlyRevenueTrend   = monthlyRevenueTrend as RevenueTrendPoint[];
     if (needs('recentActivities')      && recentActivities      !== undefined) stats.recentActivities      = recentActivities as RecentActivity[];
 
-    setInCache(tenantId, role, stats);
+    setInCache(tenantId, role, activityScope, stats);
     return stats;
   }
 }

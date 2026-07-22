@@ -9,7 +9,7 @@ require('dotenv-safe').config({
 import { TenantModel } from '../src/modules/tenant/tenant.model';
 import { TenantStatus } from '../src/shared/types/common.types';
 
-const TENANTS = [
+export const TENANTS = [
   {
     name:       'City General Hospital',
     adminEmail: 'admin-city@yopmail.com',
@@ -18,7 +18,10 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant1/reg-cert.pdf',
       gstNumber:               '27AABCT1234A1Z5',
       panCard:                 'docs/tenant1/pan.pdf',
-      addressProof:            'docs/tenant1/address.pdf',
+      addressLine:            '123 Main Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
+      pincode:                '400001',
     },
     branding: {
       displayName:  'City General Hospital',
@@ -33,7 +36,10 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant2/reg-cert.pdf',
       gstNumber:               '29AABCS5678B1Z3',
       panCard:                 'docs/tenant2/pan.pdf',
-      addressProof:            'docs/tenant2/address.pdf',
+      addressLine:            '456 Park Avenue',
+      city:                    'Pune',
+      state:                   'Maharashtra',
+      pincode:                '411001',
     },
     branding: {
       displayName:  'Sunrise Clinic',
@@ -48,7 +54,10 @@ const TENANTS = [
       registrationCertificate: 'docs/tenant3/reg-cert.pdf',
       gstNumber:               '07AABCM9012C1Z1',
       panCard:                 'docs/tenant3/pan.pdf',
-      addressProof:            'docs/tenant3/address.pdf',
+      addressLine:            '789 Sector 15',
+      city:                    'Delhi',
+      state:                   'Delhi',
+      pincode:                '110015',
     },
     branding: {
       displayName:  'Metro Health Centre',
@@ -57,7 +66,7 @@ const TENANTS = [
   },
 ];
 
-async function seed() {
+export async function seed() {
   await mongoose.connect(process.env.MONGODB_URI!);
   console.log('Connected to MongoDB');
 
@@ -75,7 +84,9 @@ async function seed() {
   process.exit(0);
 }
 
-seed().catch((err) => {
-  console.error('Tenant seed failed:', err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  seed().catch((err) => {
+    console.error('Tenant seed failed:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

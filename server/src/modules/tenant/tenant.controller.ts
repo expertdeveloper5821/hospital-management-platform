@@ -15,7 +15,10 @@ const createTenantSchema = z.object({
     registrationCertificate: z.string().min(1),
     gstNumber:               z.string().min(1),
     panCard:                 z.string().min(1),
-    addressProof:            z.string().min(1),
+    addressLine:            z.string().min(1),
+    city:                    z.string().min(1),
+    state:                   z.string().min(1),
+    pincode:                 z.string().regex(/^\d{6}$/, 'Pincode must be 6 digits'),
   }),
 });
 

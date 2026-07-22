@@ -18,8 +18,9 @@ export async function getDashboardStats(
 
     const tenantId = req.user!.tenantId as string;
     const role     = req.user!.role as UserRole;
+    const userId   = req.user!.userId;
 
-    const stats = await dashboardService.getStats(tenantId, role, bypassCache);
+    const stats = await dashboardService.getStats(tenantId, role, bypassCache, userId);
 
     res.status(200).json({ status: 'success', data: stats });
   } catch (err) {

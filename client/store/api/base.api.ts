@@ -37,8 +37,18 @@ const quietSuccessEndpoints = new Set([
   // silence the intermediate visit-created toast so the user isn't shown a success toast
   // followed by a failure toast for what they perceive as a single action.
   'createOPDVisit',
-  // Same pattern for IPD: createAdmission then createManualPayment run as one submission.
+  // These screens show their own, more specific success toast — avoid a duplicate.
+  'changeMyPassword',
+  'changeSuperAdminPassword',
+  'updateMyProfile',
   'createAdmission',
+  'uploadProfileImage',
+]);
+
+// Endpoints whose errors are handled locally / are expected, so the global toast
+// must not fire (e.g. logout after a password change hits an already-invalid token).
+const quietErrorEndpoints = new Set([
+  'logout',
 ]);
 
 function extractErrorMessage(error: FetchBaseQueryError) {
@@ -80,7 +90,9 @@ const baseQueryWithToasts: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   if (api.type !== 'mutation') return result;
 
   if ('error' in result && result.error) {
-    toastError('Request failed', extractErrorMessage(result.error));
+    if (!quietErrorEndpoints.has(api.endpoint)) {
+      toastError('Request failed', extractErrorMessage(result.error));
+    }
     return result;
   }
 

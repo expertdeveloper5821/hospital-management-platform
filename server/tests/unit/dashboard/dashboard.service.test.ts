@@ -18,6 +18,7 @@ import { InventoryItemModel }    from '../../../src/modules/inventory/inventory.
 import { PaymentModel }          from '../../../src/modules/payment/payment.model';
 import { UserModel }             from '../../../src/modules/user/user.model';
 import { AuditLogModel }         from '../../../src/modules/audit/audit.model';
+import { auditRepository }       from '../../../src/modules/audit/audit.repository';
 import { DashboardService, clearDashboardCache } from '../../../src/modules/dashboard/dashboard.service';
 import { UserRole }              from '../../../src/shared/types/common.types';
 
@@ -34,6 +35,7 @@ function mockAggregate(model: unknown, values: Record<string, unknown>[]) {
 function mockFind(model: unknown, values: unknown[]) {
   (model as { find: jest.Mock }).find = jest.fn().mockReturnValue({
     sort:  jest.fn().mockReturnThis(),
+    skip:  jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
     lean:  jest.fn().mockResolvedValue(values),
   });
@@ -59,10 +61,15 @@ describe('DashboardService.getStats', () => {
     mockCount(BedModel,               0);
     mockCount(InventoryItemModel,     0);
     mockCount(PaymentModel,           0);
+    mockCount(AuditLogModel,          0);
     mockAggregate(PaymentModel,       []);
     mockAggregate(OPDVisitModel,      []);
     mockAggregate(InventoryItemModel, []);
     mockFind(AuditLogModel,           []);
+
+    // Recent activities now go through the audit repository — mock it directly.
+    (auditRepository as unknown as { query: jest.Mock }).query = jest.fn()
+      .mockResolvedValue({ data: [], total: 0, page: 1, limit: 10, totalPages: 0 });
   });
 
   // ─── Role filtering ────────────────────────────────────────────────────────
@@ -97,6 +104,29 @@ describe('DashboardService.getStats', () => {
       expect(stats.monthlyOpdTrend).toBeDefined();
       expect(stats.monthlyRevenueTrend).toBeDefined();
       expect(stats.lastUpdated).toBeTruthy();
+    });
+  });
+
+  describe('patient counts exclude soft-deleted patients', () => {
+    test('Total Patients and New Registrations query with isDeleted: { $ne: true }', async () => {
+      await service.getStats(TENANT, UserRole.HOSPITAL_ADMIN, true, 'admin-1');
+      // Every PatientModel.countDocuments call (total + today) must exclude deleted.
+      const calls = (PatientModel.countDocuments as jest.Mock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [filter] of calls) {
+        expect(filter).toMatchObject({ tenantId: TENANT, isDeleted: { $ne: true } });
+      }
+    });
+
+    test('lab counts (pending + reports today) exclude soft-deleted requests', async () => {
+      await service.getStats(TENANT, UserRole.HOSPITAL_ADMIN, true, 'admin-1');
+      for (const model of [PathologyRequestModel, RadiologyRequestModel]) {
+        const calls = (model.countDocuments as jest.Mock).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        for (const [filter] of calls) {
+          expect(filter).toMatchObject({ tenantId: TENANT, isDeleted: { $ne: true } });
+        }
+      }
     });
   });
 
@@ -212,20 +242,41 @@ describe('DashboardService.getStats', () => {
     });
   });
 
-  describe('monthlyOpdTrend formats date correctly', () => {
-    test('formats aggregate result into TrendPoint array', async () => {
+  describe('monthlyOpdTrend — continuous 30-day series', () => {
+    // Local-timezone day key, matching the service (which buckets in server TZ).
+    const localKey = (offset: number) => {
+      const t = new Date();
+      const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() - offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    test('returns 30 points ending today, zero-filling days with no activity', async () => {
       (PaymentModel.aggregate as jest.Mock).mockResolvedValue([]);
       mockAggregate(InventoryItemModel, []);
+
+      // Aggregation now emits _id as a YYYY-MM-DD string ($dateToString in server TZ).
       (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([
-        { _id: { year: 2026, month: 5, day: 1 }, count: 3 },
-        { _id: { year: 2026, month: 5, day: 2 }, count: 7 },
+        { _id: localKey(3), count: 5 },   // 3 days ago
+        { _id: localKey(0), count: 2 },   // today
       ]);
 
       const stats = await service.getStats(TENANT, UserRole.ADMIN, true);
-      expect(stats.monthlyOpdTrend).toEqual([
-        { date: '2026-05-01', count: 3 },
-        { date: '2026-05-02', count: 7 },
-      ]);
+      const trend = stats.monthlyOpdTrend!;
+
+      expect(trend).toHaveLength(30);
+      expect(trend[trend.length - 1]).toEqual({ date: localKey(0), count: 2 }); // today included
+      expect(trend[trend.length - 4]).toEqual({ date: localKey(3), count: 5 }); // 3 days ago
+      expect(trend[0]).toEqual({ date: localKey(29), count: 0 });               // empty day zero-filled
+      expect(trend.reduce((s, p) => s + p.count, 0)).toBe(7);                   // only real data counts
+    });
+
+    test('returns an empty array when there is no activity (clean empty state)', async () => {
+      (PaymentModel.aggregate as jest.Mock).mockResolvedValue([]);
+      mockAggregate(InventoryItemModel, []);
+      (OPDVisitModel.aggregate as jest.Mock).mockResolvedValue([]);
+
+      const stats = await service.getStats(TENANT, UserRole.ADMIN, true);
+      expect(stats.monthlyOpdTrend).toEqual([]);
     });
   });
 
@@ -268,6 +319,49 @@ describe('DashboardService.getStats', () => {
 
       // Each role populates its own cache key — PatientModel called at least twice
       expect((PatientModel.countDocuments as jest.Mock).mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  // ─── Recent Activities role-based scoping ────────────────────────────────────
+  describe('recent activities — role-based scoping', () => {
+    const auditQuery = () => auditRepository.query as jest.Mock;
+
+    test('HOSPITAL_ADMIN queries all activity for the tenant (no userId filter)', async () => {
+      await service.getStats(TENANT, UserRole.HOSPITAL_ADMIN, true, 'admin-1');
+      const [tenantArg, filters] = auditQuery().mock.calls[0];
+      expect(tenantArg).toBe(TENANT);
+      expect(filters).not.toHaveProperty('userId');
+    });
+
+    test('a non-admin role is restricted to its own userId', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true, 'doc-1');
+      expect(auditQuery()).toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-1' }));
+    });
+
+    test('fail closed: a non-admin role WITHOUT a userId never falls back to tenant-wide activity', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true); // userId omitted
+      const filters = auditQuery().mock.calls[0][1];
+      // Must be scoped (has a userId sentinel), never the tenant-wide (no-userId) query.
+      expect(filters).toHaveProperty('userId');
+    });
+
+    test('two users of the same role do not share cached activity', async () => {
+      // Doctor A caches, then Doctor B (same role, different user) must query fresh
+      // with its own userId — never served Doctor A's cached feed.
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-A');
+      auditQuery().mockClear();
+
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-B');
+      expect(auditQuery()).toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-B' }));
+      expect(auditQuery()).not.toHaveBeenCalledWith(TENANT, expect.objectContaining({ userId: 'doc-A' }));
+    });
+
+    test('same user hits cache on the second call (no new activity query)', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1');
+      auditQuery().mockClear();
+
+      await service.getStats(TENANT, UserRole.DOCTOR, false, 'doc-1'); // cached
+      expect(auditQuery()).not.toHaveBeenCalled();
     });
   });
 });

@@ -48,7 +48,7 @@ beforeEach(async () => {
   const tenant = await TenantModel.create({
     name: 'Notif Test Hospital', adminEmail: 'admin@notif.com',
     status: TenantStatus.ACTIVE,
-    onboardingDocuments: { registrationCertificate: 'r', gstNumber: 'G', panCard: 'P', addressProof: 'A' },
+    onboardingDocuments: { registrationCertificate: 'r', gstNumber: 'G', panCard: 'P', addressLine: 'A', city: 'B', state: 'C', pincode: '400001' },
   });
   tenantId = (tenant._id as mongoose.Types.ObjectId).toString();
 

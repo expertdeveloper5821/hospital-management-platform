@@ -37,7 +37,6 @@ import {
   Bed,
   Trash2,
 } from 'lucide-react';
-import { toastSuccess } from '@/lib/toast';
 import { UserRole } from '@/store/types';
 import { INDIAN_STATES } from '@/lib/constants';
 
@@ -691,7 +690,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
     setDeleteError(undefined);
     try {
       await deletePatient(patient.patientId).unwrap();
-      toastSuccess('Patient record deleted.');
+      // Success toast is shown globally by the base API mutation handler.
       onDeleted();
     } catch (err: unknown) {
       const msg = (err as { data?: { message?: string } })?.data?.message

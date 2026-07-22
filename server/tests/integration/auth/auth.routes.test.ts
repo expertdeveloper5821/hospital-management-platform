@@ -64,7 +64,10 @@ async function seedTenant() {
       registrationCertificate: 's3-key-1',
       gstNumber:               'GST123',
       panCard:                 's3-key-2',
-      addressProof:            's3-key-3',
+      addressLine:            '123 Test Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
+      pincode:                 '400001',
     },
     branding: { displayName: 'Test Hospital', primaryColor: '#1A73E8' },
   });

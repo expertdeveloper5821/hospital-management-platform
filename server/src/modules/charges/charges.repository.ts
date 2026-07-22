@@ -1,4 +1,4 @@
-import { ChargeModel, ICharge, ChargeCategory } from './charges.model';
+import { ChargeModel, ICharge, ChargeCategory, ChargeStatus } from './charges.model';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
@@ -8,6 +8,8 @@ export interface ChargeListFilters {
   startDate?:  string;
   endDate?:    string;
   addedBy?:    string;
+  addedByName?: string;    // name search — resolved to actor ids by the service
+  addedByIds?: string[];   // restrict to these actor ids (from a name search)
   page?:       number;
   limit?:      number;
 }
@@ -41,6 +43,7 @@ class ChargeRepository {
     if (filters.patientId) query.patientId = filters.patientId;
     if (filters.category)  query.category  = filters.category;
     if (filters.addedBy)   query.addedBy   = filters.addedBy;
+    if (filters.addedByIds) query.addedBy  = { $in: filters.addedByIds };
     if (filters.startDate || filters.endDate) {
       const dateRange: Record<string, unknown> = {};
       if (filters.startDate) dateRange.$gte = new Date(filters.startDate);
@@ -59,6 +62,23 @@ class ChargeRepository {
   async update(tenantId: string, chargeId: string, data: Partial<ICharge>): Promise<ICharge | null> {
     assertDbConnected();
     return ChargeModel.findOneAndUpdate({ tenantId, chargeId }, data, { new: true });
+  }
+
+  // Atomic status transition: only updates when the charge is still in
+  // `fromStatus`, so concurrent pay/cancel requests can't overwrite each other.
+  // Returns null when the charge is missing or no longer in `fromStatus`.
+  async updateFromStatus(
+    tenantId:   string,
+    chargeId:   string,
+    fromStatus: ChargeStatus,
+    data:       Partial<ICharge>,
+  ): Promise<ICharge | null> {
+    assertDbConnected();
+    return ChargeModel.findOneAndUpdate(
+      { tenantId, chargeId, status: fromStatus },
+      data,
+      { new: true },
+    );
   }
 }
 
