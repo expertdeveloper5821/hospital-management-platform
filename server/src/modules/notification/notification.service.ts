@@ -62,6 +62,10 @@ export class NotificationService {
     return notificationRepository.markRead(tenantId, userId, notificationId);
   }
 
+  async markAllRead(tenantId: string, userId: string): Promise<number> {
+    return notificationRepository.markAllRead(tenantId, userId);
+  }
+
   async countUnread(tenantId: string, userId: string): Promise<number> {
     return notificationRepository.countUnread(tenantId, userId);
   }

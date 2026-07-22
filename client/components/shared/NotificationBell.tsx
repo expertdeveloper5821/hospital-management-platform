@@ -9,6 +9,7 @@ import {
   useGetUnreadCountQuery,
   useListNotificationsQuery,
   useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
 } from '@/store/api/notification.api';
 import type { NotificationMessage } from '@/store/types';
 
@@ -31,10 +32,11 @@ export function NotificationBell() {
   const wsMessages  = useAppSelector((s) => s.notification.messages);
   const wsConnected = useAppSelector((s) => s.notification.connected);
 
-  // Seed unread count from API on mount; WS-driven count takes over once connected
-  const wsUnreadCount = useAppSelector((s) => s.notification.unreadCount);
+  // Single source of truth for the badge: seeded on mount, then kept live by
+  // WS pushes (+1 per message) and mark-read actions (-1), both of which patch
+  // this same cache entry — see websocket-client.ts and notification.api.ts.
   const { data: apiUnreadCount } = useGetUnreadCountQuery(undefined, { skip: !isAuth });
-  const unreadCount = wsUnreadCount > 0 ? wsUnreadCount : (apiUnreadCount ?? 0);
+  const unreadCount = apiUnreadCount ?? 0;
 
   // Fetch notification history when panel is open
   const { data: apiNotifications = [], isFetching } = useListNotificationsQuery(
@@ -42,7 +44,8 @@ export function NotificationBell() {
     { skip: !isAuth || !panelOpen },
   );
 
-  const [markRead] = useMarkNotificationReadMutation();
+  const [markRead]           = useMarkNotificationReadMutation();
+  const [markAllReadMutation] = useMarkAllNotificationsReadMutation();
 
   // Merge: WS messages first (newest), then API history (deduped by id)
   const notifications = useMemo<NotificationMessage[]>(() => {
@@ -71,10 +74,12 @@ export function NotificationBell() {
   }
 
   async function handleMarkAllRead() {
+    // Local wsMessages read-dots update immediately; the atomic backend call
+    // clears every unread notification for the user, not just the ones
+    // currently fetched into the panel (avoids leaving unreachable stragglers
+    // that would keep the badge from ever reaching zero).
     dispatch(markAllRead());
-    // Fire-and-forget: mark each unread via API
-    const unread = notifications.filter((m) => !m.read);
-    await Promise.allSettled(unread.map((m) => markRead(m.id)));
+    await markAllReadMutation().catch(() => { /* UI already updated */ });
   }
 
   return (

@@ -165,6 +165,26 @@ describe('GET /api/notifications/unread-count', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.count).toBe(0);
   });
+
+  // Regression test: countUnread previously had no date cap while the list
+  // endpoint capped history at 30 days (FR-N-04), so a stale unread notification
+  // older than 30 days would inflate the badge forever with no way to reach it
+  // via "Mark all as read" (it never appears in the fetched list).
+  test('does not count unread notifications older than 30 days', async () => {
+    await seedNotification({ isRead: false }); // recent — within 30 days
+    await NotificationModel.create({
+      notificationId: uuidv4(), userId, tenantId,
+      title: 'Old', message: 'Old body', isRead: false,
+      createdAt: new Date('2020-01-01'), // far in the past
+    });
+
+    const res = await request(app)
+      .get('/api/notifications/unread-count')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.count).toBe(1);
+  });
 });
 
 // ─── PATCH /api/notifications/:notificationId/read ────────────────────────────
@@ -221,5 +241,74 @@ describe('PATCH /api/notifications/:notificationId/read', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ─── PATCH /api/notifications/mark-all-read ───────────────────────────────────
+
+describe('PATCH /api/notifications/mark-all-read', () => {
+  test('returns 401 without token', async () => {
+    const res = await request(app).patch('/api/notifications/mark-all-read');
+    expect(res.status).toBe(401);
+  });
+
+  test('marks every unread notification for the user as read', async () => {
+    await seedNotification({ isRead: false });
+    await seedNotification({ isRead: false });
+    await seedNotification({ isRead: true });
+
+    const res = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.count).toBe(2);
+
+    const unread = await request(app)
+      .get('/api/notifications/unread-count')
+      .set('Authorization', `Bearer ${token}`);
+    expect(unread.body.data.count).toBe(0);
+  });
+
+  test('also clears unread notifications older than 30 days (unlike the badge count/list)', async () => {
+    await NotificationModel.create({
+      notificationId: uuidv4(), userId, tenantId,
+      title: 'Old', message: 'Old body', isRead: false,
+      createdAt: new Date('2020-01-01'),
+    });
+
+    const res = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.count).toBe(1);
+  });
+
+  test('does not affect another user\'s notifications', async () => {
+    await seedNotification({ userId: 'other-user', isRead: false });
+    await seedNotification({ isRead: false });
+
+    const res = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.count).toBe(1);
+
+    const other = await NotificationModel.findOne({ userId: 'other-user' });
+    expect(other?.isRead).toBe(false);
+  });
+
+  test('is idempotent — returns 0 modified on a second call', async () => {
+    await seedNotification({ isRead: false });
+
+    await request(app).patch('/api/notifications/mark-all-read').set('Authorization', `Bearer ${token}`);
+    const second = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(second.status).toBe(200);
+    expect(second.body.data.count).toBe(0);
   });
 });

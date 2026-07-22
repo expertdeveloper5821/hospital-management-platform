@@ -52,3 +52,15 @@ export async function markRead(
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
+
+export async function markAllRead(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const count = await notificationService.markAllRead(
+      req.user!.tenantId as string,
+      req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: { count } });
+  } catch (err) { next(err); }
+}

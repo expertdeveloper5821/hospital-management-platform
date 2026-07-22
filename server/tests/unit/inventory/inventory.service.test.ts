@@ -35,6 +35,7 @@ describe('InventoryService — createItem', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new InventoryService();
+    mockNotifSvc.sendToRole = jest.fn().mockResolvedValue(undefined);
   });
 
   test('creates and returns an inventory item', async () => {
@@ -64,6 +65,59 @@ describe('InventoryService — createItem', () => {
     );
 
     expect(result.isLowStock).toBe(true);
+  });
+
+  test('sends low-stock notification when created already below threshold', async () => {
+    mockRepo.save = jest.fn().mockResolvedValue(
+      makeItem({ quantity: 5, lowStockThreshold: 20 }),
+    );
+
+    await service.createItem(
+      { name: 'Saline Solution', category: 'Fluids', unit: 'bags', quantity: 5, lowStockThreshold: 20 },
+      TENANT,
+      ADMIN,
+    );
+
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'MANAGER',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'HOSPITAL_ADMIN',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+  });
+
+  test('does NOT send notification when created above threshold', async () => {
+    mockRepo.save = jest.fn().mockResolvedValue(makeItem({ quantity: 100, lowStockThreshold: 20 }));
+
+    await service.createItem(
+      { name: 'Paracetamol 500mg', category: 'Medication', unit: 'tablets', quantity: 100, lowStockThreshold: 20 },
+      TENANT,
+      ADMIN,
+    );
+
+    expect(mockNotifSvc.sendToRole).not.toHaveBeenCalled();
+  });
+
+  test('does NOT send notification when threshold is zero', async () => {
+    mockRepo.save = jest.fn().mockResolvedValue(makeItem({ quantity: 0, lowStockThreshold: 0 }));
+
+    await service.createItem(
+      { name: 'Misc Item', category: 'Other', unit: 'units', quantity: 0, lowStockThreshold: 0 },
+      TENANT,
+      ADMIN,
+    );
+
+    expect(mockNotifSvc.sendToRole).not.toHaveBeenCalled();
   });
 });
 

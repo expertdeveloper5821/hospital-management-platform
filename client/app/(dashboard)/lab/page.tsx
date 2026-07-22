@@ -841,24 +841,6 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                             >
                               View
                             </button>
-                            {canEdit && r.status !== 'COMPLETED' && (
-                              <button
-                                className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-                                title="Edit"
-                                onClick={(e) => { e.stopPropagation(); setSelected(r); }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                            {canDelete && (
-                              <button
-                                className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-destructive"
-                                title="Delete"
-                                onClick={(e) => { e.stopPropagation(); setSelected(r); }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
                           </div>
                         </td>
                       </tr>

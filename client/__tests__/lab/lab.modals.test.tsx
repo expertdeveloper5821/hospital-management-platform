@@ -83,11 +83,11 @@ describe('EditRequestModal — pathology', () => {
     });
   });
 
-  test('shows Edit button for PENDING requests when user has edit permission', () => {
+  test('shows Edit Request button inside detail panel for PENDING requests when user has edit permission', async () => {
     render(<LabPage />);
-    // Edit button appears in the table row (pencil icon with title)
-    const editBtns = screen.getAllByTitle('Edit');
-    expect(editBtns.length).toBeGreaterThan(0);
+    // Row only exposes View — Edit lives inside the detail panel
+    fireEvent.click(screen.getByText('View'));
+    expect(await screen.findByText('Edit Request')).toBeInTheDocument();
   });
 
   test('opens Edit modal when Edit button is clicked in detail panel', async () => {
@@ -167,9 +167,11 @@ describe('DeleteRequestModal — pathology', () => {
     });
   });
 
-  test('shows Delete button when user has delete permission', () => {
+  test('shows Delete Request button inside detail panel when user has delete permission', async () => {
     render(<LabPage />);
-    expect(screen.getAllByTitle('Delete').length).toBeGreaterThan(0);
+    // Row only exposes View — Delete lives inside the detail panel
+    fireEvent.click(screen.getByText('View'));
+    expect(await screen.findByText('Delete Request')).toBeInTheDocument();
   });
 
   test('opens Delete confirmation modal when Delete button is clicked', async () => {
