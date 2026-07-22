@@ -1,4 +1,4 @@
-import { ChargeModel, ICharge, ChargeCategory } from './charges.model';
+import { ChargeModel, ICharge, ChargeCategory, ChargeStatus } from './charges.model';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
@@ -62,6 +62,23 @@ class ChargeRepository {
   async update(tenantId: string, chargeId: string, data: Partial<ICharge>): Promise<ICharge | null> {
     assertDbConnected();
     return ChargeModel.findOneAndUpdate({ tenantId, chargeId }, data, { new: true });
+  }
+
+  // Atomic status transition: only updates when the charge is still in
+  // `fromStatus`, so concurrent pay/cancel requests can't overwrite each other.
+  // Returns null when the charge is missing or no longer in `fromStatus`.
+  async updateFromStatus(
+    tenantId:   string,
+    chargeId:   string,
+    fromStatus: ChargeStatus,
+    data:       Partial<ICharge>,
+  ): Promise<ICharge | null> {
+    assertDbConnected();
+    return ChargeModel.findOneAndUpdate(
+      { tenantId, chargeId, status: fromStatus },
+      data,
+      { new: true },
+    );
   }
 }
 

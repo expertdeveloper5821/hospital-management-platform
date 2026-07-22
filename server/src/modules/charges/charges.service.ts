@@ -130,18 +130,27 @@ class ChargeService {
       throw new ForbiddenError('Only HOSPITAL_ADMIN, ADMIN, RECEPTIONIST, or FINANCE_MANAGER may cancel charges');
     }
 
+    // Only UNPAID charges can be cancelled. Explicit checks give clear messages
+    // for the common cases; the atomic write below is the real guard.
     if (charge.status === 'CANCELLED') {
       throw new ConflictError(`Charge ${chargeId} has already been cancelled.`);
     }
     if (charge.status === 'PAID') {
       throw new ConflictError(`Charge ${chargeId} is already paid and cannot be cancelled.`);
     }
+    if (charge.status !== 'UNPAID') {
+      throw new ConflictError(`Charge ${chargeId} cannot be cancelled from status ${charge.status}.`);
+    }
 
-    const updated = await chargeRepository.update(tenantId, chargeId, {
+    const updated = await chargeRepository.updateFromStatus(tenantId, chargeId, 'UNPAID', {
       status:      'CANCELLED',
       cancelledBy,
       cancelledAt: new Date(),
     });
+    // Lost the race — another request changed the status between read and write.
+    if (!updated) {
+      throw new ConflictError(`Charge ${chargeId} could not be cancelled; its status changed. Please retry.`);
+    }
 
     await auditService.log({
       entityType: AuditEntityType.CHARGE,
@@ -186,18 +195,27 @@ class ChargeService {
       throw new ForbiddenError('Only HOSPITAL_ADMIN, ADMIN, RECEPTIONIST, or FINANCE_MANAGER may mark charges paid');
     }
 
+    // Only UNPAID charges can be marked paid. Explicit checks give clear
+    // messages for the common cases; the atomic write below is the real guard.
     if (charge.status === 'PAID') {
       throw new ConflictError(`Charge ${chargeId} is already paid.`);
     }
     if (charge.status === 'CANCELLED') {
       throw new ConflictError(`Charge ${chargeId} is cancelled and cannot be marked paid.`);
     }
+    if (charge.status !== 'UNPAID') {
+      throw new ConflictError(`Charge ${chargeId} cannot be marked paid from status ${charge.status}.`);
+    }
 
-    const updated = await chargeRepository.update(tenantId, chargeId, {
+    const updated = await chargeRepository.updateFromStatus(tenantId, chargeId, 'UNPAID', {
       status: 'PAID',
       paidBy,
       paidAt: new Date(),
     });
+    // Lost the race — another request changed the status between read and write.
+    if (!updated) {
+      throw new ConflictError(`Charge ${chargeId} could not be marked paid; its status changed. Please retry.`);
+    }
 
     await auditService.log({
       entityType: AuditEntityType.CHARGE,

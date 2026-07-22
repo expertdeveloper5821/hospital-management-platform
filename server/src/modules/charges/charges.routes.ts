@@ -6,34 +6,42 @@ import { requireFirstPasswordChange } from '../../shared/middleware/require-firs
 import { UserRole }                   from '../../shared/types/common.types';
 import { addCharge, cancelCharge, markChargePaid, listCharges } from './charges.controller';
 
-const router  = Router();
-const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
+const router = Router();
+
+// Canonical order: authenticateJWT → scopeTenant → requireRole, with no
+// middleware between tenant-scoping and role-authorization. requireFirstPasswordChange
+// runs after authorization.
+const authAndScope = [authenticateJWT, scopeTenant];
 
 router.post('/',
-  ...protect,
+  ...authAndScope,
   requireRole(
     UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.DOCTOR,
     UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.RECEPTIONIST,
     UserRole.FINANCE_MANAGER,
   ),
+  requireFirstPasswordChange,
   addCharge,
 );
 
 router.get('/',
-  ...protect,
+  ...authAndScope,
   requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE_MANAGER),
+  requireFirstPasswordChange,
   listCharges,
 );
 
 router.patch('/:chargeId/cancel',
-  ...protect,
+  ...authAndScope,
   requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER),
+  requireFirstPasswordChange,
   cancelCharge,
 );
 
 router.patch('/:chargeId/pay',
-  ...protect,
+  ...authAndScope,
   requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER),
+  requireFirstPasswordChange,
   markChargePaid,
 );
 

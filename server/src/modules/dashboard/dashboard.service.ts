@@ -1,11 +1,4 @@
-import { PatientModel }          from '../patient/patient.model';
-import { OPDVisitModel }         from '../opd/opd.model';
-import { IPDAdmissionModel }     from '../ipd/ipd.model';
-import { BedModel }              from '../ipd/bed.model';
-import { PathologyRequestModel, RadiologyRequestModel } from '../lab/lab.model';
-import { InventoryItemModel }    from '../inventory/inventory.model';
-import { PaymentModel }          from '../payment/payment.model';
-import { UserModel }             from '../user/user.model';
+import { dashboardRepository }   from './dashboard.repository';
 import { auditRepository }       from '../audit/audit.repository';
 import { AppError }              from '../../shared/middleware/error-handler';
 import config                    from '../../shared/config/env';
@@ -17,8 +10,6 @@ import {
   RevenueTrendPoint,
 } from './dashboard.types';
 import { UserRole }              from '../../shared/types/common.types';
-import { PaymentStatus }         from '../payment/payment.types';
-import { LabRequestStatus }      from '../lab/lab.types';
 
 // ─── In-memory TTL cache (keyed by tenantId+role) ────────────────────────────
 
@@ -99,114 +90,79 @@ function last30DaysStart(): Date {
 // ─── Aggregation functions ────────────────────────────────────────────────────
 
 async function getTotalPatients(tenantId: string): Promise<number> {
-  // Exclude soft-deleted patients so this matches the Patients list count.
-  return (await PatientModel.countDocuments({ tenantId, isDeleted: { $ne: true } })) ?? 0;
+  return dashboardRepository.countPatients(tenantId);
 }
 
 async function getTodayOpdCount(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return OPDVisitModel.countDocuments({ tenantId, visitDate: { $gte: start, $lte: end } });
+  return dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
 }
 
 async function getActiveIpdCount(tenantId: string): Promise<number> {
-  return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED' });
+  return dashboardRepository.countActiveIpd(tenantId);
 }
 
 async function getAdmissionsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  return IPDAdmissionModel.countDocuments({ tenantId, admissionDate: { $gte: start, $lte: end } });
+  return dashboardRepository.countAdmissionsBetween(tenantId, start, end);
 }
 
 async function getNewRegistrationsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  // Exclude soft-deleted patients (a patient registered then deleted today should not count).
-  return PatientModel.countDocuments({ tenantId, isDeleted: { $ne: true }, createdAt: { $gte: start, $lte: end } });
+  return dashboardRepository.countPatientsCreatedBetween(tenantId, start, end);
 }
 
 async function getPendingLabCount(tenantId: string): Promise<number> {
-  // Exclude soft-deleted requests so this matches the Lab module’s own queries.
-  const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
-  ]);
-  return (path ?? 0) + (rad ?? 0);
+  const { pathology, radiology } = await dashboardRepository.countPendingLabRequests(tenantId);
+  return pathology + radiology;
 }
 
 async function getLabReportsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
-  const [path, rad] = await Promise.all([
-    PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
-    RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
-  ]);
-  return (path ?? 0) + (rad ?? 0);
+  const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsBetween(tenantId, start, end);
+  return pathology + radiology;
 }
 
 async function getRevenueSummary(tenantId: string): Promise<{ today: number; month: number }> {
   const { start: todayStart, end: todayEnd } = todayRange();
   const { start: monthStart, end: monthEnd } = monthRange();
 
-  const [todayResult, monthResult] = await Promise.all([
-    PaymentModel.aggregate([
-      { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: todayStart, $lte: todayEnd } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
-    PaymentModel.aggregate([
-      { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: monthStart, $lte: monthEnd } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
+  const [today, month] = await Promise.all([
+    dashboardRepository.sumCompletedPaymentsBetween(tenantId, todayStart, todayEnd),
+    dashboardRepository.sumCompletedPaymentsBetween(tenantId, monthStart, monthEnd),
   ]);
 
-  return {
-    today: todayResult[0]?.total ?? 0,
-    month: monthResult[0]?.total ?? 0,
-  };
+  return { today, month };
 }
 
 async function getAverageDailyRevenue(tenantId: string): Promise<number> {
   const since = last30DaysStart();
-  const result = await PaymentModel.aggregate([
-    { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
-    { $group: { _id: null, total: { $sum: '$amount' } } },
-  ]);
-  return Math.round((result[0]?.total ?? 0) / 30);
+  const total = await dashboardRepository.sumCompletedPaymentsSince(tenantId, since);
+  return Math.round(total / 30);
 }
 
 async function getPendingPaymentsCount(tenantId: string): Promise<number> {
-  return PaymentModel.countDocuments({ tenantId, status: PaymentStatus.PENDING });
+  return dashboardRepository.countPendingPayments(tenantId);
 }
 
 async function getLowStockCount(tenantId: string): Promise<number> {
-  const result = await InventoryItemModel.aggregate([
-    {
-      $match: {
-        tenantId,
-        isDeleted: { $ne: true },
-        $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
-      },
-    },
-    { $count: 'total' },
-  ]);
-  return result[0]?.total ?? 0;
+  return dashboardRepository.countLowStock(tenantId);
 }
 
 async function getOutOfStockCount(tenantId: string): Promise<number> {
-  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true }, quantity: 0 });
+  return dashboardRepository.countOutOfStock(tenantId);
 }
 
 async function getTotalInventoryItems(tenantId: string): Promise<number> {
-  return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true } });
+  return dashboardRepository.countInventoryItems(tenantId);
 }
 
 async function getTotalActiveStaff(tenantId: string): Promise<number> {
-  return UserModel.countDocuments({ tenantId, isActive: true });
+  return dashboardRepository.countActiveStaff(tenantId);
 }
 
 async function getBedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
-  const [total, occupied] = await Promise.all([
-    BedModel.countDocuments({ tenantId }),
-    BedModel.countDocuments({ tenantId, isOccupied: true }),
-  ]);
-  return { total, occupied };
+  return dashboardRepository.bedStats(tenantId);
 }
 
 // The server's timezone. Visit/payment dates are stored at local-midnight
@@ -242,21 +198,15 @@ function buildDailySeries(byDate: Map<string, number>): { date: string; value: n
 async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
   const since = last30DaysStart();
   // Cap at "now" so a Last-30-Days trend never includes future-scheduled visits.
-  const results = await OPDVisitModel.aggregate([
-    { $match: { tenantId, visitDate: { $gte: since, $lte: new Date() } } },
-    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$visitDate', timezone: SERVER_TZ } }, count: { $sum: 1 } } },
-  ]);
-  const byDate = new Map<string, number>(results.map((r) => [r._id as string, r.count]));
+  const results = await dashboardRepository.opdVisitsGroupedByDay(tenantId, since, new Date(), SERVER_TZ);
+  const byDate = new Map<string, number>(results.map((r) => [r._id, r.count]));
   return buildDailySeries(byDate).map((e) => ({ date: e.date, count: e.value }));
 }
 
 async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoint[]> {
   const since = last30DaysStart();
-  const results = await PaymentModel.aggregate([
-    { $match: { tenantId, status: PaymentStatus.COMPLETED, createdAt: { $gte: since } } },
-    { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: SERVER_TZ } }, amount: { $sum: '$amount' } } },
-  ]);
-  const byDate = new Map<string, number>(results.map((r) => [r._id as string, r.amount]));
+  const results = await dashboardRepository.paymentsGroupedByDay(tenantId, since, SERVER_TZ);
+  const byDate = new Map<string, number>(results.map((r) => [r._id, r.amount]));
   return buildDailySeries(byDate).map((e) => ({ date: e.date, amount: e.value }));
 }
 
