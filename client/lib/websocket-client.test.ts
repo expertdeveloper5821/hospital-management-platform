@@ -110,6 +110,9 @@ describe('websocket-client', () => {
     expect(recipe(1)).toBe(2);
     // Guards against patching an unresolved (undefined) cache entry into NaN.
     expect(recipe(undefined)).toBeUndefined();
+    // Guards against a non-finite cached value (e.g. already-corrupted NaN)
+    // being incremented into another NaN.
+    expect(recipe(NaN)).toBeNaN();
   });
 
   test('ignores non-notification frames (e.g. the initial "connected" frame)', () => {

@@ -22,6 +22,9 @@ import { NotificationModel } from '../../../src/modules/notification/notificatio
 import { TenantModel }       from '../../../src/modules/tenant/tenant.model';
 import { UserModel }         from '../../../src/modules/user/user.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
+import { auditService }      from '../../../src/shared/services/audit.service';
+
+const mockAuditLog = auditService.log as jest.Mock;
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -62,6 +65,8 @@ beforeEach(async () => {
     { userId, tenantId, role: UserRole.DOCTOR, email: 'doctor@notif.com', isFirstLogin: false },
     JWT_SECRET, { expiresIn: '1h' },
   );
+
+  mockAuditLog.mockClear();
 });
 
 async function seedNotification(overrides: Record<string, unknown> = {}) {
@@ -310,5 +315,38 @@ describe('PATCH /api/notifications/mark-all-read', () => {
 
     expect(second.status).toBe(200);
     expect(second.body.data.count).toBe(0);
+  });
+
+  test('returns 403 for a role outside tenant scope (e.g. SUPER_ADMIN)', async () => {
+    const superAdminToken = jwt.sign(
+      { userId: 'super-1', tenantId: null, role: UserRole.SUPER_ADMIN, email: 'super@notif.com', isFirstLogin: false },
+      JWT_SECRET, { expiresIn: '1h' },
+    );
+
+    const res = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${superAdminToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('writes an audit log entry after successfully marking notifications read', async () => {
+    await seedNotification({ isRead: false });
+    await seedNotification({ isRead: false });
+
+    const res = await request(app)
+      .patch('/api/notifications/mark-all-read')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: 'NOTIFICATION',
+        action:     'UPDATE',
+        userId,
+        tenantId,
+        newValue:   { count: 2 },
+      }),
+    );
   });
 });

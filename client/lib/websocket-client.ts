@@ -86,7 +86,7 @@ class WebSocketClient {
           // notifications get marked read.
           store.dispatch(
             notificationApi.util.updateQueryData('getUnreadCount', undefined, (count) =>
-              typeof count === 'number' ? count + 1 : count),
+              typeof count === 'number' && Number.isFinite(count) ? count + 1 : count),
           );
         }
         // 'connected' frame is handled by onopen → setConnected(true); skip here

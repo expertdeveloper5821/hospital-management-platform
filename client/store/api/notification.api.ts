@@ -58,13 +58,16 @@ export const notificationApi = baseApi.injectEndpoints({
         const patches = [
           dispatch(
             notificationApi.util.updateQueryData('listNotifications', { limit: 30 }, (draft) => {
+              if (!Array.isArray(draft)) return;
               const item = draft.find((n) => n.id === notificationId);
               if (item) item.read = true;
             }),
           ),
           dispatch(
             notificationApi.util.updateQueryData('getUnreadCount', undefined, (count) =>
-              Math.max(0, count - 1)),
+              typeof count === 'number' && Number.isFinite(count)
+                ? Math.max(0, count - 1)
+                : count),
           ),
         ];
         try {
@@ -89,6 +92,7 @@ export const notificationApi = baseApi.injectEndpoints({
         const patches = [
           dispatch(
             notificationApi.util.updateQueryData('listNotifications', { limit: 30 }, (draft) => {
+              if (!Array.isArray(draft)) return;
               draft.forEach((n) => { n.read = true; });
             }),
           ),
