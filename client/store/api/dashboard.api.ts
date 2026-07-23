@@ -27,7 +27,6 @@ export interface DashboardStats {
   totalPatients?:         number;
   todayOpdCount?:         number;
   activeIpdCount?:        number;
-  admissionsToday?:       number;
   newRegistrationsToday?: number;
 
   // Lab

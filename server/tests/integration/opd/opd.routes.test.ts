@@ -152,7 +152,7 @@ describe('POST /api/opd/visits', () => {
     expect(res.body.data.diagnosis).toBeNull();
   });
 
-  test('201 — Doctor can create a visit', async () => {
+  test('403 — Doctor cannot create a visit', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedPatient(tid);
@@ -164,7 +164,10 @@ describe('POST /api/opd/visits', () => {
       .set(bearer(token))
       .send(VALID_VISIT_BODY);
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
+    // No visit must have been created despite the attempt.
+    const count = await OPDVisitModel.countDocuments({ tenantId: tid });
+    expect(count).toBe(0);
   });
 
   test('201 — queue numbers increment per day', async () => {
@@ -395,18 +398,11 @@ describe('POST /api/opd/visits', () => {
     expect(res.body.message).toMatch(/Past dates are not allowed for OPD visits\./);
   });
 
-  test('400 — Doctor and Nurse cannot create a visit for a past date', async () => {
+  test('400 — Nurse cannot create a visit for a past date', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedPatient(tid);
-    const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
     const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
-
-    const resDoctor = await request(app)
-      .post('/api/opd/visits')
-      .set(bearer(tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR)))
-      .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
-    expect(resDoctor.status).toBe(400);
 
     const resNurse = await request(app)
       .post('/api/opd/visits')
@@ -509,6 +505,52 @@ describe('GET /api/opd/visits', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].visitId).toBe('OPD-DOC10001');
+  });
+
+  test('200 — Doctor sees only their own assigned visits, even when a different doctorId is requested', async () => {
+    const tenant   = await seedTenant();
+    const tid      = tenant._id.toString();
+    const doctor   = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const doctorId = doctor._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-MINE0001', doctorIds: [doctorId] });
+    await seedVisit(tid, { visitId: 'OPD-OTHER001', doctorIds: ['other-doc-id'] });
+
+    const token = tokenFor(doctorId, tid, UserRole.DOCTOR);
+
+    // Attempting to request another doctor's visits via the doctorId query param
+    // must be ignored — the backend always forces doctorId back to the caller's own.
+    const res = await request(app)
+      .get('/api/opd/visits')
+      .query({ date: '2026-05-15', doctorId: 'other-doc-id' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].visitId).toBe('OPD-MINE0001');
+  });
+
+  test('200 — Doctor sees all of their own visits regardless of status (open, in-progress, completed, cancelled)', async () => {
+    const tenant   = await seedTenant();
+    const tid      = tenant._id.toString();
+    const doctor   = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const doctorId = doctor._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-D-OPEN1', doctorIds: [doctorId], status: OPDVisitStatus.OPEN });
+    await seedVisit(tid, { visitId: 'OPD-D-DONE1', doctorIds: [doctorId], status: OPDVisitStatus.COMPLETED });
+    await seedVisit(tid, { visitId: 'OPD-D-CANC1', doctorIds: [doctorId], status: OPDVisitStatus.CANCELLED });
+    await seedVisit(tid, { visitId: 'OPD-OTHRDOC', doctorIds: ['someone-else'], status: OPDVisitStatus.OPEN });
+
+    const token = tokenFor(doctorId, tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .get('/api/opd/visits')
+      .query({ date: '2026-05-15' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    expect(visitIds).toEqual(expect.arrayContaining(['OPD-D-OPEN1', 'OPD-D-DONE1', 'OPD-D-CANC1']));
+    expect(visitIds).not.toContain('OPD-OTHRDOC');
+    expect(res.body.data).toHaveLength(3);
   });
 
   test('200 — returns empty array when no active visits', async () => {

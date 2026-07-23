@@ -295,6 +295,16 @@ export interface LabListResult<T> {
   limit:      number;
   totalPages: number;
 }
+
+// Dynamic Pathology/Radiology test types, sourced from the Lab module — used
+// by the Billing → Add Charge form's Test Type dropdown when category is LAB_TEST.
+export type LabTestTypeCategory = 'PATHOLOGY' | 'RADIOLOGY';
+
+export interface LabTestTypeResponse {
+  id:       string;
+  name:     string;
+  category: LabTestTypeCategory;
+}
  
 // ─── IPD ──────────────────────────────────────────────────────────────────────
  
@@ -652,6 +662,9 @@ export interface ChargeResponse {
   description:        string;
   amount:             number;
   encounterReference: string | null;
+  // Only populated when category === 'LAB_TEST'.
+  testTypeId:         string | null;
+  testTypeName:       string | null;
   addedBy:            string;
   // Only the charge-list endpoint enriches this; add/pay/cancel/bill responses omit it.
   addedByName?:       string | null;
@@ -670,6 +683,9 @@ export interface AddChargeRequest {
   description:         string;
   amount:              number;
   encounterReference?: string;
+  // Required by the backend when category is 'LAB_TEST'.
+  testTypeId?:         string;
+  testTypeName?:       string;
 }
 
 export interface BillResponse {

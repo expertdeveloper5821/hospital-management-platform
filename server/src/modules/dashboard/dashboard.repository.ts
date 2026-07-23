@@ -49,10 +49,6 @@ class DashboardRepository {
     return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED' });
   }
 
-  async countAdmissionsBetween(tenantId: string, start: Date, end: Date): Promise<number> {
-    return IPDAdmissionModel.countDocuments({ tenantId, admissionDate: { $gte: start, $lte: end } });
-  }
-
   async bedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
     const [total, occupied] = await Promise.all([
       BedModel.countDocuments({ tenantId }),
@@ -140,6 +136,59 @@ class DashboardRepository {
   // ── Staff ─────────────────────────────────────────────────────────────────
   async countActiveStaff(tenantId: string): Promise<number> {
     return UserModel.countDocuments({ tenantId, isActive: true });
+  }
+
+  // ── Doctor-scoped (Doctor dashboard) ─────────────────────────────────────
+  // Every query here filters by the doctor's own userId (OPDVisit.doctorIds /
+  // IPDAdmission.assignedDoctorIds / lab request.requestedBy), never tenant-wide.
+
+  async countOpdVisitsForDoctorBetween(
+    tenantId: string, doctorId: string, start: Date, end: Date,
+  ): Promise<number> {
+    return OPDVisitModel.countDocuments({ tenantId, doctorIds: doctorId, visitDate: { $gte: start, $lte: end } });
+  }
+
+  async countActiveIpdForDoctor(tenantId: string, doctorId: string): Promise<number> {
+    return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED', assignedDoctorIds: doctorId });
+  }
+
+  // Distinct patients this doctor has treated — via an OPD visit assigned to
+  // them or an IPD admission under their care. Backs "Total Patients" and
+  // scopes the doctor's lab-report queries to their own patients.
+  async findPatientIdsForDoctor(tenantId: string, doctorId: string): Promise<string[]> {
+    const [opdPatientIds, ipdPatientIds] = await Promise.all([
+      OPDVisitModel.distinct('patientId', { tenantId, doctorIds: doctorId }),
+      IPDAdmissionModel.distinct('patientId', { tenantId, assignedDoctorIds: doctorId }),
+    ]);
+    return [...new Set([...opdPatientIds, ...ipdPatientIds])] as string[];
+  }
+
+  async countPendingLabRequestsForDoctor(
+    tenantId: string, doctorId: string, patientIds: string[],
+  ): Promise<{ pathology: number; radiology: number }> {
+    const filter = {
+      tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true },
+      $or: [{ requestedBy: doctorId }, { patientId: { $in: patientIds } }],
+    };
+    const [pathology, radiology] = await Promise.all([
+      PathologyRequestModel.countDocuments(filter),
+      RadiologyRequestModel.countDocuments(filter),
+    ]);
+    return { pathology, radiology };
+  }
+
+  async countCompletedLabRequestsForDoctorBetween(
+    tenantId: string, doctorId: string, patientIds: string[], start: Date, end: Date,
+  ): Promise<{ pathology: number; radiology: number }> {
+    const filter = {
+      tenantId, status: LabRequestStatus.COMPLETED, updatedAt: { $gte: start, $lte: end }, isDeleted: { $ne: true },
+      $or: [{ requestedBy: doctorId }, { patientId: { $in: patientIds } }],
+    };
+    const [pathology, radiology] = await Promise.all([
+      PathologyRequestModel.countDocuments(filter),
+      RadiologyRequestModel.countDocuments(filter),
+    ]);
+    return { pathology, radiology };
   }
 }
 

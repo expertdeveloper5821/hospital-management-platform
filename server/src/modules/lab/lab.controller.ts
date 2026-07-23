@@ -229,3 +229,14 @@ export async function deleteRadiologyRequest(
     res.status(200).json({ status: 'success', message: 'Radiology request deleted.' });
   } catch (err) { next(err); }
 }
+
+// ─── Test types ────────────────────────────────────────────────────────────────
+
+export async function listTestTypes(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await labService.listTestTypes(req.user!.tenantId as string);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}

@@ -606,3 +606,53 @@ describe('DELETE /api/lab/radiology/:requestId', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ─── Test types ─────────────────────────────────────────────────────────────
+
+describe('GET /api/lab/test-types', () => {
+  test('200 — returns distinct Pathology and Radiology test types with id/name/category', async () => {
+    await PathologyRequestModel.create([
+      { requestId: uuidv4(), patientId: 'PAT-001', tenantId, requestedBy: doctorId, testType: 'Complete Blood Count', status: 'PENDING', priority: 'NORMAL', requestedAt: new Date() },
+      { requestId: uuidv4(), patientId: 'PAT-001', tenantId, requestedBy: doctorId, testType: 'Complete Blood Count', status: 'PENDING', priority: 'NORMAL', requestedAt: new Date() },
+      { requestId: uuidv4(), patientId: 'PAT-001', tenantId, requestedBy: doctorId, testType: 'Lipid Profile', status: 'PENDING', priority: 'NORMAL', requestedAt: new Date() },
+    ]);
+    await RadiologyRequestModel.create([
+      { requestId: uuidv4(), patientId: 'PAT-001', tenantId, requestedBy: doctorId, imagingType: 'X-Ray Chest', status: 'PENDING', priority: 'NORMAL', requestedAt: new Date() },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/test-types')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(3);
+    const names = res.body.data.map((t: { name: string }) => t.name);
+    expect(names).toEqual(['Complete Blood Count', 'Lipid Profile', 'X-Ray Chest']);
+    const cbc = res.body.data.find((t: { name: string }) => t.name === 'Complete Blood Count');
+    expect(cbc.category).toBe('PATHOLOGY');
+    expect(cbc.id).toBe('PATHOLOGY:Complete Blood Count');
+    const xray = res.body.data.find((t: { name: string }) => t.name === 'X-Ray Chest');
+    expect(xray.category).toBe('RADIOLOGY');
+    expect(xray.id).toBe('RADIOLOGY:X-Ray Chest');
+  });
+
+  test('200 — excludes soft-deleted requests and scopes by tenant', async () => {
+    await PathologyRequestModel.create({
+      requestId: uuidv4(), patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      testType: 'Deleted Test', status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+      isDeleted: true, deletedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get('/api/lab/test-types')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  test('401 — no auth token', async () => {
+    const res = await request(app).get('/api/lab/test-types');
+    expect(res.status).toBe(401);
+  });
+});

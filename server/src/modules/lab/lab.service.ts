@@ -12,6 +12,7 @@ import {
   RadiologyRequestResponse,
   PATHOLOGY_REPORT_MAX_BYTES,
   RADIOLOGY_REPORT_MAX_BYTES,
+  LabTestTypeResponse,
 } from './lab.types';
 import { patientRepository }   from '../patient/patient.repository';
 import { userRepository }      from '../user/user.repository';
@@ -504,6 +505,15 @@ export class LabService {
         previousValue: { requestId, imagingType: doc.imagingType, status: doc.status, patientId: doc.patientId },
       });
     } catch { /* swallow */ }
+  }
+
+  // ─── Test types ────────────────────────────────────────────────────────────
+
+  async listTestTypes(tenantId: string): Promise<LabTestTypeResponse[]> {
+    const rows = await labRepository.listDistinctTestTypes(tenantId);
+    return rows
+      .map((r) => ({ id: `${r.category}:${r.name}`, name: r.name, category: r.category }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.category.localeCompare(b.category));
   }
 }
 

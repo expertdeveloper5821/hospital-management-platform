@@ -895,7 +895,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                         </Badge>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">
-                        <p><span className="font-medium text-foreground">Complaint:</span> {v.chiefComplaint}</p>
+                        <p><span className="font-medium text-foreground">Reason for Visit:</span> {v.chiefComplaint}</p>
                         {v.diagnosis    && <p><span className="font-medium text-foreground">Diagnosis:</span> {v.diagnosis}</p>}
                         {v.prescription && <p><span className="font-medium text-foreground">Prescription:</span> {v.prescription}</p>}
                         {v.notes        && <p><span className="font-medium text-foreground">Notes:</span> {v.notes}</p>}
