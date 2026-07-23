@@ -24,15 +24,15 @@ const ALL_TENANT_ROLES = [
 ] as const;
 
 // GET /api/notifications?limit=20
-router.get('/', getNotifications);
+router.get('/', requireRole(...ALL_TENANT_ROLES), getNotifications);
 
 // GET /api/notifications/unread-count  — must be declared before /:notificationId
-router.get('/unread-count', getUnreadCount);
+router.get('/unread-count', requireRole(...ALL_TENANT_ROLES), getUnreadCount);
 
 // PATCH /api/notifications/mark-all-read  — must be declared before /:notificationId/read
 router.patch('/mark-all-read', requireRole(...ALL_TENANT_ROLES), markAllRead);
 
 // PATCH /api/notifications/:notificationId/read
-router.patch('/:notificationId/read', markRead);
+router.patch('/:notificationId/read', requireRole(...ALL_TENANT_ROLES), markRead);
 
 export default router;
