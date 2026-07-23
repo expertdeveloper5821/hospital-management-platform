@@ -5,6 +5,7 @@ import { s3Service } from '../../shared/services/s3.service';
 import { UserRole } from '../../shared/types/common.types';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { objectIdSchema, paginationSchema } from '../../shared/utils/validation';
+import { passwordSchema } from '../../shared/utils/password';
 const PROFILE_IMAGE_URL_EXPIRY = 86400; // 24 h
 
 async function resolveProfileImageUrl(key: string | null | undefined): Promise<string | null> {
@@ -53,12 +54,7 @@ const meProfileSchema = z.object({
 
 const mePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z
-    .string()
-    .min(8, 'Minimum 8 characters')
-    .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
-    .regex(/[0-9]/, 'Must contain at least one digit')
-    .regex(/[^A-Za-z0-9]/, 'Must contain at least one special character'),
+  newPassword:     passwordSchema,
 });
 
 export async function getMyProfile(req: Request, res: Response, next: NextFunction): Promise<void> {

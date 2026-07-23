@@ -145,6 +145,17 @@ export const authApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
     }),
 
+    // ── Super Admin self-service password reset (no tenantId) ─────────────────
+    superAdminForgotPassword: build.mutation<{ message: string }, { email: string }>({
+      query: (body) => ({ url: '/api/super-admin/forgot-password', method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+    }),
+
+    superAdminResetPassword: build.mutation<{ message: string }, { token: string; newPassword: string }>({
+      query: (body) => ({ url: '/api/super-admin/reset-password', method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+    }),
+
     completeSetup: build.mutation<{ jwtToken: string }, { token: string; name: string; password: string }>({
       query: (body) => ({ url: '/api/tenants/setup', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<{ jwtToken: string }>) => raw.data,
@@ -170,4 +181,6 @@ export const {
   useResetPasswordMutation,
   useCompleteSetupMutation,
   useChangeSuperAdminPasswordMutation,
+  useSuperAdminForgotPasswordMutation,
+  useSuperAdminResetPasswordMutation,
 } = authApi;
