@@ -61,21 +61,23 @@ function getErrorInfo(error: unknown): { status?: number; message?: string } {
 // Past-tense verb for an audit action (CREATE → Created, UPDATE → Updated, …),
 // with a grammatical fallback for any action not explicitly listed.
 const ACTION_PAST: Record<string, string> = {
-  CREATE:     'Created',
-  UPDATE:     'Updated',
-  DELETE:     'Deleted',
-  APPROVE:    'Approved',
-  ACTIVATE:   'Activated',
-  DEACTIVATE: 'Deactivated',
-  UPLOAD:     'Uploaded',
-  LOGIN:      'Logged in',
-  LOGOUT:     'Logged out',
+  CREATE:         'Created',
+  UPDATE:         'Updated',
+  DELETE:         'Deleted',
+  APPROVE:        'Approved',
+  ACTIVATE:       'Activated',
+  DEACTIVATE:     'Deactivated',
+  UPLOAD:         'Uploaded',
+  LOGIN:          'Logged in',
+  LOGOUT:         'Logged out',
+  PASSWORD_RESET: 'Password reset',
 };
 
 function pastTense(action: string): string {
   if (ACTION_PAST[action]) return ACTION_PAST[action];
-  const lower = action.toLowerCase();
-  // Naive but safe: "assign" → "assigned", "cancel" → "canceled"→ good enough as a fallback.
+  // Normalize UPPER_SNAKE_CASE to words before appending the past-tense suffix,
+  // so an unmapped action like "SOME_ACTION" reads "Some action" + "ed", not "some_actioned".
+  const lower = action.toLowerCase().replace(/_/g, ' ');
   return (lower.endsWith('e') ? `${lower}d` : `${lower}ed`).replace(/^./, (c) => c.toUpperCase());
 }
 
@@ -127,6 +129,7 @@ function activityLabel(a: RecentActivity): string {
   if (e === 'CHARGE'            && act === 'CREATE') return 'Charge added';
   if (e === 'CHARGE'            && act === 'UPDATE') return 'Charge updated';
   if (e === 'USER_ACCOUNT'      && act === 'CREATE') return 'New staff account created';
+  if (e === 'AUTH'              && act === 'PASSWORD_RESET') return 'Password reset';
   // Generic, grammatical fallback — e.g. "Department created", "Package deleted".
   return `${friendlyEntity(e)} ${pastTense(act).toLowerCase()}`;
 }

@@ -84,7 +84,7 @@ function inviteHtml(inviteLink: string): string {
 </html>`;
 }
 
-function welcomeHtml(email: string, tempPassword: string, loginUrl: string): string {
+function welcomeHtml(email: string, tempPassword: string, loginUrl: string, tenantId: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -112,6 +112,10 @@ function welcomeHtml(email: string, tempPassword: string, loginUrl: string): str
               <!-- Credentials -->
               <table cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;border:1px solid #e5e7eb;border-radius:6px;">
                 <tr>
+                  <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px;">Hospital ID</td>
+                  <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;font-weight:600;font-family:monospace;">${tenantId}</td>
+                </tr>
+                <tr>
                   <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px;">Login Email</td>
                   <td style="padding:14px 16px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;font-weight:600;">${email}</td>
                 </tr>
@@ -120,6 +124,9 @@ function welcomeHtml(email: string, tempPassword: string, loginUrl: string): str
                   <td style="padding:14px 16px;color:#111827;font-size:13px;font-weight:600;font-family:monospace;">${tempPassword}</td>
                 </tr>
               </table>
+              <p style="margin:0 0 20px;color:#6b7280;font-size:13px;line-height:1.6;">
+                Keep your <strong>Hospital ID</strong> handy — you'll need it if you ever use "Forgot Password".
+              </p>
 
               <!-- CTA Button -->
               <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
@@ -326,8 +333,8 @@ class EmailService {
     await this.sendTemplatedEmail('invite', { to, inviteLink });
   }
 
-  async sendWelcomeEmail(to: string, tempPassword: string, loginUrl: string): Promise<void> {
-    await this.sendTemplatedEmail('welcome', { to, tempPassword, loginUrl });
+  async sendWelcomeEmail(to: string, tempPassword: string, loginUrl: string, tenantId: string): Promise<void> {
+    await this.sendTemplatedEmail('welcome', { to, tempPassword, loginUrl, tenantId });
   }
 
   async sendAccountLockEmail(to: string): Promise<void> {
@@ -345,7 +352,7 @@ class EmailService {
     let html: string;
     switch (template) {
       case 'invite':         html = inviteHtml(data.inviteLink!);         break;
-      case 'welcome':        html = welcomeHtml(data.to!, data.tempPassword!, data.loginUrl!); break;
+      case 'welcome':        html = welcomeHtml(data.to!, data.tempPassword!, data.loginUrl!, data.tenantId!); break;
       case 'account-lock':   html = accountLockHtml();                    break;
       case 'password-reset': html = passwordResetHtml(data.resetLink!);   break;
     }

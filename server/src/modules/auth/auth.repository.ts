@@ -105,10 +105,13 @@ export class AuthRepository {
 
   async consumeSuperAdminResetToken(token: string): Promise<ISuperAdmin | null> {
     assertDbConnected();
-    return SuperAdminModel.findOne({
-      resetToken:       token,
-      resetTokenExpiry: { $gt: new Date() },
-    });
+    // Atomically claim the token: match a still-valid token AND clear it in a single
+    // operation, so two concurrent requests can never reuse the same reset token.
+    return SuperAdminModel.findOneAndUpdate(
+      { resetToken: token, resetTokenExpiry: { $gt: new Date() } },
+      { resetToken: null, resetTokenExpiry: null },
+      { new: true },
+    );
   }
 }
 

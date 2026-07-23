@@ -49,7 +49,7 @@ export class UserService {
     // FRONTEND_URL may be a comma-separated allow-list; use the first entry for the login link.
     const frontendBase = (process.env.FRONTEND_URL ?? 'http://localhost:3001').split(',')[0].trim();
     const loginUrl = `${frontendBase.replace(/\/+$/, '')}/login`;
-    await emailService.sendWelcomeEmail(data.email, tempPassword, loginUrl);
+    await emailService.sendWelcomeEmail(data.email, tempPassword, loginUrl, tenantId);
 
     await auditService.log({
       entityType: AuditEntityType.USER_ACCOUNT,

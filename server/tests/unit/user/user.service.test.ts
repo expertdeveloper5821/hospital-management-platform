@@ -40,6 +40,7 @@ describe('UserService — example-based', () => {
       'dr@h.com',
       expect.any(String),
       expect.stringContaining('/login'),
+      't1',
     );
   });
 

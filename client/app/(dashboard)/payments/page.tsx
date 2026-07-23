@@ -907,22 +907,19 @@ export default function PaymentsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [methodFilter, setMethodFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Initialize from the URL (e.g. the dashboard "Pending Payments" card links here
+  // as /payments?status=PENDING) so the first query already carries the filter.
+  // SSR-guarded for static prerendering.
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    const status = (new URLSearchParams(window.location.search).get("status") ?? "").toUpperCase();
+    return ["PENDING", "COMPLETED", "FAILED", "CANCELLED"].includes(status) ? status : "";
+  });
   const [page, setPage] = useState(1);
   const [showManual, setShowManual] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpaySuccess, setRazorpaySuccess] = useState(false);
   const [selected, setSelected] = useState<PaymentResponse | null>(null);
-
-  // Apply a filter passed from the dashboard (e.g. the "Pending Payments" card
-  // links here as /payments?status=PENDING). Read once on mount, client-side only.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const status = (params.get("status") ?? "").toUpperCase();
-    if (["PENDING", "COMPLETED", "FAILED", "CANCELLED"].includes(status)) {
-      setStatusFilter(status);
-    }
-  }, []);
 
   const canCreate = [
     "RECEPTIONIST",

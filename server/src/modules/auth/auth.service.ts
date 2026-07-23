@@ -234,6 +234,16 @@ export class AuthService {
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await authRepository.saveSuperAdminResetToken(admin._id.toString(), token, expiry);
 
+    // Record the request for security traceability (a reset token was persisted).
+    await auditService.log({
+      entityType: AuditEntityType.AUTH,
+      entityId:   admin._id.toString(),
+      action:     'UPDATE',
+      userId:     admin._id.toString(),
+      tenantId:   null,
+      newValue:   { event: 'super_admin_password_reset_requested' },
+    });
+
     // FRONTEND_URL may be a comma-separated allow-list; use the first entry.
     const frontendBase = (process.env.FRONTEND_URL ?? 'http://localhost:3001').split(',')[0].trim().replace(/\/+$/, '');
     const resetLink = `${frontendBase}/super-admin/reset-password?token=${token}`;
