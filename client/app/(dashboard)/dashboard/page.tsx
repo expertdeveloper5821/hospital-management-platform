@@ -278,11 +278,11 @@ export default function DashboardPage() {
 
   const statCardCount = [
     data?.totalPatients, data?.activeIpdCount, data?.totalActiveStaff,
-    data?.labReportsToday, data?.admissionsToday, data?.newRegistrationsToday,
+    data?.labReportsToday, data?.newRegistrationsToday,
   ].filter((v) => v !== undefined).length;
 
   const hasTodayActivity  = [
-    data?.newRegistrationsToday, data?.todayOpdCount, data?.admissionsToday,
+    data?.newRegistrationsToday, data?.todayOpdCount,
     data?.labReportsToday, data?.revenueToday,
   ].some((v) => v !== undefined);
 
@@ -378,7 +378,6 @@ export default function DashboardPage() {
         data?.activeIpdCount,
         data?.totalActiveStaff,
         data?.labReportsToday,
-        data?.admissionsToday,
         data?.newRegistrationsToday,
       ].some((v) => v !== undefined) && (
         <div className={cn('grid gap-4', statCardCount > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2')}>
@@ -393,9 +392,6 @@ export default function DashboardPage() {
           )}
           {data?.labReportsToday !== undefined && (
             <MetricCard icon={TestTube2}    label="Lab Reports Today"     value={data.labReportsToday}    sub="Completed" />
-          )}
-          {data?.admissionsToday !== undefined && (
-            <MetricCard icon={BedDouble}    label="Admissions Today"      value={data.admissionsToday}    sub="New this day" />
           )}
           {data?.newRegistrationsToday !== undefined && (
             <MetricCard icon={Users}        label="New Registrations"     value={data.newRegistrationsToday} sub="Today" />
@@ -459,7 +455,6 @@ export default function DashboardPage() {
                 {[
                   { label: 'New Registrations',    value: data?.newRegistrationsToday,                                           icon: Users,        color: 'text-blue-600' },
                   { label: 'OPD Visits',            value: data?.todayOpdCount,                                                   icon: Stethoscope,  color: 'text-cyan-600' },
-                  { label: 'Admissions',            value: data?.admissionsToday,                                                 icon: BedDouble,    color: 'text-purple-600' },
                   { label: 'Lab Reports Generated', value: data?.labReportsToday,                                                 icon: TestTube2,    color: 'text-orange-600' },
                   { label: 'Payments Received',     value: data?.revenueToday !== undefined ? formatINR(data.revenueToday) : undefined, icon: IndianRupee, color: 'text-green-600' },
                 ].filter((row) => row.value !== undefined).map((row) => {

@@ -89,6 +89,22 @@ describe('GET /api/notifications', () => {
     expect(res.status).toBe(401);
   });
 
+  // Regression test: scopeTenant bypasses tenant checks for SUPER_ADMIN, so
+  // without requireRole here the controller's req.user!.tenantId (null) would
+  // reach the repository's tenant-scoped query instead of being rejected.
+  test('returns 403 for a role outside tenant scope (e.g. SUPER_ADMIN)', async () => {
+    const superAdminToken = jwt.sign(
+      { userId: 'super-1', tenantId: null, role: UserRole.SUPER_ADMIN, email: 'super@notif.com', isFirstLogin: false },
+      JWT_SECRET, { expiresIn: '1h' },
+    );
+
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${superAdminToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
   test('returns notifications for authenticated user', async () => {
     await seedNotification({ title: 'A' });
     await seedNotification({ title: 'B' });
@@ -190,11 +206,38 @@ describe('GET /api/notifications/unread-count', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.count).toBe(1);
   });
+
+  test('returns 403 for a role outside tenant scope (e.g. SUPER_ADMIN)', async () => {
+    const superAdminToken = jwt.sign(
+      { userId: 'super-1', tenantId: null, role: UserRole.SUPER_ADMIN, email: 'super@notif.com', isFirstLogin: false },
+      JWT_SECRET, { expiresIn: '1h' },
+    );
+
+    const res = await request(app)
+      .get('/api/notifications/unread-count')
+      .set('Authorization', `Bearer ${superAdminToken}`);
+
+    expect(res.status).toBe(403);
+  });
 });
 
 // ─── PATCH /api/notifications/:notificationId/read ────────────────────────────
 
 describe('PATCH /api/notifications/:notificationId/read', () => {
+  test('returns 403 for a role outside tenant scope (e.g. SUPER_ADMIN)', async () => {
+    const notif = await seedNotification({ isRead: false });
+    const superAdminToken = jwt.sign(
+      { userId: 'super-1', tenantId: null, role: UserRole.SUPER_ADMIN, email: 'super@notif.com', isFirstLogin: false },
+      JWT_SECRET, { expiresIn: '1h' },
+    );
+
+    const res = await request(app)
+      .patch(`/api/notifications/${notif.notificationId}/read`)
+      .set('Authorization', `Bearer ${superAdminToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
   test('marks a notification as read', async () => {
     const notif = await seedNotification({ isRead: false });
 

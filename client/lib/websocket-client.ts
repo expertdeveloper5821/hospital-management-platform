@@ -83,10 +83,19 @@ class WebSocketClient {
           }));
           // Keep the cached unread total (source of truth for the bell badge) in
           // sync with live pushes, so it doesn't go stale once older/history
-          // notifications get marked read.
+          // notifications get marked read. upsertQueryData (not updateQueryData)
+          // is required here: if the initial getUnreadCount request is still in
+          // flight, the cache entry has no data yet and updateQueryData would be
+          // a no-op, leaving the badge stale until the fetch resolves.
+          const cached = notificationApi.endpoints.getUnreadCount.select(undefined)(
+            store.getState(),
+          ).data;
           store.dispatch(
-            notificationApi.util.updateQueryData('getUnreadCount', undefined, (count) =>
-              typeof count === 'number' && Number.isFinite(count) ? count + 1 : count),
+            notificationApi.util.upsertQueryData(
+              'getUnreadCount',
+              undefined,
+              typeof cached === 'number' && Number.isFinite(cached) ? cached + 1 : 1,
+            ),
           );
         }
         // 'connected' frame is handled by onopen → setConnected(true); skip here

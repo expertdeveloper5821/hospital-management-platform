@@ -41,6 +41,10 @@ function mockFind(model: unknown, values: unknown[]) {
   });
 }
 
+function mockDistinct(model: unknown, values: unknown[]) {
+  (model as { distinct: jest.Mock }).distinct = jest.fn().mockResolvedValue(values);
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('DashboardService.getStats', () => {
@@ -66,6 +70,8 @@ describe('DashboardService.getStats', () => {
     mockAggregate(OPDVisitModel,      []);
     mockAggregate(InventoryItemModel, []);
     mockFind(AuditLogModel,           []);
+    mockDistinct(OPDVisitModel,       []);
+    mockDistinct(IPDAdmissionModel,   []);
 
     // Recent activities now go through the audit repository — mock it directly.
     (auditRepository as unknown as { query: jest.Mock }).query = jest.fn()
@@ -150,27 +156,88 @@ describe('DashboardService.getStats', () => {
     });
   });
 
-  describe('role filtering — Doctor sees clinical fields only', () => {
-    test('omits revenue and staff fields for DOCTOR', async () => {
-      mockCount(PatientModel, 8);
+  describe('role filtering — Doctor sees only doctor-scoped clinical fields', () => {
+    const DOCTOR_ID = 'doc-1';
+
+    test('totalPatients/todayOpdCount/activeIpdCount/labReportsToday use doctor-scoped queries, and hospital-wide fields (beds, trend, staff, revenue, inventory) are absent', async () => {
+      mockDistinct(OPDVisitModel, ['PAT-1', 'PAT-2']);
+      mockDistinct(IPDAdmissionModel, ['PAT-2', 'PAT-3']);
       mockCount(OPDVisitModel, 2);
       mockCount(IPDAdmissionModel, 1);
       mockCount(PathologyRequestModel, 1);
       mockCount(RadiologyRequestModel, 0);
-      mockAggregate(OPDVisitModel, []);
 
-      const stats = await service.getStats(TENANT, UserRole.DOCTOR, true);
+      const stats = await service.getStats(TENANT, UserRole.DOCTOR, true, DOCTOR_ID);
 
-      expect(stats.totalPatients).toBe(8);
+      // Total Patients = distinct union of the doctor's OPD + IPD patients (3, not a raw tenant count).
+      expect(stats.totalPatients).toBe(3);
       expect(stats.todayOpdCount).toBe(2);
       expect(stats.activeIpdCount).toBe(1);
       expect(stats.pendingLabCount).toBe(1);
-      expect(stats.monthlyOpdTrend).toBeDefined();
+
+      // No hospital-wide counts on the Doctor dashboard.
+      expect(stats.totalBeds).toBeUndefined();
+      expect(stats.occupiedBeds).toBeUndefined();
+      expect(stats.monthlyOpdTrend).toBeUndefined();
       expect(stats.revenueToday).toBeUndefined();
       expect(stats.revenueThisMonth).toBeUndefined();
       expect(stats.lowStockCount).toBeUndefined();
       expect(stats.totalActiveStaff).toBeUndefined();
       expect(stats.monthlyRevenueTrend).toBeUndefined();
+      // 'admissionsToday' no longer exists on DashboardStats at all (removed for every role).
+    });
+
+    test("today's OPD visit count is queried with doctorIds = the logged-in doctor's userId", async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true, DOCTOR_ID);
+
+      const calls = (OPDVisitModel.countDocuments as jest.Mock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [filter] of calls) {
+        expect(filter).toMatchObject({ tenantId: TENANT, doctorIds: DOCTOR_ID });
+      }
+    });
+
+    test("active IPD count is queried with assignedDoctorIds = the logged-in doctor's userId", async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true, DOCTOR_ID);
+
+      const calls = (IPDAdmissionModel.countDocuments as jest.Mock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [filter] of calls) {
+        expect(filter).toMatchObject({ tenantId: TENANT, status: 'ADMITTED', assignedDoctorIds: DOCTOR_ID });
+      }
+    });
+
+    test("pending + completed lab counts are queried scoped to the doctor's own requests or patients, not tenant-wide", async () => {
+      mockDistinct(OPDVisitModel, ['PAT-1']);
+
+      await service.getStats(TENANT, UserRole.DOCTOR, true, DOCTOR_ID);
+
+      for (const model of [PathologyRequestModel, RadiologyRequestModel]) {
+        const calls = (model.countDocuments as jest.Mock).mock.calls;
+        expect(calls.length).toBeGreaterThan(0);
+        for (const [filter] of calls) {
+          expect(filter).toMatchObject({
+            tenantId: TENANT,
+            $or: [{ requestedBy: DOCTOR_ID }, { patientId: { $in: ['PAT-1'] } }],
+          });
+        }
+      }
+    });
+
+    test('fail closed: a DOCTOR request without a userId still scopes every query (sentinel filter), never runs the tenant-wide query', async () => {
+      await service.getStats(TENANT, UserRole.DOCTOR, true); // userId omitted
+
+      const opdCalls = (OPDVisitModel.countDocuments as jest.Mock).mock.calls;
+      expect(opdCalls.length).toBeGreaterThan(0);
+      for (const [filter] of opdCalls) {
+        expect(filter).toHaveProperty('doctorIds');
+      }
+
+      const ipdCalls = (IPDAdmissionModel.countDocuments as jest.Mock).mock.calls;
+      expect(ipdCalls.length).toBeGreaterThan(0);
+      for (const [filter] of ipdCalls) {
+        expect(filter).toHaveProperty('assignedDoctorIds');
+      }
     });
   });
 

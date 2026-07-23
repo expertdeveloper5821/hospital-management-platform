@@ -47,10 +47,10 @@ describe('OPDPage — New Visit role gating', () => {
     expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
   });
 
-  test('DOCTOR sees the New Visit button', () => {
+  test('DOCTOR does not see the New Visit button', () => {
     mockRole = 'DOCTOR';
     render(<OPDPage />);
-    expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /new visit/i })).not.toBeInTheDocument();
   });
 
   test('HOSPITAL_ADMIN sees the New Visit button', () => {

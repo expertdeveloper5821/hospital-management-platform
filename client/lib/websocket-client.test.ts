@@ -1,9 +1,17 @@
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockDispatch = jest.fn();
+const mockGetState  = jest.fn(() => ({}));
+
+// Simulates the RTK Query cache entry for getUnreadCount — tests mutate this
+// directly to represent "request still in flight" (undefined) vs "resolved".
+let mockUnreadCountCache: { data: number | undefined } = { data: undefined };
 
 jest.mock('@/store', () => ({
-  store: { dispatch: (...args: unknown[]) => mockDispatch(...args) },
+  store: {
+    dispatch:  (...args: unknown[]) => mockDispatch(...args),
+    getState: () => mockGetState(),
+  },
 }));
 
 jest.mock('@/store/slices/notification.slice', () => ({
@@ -14,16 +22,21 @@ jest.mock('@/store/slices/notification.slice', () => ({
 jest.mock('@/store/api/notification.api', () => ({
   notificationApi: {
     util: {
-      updateQueryData: jest.fn(
-        (endpoint: string, arg: unknown, recipe: (draft: unknown) => unknown) =>
-          ({ type: 'MOCK_PATCH', endpoint, arg, recipe }),
+      upsertQueryData: jest.fn(
+        (endpoint: string, arg: unknown, value: unknown) =>
+          ({ type: 'MOCK_UPSERT', endpoint, arg, value }),
       ),
+    },
+    endpoints: {
+      getUnreadCount: {
+        select: jest.fn(() => () => mockUnreadCountCache),
+      },
     },
   },
 }));
 
 import { notificationApi } from '@/store/api/notification.api';
-const mockUpdateQueryData = notificationApi.util.updateQueryData as jest.Mock;
+const mockUpsertQueryData = notificationApi.util.upsertQueryData as jest.Mock;
 
 // Fake WebSocket the client's `new WebSocket(url)` call resolves to — lets the
 // test drive onopen/onmessage/onclose manually without a real socket.
@@ -58,6 +71,7 @@ describe('websocket-client', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     FakeWebSocket.instances = [];
+    mockUnreadCountCache = { data: undefined };
   });
 
   afterEach(() => {
@@ -92,7 +106,8 @@ describe('websocket-client', () => {
     });
   });
 
-  test('patches the getUnreadCount cache (+1) for every live push, keeping the badge in sync', () => {
+  test('upserts the getUnreadCount cache (+1) for every live push, keeping the badge in sync', () => {
+    mockUnreadCountCache = { data: 1 };
     const socket = connectAndOpen();
     socket.onmessage?.({
       data: JSON.stringify({
@@ -105,14 +120,47 @@ describe('websocket-client', () => {
       }),
     });
 
-    expect(mockUpdateQueryData).toHaveBeenCalledWith('getUnreadCount', undefined, expect.any(Function));
-    const recipe = mockUpdateQueryData.mock.calls[0]![2] as (draft: unknown) => unknown;
-    expect(recipe(1)).toBe(2);
-    // Guards against patching an unresolved (undefined) cache entry into NaN.
-    expect(recipe(undefined)).toBeUndefined();
-    // Guards against a non-finite cached value (e.g. already-corrupted NaN)
-    // being incremented into another NaN.
-    expect(recipe(NaN)).toBeNaN();
+    expect(mockUpsertQueryData).toHaveBeenCalledWith('getUnreadCount', undefined, 2);
+  });
+
+  // Regression test: getUnreadCount is fetched on mount and may still be in
+  // flight (cache data === undefined) when the first WS push arrives. Using
+  // updateQueryData here would be a no-op against a cache entry with no data,
+  // leaving the bell badge stale until the fetch happened to resolve.
+  // upsertQueryData must instead initialize the count so the badge updates
+  // immediately.
+  test('initializes the unread count to 1 when a notification arrives before getUnreadCount resolves', () => {
+    mockUnreadCountCache = { data: undefined };
+    const socket = connectAndOpen();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'notification',
+        data: {
+          notificationId: 'notif-1', title: 'T', message: 'M',
+          entityType: null, entityId: null, isRead: false,
+          createdAt: '2026-07-22T00:00:00.000Z',
+        },
+      }),
+    });
+
+    expect(mockUpsertQueryData).toHaveBeenCalledWith('getUnreadCount', undefined, 1);
+  });
+
+  test('re-initializes to 1 instead of compounding a non-finite cached value (e.g. corrupted NaN)', () => {
+    mockUnreadCountCache = { data: NaN };
+    const socket = connectAndOpen();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'notification',
+        data: {
+          notificationId: 'notif-1', title: 'T', message: 'M',
+          entityType: null, entityId: null, isRead: false,
+          createdAt: '2026-07-22T00:00:00.000Z',
+        },
+      }),
+    });
+
+    expect(mockUpsertQueryData).toHaveBeenCalledWith('getUnreadCount', undefined, 1);
   });
 
   test('ignores non-notification frames (e.g. the initial "connected" frame)', () => {

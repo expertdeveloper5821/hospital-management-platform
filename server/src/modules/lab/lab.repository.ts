@@ -131,6 +131,21 @@ export class LabRepository {
       { new: true },
     );
   }
+
+  // ─── Test types ────────────────────────────────────────────────────────────
+  // Distinct testType/imagingType values already used in this tenant's requests —
+  // the source of truth for the Billing "Test Type" dropdown (no separate catalog).
+  async listDistinctTestTypes(tenantId: string): Promise<{ category: 'PATHOLOGY' | 'RADIOLOGY'; name: string }[]> {
+    assertDbConnected();
+    const [pathologyTypes, radiologyTypes] = await Promise.all([
+      PathologyRequestModel.distinct('testType', { tenantId, isDeleted: { $ne: true } }),
+      RadiologyRequestModel.distinct('imagingType', { tenantId, isDeleted: { $ne: true } }),
+    ]);
+    return [
+      ...(pathologyTypes as string[]).map((name) => ({ category: 'PATHOLOGY' as const, name })),
+      ...(radiologyTypes as string[]).map((name) => ({ category: 'RADIOLOGY' as const, name })),
+    ];
+  }
 }
 
 export const labRepository = new LabRepository();

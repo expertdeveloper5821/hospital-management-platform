@@ -25,9 +25,11 @@ const CLINICAL_ROLES = [
   UserRole.DOCTOR,
 ];
 
+// DOCTOR is deliberately excluded — doctors may view and act on visits assigned
+// to them, but must not be able to create new OPD visits (UI, direct URL, or API).
 router.post('/visits',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN, UserRole.DOCTOR),
+  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
   createVisit,
 );
 

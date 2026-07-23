@@ -28,7 +28,6 @@ export interface DashboardStats {
   totalPatients?:         number;
   todayOpdCount?:         number;
   activeIpdCount?:        number;
-  admissionsToday?:       number;
   newRegistrationsToday?: number;
 
   // Lab
@@ -65,7 +64,7 @@ type DashboardField = keyof Omit<DashboardStats, 'lastUpdated'>;
 
 export const ROLE_FIELD_ACCESS: Record<UserRole, DashboardField[]> = {
   [UserRole.ADMIN]: [
-    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'admissionsToday', 'newRegistrationsToday',
+    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'newRegistrationsToday',
     'pendingLabCount', 'labReportsToday',
     'revenueToday', 'revenueThisMonth', 'averageDailyRevenue', 'pendingPaymentsCount',
     'lowStockCount', 'outOfStockCount', 'totalInventoryItems',
@@ -73,7 +72,7 @@ export const ROLE_FIELD_ACCESS: Record<UserRole, DashboardField[]> = {
     'monthlyOpdTrend', 'monthlyRevenueTrend', 'recentActivities',
   ],
   [UserRole.HOSPITAL_ADMIN]: [
-    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'admissionsToday', 'newRegistrationsToday',
+    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'newRegistrationsToday',
     'pendingLabCount', 'labReportsToday',
     'revenueToday', 'revenueThisMonth', 'averageDailyRevenue', 'pendingPaymentsCount',
     'lowStockCount', 'outOfStockCount', 'totalInventoryItems',
@@ -81,21 +80,23 @@ export const ROLE_FIELD_ACCESS: Record<UserRole, DashboardField[]> = {
     'monthlyOpdTrend', 'monthlyRevenueTrend', 'recentActivities',
   ],
   [UserRole.MANAGER]: [
-    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'admissionsToday', 'newRegistrationsToday',
+    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'newRegistrationsToday',
     'pendingLabCount', 'labReportsToday',
     'revenueToday', 'revenueThisMonth', 'averageDailyRevenue', 'pendingPaymentsCount',
     'lowStockCount', 'outOfStockCount', 'totalInventoryItems',
     'totalActiveStaff', 'totalBeds', 'occupiedBeds',
     'monthlyOpdTrend', 'monthlyRevenueTrend', 'recentActivities',
   ],
+  // Doctor sees only data scoped to their own patients/visits/admissions/lab
+  // requests (enforced server-side in dashboard.service.ts) — no hospital-wide
+  // aggregates (beds, tenant-wide OPD trend, staff, revenue, inventory).
   [UserRole.DOCTOR]: [
-    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'admissionsToday',
+    'totalPatients', 'todayOpdCount', 'activeIpdCount',
     'pendingLabCount', 'labReportsToday',
-    'totalBeds', 'occupiedBeds',
-    'monthlyOpdTrend', 'recentActivities',
+    'recentActivities',
   ],
   [UserRole.NURSE]: [
-    'totalPatients', 'todayOpdCount', 'activeIpdCount', 'admissionsToday',
+    'totalPatients', 'todayOpdCount', 'activeIpdCount',
     'totalBeds', 'occupiedBeds',
     'recentActivities',
   ],

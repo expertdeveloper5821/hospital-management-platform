@@ -7,14 +7,14 @@ import { UserRole } from '../../shared/types/common.types';
 
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
-  chiefComplaint: z.string().min(1, 'Chief complaint is required.').max(1000, 'Chief complaint cannot exceed 1000 characters.').trim(),
+  chiefComplaint: z.string().min(1, 'Reason for visit is required.').max(1000, 'Reason for visit cannot exceed 1000 characters.').trim(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   notes:          z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
 });
 
 const updateVisitSchema = z.object({
-  chiefComplaint: z.string().min(1, 'Chief complaint is required.').max(1000, 'Chief complaint cannot exceed 1000 characters.').trim().optional(),
+  chiefComplaint: z.string().min(1, 'Reason for visit is required.').max(1000, 'Reason for visit cannot exceed 1000 characters.').trim().optional(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   diagnosis:      z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),

@@ -56,6 +56,7 @@ let tenantId:          string;
 let receptionistToken: string;
 let managerToken:      string;
 let financeToken:      string;
+let doctorToken:       string;
 let patientId:         string;
 
 beforeAll(async () => {
@@ -112,11 +113,16 @@ beforeEach(async () => {
     tenantId, email: 'finance@test.com', name: 'Pay Finance', passwordHash: 'x',
     role: UserRole.FINANCE_MANAGER, isActive: true, isFirstLogin: false,
   });
+  const doctor = await UserModel.create({
+    tenantId, email: 'doctor@test.com', name: 'Pay Doctor', passwordHash: 'x',
+    role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
+  });
 
   const base = { tenantId, isFirstLogin: false };
   receptionistToken = jwt.sign({ ...base, userId: (receptionist._id as mongoose.Types.ObjectId).toString(), role: UserRole.RECEPTIONIST,  email: 'receptionist@test.com' }, JWT_SECRET, { expiresIn: '1h' });
   managerToken      = jwt.sign({ ...base, userId: (manager._id      as mongoose.Types.ObjectId).toString(), role: UserRole.MANAGER,         email: 'manager@test.com'      }, JWT_SECRET, { expiresIn: '1h' });
   financeToken      = jwt.sign({ ...base, userId: (finance._id      as mongoose.Types.ObjectId).toString(), role: UserRole.FINANCE_MANAGER, email: 'finance@test.com'      }, JWT_SECRET, { expiresIn: '1h' });
+  doctorToken       = jwt.sign({ ...base, userId: (doctor._id       as mongoose.Types.ObjectId).toString(), role: UserRole.DOCTOR,          email: 'doctor@test.com'       }, JWT_SECRET, { expiresIn: '1h' });
 });
 
 // ─── U5-B-07: Manual payment endpoints ───────────────────────────────────────
@@ -417,6 +423,27 @@ describe('GET /api/payments', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.data).toHaveLength(1);
     expect(res.body.data.data[0].paymentMethod).toBe('CASH');
+  });
+
+  test('Doctor cannot view payment data (403) — OPD/IPD sidebar must not fetch it for this role', async () => {
+    await PaymentModel.create({
+      paymentId:    'pay-test-doc-001',
+      tenantId,
+      patientId,
+      amount:       300,
+      paymentMethod: PaymentMethod.CASH,
+      description:  'Test',
+      status:       PaymentStatus.COMPLETED,
+      receiptS3Key: 'key',
+      createdBy:    'user-001',
+    });
+
+    const res = await request(app)
+      .get('/api/payments')
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.data).toBeUndefined();
   });
 });
 

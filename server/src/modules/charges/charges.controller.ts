@@ -11,7 +11,12 @@ const addChargeSchema = z.object({
   description:        z.string().min(1).max(500),
   amount:             z.number().min(0.01).max(999_999_999.99),
   encounterReference: z.string().optional(),
-});
+  testTypeId:         z.string().min(1).max(300).optional(),
+  testTypeName:       z.string().min(1).max(200).optional(),
+}).refine(
+  (data) => data.category !== 'LAB_TEST' || (!!data.testTypeId && !!data.testTypeName),
+  { message: 'Test Type is required when category is Lab Test.', path: ['testTypeId'] },
+);
 
 const listChargesSchema = z.object({
   patientId:  z.string().optional(),
