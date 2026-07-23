@@ -45,8 +45,11 @@ export class UserService {
       isFirstLogin: true,
     });
 
-    // Send welcome email — fails the operation if SMTP is unavailable (Answer C2=A)
-    await emailService.sendWelcomeEmail(data.email, tempPassword, tenantId);
+    // Send welcome email — fails the operation if SMTP is unavailable (Answer C2=A).
+    // FRONTEND_URL may be a comma-separated allow-list; use the first entry for the login link.
+    const frontendBase = (process.env.FRONTEND_URL ?? 'http://localhost:3001').split(',')[0].trim();
+    const loginUrl = `${frontendBase.replace(/\/+$/, '')}/login`;
+    await emailService.sendWelcomeEmail(data.email, tempPassword, loginUrl, tenantId);
 
     await auditService.log({
       entityType: AuditEntityType.USER_ACCOUNT,

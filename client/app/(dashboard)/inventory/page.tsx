@@ -838,7 +838,14 @@ export default function InventoryPage() {
 
   const [categoryFilter, setCategoryFilter] = useState('');
   const [categoryInput,  setCategoryInput]  = useState('');
-  const [lowStockOnly,   setLowStockOnly]   = useState(false);
+  // Initialize from the URL (e.g. the dashboard "Low Stock" card links here as
+  // /inventory?lowStock=1) so the FIRST query already carries the filter — no
+  // extra unfiltered request or flicker. SSR-guarded for static prerendering.
+  const [lowStockOnly,   setLowStockOnly]   = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const low = new URLSearchParams(window.location.search).get('lowStock');
+    return low === '1' || low === 'true';
+  });
   const [page,           setPage]           = useState(1);
   const [showCreate,     setShowCreate]     = useState(false);
   const [selected,       setSelected]       = useState<InventoryItemResponse | null>(null);

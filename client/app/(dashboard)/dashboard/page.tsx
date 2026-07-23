@@ -58,33 +58,93 @@ function getErrorInfo(error: unknown): { status?: number; message?: string } {
   return { status, message };
 }
 
+// Past-tense verb for an audit action (CREATE → Created, UPDATE → Updated, …),
+// with a grammatical fallback for any action not explicitly listed.
+const ACTION_PAST: Record<string, string> = {
+  CREATE:         'Created',
+  UPDATE:         'Updated',
+  DELETE:         'Deleted',
+  APPROVE:        'Approved',
+  ACTIVATE:       'Activated',
+  DEACTIVATE:     'Deactivated',
+  UPLOAD:         'Uploaded',
+  LOGIN:          'Logged in',
+  LOGOUT:         'Logged out',
+  PASSWORD_RESET: 'Password reset',
+};
+
+function pastTense(action: string): string {
+  if (ACTION_PAST[action]) return ACTION_PAST[action];
+  // Normalize UPPER_SNAKE_CASE to words before appending the past-tense suffix,
+  // so an unmapped action like "SOME_ACTION" reads "Some action" + "ed", not "some_actioned".
+  const lower = action.toLowerCase().replace(/_/g, ' ');
+  return (lower.endsWith('e') ? `${lower}d` : `${lower}ed`).replace(/^./, (c) => c.toUpperCase());
+}
+
+// Friendly singular noun for an entity type (used in the generic fallback and badge).
+const ENTITY_NAME: Record<string, string> = {
+  PATIENT:            'Patient',
+  OPD_VISIT:          'OPD visit',
+  IPD_ADMISSION:      'IPD admission',
+  PATHOLOGY_REQUEST:  'Pathology request',
+  RADIOLOGY_REQUEST:  'Radiology request',
+  INVENTORY_ITEM:     'Inventory item',
+  PAYMENT_RECORD:     'Payment',
+  USER_ACCOUNT:       'User account',
+  CHARGE:             'Charge',
+  DEPARTMENT:         'Department',
+  PACKAGE:            'Package',
+  PACKAGE_ASSIGNMENT: 'Package assignment',
+  STAFF_ID_CARD:      'Staff ID card',
+  STAFF_DOCUMENT:     'Staff document',
+  TENANT:             'Hospital',
+  PLATFORM_SETTINGS:  'Platform settings',
+  NOTIFICATION:       'Notification',
+  AUTH:               'Account',
+};
+
+function friendlyEntity(e: string): string {
+  return ENTITY_NAME[e]
+    ?? e.split('_').map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ');
+}
+
 function activityLabel(a: RecentActivity): string {
   const e   = a.entityType;
   const act = a.action;
-  if (e === 'PATIENT'               && act === 'CREATE') return `Patient #${a.entityId} registered`;
-  if (e === 'PATIENT'               && act === 'UPDATE') return `Patient #${a.entityId} updated`;
-  if (e === 'IPD_ADMISSION'         && act === 'CREATE') return 'Patient admitted in IPD';
-  if (e === 'IPD_ADMISSION'         && act === 'UPDATE') return 'IPD admission updated';
-  if (e === 'OPD_VISIT'             && act === 'CREATE') return 'New OPD visit created';
-  if (e === 'OPD_VISIT'             && act === 'UPDATE') return 'OPD visit updated';
-  if (e === 'PAYMENT'               && act === 'CREATE') return 'Payment received';
-  if (e === 'LAB_PATHOLOGY_REQUEST' && act === 'CREATE') return 'Lab test created';
-  if (e === 'LAB_PATHOLOGY_REQUEST' && act === 'UPDATE') return 'Lab report updated';
-  if (e === 'LAB_RADIOLOGY_REQUEST' && act === 'CREATE') return 'Radiology test created';
-  if (e === 'LAB_RADIOLOGY_REQUEST' && act === 'UPDATE') return 'Radiology report updated';
-  if (e === 'INVENTORY_ITEM'        && act === 'CREATE') return 'Inventory item added';
-  if (e === 'INVENTORY_ITEM'        && act === 'UPDATE') return 'Inventory updated';
-  return `${e.replace(/_/g, ' ')} ${act.toLowerCase()}`;
+  // Hand-tuned phrasings for the most common events.
+  if (e === 'PATIENT'           && act === 'CREATE') return `Patient #${a.entityId} registered`;
+  if (e === 'PATIENT'           && act === 'UPDATE') return `Patient #${a.entityId} updated`;
+  if (e === 'IPD_ADMISSION'     && act === 'CREATE') return 'Patient admitted to IPD';
+  if (e === 'IPD_ADMISSION'     && act === 'UPDATE') return 'IPD admission updated';
+  if (e === 'OPD_VISIT'         && act === 'CREATE') return 'New OPD visit created';
+  if (e === 'OPD_VISIT'         && act === 'UPDATE') return 'OPD visit updated';
+  if (e === 'PAYMENT_RECORD'    && act === 'CREATE') return 'Payment recorded';
+  if (e === 'PAYMENT_RECORD'    && act === 'UPDATE') return 'Payment updated';
+  if (e === 'PATHOLOGY_REQUEST' && act === 'CREATE') return 'Pathology test requested';
+  if (e === 'PATHOLOGY_REQUEST' && act === 'UPDATE') return 'Pathology report updated';
+  if (e === 'RADIOLOGY_REQUEST' && act === 'CREATE') return 'Radiology test requested';
+  if (e === 'RADIOLOGY_REQUEST' && act === 'UPDATE') return 'Radiology report updated';
+  if (e === 'INVENTORY_ITEM'    && act === 'CREATE') return 'Inventory item added';
+  if (e === 'INVENTORY_ITEM'    && act === 'UPDATE') return 'Inventory item updated';
+  if (e === 'CHARGE'            && act === 'CREATE') return 'Charge added';
+  if (e === 'CHARGE'            && act === 'UPDATE') return 'Charge updated';
+  if (e === 'USER_ACCOUNT'      && act === 'CREATE') return 'New staff account created';
+  if (e === 'AUTH'              && act === 'PASSWORD_RESET') return 'Password reset';
+  // Generic, grammatical fallback — e.g. "Department created", "Package deleted".
+  return `${friendlyEntity(e)} ${pastTense(act).toLowerCase()}`;
 }
 
 const ENTITY_BADGE: Record<string, { label: string; cls: string }> = {
-  PATIENT:               { label: 'Patient',   cls: 'bg-blue-100 text-blue-700' },
-  IPD_ADMISSION:         { label: 'IPD',        cls: 'bg-purple-100 text-purple-700' },
-  OPD_VISIT:             { label: 'OPD',        cls: 'bg-cyan-100 text-cyan-700' },
-  PAYMENT:               { label: 'Payment',    cls: 'bg-green-100 text-green-700' },
-  LAB_PATHOLOGY_REQUEST: { label: 'Lab',        cls: 'bg-orange-100 text-orange-700' },
-  LAB_RADIOLOGY_REQUEST: { label: 'Lab',        cls: 'bg-orange-100 text-orange-700' },
-  INVENTORY_ITEM:        { label: 'Inventory',  cls: 'bg-yellow-100 text-yellow-700' },
+  PATIENT:            { label: 'Patient',   cls: 'bg-blue-100 text-blue-700' },
+  IPD_ADMISSION:      { label: 'IPD',       cls: 'bg-purple-100 text-purple-700' },
+  OPD_VISIT:          { label: 'OPD',       cls: 'bg-cyan-100 text-cyan-700' },
+  PAYMENT_RECORD:     { label: 'Payment',   cls: 'bg-green-100 text-green-700' },
+  PATHOLOGY_REQUEST:  { label: 'Lab',       cls: 'bg-orange-100 text-orange-700' },
+  RADIOLOGY_REQUEST:  { label: 'Lab',       cls: 'bg-orange-100 text-orange-700' },
+  INVENTORY_ITEM:     { label: 'Inventory', cls: 'bg-yellow-100 text-yellow-700' },
+  CHARGE:             { label: 'Billing',   cls: 'bg-emerald-100 text-emerald-700' },
+  USER_ACCOUNT:       { label: 'Staff',     cls: 'bg-indigo-100 text-indigo-700' },
+  DEPARTMENT:         { label: 'Dept',      cls: 'bg-slate-100 text-slate-700' },
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -297,13 +357,13 @@ export default function DashboardPage() {
           </h2>
           <div className={cn('grid grid-cols-1 gap-4', alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2')}>
             {data?.lowStockCount !== undefined && (
-              <AlertCard icon={PackageX}    label="Low Stock Items"       count={data.lowStockCount}        href="/inventory" warn />
+              <AlertCard icon={PackageX}    label="Low Stock Items"       count={data.lowStockCount}        href="/inventory?lowStock=1"   warn />
             )}
             {data?.pendingLabCount !== undefined && (
-              <AlertCard icon={FlaskConical} label="Pending Lab Reports"  count={data.pendingLabCount}      href="/lab"       warn />
+              <AlertCard icon={FlaskConical} label="Pending Lab Reports"  count={data.pendingLabCount}      href="/lab?status=PENDING"     warn />
             )}
             {data?.pendingPaymentsCount !== undefined && (
-              <AlertCard icon={CreditCard}  label="Pending Payments"      count={data.pendingPaymentsCount} href="/payments"  warn />
+              <AlertCard icon={CreditCard}  label="Pending Payments"      count={data.pendingPaymentsCount} href="/payments?status=PENDING" warn />
             )}
             {data?.todayOpdCount !== undefined && (
               <AlertCard icon={CalendarDays} label="Today's Appointments" count={data.todayOpdCount}        href="/opd" />
@@ -531,7 +591,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="space-y-3">
                     {(data?.recentActivities ?? []).map((a, i) => {
-                      const badge = ENTITY_BADGE[a.entityType] ?? { label: a.entityType, cls: 'bg-muted text-muted-foreground' };
+                      const badge = ENTITY_BADGE[a.entityType] ?? { label: friendlyEntity(a.entityType), cls: 'bg-muted text-muted-foreground' };
                       return (
                         <div key={i} className="flex items-start gap-3">
                           <span className="text-xs text-muted-foreground shrink-0 w-12 mt-0.5">{fmtTime(a.timestamp)}</span>

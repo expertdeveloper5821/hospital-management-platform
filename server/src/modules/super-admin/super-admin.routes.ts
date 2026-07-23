@@ -4,7 +4,7 @@ import config from '../../shared/config/env';
 import { authenticateJWT } from '../../shared/middleware/authenticate-jwt';
 import { requireRole } from '../../shared/middleware/require-role';
 import { UserRole } from '../../shared/types/common.types';
-import { superAdminLogin, getSuperAdminProfile, superAdminLogout, changeSuperAdminPassword } from './super-admin.controller';
+import { superAdminLogin, getSuperAdminProfile, superAdminLogout, changeSuperAdminPassword, superAdminForgotPassword, superAdminResetPassword } from './super-admin.controller';
 
 const router = Router();
 
@@ -20,6 +20,8 @@ const authRateLimiter = rateLimit({
 
 // Public — rate-limited
 router.post('/login', authRateLimiter, superAdminLogin);
+router.post('/forgot-password', authRateLimiter, superAdminForgotPassword);
+router.post('/reset-password',  authRateLimiter, superAdminResetPassword);
 
 // Protected — must be SUPER_ADMIN
 router.get('/me',          authenticateJWT, requireRole(UserRole.SUPER_ADMIN), getSuperAdminProfile);

@@ -691,7 +691,14 @@ interface RequestsTableProps {
 }
 
 function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: RequestsTableProps) {
-  const [statusFilter,  setStatusFilter]  = useState('');
+  // Initialize from the URL (e.g. the dashboard "Pending Lab Reports" card links
+  // here as /lab?status=PENDING) so the first query already carries the filter.
+  // SSR-guarded for static prerendering.
+  const [statusFilter,  setStatusFilter]  = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    const status = (new URLSearchParams(window.location.search).get('status') ?? '').toUpperCase();
+    return ['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(status) ? status : '';
+  });
   const [searchFilter,  setSearchFilter]  = useState('');
   const [searchInput,   setSearchInput]   = useState('');
   const [page,          setPage]          = useState(1);

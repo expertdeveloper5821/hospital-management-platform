@@ -7,6 +7,7 @@ import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType } from '../../shared/types/common.types';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { objectIdSchema, searchSchema } from '../../shared/utils/validation';
+import { passwordSchema } from '../../shared/utils/password';
 
 const createTenantSchema = z.object({
   name:       z.string().min(1).max(200),
@@ -84,7 +85,7 @@ export async function resendInvite(req: Request, res: Response, next: NextFuncti
 const completeSetupSchema = z.object({
   token:    z.string().min(1),
   name:     z.string().min(1).max(200),
-  password: z.string().min(8).max(128),
+  password: passwordSchema,
 });
 
 export async function completeTenantSetup(req: Request, res: Response, next: NextFunction): Promise<void> {

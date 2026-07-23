@@ -84,7 +84,34 @@ export class AuthRepository {
 
   async recordSuperAdminPasswordChange(userId: string, newHash: string): Promise<void> {
     assertDbConnected();
-    await SuperAdminModel.findByIdAndUpdate(userId, { passwordHash: newHash });
+    await SuperAdminModel.findByIdAndUpdate(userId, {
+      passwordHash:     newHash,
+      resetToken:       null,
+      resetTokenExpiry: null,
+    });
+  }
+
+  async saveSuperAdminResetToken(
+    id: string,
+    token: string,
+    expiry: Date,
+  ): Promise<void> {
+    assertDbConnected();
+    await SuperAdminModel.findByIdAndUpdate(id, {
+      resetToken:       token,
+      resetTokenExpiry: expiry,
+    });
+  }
+
+  async consumeSuperAdminResetToken(token: string): Promise<ISuperAdmin | null> {
+    assertDbConnected();
+    // Atomically claim the token: match a still-valid token AND clear it in a single
+    // operation, so two concurrent requests can never reuse the same reset token.
+    return SuperAdminModel.findOneAndUpdate(
+      { resetToken: token, resetTokenExpiry: { $gt: new Date() } },
+      { resetToken: null, resetTokenExpiry: null },
+      { new: true },
+    );
   }
 }
 

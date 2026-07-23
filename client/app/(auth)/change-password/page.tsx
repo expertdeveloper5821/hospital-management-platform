@@ -11,11 +11,12 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { useChangePasswordMutation } from '@/store/api/auth.api';
 import { useAppDispatch } from '@/store/hooks';
 import { tokenReceived, setFirstLoginDone } from '@/store/slices/auth.slice';
+import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
 
 const schema = z
   .object({
     currentPassword: z.string().min(1, 'Current password is required'),
-    newPassword:     z.string().min(8, 'Minimum 8 characters'),
+    newPassword:     passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your new password'),
   })
   .refine((d) => d.newPassword !== d.currentPassword, {
@@ -94,8 +95,10 @@ export default function ChangePasswordPage() {
               autoComplete="new-password"
               {...register('newPassword')}
             />
-            {errors.newPassword && (
+            {errors.newPassword ? (
               <p className="text-xs text-destructive">{errors.newPassword.message}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS}</p>
             )}
           </div>
 

@@ -10,11 +10,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useCompleteSetupMutation } from '@/store/api/auth.api';
+import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
 
 const schema = z
   .object({
     name:            z.string().min(1, 'Name is required').max(200),
-    password:        z.string().min(8, 'Minimum 8 characters'),
+    password:        passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
   .refine((d) => d.password === d.confirmPassword, {
@@ -98,8 +99,10 @@ function SetupForm() {
                 autoComplete="new-password"
                 {...register('password')}
               />
-              {errors.password && (
+              {errors.password ? (
                 <p className="text-xs text-destructive">{errors.password.message}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS}</p>
               )}
             </div>
 
