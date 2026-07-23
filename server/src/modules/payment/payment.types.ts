@@ -75,6 +75,7 @@ export const ListPaymentsQuerySchema = z.object({
   dateFrom:      z.string().datetime({ offset: true }).optional(),
   dateTo:        z.string().datetime({ offset: true }).optional(),
   paymentMethod: z.enum(['CASH', 'CHEQUE', 'UPI', 'CARD']).optional(),
+  status:        z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
   referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
   referenceId:   z.string().min(1).optional(),
   page:          z.coerce.number().int().min(1).default(1),

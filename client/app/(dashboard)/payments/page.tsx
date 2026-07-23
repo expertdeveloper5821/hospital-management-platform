@@ -289,7 +289,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
           <div>
             <h2 className="text-base font-semibold">Record Manual Payment</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Cash or Cheque
+              Cash, Cheque, UPI, or Card
             </p>
           </div>
           <button
@@ -338,14 +338,14 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
 
           <div className="space-y-1.5">
             <Label>Payment Method *</Label>
-            <div className="flex gap-3">
-              {(["CASH", "CHEQUE"] as const).map((m) => (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(["CASH", "CHEQUE", "UPI", "CARD"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => set("paymentMethod", m)}
                   className={cn(
-                    "flex-1 rounded-md border py-2 text-sm font-medium transition-colors",
+                    "rounded-md border py-2 text-sm font-medium transition-colors",
                     form.paymentMethod === m
                       ? "border-primary bg-primary/10 text-primary"
                       : "hover:bg-muted",
@@ -907,11 +907,22 @@ export default function PaymentsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [methodFilter, setMethodFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
   const [showManual, setShowManual] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
   const [razorpaySuccess, setRazorpaySuccess] = useState(false);
   const [selected, setSelected] = useState<PaymentResponse | null>(null);
+
+  // Apply a filter passed from the dashboard (e.g. the "Pending Payments" card
+  // links here as /payments?status=PENDING). Read once on mount, client-side only.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = (params.get("status") ?? "").toUpperCase();
+    if (["PENDING", "COMPLETED", "FAILED", "CANCELLED"].includes(status)) {
+      setStatusFilter(status);
+    }
+  }, []);
 
   const canCreate = [
     "RECEPTIONIST",
@@ -933,6 +944,7 @@ export default function PaymentsPage() {
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
       paymentMethod: methodFilter || undefined,
+      status: statusFilter || undefined,
       page,
       limit: 10,
     },
@@ -947,10 +959,11 @@ export default function PaymentsPage() {
     setDateFrom("");
     setDateTo("");
     setMethodFilter("");
+    setStatusFilter("");
     setPage(1);
   }
 
-  const hasFilters = !!(dateFrom || dateTo || methodFilter);
+  const hasFilters = !!(dateFrom || dateTo || methodFilter || statusFilter);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -1052,6 +1065,24 @@ export default function PaymentsPage() {
             <option value="CHEQUE">Cheque</option>
             <option value="UPI">UPI</option>
             <option value="CARD">Card</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">Status</Label>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+            className="ml-2 h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">All Statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="CANCELLED">Cancelled</option>
+            <option value="FAILED">Failed</option>
           </select>
         </div>
         {hasFilters && (

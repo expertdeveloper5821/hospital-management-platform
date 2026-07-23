@@ -53,6 +53,26 @@ const ACTION_COLORS: Record<string, string> = {
 const ACTION_BADGE_BASE =
   'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap';
 
+// Past-tense, human-readable label for an audit action (CREATE → Created, …).
+// Falls back to Title Case for any action not explicitly mapped.
+const ACTION_LABELS: Record<string, string> = {
+  CREATE:         'Created',
+  UPDATE:         'Updated',
+  DELETE:         'Deleted',
+  LOGIN:          'Logged In',
+  LOGOUT:         'Logged Out',
+  LOCKOUT:        'Locked Out',
+  PASSWORD_RESET: 'Password Reset',
+  APPROVE:        'Approved',
+  ACTIVATE:       'Activated',
+  DEACTIVATE:     'Deactivated',
+  UPLOAD:         'Uploaded',
+};
+
+function formatAction(action: string): string {
+  return ACTION_LABELS[action] ?? toTitleCase(action);
+}
+
 const LIMIT = 10;
 
 // ─── Filter form state ────────────────────────────────────────────────────────
@@ -298,7 +318,7 @@ export default function AuditPage() {
                           ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
                         )}
                       >
-                        {toTitleCase(log.action)}
+                        {formatAction(log.action)}
                       </span>
                       <Badge variant="outline" className="text-xs font-normal">
                         {log.entityType.replace(/_/g, ' ')}
@@ -352,7 +372,7 @@ export default function AuditPage() {
                               ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
                             )}
                           >
-                            {toTitleCase(log.action)}
+                            {formatAction(log.action)}
                           </span>
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-xs text-muted-foreground" title={log.userId}>

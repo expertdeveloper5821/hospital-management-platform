@@ -13,18 +13,14 @@ import { useAppDispatch, useAppSelector }      from '@/store/hooks';
 import { logout }                              from '@/store/slices/auth.slice';
 import { baseApi }                             from '@/store/api/base.api';
 import { toastSuccess }                        from '@/lib/toast';
+import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
 const schema = z
   .object({
     currentPassword: z.string().min(1, 'Current password is required'),
-    newPassword: z
-      .string()
-      .min(8, 'Minimum 8 characters')
-      .regex(/[A-Z]/, 'Must include an uppercase letter')
-      .regex(/[0-9]/, 'Must include a digit')
-      .regex(/[^A-Za-z0-9]/, 'Must include a special character'),
+    newPassword:     passwordSchema,
     confirmPassword: z.string().min(1, 'Please confirm your new password'),
   })
   .refine((d) => d.newPassword !== d.currentPassword, {
@@ -164,10 +160,13 @@ export default function ChangePasswordPage() {
             <label htmlFor="newPassword" className="text-sm font-medium">New Password</label>
             <PasswordInput
               id="newPassword"
-              placeholder="Min. 8 chars, uppercase, digit, special"
+              placeholder="Min. 8 chars, upper, lower, number, special"
               registration={register('newPassword')}
               error={errors.newPassword?.message}
             />
+            {!errors.newPassword && (
+              <p className="text-xs text-muted-foreground">{PASSWORD_REQUIREMENTS}</p>
+            )}
           </div>
 
           <div className="space-y-1.5">

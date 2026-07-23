@@ -5,13 +5,15 @@ import { Suspense } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { useResetPasswordMutation } from '@/store/api/auth.api';
+import { useSuperAdminResetPasswordMutation } from '@/store/api/auth.api';
 import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
 
+// Mirrors the backend resetPasswordSchema for super admins (strong password).
 const schema = z
   .object({
     newPassword:     passwordSchema,
@@ -24,12 +26,12 @@ const schema = z
 
 type Form = z.infer<typeof schema>;
 
-function ResetPasswordForm() {
+function SuperAdminResetPasswordForm() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const token        = searchParams.get('token') ?? '';
 
-  const [resetPassword, { isLoading, isSuccess, error }] = useResetPasswordMutation();
+  const [resetPassword, { isLoading, isSuccess, error }] = useSuperAdminResetPasswordMutation();
 
   const {
     register,
@@ -41,7 +43,7 @@ function ResetPasswordForm() {
     if (!token) return;
     try {
       await resetPassword({ token, newPassword: values.newPassword }).unwrap();
-      setTimeout(() => router.replace('/login'), 2000);
+      setTimeout(() => router.replace('/super-admin/login'), 2000);
     } catch {
       // error displayed below
     }
@@ -57,7 +59,7 @@ function ResetPasswordForm() {
           </CardDescription>
         </CardHeader>
         <CardFooter>
-          <a href="/forgot-password" className="text-sm text-primary hover:underline">
+          <a href="/super-admin/forgot-password" className="text-sm text-primary hover:underline">
             Request a new reset link
           </a>
         </CardFooter>
@@ -73,11 +75,14 @@ function ResetPasswordForm() {
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <CardTitle className="text-2xl">Set new password</CardTitle>
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          <CardTitle className="text-2xl">Set new password</CardTitle>
+        </div>
         <CardDescription>
           {isSuccess
             ? 'Password reset successfully — redirecting to sign in…'
-            : 'Enter your new password below.'}
+            : 'Enter your new platform admin password below.'}
         </CardDescription>
       </CardHeader>
 
@@ -131,10 +136,10 @@ function ResetPasswordForm() {
 }
 
 // useSearchParams requires Suspense boundary per Next.js App Router rules
-export default function ResetPasswordPage() {
+export default function SuperAdminResetPasswordPage() {
   return (
     <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
-      <ResetPasswordForm />
+      <SuperAdminResetPasswordForm />
     </Suspense>
   );
 }

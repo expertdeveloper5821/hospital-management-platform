@@ -84,7 +84,31 @@ export class AuthRepository {
 
   async recordSuperAdminPasswordChange(userId: string, newHash: string): Promise<void> {
     assertDbConnected();
-    await SuperAdminModel.findByIdAndUpdate(userId, { passwordHash: newHash });
+    await SuperAdminModel.findByIdAndUpdate(userId, {
+      passwordHash:     newHash,
+      resetToken:       null,
+      resetTokenExpiry: null,
+    });
+  }
+
+  async saveSuperAdminResetToken(
+    id: string,
+    token: string,
+    expiry: Date,
+  ): Promise<void> {
+    assertDbConnected();
+    await SuperAdminModel.findByIdAndUpdate(id, {
+      resetToken:       token,
+      resetTokenExpiry: expiry,
+    });
+  }
+
+  async consumeSuperAdminResetToken(token: string): Promise<ISuperAdmin | null> {
+    assertDbConnected();
+    return SuperAdminModel.findOne({
+      resetToken:       token,
+      resetTokenExpiry: { $gt: new Date() },
+    });
   }
 }
 

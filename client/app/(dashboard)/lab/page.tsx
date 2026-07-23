@@ -698,6 +698,14 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
   const [showNewRequest,setShowNewRequest]= useState(false);
   const [selected,      setSelected]      = useState<PathologyRequestResponse | RadiologyRequestResponse | null>(null);
 
+  // Apply a filter passed from the dashboard (e.g. the "Pending Lab Reports" card
+  // links here as /lab?status=PENDING). Read once on mount, client-side only.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = (params.get('status') ?? '').toUpperCase();
+    if (['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(status)) setStatusFilter(status);
+  }, []);
+
   const pathologyResult = useListPathologyRequestsQuery(
     { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: 10 },
     { skip: type !== 'pathology' },

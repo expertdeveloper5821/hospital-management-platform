@@ -104,6 +104,12 @@ export default function SuperAdminLoginPage() {
             {isLoading ? 'Signing in…' : 'Sign in'}
           </Button>
           <a
+            href="/super-admin/forgot-password"
+            className="text-sm text-muted-foreground hover:underline text-center"
+          >
+            Forgot Password?
+          </a>
+          <a
             href="/login"
             className="text-sm text-muted-foreground hover:underline text-center"
           >

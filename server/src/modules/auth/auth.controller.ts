@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { authService } from './auth.service';
 import { authRepository } from './auth.repository';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { passwordSchema } from '../../shared/utils/password';
 
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 const loginSchema = z.object({
@@ -14,7 +15,7 @@ const loginSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1).max(128),
-  newPassword:     z.string().min(8).max(128),
+  newPassword:     passwordSchema,
 });
 
 const forgotPasswordSchema = z.object({
@@ -24,7 +25,7 @@ const forgotPasswordSchema = z.object({
 
 const resetPasswordSchema = z.object({
   token:       z.string().min(1),
-  newPassword: z.string().min(8).max(128),
+  newPassword: passwordSchema,
 });
 
 // ─── Controllers ──────────────────────────────────────────────────────────────

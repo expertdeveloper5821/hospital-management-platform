@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   useListInventoryItemsQuery,
   useCreateInventoryItemMutation,
@@ -845,6 +845,14 @@ export default function InventoryPage() {
   const [editTarget,     setEditTarget]     = useState<InventoryItemResponse | null>(null);
   const [deleteTarget,   setDeleteTarget]   = useState<InventoryItemResponse | null>(null);
   const [historyTarget,  setHistoryTarget]  = useState<InventoryItemResponse | null>(null);
+
+  // Apply a filter passed from the dashboard (e.g. the "Low Stock Items" card
+  // links here as /inventory?lowStock=1). Read once on mount, client-side only.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const low = params.get('lowStock');
+    if (low === '1' || low === 'true') setLowStockOnly(true);
+  }, []);
 
   const { data, isFetching, refetch } = useListInventoryItemsQuery({
     category: categoryFilter || undefined,

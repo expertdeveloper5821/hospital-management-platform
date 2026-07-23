@@ -20,14 +20,15 @@ export const paymentApi = baseApi.injectEndpoints({
 
     listPayments: build.query<
       PaymentListResult,
-      { patientId?: string; dateFrom?: string; dateTo?: string; paymentMethod?: string; referenceType?: string; referenceId?: string; page?: number; limit?: number }
+      { patientId?: string; dateFrom?: string; dateTo?: string; paymentMethod?: string; status?: string; referenceType?: string; referenceId?: string; page?: number; limit?: number }
     >({
-      query: ({ patientId, dateFrom, dateTo, paymentMethod, referenceType, referenceId, page = 1, limit = 20 } = {}) => {
+      query: ({ patientId, dateFrom, dateTo, paymentMethod, status, referenceType, referenceId, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
         if (patientId)      params.set('patientId',      patientId);
         if (dateFrom)       params.set('dateFrom',       toStartOfDay(dateFrom));
         if (dateTo)         params.set('dateTo',         toEndOfDay(dateTo));
         if (paymentMethod)  params.set('paymentMethod',  paymentMethod);
+        if (status)         params.set('status',         status);
         if (referenceType)  params.set('referenceType',  referenceType);
         if (referenceId)    params.set('referenceId',    referenceId);
         params.set('page',  String(page));

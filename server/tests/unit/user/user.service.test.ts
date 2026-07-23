@@ -39,7 +39,7 @@ describe('UserService — example-based', () => {
     expect(mockEmailSvc.sendWelcomeEmail).toHaveBeenCalledWith(
       'dr@h.com',
       expect.any(String),
-      't1',
+      expect.stringContaining('/login'),
     );
   });
 

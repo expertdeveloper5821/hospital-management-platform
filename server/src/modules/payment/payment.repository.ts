@@ -24,6 +24,7 @@ export class PaymentRepository {
 
     if (query.patientId)     filter['patientId']     = query.patientId;
     if (query.paymentMethod) filter['paymentMethod'] = query.paymentMethod;
+    if (query.status)        filter['status']        = query.status;
     if (query.referenceType) filter['referenceType'] = query.referenceType;
     if (query.referenceId)   filter['referenceId']   = query.referenceId;
 

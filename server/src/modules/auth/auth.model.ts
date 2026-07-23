@@ -7,6 +7,8 @@ import { UserRole } from '../../shared/types/common.types';
 export interface ISuperAdmin extends Document {
   email: string;
   passwordHash: string;
+  resetToken: string | null;
+  resetTokenExpiry: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -15,6 +17,8 @@ const SuperAdminSchema = new Schema<ISuperAdmin>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
+    resetToken: { type: String, default: null },
+    resetTokenExpiry: { type: Date, default: null },
   },
   { timestamps: true, collection: 'super_admins' },
 );
