@@ -89,6 +89,7 @@ interface VisitPanelProps {
   canEdit: boolean;    // DOCTOR, NURSE, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
   canCancel: boolean;  // RECEPTIONIST, NURSE, DOCTOR, HOSPITAL_ADMIN
+  canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
   doctorNames: (ids: string[]) => string;
   allDoctors:  UserResponse[];
 }
@@ -97,18 +98,22 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque',
 };
 
-function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, doctorNames, allDoctors }: VisitPanelProps) {
+// Roles permitted to view payment details, matching the backend's GET /api/payments requireRole list.
+const PAYMENT_VIEW_ROLES = ['MANAGER', 'FINANCE_MANAGER', 'HOSPITAL_ADMIN', 'RECEPTIONIST'];
+
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canViewPayment, doctorNames, allDoctors }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
   // Look up the payment linked directly to this visit (referenceId) rather than
   // guessing from patientId + calendar date — a patient can have other payments
   // (registration fee, another same-day visit) on the same date, which would
-  // otherwise surface the wrong amount here.
+  // otherwise surface the wrong amount here. Skipped entirely for roles without
+  // payment visibility so no payment data is fetched for them.
   const { data: paymentData } = useListPaymentsQuery({
     referenceType: 'OPD_VISIT',
     referenceId:   visit.visitId,
     limit:         1,
-  });
+  }, { skip: !canViewPayment });
   const visitPayment = paymentData?.data?.[0] ?? null;
 
   const [selectedDepartmentId, setSelectedDepartmentId] = useState(visit.departmentId ?? '');
@@ -152,7 +157,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     if (updating || updatingRef.current) return;
     setError('');
     if ((form.chiefComplaint ?? '').trim().length > 1000) {
-      setError('Chief complaint cannot exceed 1000 characters.');
+      setError('Reason for visit cannot exceed 1000 characters.');
       return;
     }
     if ((form.diagnosis ?? '').trim().length > 2000) {
@@ -264,24 +269,26 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {mode === 'view' && (
             <div>
               {f('Doctor(s)',        doctorNames(visit.doctorIds ?? []))}
-              {f('Chief Complaint', visit.chiefComplaint)}
+              {f('Reason for Visit', visit.chiefComplaint)}
               {f('Diagnosis',       visit.diagnosis)}
               {f('Prescription',    visit.prescription ? (
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
               {f('Notes',           visit.notes)}
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
-              <div className="mt-3 pt-3 border-t space-y-0">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
-                {visitPayment ? (
-                  <>
-                    {f('Amount',       <span className="font-semibold">{formatINR(visitPayment.amount)}</span>)}
-                    {f('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[visitPayment.paymentMethod] ?? visitPayment.paymentMethod}</span>)}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-1">No payment on record for this visit.</p>
-                )}
-              </div>
+              {canViewPayment && (
+                <div className="mt-3 pt-3 border-t space-y-0">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
+                  {visitPayment ? (
+                    <>
+                      {f('Amount',       <span className="font-semibold">{formatINR(visitPayment.amount)}</span>)}
+                      {f('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[visitPayment.paymentMethod] ?? visitPayment.paymentMethod}</span>)}
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-1">No payment on record for this visit.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -346,7 +353,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="ep-complaint">Chief Complaint *</Label>
+                <Label htmlFor="ep-complaint">Reason for Visit *</Label>
                 <Input
                   id="ep-complaint"
                   value={form.chiefComplaint ?? ''}
@@ -446,20 +453,26 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         {!isTerminal && (
           <div className="shrink-0 border-t p-4 space-y-3">
             {mode === 'view' && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-stretch gap-2">
                 {canEdit && (
-                  <Button variant="outline" className="flex-1" onClick={() => setMode('edit')}>
+                  <Button variant="outline" size="sm" className="flex-1 min-w-[7rem]" onClick={() => setMode('edit')}>
                     Edit Visit
                   </Button>
                 )}
                 {canComplete && (
-                  <Button className="flex-1" onClick={() => setMode('complete')}>
+                  <Button size="sm" className="flex-1 min-w-[7rem]" onClick={() => setMode('complete')}>
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Complete
                   </Button>
                 )}
                 {canCancel && (
-                  <Button variant="destructive" size="sm" onClick={() => setShowCancelConfirm(true)} disabled={cancelling}>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="shrink-0 px-3"
+                    onClick={() => setShowCancelConfirm(true)}
+                    disabled={cancelling}
+                  >
                     <XCircle className="h-4 w-4 mr-1" />
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
@@ -587,9 +600,9 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
       setError('Past dates are not allowed for OPD visits.');
       return;
     }
-    if (!form.chiefComplaint.trim()) { setError('Chief complaint is required.'); return; }
+    if (!form.chiefComplaint.trim()) { setError('Reason for visit is required.'); return; }
     if (form.chiefComplaint.trim().length > 1000) {
-      setError('Chief complaint cannot exceed 1000 characters.');
+      setError('Reason for visit cannot exceed 1000 characters.');
       return;
     }
     if ((form.notes ?? '').trim().length > 2000) {
@@ -779,15 +792,15 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             />
           </div>
 
-          {/* Chief complaint */}
+          {/* Reason for visit */}
           <div className="space-y-1.5">
-            <Label htmlFor="nv-complaint">Chief Complaint *</Label>
+            <Label htmlFor="nv-complaint">Reason for Visit *</Label>
             <textarea
               id="nv-complaint"
               rows={3}
               value={form.chiefComplaint}
               onChange={(e) => setForm((f) => ({ ...f, chiefComplaint: e.target.value }))}
-              placeholder="Describe the patient's chief complaint…"
+              placeholder="Describe the patient's reason for visit…"
               maxLength={1000}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
               required
@@ -898,10 +911,13 @@ export default function OPDPage() {
 
   const visits = queue ?? [];
 
-  const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN', 'DOCTOR'].includes(role ?? '');
+  // DOCTOR is deliberately excluded — doctors may view/act on visits assigned to
+  // them but must not be able to create new OPD visits (also enforced server-side).
+  const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canEdit        = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canComplete    = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canCancel      = ['RECEPTIONIST', 'NURSE', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canViewPayment = PAYMENT_VIEW_ROLES.includes(role ?? '');
 
   // Queue stats
   const open      = visits.filter((v) => v.status === 'OPEN').length;
@@ -1016,7 +1032,7 @@ export default function OPDPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground w-12">#</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Chief Complaint</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Reason for Visit</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Doctor</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Action</th>
@@ -1071,6 +1087,7 @@ export default function OPDPage() {
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}
+          canViewPayment={canViewPayment}
           doctorNames={doctorNames}
           allDoctors={doctors}
         />

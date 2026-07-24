@@ -20,6 +20,7 @@ import {
   uploadRadiologyReport,
   editRadiologyRequest,
   deleteRadiologyRequest,
+  listTestTypes,
 } from './lab.controller';
 
 const router = express.Router();
@@ -118,6 +119,17 @@ router.patch(
   requireRole(UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   radiologyUpload.single('report'),
   uploadRadiologyReport,
+);
+
+// ─── Test types (Billing → Add Charge, category LAB_TEST) ─────────────────────
+// Same role set as POST /api/charges, since this feeds that form's Test Type dropdown.
+router.get(
+  '/test-types',
+  requireRole(
+    UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.DOCTOR, UserRole.NURSE,
+    UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER,
+  ),
+  listTestTypes,
 );
 
 export default router;

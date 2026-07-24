@@ -25,6 +25,11 @@ const statsCache = new Map<string, CacheEntry>();
 // (fail closed) instead of falling back to tenant-wide activity.
 const NO_ACTIVITY_SENTINEL = '__no_user__';
 
+// Same fail-closed idea for Doctor-scoped stats: if a DOCTOR request somehow
+// arrives without a userId, this sentinel matches no OPD/IPD/lab records, so
+// the doctor's counts come back as 0 rather than leaking hospital-wide totals.
+const NO_DOCTOR_SENTINEL = '__no_doctor__';
+
 // `activityScope` isolates the cache per recent-activity view: 'ALL' for roles
 // that see every user's activity (Hospital Admin), or the acting userId for
 // self-scoped roles — so two users of the same role never share cached activity.
@@ -89,22 +94,28 @@ function last30DaysStart(): Date {
 
 // ─── Aggregation functions ────────────────────────────────────────────────────
 
-async function getTotalPatients(tenantId: string): Promise<number> {
+// `doctorId` present ⇒ scope to that doctor's own patients/visits/admissions/
+// requests (Doctor dashboard); absent ⇒ tenant-wide (every other role).
+
+async function getTotalPatients(tenantId: string, doctorId?: string): Promise<number> {
+  if (doctorId !== undefined) {
+    const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
+    return patientIds.length;
+  }
   return dashboardRepository.countPatients(tenantId);
 }
 
-async function getTodayOpdCount(tenantId: string): Promise<number> {
+async function getTodayOpdCount(tenantId: string, doctorId?: string): Promise<number> {
   const { start, end } = todayRange();
-  return dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
+  return doctorId !== undefined
+    ? dashboardRepository.countOpdVisitsForDoctorBetween(tenantId, doctorId, start, end)
+    : dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
 }
 
-async function getActiveIpdCount(tenantId: string): Promise<number> {
-  return dashboardRepository.countActiveIpd(tenantId);
-}
-
-async function getAdmissionsToday(tenantId: string): Promise<number> {
-  const { start, end } = todayRange();
-  return dashboardRepository.countAdmissionsBetween(tenantId, start, end);
+async function getActiveIpdCount(tenantId: string, doctorId?: string): Promise<number> {
+  return doctorId !== undefined
+    ? dashboardRepository.countActiveIpdForDoctor(tenantId, doctorId)
+    : dashboardRepository.countActiveIpd(tenantId);
 }
 
 async function getNewRegistrationsToday(tenantId: string): Promise<number> {
@@ -112,13 +123,23 @@ async function getNewRegistrationsToday(tenantId: string): Promise<number> {
   return dashboardRepository.countPatientsCreatedBetween(tenantId, start, end);
 }
 
-async function getPendingLabCount(tenantId: string): Promise<number> {
+async function getPendingLabCount(tenantId: string, doctorId?: string): Promise<number> {
+  if (doctorId !== undefined) {
+    const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
+    const { pathology, radiology } = await dashboardRepository.countPendingLabRequestsForDoctor(tenantId, doctorId, patientIds);
+    return pathology + radiology;
+  }
   const { pathology, radiology } = await dashboardRepository.countPendingLabRequests(tenantId);
   return pathology + radiology;
 }
 
-async function getLabReportsToday(tenantId: string): Promise<number> {
+async function getLabReportsToday(tenantId: string, doctorId?: string): Promise<number> {
   const { start, end } = todayRange();
+  if (doctorId !== undefined) {
+    const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
+    const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsForDoctorBetween(tenantId, doctorId, patientIds, start, end);
+    return pathology + radiology;
+  }
   const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsBetween(tenantId, start, end);
   return pathology + radiology;
 }
@@ -246,6 +267,11 @@ export class DashboardService {
       : (userId ?? NO_ACTIVITY_SENTINEL);
     const activityScope  = activityUserId ?? 'ALL';
 
+    // Doctor dashboard: every patient/OPD/IPD/lab figure below is scoped to this
+    // doctor's own userId, never tenant-wide (see dashboard.repository doctor-scoped
+    // methods). Same fail-closed sentinel pattern as activityUserId above.
+    const doctorId = role === UserRole.DOCTOR ? (userId ?? NO_DOCTOR_SENTINEL) : undefined;
+
     if (!bypassCache) {
       const cached = getFromCache(tenantId, role, activityScope);
       if (cached) return cached;
@@ -267,7 +293,6 @@ export class DashboardService {
       totalPatients,
       todayOpdCount,
       activeIpdCount,
-      admissionsToday,
       newRegistrationsToday,
       pendingLabCount,
       labReportsToday,
@@ -283,13 +308,12 @@ export class DashboardService {
       monthlyRevenueTrend,
       recentActivities,
     ] = await withTimeout(Promise.all([
-      needs('totalPatients')         ? getTotalPatients(tenantId)         : Promise.resolve(undefined),
-      needs('todayOpdCount')         ? getTodayOpdCount(tenantId)         : Promise.resolve(undefined),
-      needs('activeIpdCount')        ? getActiveIpdCount(tenantId)        : Promise.resolve(undefined),
-      needs('admissionsToday')       ? getAdmissionsToday(tenantId)       : Promise.resolve(undefined),
+      needs('totalPatients')         ? getTotalPatients(tenantId, doctorId) : Promise.resolve(undefined),
+      needs('todayOpdCount')         ? getTodayOpdCount(tenantId, doctorId) : Promise.resolve(undefined),
+      needs('activeIpdCount')        ? getActiveIpdCount(tenantId, doctorId) : Promise.resolve(undefined),
       needs('newRegistrationsToday') ? getNewRegistrationsToday(tenantId) : Promise.resolve(undefined),
-      needs('pendingLabCount')       ? getPendingLabCount(tenantId)       : Promise.resolve(undefined),
-      needs('labReportsToday')       ? getLabReportsToday(tenantId)       : Promise.resolve(undefined),
+      needs('pendingLabCount')       ? getPendingLabCount(tenantId, doctorId) : Promise.resolve(undefined),
+      needs('labReportsToday')       ? getLabReportsToday(tenantId, doctorId) : Promise.resolve(undefined),
       (needs('revenueToday') || needs('revenueThisMonth'))
         ? getRevenueSummary(tenantId) : Promise.resolve(undefined),
       needs('averageDailyRevenue')   ? getAverageDailyRevenue(tenantId)   : Promise.resolve(undefined),
@@ -310,7 +334,6 @@ export class DashboardService {
     if (needs('totalPatients')         && totalPatients         !== undefined) stats.totalPatients         = totalPatients as number;
     if (needs('todayOpdCount')         && todayOpdCount         !== undefined) stats.todayOpdCount         = todayOpdCount as number;
     if (needs('activeIpdCount')        && activeIpdCount        !== undefined) stats.activeIpdCount        = activeIpdCount as number;
-    if (needs('admissionsToday')       && admissionsToday       !== undefined) stats.admissionsToday       = admissionsToday as number;
     if (needs('newRegistrationsToday') && newRegistrationsToday !== undefined) stats.newRegistrationsToday = newRegistrationsToday as number;
     if (needs('pendingLabCount')       && pendingLabCount       !== undefined) stats.pendingLabCount       = pendingLabCount as number;
     if (needs('labReportsToday')       && labReportsToday       !== undefined) stats.labReportsToday       = labReportsToday as number;

@@ -8,6 +8,7 @@ import type {
   EditPathologyRequest,
   EditRadiologyRequest,
   LabListResult,
+  LabTestTypeResponse,
 } from '../types';
 
 export const labApi = baseApi.injectEndpoints({
@@ -132,6 +133,14 @@ export const labApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
       invalidatesTags: ['Lab'],
     }),
+
+    // ─── Test types ───────────────────────────────────────────────────────────
+    // Feeds the Billing → Add Charge form's Test Type dropdown when category is LAB_TEST.
+    listLabTestTypes: build.query<LabTestTypeResponse[], void>({
+      query: () => '/api/lab/test-types',
+      transformResponse: (raw: ApiSuccess<LabTestTypeResponse[]>) => raw.data,
+      providesTags: ['Lab'],
+    }),
   }),
 });
 
@@ -148,4 +157,5 @@ export const {
   useUploadRadiologyReportMutation,
   useEditRadiologyRequestMutation,
   useDeleteRadiologyRequestMutation,
+  useListLabTestTypesQuery,
 } = labApi;

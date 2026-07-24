@@ -36,6 +36,11 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
   CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque',
 };
 
+// Roles permitted to view payment details, matching the backend's GET /api/payments requireRole list.
+const PAYMENT_VIEW_ROLES: UserRole[] = [
+  UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST,
+];
+
 // ─── PatientSearch ────────────────────────────────────────────────────────────
 // Live search typeahead — type name or mobile, pick a patient from the dropdown.
 
@@ -242,23 +247,25 @@ interface AdmissionPanelProps {
   onDischarge:   (a: AdmissionResponse) => void;
   onNotes:       (a: AdmissionResponse) => void;
   canProgress:   boolean;
+  canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
 }
 
 function AdmissionPanel({
   admission, onClose, onUpdate,
   canEdit, canDischarge, doctorMap,
-  onDischarge, onNotes, canProgress,
+  onDischarge, onNotes, canProgress, canViewPayment,
 }: AdmissionPanelProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [error, setError] = useState<string | null>(null);
 
   const admissionDateStr = new Date(admission.admissionDate).toISOString().substring(0, 10);
+  // Skipped entirely for roles without payment visibility so no payment data is fetched for them.
   const { data: paymentData } = useListPaymentsQuery({
     patientId: admission.patientId,
     dateFrom:  admissionDateStr,
     dateTo:    admissionDateStr,
     limit:     10,
-  });
+  }, { skip: !canViewPayment });
   const admissionPayment = paymentData?.data?.[0] ?? null;
 
   // Edit state — initialised from current admission
@@ -388,17 +395,19 @@ function AdmissionPanel({
                 </button>
               ))}
               {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
-              <div className="mt-3 pt-3 border-t space-y-0">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
-                {admissionPayment ? (
-                  <>
-                    {row('Amount',       <span className="font-semibold">₹{admissionPayment.amount.toLocaleString('en-IN')}</span>)}
-                    {row('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[admissionPayment.paymentMethod] ?? admissionPayment.paymentMethod}</span>)}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground py-1">No payment on record for this admission.</p>
-                )}
-              </div>
+              {canViewPayment && (
+                <div className="mt-3 pt-3 border-t space-y-0">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Payment</p>
+                  {admissionPayment ? (
+                    <>
+                      {row('Amount',       <span className="font-semibold">₹{admissionPayment.amount.toLocaleString('en-IN')}</span>)}
+                      {row('Payment Mode', <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium">{PAYMENT_METHOD_LABELS[admissionPayment.paymentMethod] ?? admissionPayment.paymentMethod}</span>)}
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground py-1">No payment on record for this admission.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -1027,6 +1036,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN ||
     role === UserRole.RECEPTIONIST;
+  const canViewPayment = PAYMENT_VIEW_ROLES.includes(role);
 
   const admissions = data?.data ?? [];
   const total      = data?.total      ?? 0;
@@ -1291,6 +1301,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           canEdit={canEdit}
           canDischarge={canDischarge}
           canProgress={canProgress}
+          canViewPayment={canViewPayment}
           doctorMap={doctorMap}
           onDischarge={(a) => setDischargeFor(a)}
           onNotes={(a) => setNotesFor(a)}

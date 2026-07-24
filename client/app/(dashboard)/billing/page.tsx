@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useListChargesQuery, useAddChargeMutation, useCancelChargeMutation, useMarkChargePaidMutation } from '@/store/api/charges.api';
+import { useListLabTestTypesQuery } from '@/store/api/lab.api';
 import { useAppSelector } from '@/store/hooks';
 import type { ChargeCategory, ChargeStatus } from '@/store/types';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,16 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
   const [category, setCategory]       = useState<ChargeCategory>('CONSULTATION');
   const [amount, setAmount]           = useState('');
   const [description, setDescription] = useState('');
+  const [testTypeId, setTestTypeId]   = useState('');
   const [error, setError]             = useState<string | null>(null);
+
+  const isLabTest = category === 'LAB_TEST';
+  const { data: testTypes, isLoading: loadingTestTypes } = useListLabTestTypesQuery(undefined, { skip: !isLabTest });
+
+  function handleCategoryChange(next: ChargeCategory) {
+    setCategory(next);
+    if (next !== 'LAB_TEST') setTestTypeId('');
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -57,6 +67,10 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
     if (!Number.isFinite(parsedAmount) || parsedAmount < 0.01) {
       setError('Amount must be at least ₹0.01.'); return;
     }
+    const selectedTestType = testTypes?.find((t) => t.id === testTypeId);
+    if (isLabTest && !selectedTestType) {
+      setError('Test Type is required for Lab Test charges.'); return;
+    }
 
     try {
       await addCharge({
@@ -64,6 +78,9 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
         category,
         description: description.trim(),
         amount: Math.round(parsedAmount * 100) / 100,
+        ...(isLabTest && selectedTestType
+          ? { testTypeId: selectedTestType.id, testTypeName: selectedTestType.name }
+          : {}),
       }).unwrap();
       // The billing list refreshes automatically via invalidated cache tags.
       onClose();
@@ -109,11 +126,32 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
                 id="add-category"
                 className="w-full border rounded px-3 py-2 text-sm"
                 value={category}
-                onChange={(e) => setCategory(e.target.value as ChargeCategory)}
+                onChange={(e) => handleCategoryChange(e.target.value as ChargeCategory)}
               >
                 {CATEGORIES.map((c) => <option key={c} value={c}>{toTitleCase(c)}</option>)}
               </select>
             </div>
+            {isLabTest && (
+              <div>
+                <Label htmlFor="add-test-type">Test Type</Label>
+                <select
+                  id="add-test-type"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={testTypeId}
+                  onChange={(e) => setTestTypeId(e.target.value)}
+                  disabled={loadingTestTypes}
+                >
+                  <option value="">
+                    {loadingTestTypes ? 'Loading test types…' : 'Select a test type'}
+                  </option>
+                  {testTypes?.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({toTitleCase(t.category)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <Label htmlFor="add-amount">Amount (₹)</Label>
               <Input

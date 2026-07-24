@@ -109,3 +109,14 @@ export interface RadiologyRequestResponse {
 // ─── File size limits (bytes) ─────────────────────────────────────────────────
 export const PATHOLOGY_REPORT_MAX_BYTES  = 10 * 1024 * 1024; // 10 MB
 export const RADIOLOGY_REPORT_MAX_BYTES  = 20 * 1024 * 1024; // 20 MB
+
+// ─── Test types (for Billing → Add Charge, category LAB_TEST) ────────────────
+// Derived dynamically from the distinct testType/imagingType values already
+// used in Pathology/Radiology requests — not a separate hardcoded catalog.
+export type LabTestTypeCategory = 'PATHOLOGY' | 'RADIOLOGY';
+
+export interface LabTestTypeResponse {
+  id:       string;
+  name:     string;
+  category: LabTestTypeCategory;
+}

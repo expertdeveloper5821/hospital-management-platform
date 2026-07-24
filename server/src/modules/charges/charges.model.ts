@@ -22,6 +22,10 @@ export interface ICharge extends Document {
   description:        string;
   amount:             number;
   encounterReference: string | null;
+  // Only populated when category === 'LAB_TEST' — the Pathology/Radiology test
+  // type selected from the Lab module's dynamic list on the Add Charge form.
+  testTypeId:         string | null;
+  testTypeName:       string | null;
   addedBy:            string;
   status:             ChargeStatus;
   paidBy:             string | null;
@@ -41,6 +45,8 @@ const ChargeSchema = new Schema<ICharge>(
     description:        { type: String, required: true, maxlength: 500 },
     amount:             { type: Number, required: true, min: 0.01 },
     encounterReference: { type: String, default: null },
+    testTypeId:         { type: String, default: null },
+    testTypeName:       { type: String, default: null },
     addedBy:            { type: String, required: true },
     status:             { type: String, required: true, enum: ['UNPAID', 'PAID', 'CANCELLED'], default: 'UNPAID' },
     paidBy:             { type: String, default: null },

@@ -38,6 +38,8 @@ export interface AddChargeInput {
   description:         string;
   amount:              number;
   encounterReference?: string;
+  testTypeId?:         string;
+  testTypeName?:       string;
 }
 
 export interface BillTotals {
@@ -97,6 +99,8 @@ class ChargeService {
       description:        data.description,
       amount:             Math.round(data.amount * 100) / 100,
       encounterReference: data.encounterReference ?? null,
+      testTypeId:         data.category === 'LAB_TEST' ? (data.testTypeId   ?? null) : null,
+      testTypeName:       data.category === 'LAB_TEST' ? (data.testTypeName ?? null) : null,
       addedBy,
       status:             'UNPAID',
     });
