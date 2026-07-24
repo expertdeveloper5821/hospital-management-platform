@@ -15,6 +15,7 @@ import {
   AppError,
 } from '../../shared/middleware/error-handler';
 import { LoginRequest, LoginResponse, ChangePasswordResponse } from './auth.types';
+import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_MS   = 15 * 60 * 1000; // 15 minutes
@@ -169,7 +170,7 @@ export class AuthService {
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await authRepository.saveResetToken(user._id.toString(), token, expiry);
 
-    const resetLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/reset-password?token=${token}`;
+    const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${token}`;
     await emailService.sendPasswordResetEmail(email, resetLink);
   }
 
@@ -244,9 +245,7 @@ export class AuthService {
       newValue:   { event: 'super_admin_password_reset_requested' },
     });
 
-    // FRONTEND_URL may be a comma-separated allow-list; use the first entry.
-    const frontendBase = (process.env.FRONTEND_URL ?? 'http://localhost:3001').split(',')[0].trim().replace(/\/+$/, '');
-    const resetLink = `${frontendBase}/super-admin/reset-password?token=${token}`;
+    const resetLink = `${getFrontendBaseUrl()}/super-admin/reset-password?token=${token}`;
     await emailService.sendPasswordResetEmail(admin.email, resetLink);
   }
 

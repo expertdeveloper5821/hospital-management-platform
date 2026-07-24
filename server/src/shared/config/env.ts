@@ -30,6 +30,7 @@ export interface AppConfig {
     secretAccessKey: string;
     s3BucketName:    string;
     endpoint?:       string;
+    folderPrefix:    string;
   };
   corsOrigins:  string[];
   allowedOrigins: string[];
@@ -98,6 +99,10 @@ const config: AppConfig = {
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
     s3BucketName:    process.env.S3_BUCKET_NAME!,
     endpoint:        process.env.AWS_ENDPOINT || undefined,
+    // Optional prefix applied to every object key (e.g. "medical" groups all
+    // uploads under one folder in shared/multi-purpose buckets). No leading/
+    // trailing slash needed — s3Service normalizes it.
+    folderPrefix:    process.env.S3_FOLDER_PREFIX ?? '',
   },
   allowedOrigins: Array.from(
     new Set([
