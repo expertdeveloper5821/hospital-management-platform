@@ -12,6 +12,7 @@ import config from '../../shared/config/env';
 import { TenantStatus, AuditEntityType, UserRole, JWTPayload, PaginatedResult } from '../../shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError, UnauthorizedError } from '../../shared/middleware/error-handler';
 import { CreateTenantRequest, UpdateBrandingRequest, BrandingConfig } from './tenant.types';
+import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 const INVITE_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
 const MAX_LOGO_BYTES   = 2 * 1024 * 1024;       // 2 MB
@@ -60,7 +61,7 @@ export class TenantService {
     const expiry = new Date(Date.now() + INVITE_EXPIRY_MS);
     await tenantRepository.saveInviteToken(tenantId, token, expiry);
 
-    const inviteLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/setup?token=${token}`;
+    const inviteLink = `${getFrontendBaseUrl()}/setup?token=${token}`;
     await emailService.sendInviteEmail(tenant.adminEmail, inviteLink);
 
     await tenantRepository.updateStatus(tenantId, TenantStatus.ACTIVE);
@@ -128,7 +129,7 @@ export class TenantService {
     const expiry = new Date(Date.now() + INVITE_EXPIRY_MS);
     await tenantRepository.saveInviteToken(tenantId, token, expiry);
 
-    const inviteLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3001'}/setup?token=${token}`;
+    const inviteLink = `${getFrontendBaseUrl()}/setup?token=${token}`;
     await emailService.sendInviteEmail(tenant.adminEmail, inviteLink);
 
     // Only log audit if email sending succeeded
