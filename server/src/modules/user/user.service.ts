@@ -12,6 +12,7 @@ import { addToDenylist } from '../../shared/middleware/token-denylist';
 import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
+import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 // Roles that must never be created or assigned through tenant user-management.
 // SUPER_ADMIN would escalate privileges outside tenant scope; HOSPITAL_ADMIN is
@@ -46,9 +47,7 @@ export class UserService {
     });
 
     // Send welcome email — fails the operation if SMTP is unavailable (Answer C2=A).
-    // FRONTEND_URL may be a comma-separated allow-list; use the first entry for the login link.
-    const frontendBase = (process.env.FRONTEND_URL ?? 'http://localhost:3001').split(',')[0].trim();
-    const loginUrl = `${frontendBase.replace(/\/+$/, '')}/login`;
+    const loginUrl = `${getFrontendBaseUrl()}/login`;
     await emailService.sendWelcomeEmail(data.email, tempPassword, loginUrl, tenantId);
 
     await auditService.log({
