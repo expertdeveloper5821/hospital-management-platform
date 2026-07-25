@@ -13,6 +13,8 @@ import {
   ListAdmissionsQuery,
   CreateWardRequest,
   AddBedsRequest,
+  ProgressNote,
+  ProgressNoteResponse,
 } from './ipd.types';
 
 import { patientRepository } from '../patient/patient.repository';
@@ -53,7 +55,40 @@ export class BedOccupiedError extends Error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function toResponse(doc: IIPDAdmission, fullName: string | null = null): AdmissionResponse {
+// Progress notes store only the creator's userId (field name `doctorId` is
+// historical — a NURSE can also author a note). Resolve each unique author to
+// their display name in one batch, rather than storing/duplicating it on write.
+async function resolveProgressNoteStaffNames(
+  tenantId: string,
+  notes:    ProgressNote[],
+): Promise<ProgressNoteResponse[]> {
+  if (notes.length === 0) return [];
+
+  const uniqueIds = [...new Set(notes.map((n) => n.doctorId))];
+  const users = await Promise.all(uniqueIds.map((id) => userRepository.findById(tenantId, id)));
+
+  const nameMap = new Map<string, string>();
+  uniqueIds.forEach((id, i) => {
+    const user = users[i];
+    if (user) nameMap.set(id, user.name);
+  });
+
+  // Build plain objects field-by-field — `notes` may be Mongoose subdocuments,
+  // whose own properties aren't enumerable, so a spread ({...n}) silently drops them.
+  return notes.map((n) => ({
+    noteId:    n.noteId,
+    doctorId:  n.doctorId,
+    note:      n.note,
+    timestamp: n.timestamp,
+    staffName: nameMap.get(n.doctorId) ?? null,
+  }));
+}
+
+async function toResponse(
+  doc:      IIPDAdmission,
+  tenantId: string,
+  fullName: string | null = null,
+): Promise<AdmissionResponse> {
   return {
     admissionId:       doc.admissionId,
     patientId:         doc.patientId,
@@ -67,7 +102,7 @@ function toResponse(doc: IIPDAdmission, fullName: string | null = null): Admissi
     status:            doc.status,
     admissionDate:     doc.admissionDate.toISOString(),
     dischargeDate:     doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
-    progressNotes:     doc.progressNotes,
+    progressNotes:     await resolveProgressNoteStaffNames(tenantId, doc.progressNotes),
   };
 }
 
@@ -173,14 +208,25 @@ export class IPDService {
       });
     } catch { /* swallow — audit failure must not block primary response */ }
 
-    return toResponse(admission, patient.fullName);
+    return toResponse(admission, tenantId, patient.fullName);
   }
 
-  async getAdmissionById(admissionId: string, tenantId: string): Promise<AdmissionResponse> {
+  async getAdmissionById(
+    admissionId:      string,
+    tenantId:         string,
+    nurseWardIds?:    string[],
+    doctorPatientIds?: string[],
+  ): Promise<AdmissionResponse> {
     const admission = await ipdRepository.findById(admissionId, tenantId);
     if (!admission) throw new NotFoundError('Admission not found');
+    if (nurseWardIds && !nurseWardIds.includes(admission.wardId)) {
+      throw new NotFoundError('Admission not found');
+    }
+    if (doctorPatientIds && !doctorPatientIds.includes(admission.patientId)) {
+      throw new NotFoundError('Admission not found');
+    }
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
-    return toResponse(admission, patient?.fullName ?? null);
+    return toResponse(admission, tenantId, patient?.fullName ?? null);
   }
 
   async updateAdmission(
@@ -260,7 +306,7 @@ export class IPDService {
     if (Object.keys(fields).length === 0) {
       // Nothing changed — return current state
       const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
-      return toResponse(admission, patient?.fullName ?? null);
+      return toResponse(admission, tenantId, patient?.fullName ?? null);
     }
 
     const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
@@ -279,7 +325,7 @@ export class IPDService {
     } catch { /* swallow */ }
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async addProgressNote(
@@ -306,7 +352,7 @@ export class IPDService {
     if (!updated) throw new NotFoundError('Admission not found');
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async dischargePatient(
@@ -353,18 +399,19 @@ export class IPDService {
     } catch { /* swallow */ }
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async listAdmissions(
-    tenantId:         string,
-    query:            ListAdmissionsQuery,
+    tenantId:          string,
+    query:             ListAdmissionsQuery,
     assignedDoctorId?: string,
+    nurseWardIds?:     string[],
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds, assignedDoctorId);
+    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds, assignedDoctorId, nurseWardIds);
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);
@@ -378,27 +425,40 @@ export class IPDService {
 
     return {
       ...result,
-      data: result.data.map((admission) =>
-        toResponse(admission, map.get(admission.patientId) ?? null),
+      data: await Promise.all(
+        result.data.map((admission) =>
+          toResponse(admission, tenantId, map.get(admission.patientId) ?? null),
+        ),
       ),
     };
   }
 
   async getPatientHistory(
-    tenantId:  string,
-    patientId: string,
-    page:      number,
-    limit:     number,
-    status?:   'ADMITTED' | 'DISCHARGED',
+    tenantId:          string,
+    patientId:         string,
+    page:              number,
+    limit:             number,
+    status?:           'ADMITTED' | 'DISCHARGED',
+    nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (nurseWardIds) {
+      const scopedPatientIds = await ipdRepository.findPatientIdsByWards(tenantId, nurseWardIds);
+      if (!scopedPatientIds.includes(patientId)) throw new NotFoundError('Patient not found');
+    }
+
+    if (doctorPatientIds && !doctorPatientIds.includes(patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const result = await ipdRepository.findByPatient(tenantId, patientId, page, limit, status);
 
     return {
       ...result,
-      data: result.data.map((a) => toResponse(a, patient.fullName)),
+      data: await Promise.all(result.data.map((a) => toResponse(a, tenantId, patient.fullName))),
     };
   }
 

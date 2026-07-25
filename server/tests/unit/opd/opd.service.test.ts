@@ -438,6 +438,7 @@ describe('OPDService — example-based', () => {
         't1',
         expect.any(Date),
         'doc-99',
+        undefined,
       );
     });
 

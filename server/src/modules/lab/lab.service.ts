@@ -43,6 +43,17 @@ async function resolvePatientIdsBySearch(tenantId: string, search: string): Prom
   return patients.map((p) => p.patientId);
 }
 
+// Combines an optional search-derived patientId filter with an optional
+// doctor-scoping patientId filter (intersection when both are present, so a
+// Doctor's search results never include another doctor's patients).
+function combinePatientIdFilters(
+  searchIds?: string[],
+  scopeIds?:  string[],
+): string[] | undefined {
+  if (searchIds && scopeIds) return searchIds.filter((id) => scopeIds.includes(id));
+  return searchIds ?? scopeIds;
+}
+
 async function getPatientFullName(tenantId: string, patientId: string): Promise<string | undefined> {
   const patient = await patientRepository.findByPatientId(tenantId, patientId);
   return patient?.fullName;
@@ -112,12 +123,17 @@ export class LabService {
   // ─── Pathology ─────────────────────────────────────────────────────────────
 
   async createPathologyRequest(
-    input:    CreatePathologyRequestInput,
-    tenantId: string,
-    userId:   string,
+    input:              CreatePathologyRequestInput,
+    tenantId:           string,
+    userId:             string,
+    allowedPatientIds?: string[],
   ): Promise<PathologyRequestResponse> {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (allowedPatientIds && !allowedPatientIds.includes(input.patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const requester = await userRepository.findById(tenantId, userId);
 
@@ -214,21 +230,29 @@ export class LabService {
     return toPathologyResponse(updated);
   }
 
-  async getPathologyRequest(requestId: string, tenantId: string): Promise<PathologyRequestResponse> {
+  async getPathologyRequest(
+    requestId:          string,
+    tenantId:           string,
+    allowedPatientIds?: string[],
+  ): Promise<PathologyRequestResponse> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Pathology request not found');
+    }
     return toPathologyResponse(doc);
   }
 
   async listPathologyRequests(
-    tenantId:      string,
-    query:         ListLabRequestsQuery,
-    departmentIds?: string[],
+    tenantId:           string,
+    query:              ListLabRequestsQuery,
+    doctorPatientIds?:  string[],
   ): Promise<PaginatedResult<PathologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await labRepository.findPathologyByPatient(tenantId, query, searchPatientIds, departmentIds);
+    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
+    const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(
@@ -240,12 +264,17 @@ export class LabService {
   // ─── Radiology ─────────────────────────────────────────────────────────────
 
   async createRadiologyRequest(
-    input:    CreateRadiologyRequestInput,
-    tenantId: string,
-    userId:   string,
+    input:              CreateRadiologyRequestInput,
+    tenantId:           string,
+    userId:             string,
+    allowedPatientIds?: string[],
   ): Promise<RadiologyRequestResponse> {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (allowedPatientIds && !allowedPatientIds.includes(input.patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const requester = await userRepository.findById(tenantId, userId);
 
@@ -340,21 +369,29 @@ export class LabService {
     return toRadiologyResponse(updated);
   }
 
-  async getRadiologyRequest(requestId: string, tenantId: string): Promise<RadiologyRequestResponse> {
+  async getRadiologyRequest(
+    requestId:          string,
+    tenantId:           string,
+    allowedPatientIds?: string[],
+  ): Promise<RadiologyRequestResponse> {
     const doc = await labRepository.findRadiologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Radiology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Radiology request not found');
+    }
     return toRadiologyResponse(doc);
   }
 
   async listRadiologyRequests(
-    tenantId:      string,
-    query:         ListLabRequestsQuery,
-    departmentIds?: string[],
+    tenantId:          string,
+    query:             ListLabRequestsQuery,
+    doctorPatientIds?: string[],
   ): Promise<PaginatedResult<RadiologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await labRepository.findRadiologyByPatient(tenantId, query, searchPatientIds, departmentIds);
+    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
+    const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(

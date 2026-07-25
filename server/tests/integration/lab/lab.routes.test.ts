@@ -28,6 +28,8 @@ import { UserModel }        from '../../../src/modules/user/user.model';
 import { TenantModel }      from '../../../src/modules/tenant/tenant.model';
 import { PatientModel }     from '../../../src/modules/patient/patient.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
+import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
+import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { TenantStatus, UserRole }     from '../../../src/shared/types/common.types';
 import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
 
@@ -95,6 +97,21 @@ beforeEach(async () => {
     patientId: 'PAT-001', tenantId, fullName: 'John Doe',
     dateOfBirth: new Date('1980-01-01'), gender: 'MALE',
     mobileNumber: '1234567890', address: '123 Test Street',
+  });
+
+  // Doctor-patient assignment: Lab Doctor is assigned to PAT-001 via an OPD
+  // visit, so all existing "doctor acts on PAT-001" tests below continue to
+  // hold now that Doctor Lab access is scoped to assigned patients.
+  await OPDVisitModel.create({
+    visitId:        'OPD-LABTEST01',
+    tenantId,
+    patientId:      'PAT-001',
+    doctorIds:      [doctorId],
+    departmentId:   null,
+    visitDate:      new Date(),
+    queueNumber:    1,
+    status:         'OPEN',
+    chiefComplaint: 'Routine checkup',
   });
 
   const admin = await UserModel.create({
@@ -269,6 +286,159 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
   });
 });
 
+
+// ─── Doctor patient-assignment scoping ────────────────────────────────────────
+
+describe('Doctor Lab access is scoped to assigned patients', () => {
+  async function seedUnassignedPatient() {
+    await PatientModel.create({
+      patientId: 'PAT-002', tenantId, fullName: 'Jane Roe',
+      dateOfBirth: new Date('1985-01-01'), gender: 'FEMALE',
+      mobileNumber: '9998887777', address: '456 Other Street',
+    });
+  }
+
+  test('404 — doctor cannot create a pathology request for a patient not assigned to them', async () => {
+    await seedUnassignedPatient();
+
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('404 — doctor cannot create a radiology request for a patient not assigned to them', async () => {
+    await seedUnassignedPatient();
+
+    const res = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', imagingType: 'X-Ray Chest' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('201 — doctor can create a pathology request for a patient assigned only via an IPD admission', async () => {
+    await seedUnassignedPatient();
+    await IPDAdmissionModel.create({
+      admissionId:       'adm-lab-001',
+      patientId:         'PAT-002',
+      wardId:            'ward-1',
+      bedId:             'bed-1',
+      bedNumber:         'B-01',
+      wardName:          'General Ward',
+      assignedDoctorIds: [doctorId],
+      status:            'ADMITTED',
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId,
+    });
+
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('GET /api/lab/pathology — doctor sees only requests for their own assigned patients', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-001');
+  });
+
+  test('GET /api/lab/pathology/:requestId — doctor can fetch a request for their own patient (200)', async () => {
+    const requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('GET /api/lab/pathology/:requestId — doctor cannot fetch another doctor\'s patient\'s request, even by direct ID (404)', async () => {
+    await seedUnassignedPatient();
+    const requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-002', tenantId,
+      requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('GET /api/lab/radiology/:requestId — doctor cannot fetch another doctor\'s patient\'s request, even by direct ID (404)', async () => {
+    await seedUnassignedPatient();
+    const requestId = uuidv4();
+    await RadiologyRequestModel.create({
+      requestId, patientId: 'PAT-002', tenantId,
+      requestedBy: '507f1f77bcf86cd799439011', imagingType: 'CT Scan',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('HOSPITAL_ADMIN continues to see lab requests for all patients (unaffected)', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+  });
+});
 
 // ─── Radiology ────────────────────────────────────────────────────────────────
 

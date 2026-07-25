@@ -2,8 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { opdService } from './opd.service';
 import { IOPDVisit } from './opd.model';
-import { ValidationError } from '../../shared/middleware/error-handler';
+import { ValidationError, NotFoundError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
+import { ipdRepository } from '../ipd/ipd.repository';
+import { opdRepository } from './opd.repository';
 
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
@@ -71,6 +73,35 @@ function toResponse(v: IOPDVisit) {
   };
 }
 
+// A Nurse only sees OPD visits for patients currently admitted (active IPD
+// admission) in their assigned ward(s). Returns undefined for any other role.
+async function resolveNursePatientIds(
+  tenantId: string,
+  role:     UserRole,
+  userId:   string,
+): Promise<string[] | undefined> {
+  if (role !== UserRole.NURSE) return undefined;
+  const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, userId);
+  if (!wardIds.length) return [];
+  return ipdRepository.findPatientIdsByWards(tenantId, wardIds);
+}
+
+// A Doctor only sees OPD visits/history for patients they've been assigned to —
+// via an OPD visit (doctorIds) or an IPD admission (assignedDoctorIds), current
+// or past. Returns undefined for any other role (no restriction applied).
+async function resolveDoctorPatientIds(
+  tenantId: string,
+  role:     UserRole,
+  userId:   string,
+): Promise<string[] | undefined> {
+  if (role !== UserRole.DOCTOR) return undefined;
+  const [opdIds, ipdIds] = await Promise.all([
+    opdRepository.findPatientIdsByDoctor(tenantId, userId),
+    ipdRepository.findPatientIdsByAssignedDoctor(tenantId, userId),
+  ]);
+  return [...new Set([...opdIds, ...ipdIds])];
+}
+
 export async function createVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const body = createVisitSchema.safeParse(req.body);
@@ -91,8 +122,9 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     const doctorId = req.user!.role === UserRole.DOCTOR
       ? req.user!.userId
       : query.data.doctorId;
+    const nursePatientIds = await resolveNursePatientIds(tenantId, req.user!.role, req.user!.userId);
 
-    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search);
+    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search, nursePatientIds);
     res.status(200).json({
       status: 'success',
       data: visits.map((v) => toResponse(v)),
@@ -102,7 +134,16 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
 
 export async function getVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const visit = await opdService.getVisitById(req.user!.tenantId!, req.params.visitId);
+    const tenantId = req.user!.tenantId!;
+    const visit = await opdService.getVisitById(tenantId, req.params.visitId);
+
+    if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
+      const scopedIds = req.user!.role === UserRole.NURSE
+        ? await resolveNursePatientIds(tenantId, req.user!.role, req.user!.userId)
+        : await resolveDoctorPatientIds(tenantId, req.user!.role, req.user!.userId);
+      if (!scopedIds?.includes(visit.patientId)) throw new NotFoundError('OPD visit not found');
+    }
+
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
 }
@@ -154,11 +195,15 @@ export async function getPatientHistory(req: Request, res: Response, next: NextF
     const query = historyQuerySchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params', { errors: query.error.flatten() });
 
+    const tenantId = req.user!.tenantId!;
     const { page, limit, startDate, endDate, status, search } = query.data;
+    const scopedPatientIds = (await resolveNursePatientIds(tenantId, req.user!.role, req.user!.userId))
+      ?? (await resolveDoctorPatientIds(tenantId, req.user!.role, req.user!.userId));
     const result = await opdService.getPatientHistory(
-      req.user!.tenantId!,
+      tenantId,
       req.params.patientId,
       { page, limit, startDate, endDate, status, search },
+      scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

@@ -34,11 +34,12 @@ import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
-let mongod:       MongoMemoryServer;
-let tenantId:     string;
-let adminToken:   string;
-let managerToken: string;
-let doctorToken:  string;
+let mongod:         MongoMemoryServer;
+let tenantId:       string;
+let adminToken:     string;
+let adminRoleToken: string;
+let managerToken:   string;
+let doctorToken:    string;
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
@@ -75,6 +76,10 @@ beforeEach(async () => {
     tenantId, email: 'admin@inv.com', name: 'Inv Admin', passwordHash: 'x',
     role: UserRole.HOSPITAL_ADMIN, isActive: true, isFirstLogin: false,
   });
+  const adminRole = await UserModel.create({
+    tenantId, email: 'adminrole@inv.com', name: 'Inv Admin Role', passwordHash: 'x',
+    role: UserRole.ADMIN, isActive: true, isFirstLogin: false,
+  });
   const manager = await UserModel.create({
     tenantId, email: 'manager@inv.com', name: 'Inv Manager', passwordHash: 'x',
     role: UserRole.MANAGER, isActive: true, isFirstLogin: false,
@@ -90,9 +95,10 @@ beforeEach(async () => {
       JWT_SECRET,
     );
 
-  adminToken   = sign((admin._id as mongoose.Types.ObjectId).toString(), UserRole.HOSPITAL_ADMIN);
-  managerToken = sign((manager._id as mongoose.Types.ObjectId).toString(), UserRole.MANAGER);
-  doctorToken  = sign((doctor._id as mongoose.Types.ObjectId).toString(), UserRole.DOCTOR);
+  adminToken     = sign((admin._id as mongoose.Types.ObjectId).toString(), UserRole.HOSPITAL_ADMIN);
+  adminRoleToken = sign((adminRole._id as mongoose.Types.ObjectId).toString(), UserRole.ADMIN);
+  managerToken   = sign((manager._id as mongoose.Types.ObjectId).toString(), UserRole.MANAGER);
+  doctorToken    = sign((doctor._id as mongoose.Types.ObjectId).toString(), UserRole.DOCTOR);
 });
 
 // ─── Create ───────────────────────────────────────────────────────────────────
@@ -648,5 +654,119 @@ describe('GET /api/inventory/:itemId/stock-history', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+// ─── ADMIN role access (parity with HOSPITAL_ADMIN) ───────────────────────────
+
+describe('ADMIN role — inventory access', () => {
+  test('ADMIN can create an inventory item (201)', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({
+        name: 'Paracetamol 500mg', category: 'Medication', unit: 'tablets',
+        quantity: 200, lowStockThreshold: 50,
+      });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('ADMIN can list inventory items (200)', async () => {
+    const res = await request(app)
+      .get('/api/inventory')
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('ADMIN can get an inventory item by ID (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Gloves', category: 'PPE', unit: 'pairs',
+      quantity: 100, lowStockThreshold: 10,
+    });
+
+    const res = await request(app)
+      .get(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('ADMIN can update stock (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Paracetamol', category: 'Medication',
+      unit: 'tablets', quantity: 100, lowStockThreshold: 10,
+    });
+
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/stock`)
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({ quantityChange: -20, reason: 'dispense to ward' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.quantity).toBe(80);
+  });
+
+  test('ADMIN can update the low-stock threshold (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Gloves', category: 'PPE',
+      unit: 'pairs', quantity: 100, lowStockThreshold: 10,
+    });
+
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/threshold`)
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({ lowStockThreshold: 25 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.lowStockThreshold).toBe(25);
+  });
+
+  test('ADMIN can edit item metadata (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Bandages', category: 'Consumable',
+      unit: 'rolls', quantity: 200, lowStockThreshold: 20,
+    });
+
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({ name: 'Premium Bandages' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Premium Bandages');
+  });
+
+  test('ADMIN can access stock history (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Saline Bags', category: 'Fluids',
+      unit: 'bags', quantity: 100, lowStockThreshold: 10,
+    });
+
+    const res = await request(app)
+      .get(`/api/inventory/${itemId}/stock-history`)
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('ADMIN can delete an item (200)', async () => {
+    const itemId = uuidv4();
+    await InventoryItemModel.create({
+      itemId, tenantId, name: 'Expired Stock', category: 'Medication',
+      unit: 'bottles', quantity: 10, lowStockThreshold: 5,
+    });
+
+    const res = await request(app)
+      .delete(`/api/inventory/${itemId}`)
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
   });
 });

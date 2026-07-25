@@ -42,8 +42,12 @@ export class OPDRepository {
       tenantId,
       visitDate: { $gte: start, $lte: end },
     };
-    if (doctorId)            query.doctorIds = { $in: [doctorId] };
-    if (patientIds?.length)  query.patientId = { $in: patientIds };
+    if (doctorId)     query.doctorIds = { $in: [doctorId] };
+    // Must distinguish "no restriction" (undefined) from "restricted to zero
+    // patients" (empty array, e.g. a nurse with no ward assignment) — an empty
+    // $in correctly matches nothing, whereas skipping the filter would leak
+    // every patient's visits.
+    if (patientIds)   query.patientId = { $in: patientIds };
 
     return OPDVisitModel.find(query).sort({ queueNumber: 1 });
   }
@@ -154,6 +158,17 @@ export class OPDRepository {
       }
       throw err;
     }
+  }
+
+  // Patients this doctor has ever had an OPD visit with — one half of the
+  // "assigned patients" set used to scope a Doctor's Patient/OPD/IPD/Lab access.
+  async findPatientIdsByDoctor(tenantId: string, doctorId: string): Promise<string[]> {
+    assertDbConnected();
+    const patientIds = await OPDVisitModel.distinct('patientId', {
+      tenantId,
+      doctorIds: doctorId,
+    });
+    return patientIds as string[];
   }
 
   async countByDate(tenantId: string, date: Date): Promise<number> {

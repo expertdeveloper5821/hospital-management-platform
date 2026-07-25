@@ -458,7 +458,7 @@ export default function WardsPage() {
   if (!role) return null;
 
   const canManage        = role === UserRole.HOSPITAL_ADMIN || role === UserRole.ADMIN;
-  const canAssignNurses  = role === UserRole.HOSPITAL_ADMIN || role === UserRole.DOCTOR;
+  const canAssignNurses  = role === UserRole.HOSPITAL_ADMIN || role === UserRole.ADMIN || role === UserRole.DOCTOR;
   const canViewOccupancy =
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN          ||

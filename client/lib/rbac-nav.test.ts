@@ -26,6 +26,15 @@ describe('getNavItems — RBAC nav filtering', () => {
     expect(hrefs).toContain('/audit');
   });
 
+  it('MANAGER does not see Audit Logs, but keeps other modules', () => {
+    const items = getNavItems('MANAGER');
+    const hrefs = items.map((i) => i.href);
+    expect(hrefs).not.toContain('/audit');
+    expect(hrefs).toContain('/patients');
+    expect(hrefs).toContain('/inventory');
+    expect(hrefs).toContain('/payments');
+  });
+
   it('DOCTOR sees patient, OPD, IPD, lab — not payments or inventory', () => {
     const items = getNavItems('DOCTOR');
     const hrefs = items.map((i) => i.href);
@@ -81,6 +90,16 @@ describe('getNavItems — RBAC nav filtering', () => {
     expect(hrefs).toContain('/payments');
     expect(hrefs).not.toContain('/patients');
     expect(hrefs).not.toContain('/lab');
+  });
+
+  it('ADMIN does not see Audit Logs, but keeps other modules', () => {
+    const items = getNavItems('ADMIN');
+    const hrefs = items.map((i) => i.href);
+    expect(hrefs).not.toContain('/audit');
+    expect(hrefs).toContain('/patients');
+    expect(hrefs).toContain('/inventory');
+    expect(hrefs).toContain('/payments');
+    expect(hrefs).toContain('/admin');
   });
 
   it('HR sees only users', () => {

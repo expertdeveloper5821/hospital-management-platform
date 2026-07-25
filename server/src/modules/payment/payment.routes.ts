@@ -22,28 +22,28 @@ router.use(authenticateJWT, scopeTenant);
 // POST /api/payments/manual — record a Cash/Cheque payment (U5-B-05)
 router.post(
   '/manual',
-  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   createManualPayment,
 );
 
 // POST /api/payments/razorpay-order — initiate a UPI/Card order (U5-C)
 router.post(
   '/razorpay-order',
-  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   createRazorpayOrder,
 );
 
 // POST /api/payments/razorpay/verify — confirm a successful checkout (client handler)
 router.post(
   '/razorpay/verify',
-  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   verifyRazorpayPayment,
 );
 
 // POST /api/payments/razorpay/cancel — mark an abandoned checkout CANCELLED (client dismiss)
 router.post(
   '/razorpay/cancel',
-  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   cancelRazorpayOrder,
 );
 
@@ -51,7 +51,7 @@ router.post(
 router.get(
   '/',
   requireRole(
-    UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN,
+    UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN,
     UserRole.RECEPTIONIST,
   ),
   listPayments,
@@ -60,7 +60,7 @@ router.get(
 // GET /api/payments/summary — totals by method (U5-B-04)
 router.get(
   '/summary',
-  requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   getPaymentSummary,
 );
 
@@ -69,7 +69,7 @@ router.get(
   '/:paymentId/receipt',
   requireRole(
     UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER,
-    UserRole.MANAGER,      UserRole.HOSPITAL_ADMIN,
+    UserRole.MANAGER,      UserRole.HOSPITAL_ADMIN, UserRole.ADMIN,
   ),
   getReceiptUrl,
 );

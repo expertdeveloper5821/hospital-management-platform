@@ -104,6 +104,24 @@ describe('GET /api/audit', () => {
     expect(res.status).toBe(403);
   });
 
+  test('returns 403 for MANAGER role', async () => {
+    const managerToken = makeToken(uuidv4(), UserRole.MANAGER);
+    const res = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe("Access denied. You don't have permission to perform this action.");
+  });
+
+  test('returns 403 for ADMIN role', async () => {
+    const adminRoleToken = makeToken(uuidv4(), UserRole.ADMIN);
+    const res = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe("Access denied. You don't have permission to perform this action.");
+  });
+
   test('HOSPITAL_ADMIN can retrieve audit logs for their tenant', async () => {
     await seedLogs(3);
     const res = await request(app)

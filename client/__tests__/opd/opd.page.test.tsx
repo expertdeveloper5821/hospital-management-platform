@@ -28,6 +28,10 @@ jest.mock('@/store/api/department.api', () => ({
   useListDepartmentsQuery: () => ({ data: undefined }),
 }));
 
+jest.mock('@/store/api/ipd.api', () => ({
+  useListWardsQuery: () => ({ data: [] }),
+}));
+
 let mockRole = 'RECEPTIONIST';
 
 jest.mock('@/store/hooks', () => ({

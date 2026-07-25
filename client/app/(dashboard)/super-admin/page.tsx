@@ -136,7 +136,7 @@ export default function SuperAdminPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Super Admin Panel</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage hospital tenants — {total} total
+            Manage Tenants — {total} total
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">

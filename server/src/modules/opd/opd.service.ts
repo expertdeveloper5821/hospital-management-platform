@@ -235,14 +235,15 @@ export class OPDService {
   }
 
   async getQueue(
-    tenantId:  string,
-    date?:     string,
-    doctorId?: string,
-    search?:   string,
+    tenantId:    string,
+    date?:       string,
+    doctorId?:   string,
+    search?:     string,
+    patientIds?: string[],
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
 
-    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId);
+    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds);
 
     const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
@@ -271,12 +272,17 @@ export class OPDService {
   }
 
   async getPatientHistory(
-    tenantId:  string,
-    patientId: string,
-    filters:   OpdHistoryFilters,
+    tenantId:       string,
+    patientId:      string,
+    filters:        OpdHistoryFilters,
+    scopedPatientIds?: string[],
   ): Promise<PaginatedResult<OPDVisitResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (scopedPatientIds && !scopedPatientIds.includes(patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const result = await opdRepository.findByPatient(tenantId, patientId, filters);
 

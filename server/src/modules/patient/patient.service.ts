@@ -163,8 +163,9 @@ export class PatientService {
     page:         number,
     limit:        number,
     departmentIds?: string[],
+    patientIds?:    string[],
   ): Promise<PaginatedResult<IPatient>> {
-    return patientRepository.search(tenantId, q, page, limit, departmentIds);
+    return patientRepository.search(tenantId, q, page, limit, departmentIds, patientIds);
   }
 
   async generateMedicalCard(

@@ -16,6 +16,13 @@ export interface ProgressNote {
   timestamp: Date;
 }
 
+// Response shape only — staffName is resolved from the user collection at
+// read time (via ProgressNote.doctorId, the creator's userId) and is never
+// stored on the admission document itself.
+export interface ProgressNoteResponse extends ProgressNote {
+  staffName: string | null;
+}
+
 // ─── Zod Validation Schemas ───────────────────────────────────────────────────
 
 // wardId and bedId are MongoDB ObjectId strings (24-char hex) from U3-A models
@@ -64,7 +71,7 @@ export interface AdmissionResponse {
   status:            AdmissionStatus;
   admissionDate:     string;
   dischargeDate:     string | null;
-  progressNotes:     ProgressNote[];
+  progressNotes:     ProgressNoteResponse[];
 }
 
 // Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)

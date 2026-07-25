@@ -565,7 +565,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md rounded-lg bg-background shadow-xl">
+      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
             <h2 className="text-base font-semibold">Update Stock</h2>
@@ -866,8 +866,8 @@ export default function InventoryPage() {
 
   const lowStockCount = items.filter((i) => i.isLowStock).length;
 
-  const canManage = ['HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
-  const canView   = ['HOSPITAL_ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
+  const canManage = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER'].includes(role ?? '');
+  const canView   = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
 
   function handleCategoryFilter() {
     setCategoryFilter(categoryInput.trim());

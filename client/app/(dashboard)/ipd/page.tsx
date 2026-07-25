@@ -911,7 +911,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
                   {new Date(n.timestamp).toLocaleString()}
                   {' · '}
                   <span className="font-medium text-foreground">
-                    {doctorMap[n.doctorId] ?? `Dr. ${n.doctorId.slice(0, 8)}…`}
+                    {n.staffName ?? doctorMap[n.doctorId] ?? `Staff ${n.doctorId.slice(0, 8)}…`}
                   </span>
                 </p>
                 <p className="text-sm whitespace-pre-wrap">{n.note}</p>
@@ -988,6 +988,9 @@ function DischargeConfirm({ admission, onConfirm, onCancel, loading }: Discharge
 // ─── Admissions Tab ───────────────────────────────────────────────────────────
 
 function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] }) {
+  const userId = useAppSelector((s) => s.auth.profile?.userId);
+  const nurseHasNoWard = role === UserRole.NURSE && !wards.some((w) => w.assignedNurseIds.includes(userId ?? ''));
+
   const [filterWard,      setFilterWard]      = useState('');
   const [filterStatus,    setFilterStatus]    = useState<'ADMITTED' | 'DISCHARGED'>('ADMITTED');
   const [searchQ,         setSearchQ]         = useState('');
@@ -1112,7 +1115,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
         ) : admissions.length === 0 ? (
           <div className="py-20 text-center text-sm text-muted-foreground">
             <Bed className="mx-auto h-8 w-8 mb-3 opacity-40" />
-            {searchQ ? 'No admissions match your search.' : 'No admissions found.'}
+            {nurseHasNoWard
+              ? 'No ward has been assigned to your account.'
+              : searchQ ? 'No admissions match your search.' : 'No admissions found.'}
           </div>
         ) : (
           <>

@@ -160,10 +160,10 @@ router.get('/wards',
   listWards,
 );
 
-// PATCH /api/ipd/wards/:wardId/nurses — HOSPITAL_ADMIN and DOCTOR assign nurses
+// PATCH /api/ipd/wards/:wardId/nurses — HOSPITAL_ADMIN, ADMIN, and DOCTOR assign nurses
 router.patch('/wards/:wardId/nurses',
   ...protect,
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.DOCTOR),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.DOCTOR),
   assignNurses,
 );
 
