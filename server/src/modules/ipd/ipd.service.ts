@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { ipdRepository } from './ipd.repository';
+import { opdRepository } from '../opd/opd.repository';
 import { IIPDAdmission } from './ipd.model';
 import { IWard }          from './ward.model';
 import { IBed }           from './bed.model';
@@ -41,6 +42,17 @@ async function resolvePatientIdsBySearch(tenantId: string, search: string): Prom
   return patients.map((p) => p.patientId);
 }
 
+// Combines an optional search-derived patientId filter with an optional
+// doctor-scoping patientId filter (intersection when both are present, so a
+// Doctor's search results never include another doctor's patients).
+function combinePatientIdFilters(
+  searchIds?: string[],
+  scopeIds?:  string[],
+): string[] | undefined {
+  if (searchIds && scopeIds) return searchIds.filter((id) => scopeIds.includes(id));
+  return searchIds ?? scopeIds;
+}
+
 // ─── BedOccupiedError (standalone — NOT inside IPDService) ───────────────────
 export class BedOccupiedError extends Error {
   readonly statusCode = 409;
@@ -58,23 +70,12 @@ export class BedOccupiedError extends Error {
 // Progress notes store only the creator's userId (field name `doctorId` is
 // historical — a NURSE can also author a note). Resolve each unique author to
 // their display name in one batch, rather than storing/duplicating it on write.
-async function resolveProgressNoteStaffNames(
-  tenantId: string,
-  notes:    ProgressNote[],
-): Promise<ProgressNoteResponse[]> {
-  if (notes.length === 0) return [];
-
-  const uniqueIds = [...new Set(notes.map((n) => n.doctorId))];
-  const users = await Promise.all(uniqueIds.map((id) => userRepository.findById(tenantId, id)));
-
-  const nameMap = new Map<string, string>();
-  uniqueIds.forEach((id, i) => {
-    const user = users[i];
-    if (user) nameMap.set(id, user.name);
-  });
-
-  // Build plain objects field-by-field — `notes` may be Mongoose subdocuments,
-  // whose own properties aren't enumerable, so a spread ({...n}) silently drops them.
+// Build plain objects field-by-field — `notes` may be Mongoose subdocuments,
+// whose own properties aren't enumerable, so a spread ({...n}) silently drops them.
+function mapProgressNotes(
+  notes:   ProgressNote[],
+  nameMap: Map<string, string>,
+): ProgressNoteResponse[] {
   return notes.map((n) => ({
     noteId:    n.noteId,
     doctorId:  n.doctorId,
@@ -84,10 +85,23 @@ async function resolveProgressNoteStaffNames(
   }));
 }
 
-async function toResponse(
-  doc:      IIPDAdmission,
+async function resolveProgressNoteStaffNames(
   tenantId: string,
-  fullName: string | null = null,
+  notes:    ProgressNote[],
+): Promise<ProgressNoteResponse[]> {
+  if (notes.length === 0) return [];
+
+  const uniqueIds = [...new Set(notes.map((n) => n.doctorId))];
+  const nameMap = await userRepository.findNamesByIds(tenantId, uniqueIds);
+
+  return mapProgressNotes(notes, nameMap);
+}
+
+async function toResponse(
+  doc:           IIPDAdmission,
+  tenantId:      string,
+  fullName:      string | null = null,
+  staffNameMap?: Map<string, string>,
 ): Promise<AdmissionResponse> {
   return {
     admissionId:       doc.admissionId,
@@ -102,7 +116,9 @@ async function toResponse(
     status:            doc.status,
     admissionDate:     doc.admissionDate.toISOString(),
     dischargeDate:     doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
-    progressNotes:     await resolveProgressNoteStaffNames(tenantId, doc.progressNotes),
+    progressNotes:     staffNameMap
+      ? mapProgressNotes(doc.progressNotes, staffNameMap)
+      : await resolveProgressNoteStaffNames(tenantId, doc.progressNotes),
   };
 }
 
@@ -405,13 +421,14 @@ export class IPDService {
   async listAdmissions(
     tenantId:          string,
     query:             ListAdmissionsQuery,
-    assignedDoctorId?: string,
     nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds, assignedDoctorId, nurseWardIds);
+    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
+    const result = await ipdRepository.findActiveAdmissions(tenantId, query, scopedPatientIds, nurseWardIds);
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);
@@ -423,11 +440,14 @@ export class IPDService {
 
     const map = new Map(patients.map(p => [p.patientId, p.fullName]));
 
+    const allAuthorIds = [...new Set(admissions.flatMap((a) => a.progressNotes.map((n) => n.doctorId)))];
+    const staffNameMap = await userRepository.findNamesByIds(tenantId, allAuthorIds);
+
     return {
       ...result,
       data: await Promise.all(
         result.data.map((admission) =>
-          toResponse(admission, tenantId, map.get(admission.patientId) ?? null),
+          toResponse(admission, tenantId, map.get(admission.patientId) ?? null, staffNameMap),
         ),
       ),
     };
@@ -465,6 +485,51 @@ export class IPDService {
   async getBedOccupancySummary(tenantId: string): Promise<WardOccupancySummary[]> {
     // Delegates to U3-A's aggregation-based occupancy query (single DB round-trip)
     return ipdRepository.getOccupancySummary(tenantId);
+  }
+
+  // ─── Role-based access scope resolution ─────────────────────────────────────
+  // Canonical implementations — reused by OPDService and PatientService so the
+  // same nurse/doctor scoping logic isn't duplicated across modules.
+
+  // A Nurse is restricted to the ward(s) they're assigned via Ward.assignedNurseIds.
+  // Returns undefined for any other role (no restriction applied).
+  async resolveNurseWardIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.NURSE) return undefined;
+    return ipdRepository.findWardIdsByNurse(tenantId, userId);
+  }
+
+  // A Nurse only sees patients currently admitted (active IPD admission) in
+  // their assigned ward(s) — Ward.assignedNurseIds is the source of truth.
+  // Returns undefined for any other role (no restriction applied).
+  async resolveNursePatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.NURSE) return undefined;
+    const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, userId);
+    if (!wardIds.length) return [];
+    return ipdRepository.findPatientIdsByWards(tenantId, wardIds);
+  }
+
+  // A Doctor only sees patients/records they've been assigned to — via an OPD
+  // visit (doctorIds) or an IPD admission (assignedDoctorIds), current or
+  // past. Returns undefined for any other role (no restriction applied).
+  async resolveDoctorPatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.DOCTOR) return undefined;
+    const [opdIds, ipdIds] = await Promise.all([
+      opdRepository.findPatientIdsByDoctor(tenantId, userId),
+      ipdRepository.findPatientIdsByAssignedDoctor(tenantId, userId),
+    ]);
+    return [...new Set([...opdIds, ...ipdIds])];
   }
 
   // ─── U3-A: Ward Management ──────────────────────────────────────────────────

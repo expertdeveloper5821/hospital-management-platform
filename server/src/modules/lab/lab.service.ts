@@ -403,13 +403,17 @@ export class LabService {
   // ─── Edit & Delete — Pathology ────────────────────────────────────────────
 
   async editPathologyRequest(
-    requestId: string,
-    tenantId:  string,
-    userId:    string,
-    input:     EditPathologyRequestInput,
+    requestId:          string,
+    tenantId:           string,
+    userId:             string,
+    input:              EditPathologyRequestInput,
+    allowedPatientIds?: string[],
   ): Promise<PathologyRequestResponse> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Pathology request not found');
+    }
     if (doc.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Cannot edit a completed pathology request', 409);
     }
@@ -424,7 +428,7 @@ export class LabService {
       }
     }
 
-    const updated = await labRepository.updatePathology(requestId, tenantId, updatePayload);
+    const updated = await labRepository.updatePathology(requestId, tenantId, updatePayload, allowedPatientIds);
     if (!updated) throw new NotFoundError('Pathology request not found');
 
     try {
@@ -443,13 +447,17 @@ export class LabService {
   }
 
   async deletePathologyRequest(
-    requestId: string,
-    tenantId:  string,
-    userId:    string,
-    userRole:  UserRole,
+    requestId:          string,
+    tenantId:           string,
+    userId:             string,
+    userRole:           UserRole,
+    allowedPatientIds?: string[],
   ): Promise<void> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Pathology request not found');
+    }
 
     if (doc.status === LabRequestStatus.COMPLETED) {
       if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
@@ -457,7 +465,7 @@ export class LabService {
       }
     }
 
-    const deleted = await labRepository.softDeletePathology(requestId, tenantId);
+    const deleted = await labRepository.softDeletePathology(requestId, tenantId, allowedPatientIds);
     if (!deleted) throw new NotFoundError('Pathology request not found');
 
     try {
@@ -475,13 +483,17 @@ export class LabService {
   // ─── Edit & Delete — Radiology ────────────────────────────────────────────
 
   async editRadiologyRequest(
-    requestId: string,
-    tenantId:  string,
-    userId:    string,
-    input:     EditRadiologyRequestInput,
+    requestId:          string,
+    tenantId:           string,
+    userId:             string,
+    input:              EditRadiologyRequestInput,
+    allowedPatientIds?: string[],
   ): Promise<RadiologyRequestResponse> {
     const doc = await labRepository.findRadiologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Radiology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Radiology request not found');
+    }
     if (doc.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Cannot edit a completed radiology request', 409);
     }
@@ -496,7 +508,7 @@ export class LabService {
       }
     }
 
-    const updated = await labRepository.updateRadiology(requestId, tenantId, updatePayload);
+    const updated = await labRepository.updateRadiology(requestId, tenantId, updatePayload, allowedPatientIds);
     if (!updated) throw new NotFoundError('Radiology request not found');
 
     try {
@@ -515,13 +527,17 @@ export class LabService {
   }
 
   async deleteRadiologyRequest(
-    requestId: string,
-    tenantId:  string,
-    userId:    string,
-    userRole:  UserRole,
+    requestId:          string,
+    tenantId:           string,
+    userId:             string,
+    userRole:           UserRole,
+    allowedPatientIds?: string[],
   ): Promise<void> {
     const doc = await labRepository.findRadiologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Radiology request not found');
+    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+      throw new NotFoundError('Radiology request not found');
+    }
 
     if (doc.status === LabRequestStatus.COMPLETED) {
       if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
@@ -529,7 +545,7 @@ export class LabService {
       }
     }
 
-    const deleted = await labRepository.softDeleteRadiology(requestId, tenantId);
+    const deleted = await labRepository.softDeleteRadiology(requestId, tenantId, allowedPatientIds);
     if (!deleted) throw new NotFoundError('Radiology request not found');
 
     try {

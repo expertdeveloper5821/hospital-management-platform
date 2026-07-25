@@ -6,8 +6,6 @@ import { ValidationError, NotFoundError } from '../../shared/middleware/error-ha
 import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
 import { paymentService } from '../payment/payment.service';
 import { PaymentMethod } from '../payment/payment.types';
-import { ipdRepository } from '../ipd/ipd.repository';
-import { opdRepository } from '../opd/opd.repository';
 import { UserRole } from '../../shared/types/common.types';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
@@ -81,36 +79,6 @@ function toResponse(p: IPatient) {
   };
 }
 
-// A Nurse only sees patients currently admitted (active IPD admission) in their
-// assigned ward(s) — Ward.assignedNurseIds is the source of truth. Returns
-// undefined for any other role (no restriction applied).
-async function resolveNursePatientIds(
-  tenantId: string,
-  role:     UserRole,
-  userId:   string,
-): Promise<string[] | undefined> {
-  if (role !== UserRole.NURSE) return undefined;
-  const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, userId);
-  if (!wardIds.length) return [];
-  return ipdRepository.findPatientIdsByWards(tenantId, wardIds);
-}
-
-// A Doctor only sees patients they've been assigned to — via an OPD visit
-// (doctorIds) or an IPD admission (assignedDoctorIds), current or past.
-// Returns undefined for any other role (no restriction applied).
-async function resolveDoctorPatientIds(
-  tenantId: string,
-  role:     UserRole,
-  userId:   string,
-): Promise<string[] | undefined> {
-  if (role !== UserRole.DOCTOR) return undefined;
-  const [opdIds, ipdIds] = await Promise.all([
-    opdRepository.findPatientIdsByDoctor(tenantId, userId),
-    ipdRepository.findPatientIdsByAssignedDoctor(tenantId, userId),
-  ]);
-  return [...new Set([...opdIds, ...ipdIds])];
-}
-
 export async function createPatient(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const body = createPatientSchema.safeParse(req.body);
@@ -162,8 +130,8 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
     const { q, page, limit } = query.data;
 
     const tenantId   = req.user!.tenantId!;
-    const patientIds = (await resolveNursePatientIds(tenantId, req.user!.role, req.user!.userId))
-      ?? (await resolveDoctorPatientIds(tenantId, req.user!.role, req.user!.userId));
+    const patientIds = (await patientService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role))
+      ?? (await patientService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role));
 
     const result = await patientService.searchPatients(tenantId, q, page, limit, undefined, patientIds);
     res.status(200).json({ status: 'success', data: result });
@@ -177,8 +145,8 @@ export async function getPatient(req: Request, res: Response, next: NextFunction
 
     if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
       const scopedIds = req.user!.role === UserRole.NURSE
-        ? await resolveNursePatientIds(tenantId, req.user!.role, req.user!.userId)
-        : await resolveDoctorPatientIds(tenantId, req.user!.role, req.user!.userId);
+        ? await patientService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role)
+        : await patientService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
       if (!scopedIds?.includes(patientId)) throw new NotFoundError('Patient not found');
     }
 

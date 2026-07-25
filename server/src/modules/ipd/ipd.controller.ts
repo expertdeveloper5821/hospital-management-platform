@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { ipdService } from './ipd.service';
-import { ipdRepository } from './ipd.repository';
-import { opdRepository } from '../opd/opd.repository';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import {
   CreateAdmissionSchema,
@@ -53,33 +51,6 @@ function toBedResponse(b: IBed) {
   };
 }
 
-// A Nurse is restricted to the ward(s) they're assigned via Ward.assignedNurseIds.
-// Returns undefined for any other role (no restriction applied).
-async function resolveNurseWardIds(
-  tenantId: string,
-  userId:   string,
-  role:     UserRole,
-): Promise<string[] | undefined> {
-  if (role !== UserRole.NURSE) return undefined;
-  return ipdRepository.findWardIdsByNurse(tenantId, userId);
-}
-
-// A Doctor only sees IPD admissions/history for patients they've been assigned
-// to — via an OPD visit (doctorIds) or an IPD admission (assignedDoctorIds),
-// current or past. Returns undefined for any other role (no restriction applied).
-async function resolveDoctorPatientIds(
-  tenantId: string,
-  userId:   string,
-  role:     UserRole,
-): Promise<string[] | undefined> {
-  if (role !== UserRole.DOCTOR) return undefined;
-  const [opdIds, ipdIds] = await Promise.all([
-    opdRepository.findPatientIdsByDoctor(tenantId, userId),
-    ipdRepository.findPatientIdsByAssignedDoctor(tenantId, userId),
-  ]);
-  return [...new Set([...opdIds, ...ipdIds])];
-}
-
 // ─── U3-B: Admission controllers ─────────────────────────────────────────────
 
 export async function createAdmission(
@@ -121,8 +92,8 @@ export async function getAdmissionById(
     }
 
     const tenantId  = req.user!.tenantId as string;
-    const nurseWardIds     = await resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
-    const doctorPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const admission = await ipdService.getAdmissionById(idResult.data, tenantId, nurseWardIds, doctorPatientIds);
     res.status(200).json({ status: 'success', data: admission });
   } catch (err) { next(err); }
@@ -146,9 +117,9 @@ export async function listAdmissions(
 
     const tenantId = req.user!.tenantId as string;
 
-    const assignedDoctorId = req.user!.role === UserRole.DOCTOR ? req.user!.userId : undefined;
-    const nurseWardIds = await resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await ipdService.listAdmissions(tenantId, parsed.data, assignedDoctorId, nurseWardIds);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const result = await ipdService.listAdmissions(tenantId, parsed.data, nurseWardIds, doctorPatientIds);
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) {
@@ -261,8 +232,8 @@ export async function getPatientIPDHistory(
     const status = req.query['status'] as 'ADMITTED' | 'DISCHARGED' | undefined;
 
     const tenantId = req.user!.tenantId as string;
-    const nurseWardIds     = await resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
-    const doctorPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const result   = await ipdService.getPatientHistory(tenantId, patientId, page, limit, status, nurseWardIds, doctorPatientIds);
 
     res.status(200).json({ status: 'success', data: result });

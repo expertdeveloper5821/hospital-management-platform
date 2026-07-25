@@ -31,6 +31,7 @@ import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { WardModel }   from '../../../src/modules/ipd/ward.model';
 import { BedModel }    from '../../../src/modules/ipd/bed.model';
 import { PatientModel } from '../../../src/modules/patient/patient.model';
+import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { AdmissionStatus } from '../../../src/modules/ipd/ipd.types';
 
@@ -709,6 +710,137 @@ describe('Doctor patient-assignment scoping', () => {
   });
 });
 
+// ─── GET /api/ipd/admissions — doctor OPD+IPD patient-scoping ────────────────
+describe('GET /api/ipd/admissions — doctor patient-assignment scoping (OPD + IPD)', () => {
+  async function seedAdmission(opts: {
+    admissionId: string; patientId: string; assignedDoctorIds: string[]; tenantId: string;
+  }) {
+    return IPDAdmissionModel.create({
+      admissionId:       opts.admissionId,
+      patientId:         opts.patientId,
+      wardId:            'ward-1',
+      wardName:          'General Ward',
+      bedId:             `bed-${opts.admissionId}`,
+      bedNumber:         'B-01',
+      assignedDoctorIds: opts.assignedDoctorIds,
+      status:            AdmissionStatus.ADMITTED,
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId:          opts.tenantId,
+    });
+  }
+
+  test('200 — a patient assigned to the doctor only through an OPD visit has their IPD admission listed', async () => {
+    const tenant = await seedTenant();
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const ADM_ID = 'e1000000-0000-0000-0000-000000000001';
+
+    await OPDVisitModel.create({
+      visitId:        'OPD-LIST0001',
+      tenantId:       toId(tenant),
+      patientId:      'PAT-LIST-OPD',
+      doctorIds:      [toId(doctor)],
+      departmentId:   null,
+      visitDate:      new Date(),
+      queueNumber:    1,
+      status:         'OPEN',
+      chiefComplaint: 'Routine checkup',
+    });
+    // Admission itself has no assignedDoctorIds — the doctor is only linked via OPD.
+    await seedAdmission({ admissionId: ADM_ID, patientId: 'PAT-LIST-OPD', assignedDoctorIds: [], tenantId: toId(tenant) });
+
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).toContain(ADM_ID);
+  });
+
+  test('200 — a patient assigned to the doctor through IPD assignedDoctorIds remains listed', async () => {
+    const tenant = await seedTenant();
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const ADM_ID = 'e1000000-0000-0000-0000-000000000002';
+
+    await seedAdmission({ admissionId: ADM_ID, patientId: 'PAT-LIST-IPD', assignedDoctorIds: [toId(doctor)], tenantId: toId(tenant) });
+
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).toContain(ADM_ID);
+  });
+
+  test('200 — a patient assigned through neither OPD nor IPD is not listed', async () => {
+    const tenant      = await seedTenant();
+    const doctor      = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const otherDoctor = await UserModel.create({
+      name: 'Other Doctor', tenantId: toId(tenant), email: 'other-list-doctor@inttest.com',
+      passwordHash: '$2a$12$hashedpwd', role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
+    });
+    const ADM_ID = 'e1000000-0000-0000-0000-000000000003';
+
+    await seedAdmission({ admissionId: ADM_ID, patientId: 'PAT-LIST-NONE', assignedDoctorIds: [toId(otherDoctor)], tenantId: toId(tenant) });
+
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).not.toContain(ADM_ID);
+  });
+
+  test('200 — nurse ward scoping is unaffected by the doctor patient-scope change', async () => {
+    const tenant = await seedTenant();
+    const nurse  = await seedUser(UserRole.NURSE, toId(tenant));
+    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: toId(tenant), assignedNurseIds: [toId(nurse)] });
+    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: toId(tenant) });
+
+    await IPDAdmissionModel.create({
+      admissionId: 'e1000000-0000-0000-0000-000000000004', patientId: 'PAT-LIST-WA',
+      wardId: toId(wardA), wardName: 'Ward A', bedId: 'bed-wa', bedNumber: 'A-01',
+      assignedDoctorIds: [], status: AdmissionStatus.ADMITTED, admissionDate: new Date(),
+      dischargeDate: null, progressNotes: [], tenantId: toId(tenant),
+    });
+    await IPDAdmissionModel.create({
+      admissionId: 'e1000000-0000-0000-0000-000000000005', patientId: 'PAT-LIST-WB',
+      wardId: toId(wardB), wardName: 'Ward B', bedId: 'bed-wb', bedNumber: 'B-01',
+      assignedDoctorIds: [], status: AdmissionStatus.ADMITTED, admissionDate: new Date(),
+      dischargeDate: null, progressNotes: [], tenantId: toId(tenant),
+    });
+
+    const token = makeToken(toId(nurse), toId(tenant), UserRole.NURSE);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].wardId).toBe(toId(wardA));
+  });
+
+  test('200 — other roles (Receptionist) continue to see all admissions as before', async () => {
+    const tenant = await seedTenant();
+    const receptionist = await seedUser(UserRole.RECEPTIONIST, toId(tenant));
+
+    await seedAdmission({ admissionId: 'e1000000-0000-0000-0000-000000000006', patientId: 'PAT-LIST-RC1', assignedDoctorIds: [], tenantId: toId(tenant) });
+    await seedAdmission({ admissionId: 'e1000000-0000-0000-0000-000000000007', patientId: 'PAT-LIST-RC2', assignedDoctorIds: [], tenantId: toId(tenant) });
+
+    const token = makeToken(toId(receptionist), toId(tenant), UserRole.RECEPTIONIST);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+  });
+});
+
 describe('PATCH /api/ipd/wards/:wardId/nurses', () => {
   test('ADMIN can assign nurses to a ward', async () => {
     const tenant = await seedTenant();
@@ -766,5 +898,52 @@ describe('PATCH /api/ipd/wards/:wardId/nurses', () => {
       .send({ nurseIds: [] });
 
     expect(res.status).toBe(403);
+  });
+});
+
+// ─── Middleware order: requireRole must run before requireFirstPasswordChange ─
+describe('IPD route middleware order — requireRole before requireFirstPasswordChange', () => {
+  function makeFirstLoginToken(userId: string, tenantId: string, role: UserRole) {
+    return jwt.sign(
+      { userId, tenantId, role, email: `${role}@test.com`, isFirstLogin: true },
+      JWT_SECRET,
+      { expiresIn: '1h' },
+    );
+  }
+
+  test('403 "Access denied" (not password-change) for a disallowed role even with isFirstLogin — requireRole runs first', async () => {
+    const tenant = await seedTenant();
+    const token  = makeFirstLoginToken('patho-001', toId(tenant), UserRole.PATHOLOGIST);
+
+    const res = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/access denied/i);
+    expect(res.body.message).not.toMatch(/password/i);
+  });
+
+  test('403 "Password change required" for an allowed role with isFirstLogin — requireFirstPasswordChange still active after requireRole', async () => {
+    const tenant = await seedTenant();
+    const token  = makeFirstLoginToken('recept-fpc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/password change required/i);
+  });
+
+  test('200 for an allowed role without isFirstLogin (unaffected baseline behavior)', async () => {
+    const tenant = await seedTenant();
+    const token  = makeToken('recept-fpc-002', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
   });
 });

@@ -1,6 +1,7 @@
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/tenant/tenant.repository');
 jest.mock('../../../src/modules/ipd/ipd.repository');
+jest.mock('../../../src/modules/ipd/ipd.service');
 jest.mock('../../../src/shared/services/audit.service');
 jest.mock('../../../src/modules/patient/medical-card.pdf');
 jest.mock('../../../src/shared/services/s3.service');
@@ -9,15 +10,18 @@ import * as fc from 'fast-check';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
 import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
+import { ipdService }        from '../../../src/modules/ipd/ipd.service';
 import { buildMedicalCardPdf } from '../../../src/modules/patient/medical-card.pdf';
 import { s3Service }           from '../../../src/shared/services/s3.service';
 import { PatientService, DuplicateWarningError } from '../../../src/modules/patient/patient.service';
 import { NotFoundError, ConflictError } from '../../../src/shared/middleware/error-handler';
 import { Gender, BloodGroup } from '../../../src/modules/patient/patient.types';
+import { UserRole } from '../../../src/shared/types/common.types';
 
 const mockRepo      = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockTenantRepo = tenantRepository as jest.Mocked<typeof tenantRepository>;
 const mockIpdRepo   = ipdRepository    as jest.Mocked<typeof ipdRepository>;
+const mockIpdService = ipdService      as jest.Mocked<typeof ipdService>;
 const mockBuildPdf  = buildMedicalCardPdf as jest.MockedFunction<typeof buildMedicalCardPdf>;
 const mockS3        = s3Service as jest.Mocked<typeof s3Service>;
 
@@ -361,6 +365,29 @@ describe('PatientService — example-based', () => {
         expect.anything(),
         expect.objectContaining({ displayName: 'Apollo Hospital' }),
       );
+    });
+  });
+
+  // ── Role-based access scope resolution ───────────────────────────────────────
+  describe('resolveNursePatientIds', () => {
+    test('delegates to IPDService.resolveNursePatientIds', async () => {
+      mockIpdService.resolveNursePatientIds.mockResolvedValue(['PAT-00001']);
+
+      const result = await service.resolveNursePatientIds('t1', 'nurse-1', UserRole.NURSE);
+
+      expect(result).toEqual(['PAT-00001']);
+      expect(mockIpdService.resolveNursePatientIds).toHaveBeenCalledWith('t1', 'nurse-1', UserRole.NURSE);
+    });
+  });
+
+  describe('resolveDoctorPatientIds', () => {
+    test('delegates to IPDService.resolveDoctorPatientIds', async () => {
+      mockIpdService.resolveDoctorPatientIds.mockResolvedValue(['PAT-00002']);
+
+      const result = await service.resolveDoctorPatientIds('t1', 'doc-1', UserRole.DOCTOR);
+
+      expect(result).toEqual(['PAT-00002']);
+      expect(mockIpdService.resolveDoctorPatientIds).toHaveBeenCalledWith('t1', 'doc-1', UserRole.DOCTOR);
     });
   });
 });

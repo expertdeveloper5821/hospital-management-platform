@@ -141,14 +141,17 @@ export class OPDRepository {
   }
 
   async update(
-    tenantId: string,
-    visitId: string,
-    data: Partial<IOPDVisit>,
+    tenantId:           string,
+    visitId:            string,
+    data:               Partial<IOPDVisit>,
+    scopedPatientIds?:  string[],
   ): Promise<IOPDVisit | null> {
     assertDbConnected();
     try {
+      const filter: Record<string, unknown> = { tenantId, visitId };
+      if (scopedPatientIds) filter.patientId = { $in: scopedPatientIds };
       return await OPDVisitModel.findOneAndUpdate(
-        { tenantId, visitId },
+        filter,
         { $set: data },
         { new: true },
       );

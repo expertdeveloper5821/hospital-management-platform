@@ -3,10 +3,11 @@ import { patientRepository } from './patient.repository';
 import { IPatient } from './patient.model';
 import { tenantRepository } from '../tenant/tenant.repository';
 import { ipdRepository } from '../ipd/ipd.repository';
+import { ipdService } from '../ipd/ipd.service';
 import { buildMedicalCardPdf } from './medical-card.pdf';
 import { s3Service }   from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
-import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
+import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { NotFoundError, ConflictError, AppError } from '../../shared/middleware/error-handler';
 import { CreatePatientRequest, UpdatePatientRequest } from './patient.types';
 
@@ -213,6 +214,32 @@ export class PatientService {
     });
 
     return pdfBuffer;
+  }
+
+  // ─── Role-based access scope resolution ─────────────────────────────────────
+  // Delegates to IPDService's canonical implementation — nurse ward
+  // assignment and doctor-patient assignment are IPD/OPD admission data that
+  // IPDService already owns, so the logic isn't duplicated here.
+
+  // A Nurse only sees patients currently admitted (active IPD admission) in
+  // their assigned ward(s). Returns undefined for any other role.
+  async resolveNursePatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    return ipdService.resolveNursePatientIds(tenantId, userId, role);
+  }
+
+  // A Doctor only sees patients they've been assigned to — via an OPD visit
+  // (doctorIds) or an IPD admission (assignedDoctorIds), current or past.
+  // Returns undefined for any other role.
+  async resolveDoctorPatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    return ipdService.resolveDoctorPatientIds(tenantId, userId, role);
   }
 }
 

@@ -189,8 +189,10 @@ export async function editPathologyRequest(
       return;
     }
 
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const result = await labService.editPathologyRequest(
-      id.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
@@ -203,8 +205,10 @@ export async function deletePathologyRequest(
     const id = requestIdSchema.safeParse(req.params['requestId']);
     if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
 
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     await labService.deletePathologyRequest(
-      id.data, req.user!.tenantId as string, req.user!.userId, req.user!.role as UserRole,
+      id.data, tenantId, req.user!.userId, req.user!.role as UserRole, allowedPatientIds,
     );
     res.status(200).json({ status: 'success', message: 'Pathology request deleted.' });
   } catch (err) { next(err); }
@@ -225,8 +229,10 @@ export async function editRadiologyRequest(
       return;
     }
 
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const result = await labService.editRadiologyRequest(
-      id.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
@@ -239,8 +245,10 @@ export async function deleteRadiologyRequest(
     const id = requestIdSchema.safeParse(req.params['requestId']);
     if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
 
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     await labService.deleteRadiologyRequest(
-      id.data, req.user!.tenantId as string, req.user!.userId, req.user!.role as UserRole,
+      id.data, tenantId, req.user!.userId, req.user!.role as UserRole, allowedPatientIds,
     );
     res.status(200).json({ status: 'success', message: 'Radiology request deleted.' });
   } catch (err) { next(err); }
