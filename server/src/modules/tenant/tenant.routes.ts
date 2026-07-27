@@ -6,6 +6,7 @@ import { authenticateJWT } from '../../shared/middleware/authenticate-jwt';
 import { authenticateSuperAdmin } from '../../shared/middleware/authenticate-super-admin';
 import { requireRole } from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { ValidationError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
 import {
   createTenant,
@@ -30,7 +31,9 @@ const logoUpload = multer({
     if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png') {
       cb(null, true);
     } else {
-      cb(new Error('Only JPEG and PNG images are allowed'));
+      // Pass a ValidationError (400) so the global error handler surfaces a clear,
+      // client-readable message instead of a generic 500 "something went wrong".
+      cb(new ValidationError('Only JPEG and PNG images are allowed. Please upload a .jpg or .png file.'));
     }
   },
 });

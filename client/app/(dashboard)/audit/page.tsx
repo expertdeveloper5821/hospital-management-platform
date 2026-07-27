@@ -50,8 +50,10 @@ const ACTION_COLORS: Record<string, string> = {
   PASSWORD_RESET: 'bg-amber-100 text-amber-800 ring-amber-600/20',
 };
 
+// Fixed width + centered so every Action badge lines up uniformly in the column,
+// regardless of label length (e.g. "Created" vs "Password Reset").
 const ACTION_BADGE_BASE =
-  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap';
+  'inline-flex w-32 items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap';
 
 // Past-tense, human-readable label for an audit action (CREATE → Created, …).
 // Falls back to Title Case for any action not explicitly mapped.

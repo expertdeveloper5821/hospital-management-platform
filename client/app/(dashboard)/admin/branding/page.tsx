@@ -45,8 +45,14 @@ export default function BrandingPage() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+      setError('Unsupported file type. Please upload a PNG or JPG image.');
+      e.target.value = '';
+      return;
+    }
     if (file.size > 2 * 1024 * 1024) {
       setError('Logo must be 2 MB or smaller.');
+      e.target.value = '';
       return;
     }
     setLogoFile(file);
@@ -135,7 +141,7 @@ export default function BrandingPage() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg"
             className="hidden"
             onChange={handleFileChange}
           />
