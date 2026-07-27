@@ -50,8 +50,13 @@ const ACTION_COLORS: Record<string, string> = {
   PASSWORD_RESET: 'bg-amber-100 text-amber-800 ring-amber-600/20',
 };
 
+// Fixed width + centered so every Action badge lines up uniformly in the column,
+// regardless of label length (e.g. "Created" vs "Password Reset"). `truncate`
+// guarantees an unexpectedly long / unmapped label is clipped with an ellipsis
+// instead of overflowing and overlapping adjacent cells; the full text stays
+// available via the `title` tooltip on each badge.
 const ACTION_BADGE_BASE =
-  'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap';
+  'inline-block w-32 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset text-center align-middle truncate';
 
 // Past-tense, human-readable label for an audit action (CREATE → Created, …).
 // Falls back to Title Case for any action not explicitly mapped.
@@ -313,6 +318,7 @@ export default function AuditPage() {
                   <div key={log.auditId} className="px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <span
+                        title={formatAction(log.action)}
                         className={cn(
                           ACTION_BADGE_BASE,
                           ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
@@ -367,6 +373,7 @@ export default function AuditPage() {
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span
+                            title={formatAction(log.action)}
                             className={cn(
                               ACTION_BADGE_BASE,
                               ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',

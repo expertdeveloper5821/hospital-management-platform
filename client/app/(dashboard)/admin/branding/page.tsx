@@ -42,11 +42,25 @@ export default function BrandingPage() {
     );
   }
 
+  // Discard any previously accepted selection so an invalid pick can never leave
+  // a stale, submittable file behind in state.
+  function clearSelection(input: HTMLInputElement) {
+    input.value = '';
+    setLogoFile(null);
+    setLogoPreview(null);
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg') {
+      setError('Unsupported file type. Please upload a PNG or JPG image.');
+      clearSelection(e.target);
+      return;
+    }
     if (file.size > 2 * 1024 * 1024) {
       setError('Logo must be 2 MB or smaller.');
+      clearSelection(e.target);
       return;
     }
     setLogoFile(file);
@@ -135,7 +149,7 @@ export default function BrandingPage() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg"
             className="hidden"
             onChange={handleFileChange}
           />

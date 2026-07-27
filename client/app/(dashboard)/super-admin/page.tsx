@@ -23,15 +23,22 @@ const STATUS_STYLES: Record<string, string> = {
   INACTIVE:             'bg-red-100 text-red-800 ring-red-600/20',
 };
 
+// Short, uniform labels so every badge reads at a glance and fits the fixed width.
+const STATUS_LABELS: Record<string, string> = {
+  ACTIVE:               'Active',
+  PENDING_VERIFICATION: 'Pending',
+  INACTIVE:             'Inactive',
+};
+
 function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap',
+        'inline-flex w-24 items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset whitespace-nowrap',
         STATUS_STYLES[status] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
       )}
     >
-      {toTitleCase(status)}
+      {STATUS_LABELS[status] ?? toTitleCase(status)}
     </span>
   );
 }
@@ -81,7 +88,7 @@ export default function SuperAdminPage() {
           <Button
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
+            className="h-7 w-28 justify-center px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
             disabled={isBusy}
             onClick={() => approveTenant(tenant._id)}
           >
@@ -117,7 +124,7 @@ export default function SuperAdminPage() {
           <Button
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
+            className="h-7 w-28 justify-center px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
             disabled={isBusy}
             onClick={() => reactivateTenant(tenant._id)}
           >
