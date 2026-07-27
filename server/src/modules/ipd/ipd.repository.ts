@@ -57,18 +57,25 @@ export class IPDRepository {
   }
 
   async findActiveAdmissions(
-    tenantId:          string,
-    query:             ListAdmissionsQuery,
-    patientIds?:       string[],
-    assignedDoctorId?: string,
+    tenantId:      string,
+    query:         ListAdmissionsQuery,
+    patientIds?:   string[],
+    nurseWardIds?: string[],
   ): Promise<PaginatedResult<IIPDAdmission>> {
     assertDbConnected();
     const { wardId, status, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, status };
-    if (wardId)            filter['wardId']           = wardId;
-    if (patientIds)        filter['patientId']        = { $in: patientIds };
-    if (assignedDoctorId)  filter['assignedDoctorIds'] = { $in: [assignedDoctorId] };
+    if (nurseWardIds) {
+      // Nurse is restricted to their assigned ward(s) regardless of the wardId
+      // query param — a wardId outside their assignment must yield zero rows.
+      filter['wardId'] = wardId
+        ? (nurseWardIds.includes(wardId) ? wardId : { $in: [] })
+        : { $in: nurseWardIds };
+    } else if (wardId) {
+      filter['wardId'] = wardId;
+    }
+    if (patientIds) filter['patientId'] = { $in: patientIds };
 
     const [data, total] = await Promise.all([
       IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),
@@ -174,6 +181,42 @@ export class IPDRepository {
       { $set: { assignedNurseIds: nurseIds } },
       { new: true },
     );
+  }
+
+  // Ward(s) a given nurse is assigned to — the authoritative source for the
+  // nurse ward-scoping restriction (Ward.assignedNurseIds is the source of truth).
+  async findWardIdsByNurse(tenantId: string, nurseId: string): Promise<string[]> {
+    assertDbConnected();
+    const wards = await WardModel.find({ tenantId, assignedNurseIds: nurseId })
+      .select('_id')
+      .lean();
+    return wards.map((w) => (w._id as mongoose.Types.ObjectId).toString());
+  }
+
+  // Patients currently admitted (ADMITTED status) in the given ward(s) — used to
+  // scope Patient/OPD visibility for a nurse down to their assigned ward.
+  async findPatientIdsByWards(tenantId: string, wardIds: string[]): Promise<string[]> {
+    assertDbConnected();
+    if (!wardIds.length) return [];
+    const patientIds = await IPDAdmissionModel.distinct('patientId', {
+      tenantId,
+      wardId: { $in: wardIds },
+      status: 'ADMITTED',
+    });
+    return patientIds as string[];
+  }
+
+  // Patients this doctor has ever had an IPD admission assigned to them — the
+  // other half of the "assigned patients" set used to scope a Doctor's
+  // Patient/OPD/IPD/Lab access. Not restricted to ADMITTED — a discharged
+  // patient the doctor treated remains "their" patient for history purposes.
+  async findPatientIdsByAssignedDoctor(tenantId: string, doctorId: string): Promise<string[]> {
+    assertDbConnected();
+    const patientIds = await IPDAdmissionModel.distinct('patientId', {
+      tenantId,
+      assignedDoctorIds: doctorId,
+    });
+    return patientIds as string[];
   }
 
   // ─── Bed ───────────────────────────────────────────────────────────────────

@@ -46,7 +46,6 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
     { label: "Billing", href: "/billing", icon: "receipt" },
-    { label: "Audit Logs", href: "/audit", icon: "file-text" },
   ],
   DOCTOR: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
@@ -105,7 +104,6 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
     { label: "Billing", href: "/billing", icon: "receipt" },
-    { label: "Audit Logs", href: "/audit", icon: "file-text" },
   ],
   STAFF: [{ label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" }],
 };

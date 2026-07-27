@@ -22,7 +22,7 @@ import {
 } from './ipd.controller';
 
 const router  = Router();
-const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
+const protect = [authenticateJWT, scopeTenant];
 const ADMIN_ROLES = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN];
 
 // POST /api/ipd/admissions — Receptionist creates admission + assigns bed
@@ -35,6 +35,7 @@ router.post(
     UserRole.HOSPITAL_ADMIN,
     UserRole.NURSE,
      ...ADMIN_ROLES),
+  requireFirstPasswordChange,
   createAdmission,
 );
 
@@ -51,6 +52,7 @@ router.get(
     UserRole.MANAGER,
     ...ADMIN_ROLES,
   ),
+  requireFirstPasswordChange,
   listAdmissions,
 );
 
@@ -65,6 +67,7 @@ router.get(
     UserRole.MANAGER,
     ...ADMIN_ROLES,
   ),
+  requireFirstPasswordChange,
   getAdmissionById,
 );
 
@@ -79,6 +82,7 @@ router.patch(
     UserRole.ADMIN,
     UserRole.HOSPITAL_ADMIN,
   ),
+  requireFirstPasswordChange,
   updateAdmission,
 );
 
@@ -87,6 +91,7 @@ router.post(
   '/admissions/:admissionId/progress-notes',
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.NURSE),
+  requireFirstPasswordChange,
   addProgressNote,
 );
 
@@ -101,6 +106,7 @@ router.patch(
     UserRole.ADMIN,
     UserRole.RECEPTIONIST,
   ),
+  requireFirstPasswordChange,
   dischargePatient,
 );
 
@@ -115,6 +121,7 @@ router.get(
     ...ADMIN_ROLES,
     UserRole.RECEPTIONIST,
   ),
+  requireFirstPasswordChange,
   getBedOccupancySummary,
 );
 
@@ -141,6 +148,7 @@ router.get(
   '/patients/:patientId/history',
   ...protect,
   requireRole(...ADMISSION_READERS),
+  requireFirstPasswordChange,
   getPatientIPDHistory,
 );
 
@@ -151,19 +159,22 @@ router.post('/wards',
   UserRole.RECEPTIONIST,
   UserRole.MANAGER,
   ),
+  requireFirstPasswordChange,
   createWard,
 );
 
 router.get('/wards',
   ...protect,
   requireRole(...WARD_READERS),
+  requireFirstPasswordChange,
   listWards,
 );
 
-// PATCH /api/ipd/wards/:wardId/nurses — HOSPITAL_ADMIN and DOCTOR assign nurses
+// PATCH /api/ipd/wards/:wardId/nurses — HOSPITAL_ADMIN, ADMIN, and DOCTOR assign nurses
 router.patch('/wards/:wardId/nurses',
   ...protect,
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.DOCTOR),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.DOCTOR),
+  requireFirstPasswordChange,
   assignNurses,
 );
 
@@ -174,12 +185,14 @@ router.post('/wards/:wardId/beds',
     UserRole.RECEPTIONIST,
     UserRole.MANAGER,
   ),
+  requireFirstPasswordChange,
   addBeds,
 );
 
 router.get('/wards/:wardId/beds',
   ...protect,
   requireRole(...WARD_READERS),
+  requireFirstPasswordChange,
   listBeds,
 );
 
@@ -187,6 +200,7 @@ router.get('/wards/:wardId/beds',
 router.get('/occupancy',
   ...protect,
   requireRole(...ADMIN_ROLES, UserRole.MANAGER, UserRole.NURSE),
+  requireFirstPasswordChange,
   getOccupancySummary,
 );
 

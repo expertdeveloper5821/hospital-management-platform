@@ -92,7 +92,9 @@ export async function getAdmissionById(
     }
 
     const tenantId  = req.user!.tenantId as string;
-    const admission = await ipdService.getAdmissionById(idResult.data, tenantId);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const admission = await ipdService.getAdmissionById(idResult.data, tenantId, nurseWardIds, doctorPatientIds);
     res.status(200).json({ status: 'success', data: admission });
   } catch (err) { next(err); }
 }
@@ -115,8 +117,9 @@ export async function listAdmissions(
 
     const tenantId = req.user!.tenantId as string;
 
-    const assignedDoctorId = req.user!.role === UserRole.DOCTOR ? req.user!.userId : undefined;
-    const result = await ipdService.listAdmissions(tenantId, parsed.data, assignedDoctorId);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const result = await ipdService.listAdmissions(tenantId, parsed.data, nurseWardIds, doctorPatientIds);
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) {
@@ -229,7 +232,9 @@ export async function getPatientIPDHistory(
     const status = req.query['status'] as 'ADMITTED' | 'DISCHARGED' | undefined;
 
     const tenantId = req.user!.tenantId as string;
-    const result   = await ipdService.getPatientHistory(tenantId, patientId, page, limit, status);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const result   = await ipdService.getPatientHistory(tenantId, patientId, page, limit, status, nurseWardIds, doctorPatientIds);
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

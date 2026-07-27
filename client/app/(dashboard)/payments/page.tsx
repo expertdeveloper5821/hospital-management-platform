@@ -925,14 +925,16 @@ export default function PaymentsPage() {
     "RECEPTIONIST",
     "FINANCE_MANAGER",
     "HOSPITAL_ADMIN",
+    "ADMIN",
   ].includes(role ?? "");
   const canView = [
     "MANAGER",
     "FINANCE_MANAGER",
     "HOSPITAL_ADMIN",
+    "ADMIN",
     "RECEPTIONIST",
   ].includes(role ?? "");
-  const canSummary = ["MANAGER", "FINANCE_MANAGER", "HOSPITAL_ADMIN"].includes(
+  const canSummary = ["MANAGER", "FINANCE_MANAGER", "HOSPITAL_ADMIN", "ADMIN"].includes(
     role ?? "",
   );
 

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
+import { ipdService } from '../ipd/ipd.service';
 import { patientRepository } from '../patient/patient.repository';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
@@ -87,14 +88,18 @@ export class OPDService {
   }
 
   async updateVisit(
-    tenantId:  string,
-    visitId:   string,
-    data:      UpdateOPDVisitRequest,
-    updatedBy: string,
-    role:      UserRole,
+    tenantId:          string,
+    visitId:           string,
+    data:              UpdateOPDVisitRequest,
+    updatedBy:         string,
+    role:              UserRole,
+    scopedPatientIds?: string[],
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+      throw new NotFoundError('OPD visit not found');
+    }
 
     if (TERMINAL_STATUSES.has(visit.status)) {
       throw new ConflictError(`Cannot update a visit with status ${visit.status}`);
@@ -149,7 +154,7 @@ export class OPDService {
       }
     }
 
-    const updated = await opdRepository.update(tenantId, visitId, updateData);
+    const updated = await opdRepository.update(tenantId, visitId, updateData, scopedPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     await auditService.log({
@@ -167,13 +172,17 @@ export class OPDService {
   }
 
   async completeVisit(
-    tenantId:    string,
-    visitId:     string,
-    data:        CompleteOPDVisitRequest,
-    completedBy: string,
+    tenantId:          string,
+    visitId:           string,
+    data:              CompleteOPDVisitRequest,
+    completedBy:       string,
+    scopedPatientIds?: string[],
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+      throw new NotFoundError('OPD visit not found');
+    }
 
     if (TERMINAL_STATUSES.has(visit.status)) {
       throw new ConflictError(`Cannot complete a visit with status ${visit.status}`);
@@ -186,7 +195,7 @@ export class OPDService {
     if (data.prescription !== undefined) updateData.prescription = data.prescription;
     if (data.notes        !== undefined) updateData.notes        = data.notes;
 
-    const updated = await opdRepository.update(tenantId, visitId, updateData);
+    const updated = await opdRepository.update(tenantId, visitId, updateData, scopedPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     await auditService.log({
@@ -204,12 +213,16 @@ export class OPDService {
   }
 
   async cancelVisit(
-    tenantId:    string,
-    visitId:     string,
-    cancelledBy: string,
+    tenantId:          string,
+    visitId:           string,
+    cancelledBy:       string,
+    scopedPatientIds?: string[],
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+      throw new NotFoundError('OPD visit not found');
+    }
 
     if (TERMINAL_STATUSES.has(visit.status)) {
       throw new ConflictError(`Cannot cancel a visit with status ${visit.status}`);
@@ -217,7 +230,7 @@ export class OPDService {
 
     const updated = await opdRepository.update(tenantId, visitId, {
       status: OPDVisitStatus.CANCELLED,
-    } as Partial<IOPDVisit>);
+    } as Partial<IOPDVisit>, scopedPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     await auditService.log({
@@ -235,14 +248,15 @@ export class OPDService {
   }
 
   async getQueue(
-    tenantId:  string,
-    date?:     string,
-    doctorId?: string,
-    search?:   string,
+    tenantId:    string,
+    date?:       string,
+    doctorId?:   string,
+    search?:     string,
+    patientIds?: string[],
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
 
-    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId);
+    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds);
 
     const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
@@ -271,12 +285,17 @@ export class OPDService {
   }
 
   async getPatientHistory(
-    tenantId:  string,
-    patientId: string,
-    filters:   OpdHistoryFilters,
+    tenantId:       string,
+    patientId:      string,
+    filters:        OpdHistoryFilters,
+    scopedPatientIds?: string[],
   ): Promise<PaginatedResult<OPDVisitResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (scopedPatientIds && !scopedPatientIds.includes(patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const result = await opdRepository.findByPatient(tenantId, patientId, filters);
 
@@ -299,6 +318,44 @@ export class OPDService {
         updatedAt:      visit.updatedAt,
       })),
     };
+  }
+
+  // ─── Role-based access scope resolution ─────────────────────────────────────
+  // Delegates to IPDService's canonical implementation — nurse ward
+  // assignment and doctor-patient assignment are IPD/OPD admission data that
+  // IPDService already owns, so the logic isn't duplicated here.
+
+  // A Nurse only sees OPD visits for patients currently admitted (active IPD
+  // admission) in their assigned ward(s). Returns undefined for any other role.
+  async resolveNursePatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    return ipdService.resolveNursePatientIds(tenantId, userId, role);
+  }
+
+  // A Doctor only sees OPD visits/history for patients they've been assigned
+  // to — via an OPD visit (doctorIds) or an IPD admission (assignedDoctorIds),
+  // current or past. Returns undefined for any other role.
+  async resolveDoctorPatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    return ipdService.resolveDoctorPatientIds(tenantId, userId, role);
+  }
+
+  // Nurse/Doctor scoped patient IDs for mutation guards (update/complete/cancel).
+  // Returns undefined for any other role (no restriction applied).
+  async resolveMutationScopedPatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role === UserRole.NURSE)  return this.resolveNursePatientIds(tenantId, userId, role);
+    if (role === UserRole.DOCTOR) return this.resolveDoctorPatientIds(tenantId, userId, role);
+    return undefined;
   }
 }
 

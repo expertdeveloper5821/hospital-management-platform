@@ -12,6 +12,7 @@ import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/ap
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
+import { useListWardsQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import type {
   OPDVisitResponse,
@@ -877,7 +878,11 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
 type TabType = 'queue' | 'new';
 
 export default function OPDPage() {
-  const role = useAppSelector((s) => s.auth.profile?.role);
+  const role   = useAppSelector((s) => s.auth.profile?.role);
+  const userId = useAppSelector((s) => s.auth.profile?.userId);
+
+  const { data: wards = [] } = useListWardsQuery(undefined, { skip: role !== 'NURSE' });
+  const nurseHasNoWard = role === 'NURSE' && !wards.some((w) => w.assignedNurseIds.includes(userId ?? ''));
 
   const [activeTab,    setActiveTab]    = useState<TabType>('queue');
   const [filterDate,   setFilterDate]   = useState(todayISO());
@@ -1023,7 +1028,7 @@ export default function OPDPage() {
           ) : visits.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
               <ClipboardList className="h-8 w-8 opacity-30" />
-              No visits for the selected filters.
+              {nurseHasNoWard ? 'No ward has been assigned to your account.' : 'No visits for the selected filters.'}
             </div>
           ) : (
             <div className="overflow-x-auto">

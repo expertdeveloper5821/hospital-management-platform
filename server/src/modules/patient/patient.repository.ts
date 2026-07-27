@@ -41,6 +41,7 @@ export class PatientRepository {
     page:         number,
     limit:        number,
     departmentIds?: string[],
+    patientIds?:    string[],
   ): Promise<PaginatedResult<IPatient>> {
     assertDbConnected();
     const skip = (page - 1) * limit;
@@ -48,6 +49,7 @@ export class PatientRepository {
 
     const base: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
     if (departmentIds?.length) base['departmentId'] = { $in: departmentIds };
+    if (patientIds)            base['patientId']    = { $in: patientIds };
 
     const query: Record<string, unknown> = safeQuery
       ? {

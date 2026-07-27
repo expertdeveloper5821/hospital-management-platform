@@ -9,7 +9,7 @@ import {
   useDeletePatientMutation,
 } from '@/store/api/patient.api';
 import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
-import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
+import { useGetIPDPatientHistoryQuery, useListWardsQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import type { PatientResponse, Gender, BloodGroup, CreatePatientRequest, UpdatePatientRequest, OPDVisitResponse } from '@/store/types';
 import { Button } from '@/components/ui/button';
@@ -675,6 +675,10 @@ interface PatientDetailPanelProps {
 function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDetailPanelProps) {
   const role = useAppSelector((s) => s.auth.profile?.role);
   const canDelete = role === UserRole.ADMIN || role === UserRole.MANAGER || role === UserRole.HOSPITAL_ADMIN;
+  // Nurses and Doctors may view patient details but not edit them — the backend
+  // PATCH /api/patients/:patientId route already rejects these roles; this only
+  // hides the action so they aren't led into a request that will 403.
+  const canEdit = role !== UserRole.NURSE && role !== UserRole.DOCTOR;
 
   const [tab,           setTab]           = useState<'details' | 'history' | 'ipd'>('details');
   const [historyPage,   setHistoryPage]   = useState(1);
@@ -951,10 +955,12 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
         )}
 
         <div className="shrink-0 flex gap-3 p-5 border-t">
-          <Button variant="outline" className="flex-1" onClick={onEdit}>
-            <Pencil className="h-4 w-4 mr-2" />
-            Edit
-          </Button>
+          {canEdit && (
+            <Button variant="outline" className="flex-1" onClick={onEdit}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
+          )}
           <Button className="flex-1" onClick={handleDownload} disabled={downloading}>
             <Download className="h-4 w-4 mr-2" />
             {downloading ? 'Downloading…' : 'Medical Card'}
@@ -979,7 +985,11 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function PatientsPage() {
-  const role = useAppSelector((s) => s.auth.profile?.role);
+  const role   = useAppSelector((s) => s.auth.profile?.role);
+  const userId = useAppSelector((s) => s.auth.profile?.userId);
+
+  const { data: wards = [] } = useListWardsQuery(undefined, { skip: role !== 'NURSE' });
+  const nurseHasNoWard = role === 'NURSE' && !wards.some((w) => w.assignedNurseIds.includes(userId ?? ''));
 
   const [search,          setSearch]          = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -1043,7 +1053,9 @@ export default function PatientsPage() {
           ) : patients.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-sm text-muted-foreground gap-2">
               <Search className="h-8 w-8 opacity-30" />
-              {debouncedSearch ? `No patients found for "${debouncedSearch}"` : 'No patients registered yet.'}
+              {nurseHasNoWard
+                ? 'No ward has been assigned to your account.'
+                : debouncedSearch ? `No patients found for "${debouncedSearch}"` : 'No patients registered yet.'}
             </div>
           ) : (
             <div className="overflow-x-auto">

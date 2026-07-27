@@ -1,9 +1,11 @@
 jest.mock('../../../src/modules/opd/opd.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
+jest.mock('../../../src/modules/ipd/ipd.service');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { opdRepository }     from '../../../src/modules/opd/opd.repository';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
+import { ipdService }        from '../../../src/modules/ipd/ipd.service';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
 import { OPDVisitStatus }    from '../../../src/modules/opd/opd.types';
 import { UserRole }          from '../../../src/shared/types/common.types';
@@ -11,6 +13,7 @@ import { NotFoundError, ConflictError, ValidationError } from '../../../src/shar
 
 const mockOpdRepo     = opdRepository     as jest.Mocked<typeof opdRepository>;
 const mockPatientRepo = patientRepository as jest.Mocked<typeof patientRepository>;
+const mockIpdService  = ipdService        as jest.Mocked<typeof ipdService>;
 
 const BASE_PATIENT = {
   patientId: 'PAT-ABCD1234',
@@ -211,6 +214,7 @@ describe('OPDService — example-based', () => {
       expect(mockOpdRepo.update).toHaveBeenCalledWith(
         't1', 'OPD-TEST0001',
         expect.objectContaining({ diagnosis: 'Viral fever' }),
+        undefined,
       );
     });
 
@@ -339,6 +343,7 @@ describe('OPDService — example-based', () => {
       expect(mockOpdRepo.update).toHaveBeenCalledWith(
         't1', 'OPD-TEST0001',
         expect.objectContaining({ status: OPDVisitStatus.COMPLETED, diagnosis: 'Viral fever, resolved' }),
+        undefined,
       );
       expect(result.status).toBe(OPDVisitStatus.COMPLETED);
     });
@@ -383,6 +388,7 @@ describe('OPDService — example-based', () => {
       expect(mockOpdRepo.update).toHaveBeenCalledWith(
         't1', 'OPD-TEST0001',
         expect.objectContaining({ status: OPDVisitStatus.CANCELLED }),
+        undefined,
       );
       expect(result.status).toBe(OPDVisitStatus.CANCELLED);
     });
@@ -438,6 +444,7 @@ describe('OPDService — example-based', () => {
         't1',
         expect.any(Date),
         'doc-99',
+        undefined,
       );
     });
 
@@ -522,6 +529,57 @@ describe('OPDService — example-based', () => {
       const result = await service.getPatientHistory('t1', 'PAT-ABCD1234', baseFilters);
 
       expect(result.data[0].fullName).toBe('Ravi Kumar');
+    });
+  });
+
+  // ── Role-based access scope resolution ───────────────────────────────────────
+  describe('resolveNursePatientIds', () => {
+    test('delegates to IPDService.resolveNursePatientIds', async () => {
+      mockIpdService.resolveNursePatientIds.mockResolvedValue(['PAT-00001']);
+
+      const result = await service.resolveNursePatientIds('t1', 'nurse-1', UserRole.NURSE);
+
+      expect(result).toEqual(['PAT-00001']);
+      expect(mockIpdService.resolveNursePatientIds).toHaveBeenCalledWith('t1', 'nurse-1', UserRole.NURSE);
+    });
+  });
+
+  describe('resolveDoctorPatientIds', () => {
+    test('delegates to IPDService.resolveDoctorPatientIds', async () => {
+      mockIpdService.resolveDoctorPatientIds.mockResolvedValue(['PAT-00002']);
+
+      const result = await service.resolveDoctorPatientIds('t1', 'doc-1', UserRole.DOCTOR);
+
+      expect(result).toEqual(['PAT-00002']);
+      expect(mockIpdService.resolveDoctorPatientIds).toHaveBeenCalledWith('t1', 'doc-1', UserRole.DOCTOR);
+    });
+  });
+
+  describe('resolveMutationScopedPatientIds', () => {
+    test('resolves via the nurse path for a NURSE', async () => {
+      mockIpdService.resolveNursePatientIds.mockResolvedValue(['PAT-N1']);
+
+      const result = await service.resolveMutationScopedPatientIds('t1', 'nurse-1', UserRole.NURSE);
+
+      expect(result).toEqual(['PAT-N1']);
+      expect(mockIpdService.resolveDoctorPatientIds).not.toHaveBeenCalled();
+    });
+
+    test('resolves via the doctor path for a DOCTOR', async () => {
+      mockIpdService.resolveDoctorPatientIds.mockResolvedValue(['PAT-D1']);
+
+      const result = await service.resolveMutationScopedPatientIds('t1', 'doc-1', UserRole.DOCTOR);
+
+      expect(result).toEqual(['PAT-D1']);
+      expect(mockIpdService.resolveNursePatientIds).not.toHaveBeenCalled();
+    });
+
+    test('returns undefined for any other role, without calling IPDService', async () => {
+      const result = await service.resolveMutationScopedPatientIds('t1', 'admin-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(result).toBeUndefined();
+      expect(mockIpdService.resolveNursePatientIds).not.toHaveBeenCalled();
+      expect(mockIpdService.resolveDoctorPatientIds).not.toHaveBeenCalled();
     });
   });
 });

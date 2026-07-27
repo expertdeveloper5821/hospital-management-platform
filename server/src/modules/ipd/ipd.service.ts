@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { ipdRepository } from './ipd.repository';
+import { opdRepository } from '../opd/opd.repository';
 import { IIPDAdmission } from './ipd.model';
 import { IWard }          from './ward.model';
 import { IBed }           from './bed.model';
@@ -13,6 +14,8 @@ import {
   ListAdmissionsQuery,
   CreateWardRequest,
   AddBedsRequest,
+  ProgressNote,
+  ProgressNoteResponse,
 } from './ipd.types';
 
 import { patientRepository } from '../patient/patient.repository';
@@ -39,6 +42,17 @@ async function resolvePatientIdsBySearch(tenantId: string, search: string): Prom
   return patients.map((p) => p.patientId);
 }
 
+// Combines an optional search-derived patientId filter with an optional
+// doctor-scoping patientId filter (intersection when both are present, so a
+// Doctor's search results never include another doctor's patients).
+function combinePatientIdFilters(
+  searchIds?: string[],
+  scopeIds?:  string[],
+): string[] | undefined {
+  if (searchIds && scopeIds) return searchIds.filter((id) => scopeIds.includes(id));
+  return searchIds ?? scopeIds;
+}
+
 // ─── BedOccupiedError (standalone — NOT inside IPDService) ───────────────────
 export class BedOccupiedError extends Error {
   readonly statusCode = 409;
@@ -53,7 +67,42 @@ export class BedOccupiedError extends Error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function toResponse(doc: IIPDAdmission, fullName: string | null = null): AdmissionResponse {
+// Progress notes store only the creator's userId (field name `doctorId` is
+// historical — a NURSE can also author a note). Resolve each unique author to
+// their display name in one batch, rather than storing/duplicating it on write.
+// Build plain objects field-by-field — `notes` may be Mongoose subdocuments,
+// whose own properties aren't enumerable, so a spread ({...n}) silently drops them.
+function mapProgressNotes(
+  notes:   ProgressNote[],
+  nameMap: Map<string, string>,
+): ProgressNoteResponse[] {
+  return notes.map((n) => ({
+    noteId:    n.noteId,
+    doctorId:  n.doctorId,
+    note:      n.note,
+    timestamp: n.timestamp,
+    staffName: nameMap.get(n.doctorId) ?? null,
+  }));
+}
+
+async function resolveProgressNoteStaffNames(
+  tenantId: string,
+  notes:    ProgressNote[],
+): Promise<ProgressNoteResponse[]> {
+  if (notes.length === 0) return [];
+
+  const uniqueIds = [...new Set(notes.map((n) => n.doctorId))];
+  const nameMap = await userRepository.findNamesByIds(tenantId, uniqueIds);
+
+  return mapProgressNotes(notes, nameMap);
+}
+
+async function toResponse(
+  doc:           IIPDAdmission,
+  tenantId:      string,
+  fullName:      string | null = null,
+  staffNameMap?: Map<string, string>,
+): Promise<AdmissionResponse> {
   return {
     admissionId:       doc.admissionId,
     patientId:         doc.patientId,
@@ -67,7 +116,9 @@ function toResponse(doc: IIPDAdmission, fullName: string | null = null): Admissi
     status:            doc.status,
     admissionDate:     doc.admissionDate.toISOString(),
     dischargeDate:     doc.dischargeDate ? doc.dischargeDate.toISOString() : null,
-    progressNotes:     doc.progressNotes,
+    progressNotes:     staffNameMap
+      ? mapProgressNotes(doc.progressNotes, staffNameMap)
+      : await resolveProgressNoteStaffNames(tenantId, doc.progressNotes),
   };
 }
 
@@ -173,14 +224,25 @@ export class IPDService {
       });
     } catch { /* swallow — audit failure must not block primary response */ }
 
-    return toResponse(admission, patient.fullName);
+    return toResponse(admission, tenantId, patient.fullName);
   }
 
-  async getAdmissionById(admissionId: string, tenantId: string): Promise<AdmissionResponse> {
+  async getAdmissionById(
+    admissionId:      string,
+    tenantId:         string,
+    nurseWardIds?:    string[],
+    doctorPatientIds?: string[],
+  ): Promise<AdmissionResponse> {
     const admission = await ipdRepository.findById(admissionId, tenantId);
     if (!admission) throw new NotFoundError('Admission not found');
+    if (nurseWardIds && !nurseWardIds.includes(admission.wardId)) {
+      throw new NotFoundError('Admission not found');
+    }
+    if (doctorPatientIds && !doctorPatientIds.includes(admission.patientId)) {
+      throw new NotFoundError('Admission not found');
+    }
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
-    return toResponse(admission, patient?.fullName ?? null);
+    return toResponse(admission, tenantId, patient?.fullName ?? null);
   }
 
   async updateAdmission(
@@ -260,7 +322,7 @@ export class IPDService {
     if (Object.keys(fields).length === 0) {
       // Nothing changed — return current state
       const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
-      return toResponse(admission, patient?.fullName ?? null);
+      return toResponse(admission, tenantId, patient?.fullName ?? null);
     }
 
     const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
@@ -279,7 +341,7 @@ export class IPDService {
     } catch { /* swallow */ }
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async addProgressNote(
@@ -306,7 +368,7 @@ export class IPDService {
     if (!updated) throw new NotFoundError('Admission not found');
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async dischargePatient(
@@ -353,18 +415,20 @@ export class IPDService {
     } catch { /* swallow */ }
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
-    return toResponse(updated, patient?.fullName ?? null);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
   async listAdmissions(
-    tenantId:         string,
-    query:            ListAdmissionsQuery,
-    assignedDoctorId?: string,
+    tenantId:          string,
+    query:             ListAdmissionsQuery,
+    nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query, searchPatientIds, assignedDoctorId);
+    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
+    const result = await ipdRepository.findActiveAdmissions(tenantId, query, scopedPatientIds, nurseWardIds);
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);
@@ -376,35 +440,96 @@ export class IPDService {
 
     const map = new Map(patients.map(p => [p.patientId, p.fullName]));
 
+    const allAuthorIds = [...new Set(admissions.flatMap((a) => a.progressNotes.map((n) => n.doctorId)))];
+    const staffNameMap = await userRepository.findNamesByIds(tenantId, allAuthorIds);
+
     return {
       ...result,
-      data: result.data.map((admission) =>
-        toResponse(admission, map.get(admission.patientId) ?? null),
+      data: await Promise.all(
+        result.data.map((admission) =>
+          toResponse(admission, tenantId, map.get(admission.patientId) ?? null, staffNameMap),
+        ),
       ),
     };
   }
 
   async getPatientHistory(
-    tenantId:  string,
-    patientId: string,
-    page:      number,
-    limit:     number,
-    status?:   'ADMITTED' | 'DISCHARGED',
+    tenantId:          string,
+    patientId:         string,
+    page:              number,
+    limit:             number,
+    status?:           'ADMITTED' | 'DISCHARGED',
+    nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
+
+    if (nurseWardIds) {
+      const scopedPatientIds = await ipdRepository.findPatientIdsByWards(tenantId, nurseWardIds);
+      if (!scopedPatientIds.includes(patientId)) throw new NotFoundError('Patient not found');
+    }
+
+    if (doctorPatientIds && !doctorPatientIds.includes(patientId)) {
+      throw new NotFoundError('Patient not found');
+    }
 
     const result = await ipdRepository.findByPatient(tenantId, patientId, page, limit, status);
 
     return {
       ...result,
-      data: result.data.map((a) => toResponse(a, patient.fullName)),
+      data: await Promise.all(result.data.map((a) => toResponse(a, tenantId, patient.fullName))),
     };
   }
 
   async getBedOccupancySummary(tenantId: string): Promise<WardOccupancySummary[]> {
     // Delegates to U3-A's aggregation-based occupancy query (single DB round-trip)
     return ipdRepository.getOccupancySummary(tenantId);
+  }
+
+  // ─── Role-based access scope resolution ─────────────────────────────────────
+  // Canonical implementations — reused by OPDService and PatientService so the
+  // same nurse/doctor scoping logic isn't duplicated across modules.
+
+  // A Nurse is restricted to the ward(s) they're assigned via Ward.assignedNurseIds.
+  // Returns undefined for any other role (no restriction applied).
+  async resolveNurseWardIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.NURSE) return undefined;
+    return ipdRepository.findWardIdsByNurse(tenantId, userId);
+  }
+
+  // A Nurse only sees patients currently admitted (active IPD admission) in
+  // their assigned ward(s) — Ward.assignedNurseIds is the source of truth.
+  // Returns undefined for any other role (no restriction applied).
+  async resolveNursePatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.NURSE) return undefined;
+    const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, userId);
+    if (!wardIds.length) return [];
+    return ipdRepository.findPatientIdsByWards(tenantId, wardIds);
+  }
+
+  // A Doctor only sees patients/records they've been assigned to — via an OPD
+  // visit (doctorIds) or an IPD admission (assignedDoctorIds), current or
+  // past. Returns undefined for any other role (no restriction applied).
+  async resolveDoctorPatientIds(
+    tenantId: string,
+    userId:   string,
+    role:     UserRole,
+  ): Promise<string[] | undefined> {
+    if (role !== UserRole.DOCTOR) return undefined;
+    const [opdIds, ipdIds] = await Promise.all([
+      opdRepository.findPatientIdsByDoctor(tenantId, userId),
+      ipdRepository.findPatientIdsByAssignedDoctor(tenantId, userId),
+    ]);
+    return [...new Set([...opdIds, ...ipdIds])];
   }
 
   // ─── U3-A: Ward Management ──────────────────────────────────────────────────

@@ -300,6 +300,7 @@ describe('LabService — editPathologyRequest', () => {
     expect(mockLabRepo.updatePathology).toHaveBeenCalledWith(
       'req-path-001', TENANT,
       expect.objectContaining({ testType: 'New CBC', priority: 'URGENT' }),
+      undefined,
     );
     const callArgs = (mockLabRepo.updatePathology as jest.Mock).mock.calls[0][2];
     expect(callArgs).not.toHaveProperty('notes');
@@ -461,6 +462,7 @@ describe('LabService — editRadiologyRequest', () => {
     expect(mockLabRepo.updateRadiology).toHaveBeenCalledWith(
       'req-radio-001', TENANT,
       expect.objectContaining({ imagingType: 'CT Chest', priority: 'URGENT' }),
+      undefined,
     );
   });
 

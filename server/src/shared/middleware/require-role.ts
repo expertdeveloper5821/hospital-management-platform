@@ -41,7 +41,7 @@ export function requireRole(...roles: UserRole[]) {
         }).catch(() => { /* audit failure must never block */ });
       }).catch(() => { /* ignore import failure */ });
 
-      return next(new ForbiddenError('Insufficient permissions'));
+      return next(new ForbiddenError("Access denied. You don't have permission to perform this action."));
     }
 
     next();

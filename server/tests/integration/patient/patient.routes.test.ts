@@ -33,6 +33,8 @@ import { UserModel }    from '../../../src/modules/auth/auth.model';
 import { TenantModel }  from '../../../src/modules/tenant/tenant.model';
 import { PatientModel } from '../../../src/modules/patient/patient.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
+import { WardModel }    from '../../../src/modules/ipd/ward.model';
+import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { Gender, BloodGroup }     from '../../../src/modules/patient/patient.types';
 
@@ -678,6 +680,21 @@ describe('PATCH /api/patients/:patientId', () => {
     expect(res.status).toBe(403);
   });
 
+  test('403 — Nurse cannot update patient demographics', async () => {
+    const tenant = await seedTenant();
+    const nurse  = await seedUser(tenant._id.toString(), 'nurse-edit@h.com', UserRole.NURSE);
+    const token  = tokenFor(nurse._id.toString(), tenant._id.toString(), UserRole.NURSE);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-403NUR01' });
+
+    const res = await request(app)
+      .patch('/api/patients/PAT-403NUR01')
+      .set(bearer(token))
+      .send({ fullName: 'Should Fail' });
+
+    expect(res.status).toBe(403);
+  });
+
   test('401 — unauthenticated', async () => {
     const res = await request(app)
       .patch('/api/patients/PAT-UNAUTH01')
@@ -847,6 +864,228 @@ describe('DELETE /api/patients/:patientId', () => {
   test('401 — unauthenticated', async () => {
     const res = await request(app).delete('/api/patients/PAT-TEST0001');
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── Nurse ward-scoped access restriction ──────────────────────────────────────
+describe('Nurse ward-scoped access restriction', () => {
+  async function admitPatientToWard(tenantId: string, patientId: string, wardId: string, admissionId: string) {
+    return IPDAdmissionModel.create({
+      admissionId,
+      patientId,
+      wardId,
+      wardName:          'Ward',
+      bedId:             `bed-${admissionId}`,
+      bedNumber:         'B-01',
+      assignedDoctorIds: [],
+      status:            'ADMITTED',
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId,
+    });
+  }
+
+  test('200 — nurse sees only patients currently admitted in their assigned ward', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
+    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
+
+    await seedPatient(tid, { patientId: 'PAT-WA0001', fullName: 'Ward A Patient' });
+    await seedPatient(tid, { patientId: 'PAT-WB0001', fullName: 'Ward B Patient' });
+    await admitPatientToWard(tid, 'PAT-WA0001', wardA._id.toString(), 'ADM-WA-0001');
+    await admitPatientToWard(tid, 'PAT-WB0001', wardB._id.toString(), 'ADM-WB-0001');
+
+    const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-WA0001');
+  });
+
+  test('200 — nurse can fetch a patient in their own ward by direct patientId', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
+
+    await seedPatient(tid, { patientId: 'PAT-WA000002', fullName: 'Ward A Patient' });
+    await admitPatientToWard(tid, 'PAT-WA000002', wardA._id.toString(), 'ADM-WA-0002');
+
+    const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
+    const res   = await request(app).get('/api/patients/PAT-WA000002').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.patientId).toBe('PAT-WA000002');
+  });
+
+  test('404 — nurse cannot fetch another ward\'s patient via direct patientId (Direct URL / manual ID)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
+    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
+
+    await seedPatient(tid, { patientId: 'PAT-WA000003', fullName: 'Ward A Patient' });
+    await seedPatient(tid, { patientId: 'PAT-WB000003', fullName: 'Ward B Patient' });
+    await admitPatientToWard(tid, 'PAT-WA000003', wardA._id.toString(), 'ADM-WA-0003');
+    await admitPatientToWard(tid, 'PAT-WB000003', wardB._id.toString(), 'ADM-WB-0003');
+
+    const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
+    const res   = await request(app).get('/api/patients/PAT-WB000003').set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('200 — nurse with no ward assigned sees an empty patient list (not an error)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+    await seedPatient(tid, { patientId: 'PAT-NW0001', fullName: 'Unassigned Ward Patient' });
+
+    const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('200 — other roles (Receptionist) continue to see all patients as before', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc     = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid });
+    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
+
+    await seedPatient(tid, { patientId: 'PAT-RCA001', fullName: 'Ward A Patient' });
+    await seedPatient(tid, { patientId: 'PAT-RCB001', fullName: 'Ward B Patient' });
+    await admitPatientToWard(tid, 'PAT-RCA001', wardA._id.toString(), 'ADM-RCA-001');
+    await admitPatientToWard(tid, 'PAT-RCB001', wardB._id.toString(), 'ADM-RCB-001');
+
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(2);
+  });
+});
+
+// ─── Doctor patient-assignment scoping ─────────────────────────────────────────
+describe('Doctor patient-assignment scoping', () => {
+  async function assignPatientViaOPD(tenantId: string, patientId: string, doctorId: string, visitId: string) {
+    return OPDVisitModel.create({
+      visitId,
+      tenantId,
+      patientId,
+      doctorIds:      [doctorId],
+      departmentId:   null,
+      visitDate:      new Date(),
+      queueNumber:    1,
+      status:         'OPEN',
+      chiefComplaint: 'Routine checkup',
+    });
+  }
+
+  async function assignPatientViaIPD(tenantId: string, patientId: string, doctorId: string, admissionId: string) {
+    return IPDAdmissionModel.create({
+      admissionId,
+      patientId,
+      wardId:            'ward-1',
+      bedId:             'bed-1',
+      bedNumber:         'B-01',
+      wardName:          'General Ward',
+      assignedDoctorIds: [doctorId],
+      status:            'ADMITTED',
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId,
+    });
+  }
+
+  test('200 — doctor sees only patients assigned to them via an OPD visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const doctor = await seedUser(tid, 'doc-opd@h.com', UserRole.DOCTOR);
+    const doctorId = doctor._id.toString();
+
+    await seedPatient(tid, { patientId: 'PAT-DOA00001', fullName: 'My Patient' });
+    await seedPatient(tid, { patientId: 'PAT-DOB00001', fullName: 'Other Doctor Patient' });
+    await assignPatientViaOPD(tid, 'PAT-DOA00001', doctorId, 'OPD-DOC-001');
+
+    const token = tokenFor(doctorId, tid, UserRole.DOCTOR);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-DOA00001');
+  });
+
+  test('200 — doctor sees a patient assigned to them only via an IPD admission', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const doctor = await seedUser(tid, 'doc-ipd@h.com', UserRole.DOCTOR);
+    const doctorId = doctor._id.toString();
+
+    await seedPatient(tid, { patientId: 'PAT-DOC00002', fullName: 'IPD Patient' });
+    await assignPatientViaIPD(tid, 'PAT-DOC00002', doctorId, 'ADM-DOC-001');
+
+    const token = tokenFor(doctorId, tid, UserRole.DOCTOR);
+    const res   = await request(app).get('/api/patients/PAT-DOC00002').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.patientId).toBe('PAT-DOC00002');
+  });
+
+  test('404 — doctor cannot fetch another doctor\'s patient via direct patientId (Direct URL / manual ID)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const doctor = await seedUser(tid, 'doc-a@h.com', UserRole.DOCTOR);
+    const doctorId = doctor._id.toString();
+    const otherDoctor = await seedUser(tid, 'doc-b@h.com', UserRole.DOCTOR);
+
+    await seedPatient(tid, { patientId: 'PAT-DOB00003', fullName: 'Other Doctor Patient' });
+    await assignPatientViaOPD(tid, 'PAT-DOB00003', otherDoctor._id.toString(), 'OPD-DOC-003');
+
+    const token = tokenFor(doctorId, tid, UserRole.DOCTOR);
+    const res   = await request(app).get('/api/patients/PAT-DOB00003').set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('200 — doctor with no assigned patients sees an empty patient list (not an error)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const doctor = await seedUser(tid, 'doc-none@h.com', UserRole.DOCTOR);
+    await seedPatient(tid, { patientId: 'PAT-DOE00001', fullName: 'Unassigned Patient' });
+
+    const token = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('200 — other roles (Receptionist) continue to see all patients as before', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc     = await seedUser(tid, 'rc-doc@h.com', UserRole.RECEPTIONIST);
+    const doctor = await seedUser(tid, 'doc-x@h.com', UserRole.DOCTOR);
+
+    await seedPatient(tid, { patientId: 'PAT-DOF00001', fullName: 'Assigned Patient' });
+    await seedPatient(tid, { patientId: 'PAT-DOG00001', fullName: 'Unassigned Patient' });
+    await assignPatientViaOPD(tid, 'PAT-DOF00001', doctor._id.toString(), 'OPD-DOC-004');
+
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const res   = await request(app).get('/api/patients').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(2);
   });
 });
 

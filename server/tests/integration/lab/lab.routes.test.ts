@@ -28,6 +28,8 @@ import { UserModel }        from '../../../src/modules/user/user.model';
 import { TenantModel }      from '../../../src/modules/tenant/tenant.model';
 import { PatientModel }     from '../../../src/modules/patient/patient.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
+import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
+import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { TenantStatus, UserRole }     from '../../../src/shared/types/common.types';
 import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
 
@@ -95,6 +97,21 @@ beforeEach(async () => {
     patientId: 'PAT-001', tenantId, fullName: 'John Doe',
     dateOfBirth: new Date('1980-01-01'), gender: 'MALE',
     mobileNumber: '1234567890', address: '123 Test Street',
+  });
+
+  // Doctor-patient assignment: Lab Doctor is assigned to PAT-001 via an OPD
+  // visit, so all existing "doctor acts on PAT-001" tests below continue to
+  // hold now that Doctor Lab access is scoped to assigned patients.
+  await OPDVisitModel.create({
+    visitId:        'OPD-LABTEST01',
+    tenantId,
+    patientId:      'PAT-001',
+    doctorIds:      [doctorId],
+    departmentId:   null,
+    visitDate:      new Date(),
+    queueNumber:    1,
+    status:         'OPEN',
+    chiefComplaint: 'Routine checkup',
   });
 
   const admin = await UserModel.create({
@@ -269,6 +286,326 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
   });
 });
 
+
+// ─── Doctor patient-assignment scoping ────────────────────────────────────────
+
+describe('Doctor Lab access is scoped to assigned patients', () => {
+  async function seedUnassignedPatient() {
+    await PatientModel.create({
+      patientId: 'PAT-002', tenantId, fullName: 'Jane Roe',
+      dateOfBirth: new Date('1985-01-01'), gender: 'FEMALE',
+      mobileNumber: '9998887777', address: '456 Other Street',
+    });
+  }
+
+  test('404 — doctor cannot create a pathology request for a patient not assigned to them', async () => {
+    await seedUnassignedPatient();
+
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('404 — doctor cannot create a radiology request for a patient not assigned to them', async () => {
+    await seedUnassignedPatient();
+
+    const res = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', imagingType: 'X-Ray Chest' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('201 — doctor can create a pathology request for a patient assigned only via an IPD admission', async () => {
+    await seedUnassignedPatient();
+    await IPDAdmissionModel.create({
+      admissionId:       'adm-lab-001',
+      patientId:         'PAT-002',
+      wardId:            'ward-1',
+      bedId:             'bed-1',
+      bedNumber:         'B-01',
+      wardName:          'General Ward',
+      assignedDoctorIds: [doctorId],
+      status:            'ADMITTED',
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId,
+    });
+
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-002', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('GET /api/lab/pathology — doctor sees only requests for their own assigned patients', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-001');
+  });
+
+  test('GET /api/lab/pathology/:requestId — doctor can fetch a request for their own patient (200)', async () => {
+    const requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('GET /api/lab/pathology/:requestId — doctor cannot fetch another doctor\'s patient\'s request, even by direct ID (404)', async () => {
+    await seedUnassignedPatient();
+    const requestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId, patientId: 'PAT-002', tenantId,
+      requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('GET /api/lab/radiology/:requestId — doctor cannot fetch another doctor\'s patient\'s request, even by direct ID (404)', async () => {
+    await seedUnassignedPatient();
+    const requestId = uuidv4();
+    await RadiologyRequestModel.create({
+      requestId, patientId: 'PAT-002', tenantId,
+      requestedBy: '507f1f77bcf86cd799439011', imagingType: 'CT Scan',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('HOSPITAL_ADMIN continues to see lab requests for all patients (unaffected)', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+  });
+
+  // ─── patientId filter combined with doctor scoping ──────────────────────────
+
+  test('GET /api/lab/pathology?patientId=<allowed> — doctor filtering by an allowed patientId receives only that patient\'s records', async () => {
+    await seedUnassignedPatient();
+    await OPDVisitModel.create({
+      visitId: 'OPD-LABTEST02', tenantId, patientId: 'PAT-002',
+      doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
+      queueNumber: 2, status: 'OPEN', chiefComplaint: 'Follow-up',
+    });
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: doctorId, testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .query({ patientId: 'PAT-001' })
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-001');
+  });
+
+  test('GET /api/lab/pathology?patientId=<out-of-scope> — doctor filtering by an out-of-scope patientId receives zero records', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .query({ patientId: 'PAT-002' })
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('GET /api/lab/pathology (no patientId filter) — doctor without a patientId filter receives records for all allowed patients', async () => {
+    await seedUnassignedPatient();
+    await OPDVisitModel.create({
+      visitId: 'OPD-LABTEST03', tenantId, patientId: 'PAT-002',
+      doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
+      queueNumber: 3, status: 'OPEN', chiefComplaint: 'Follow-up',
+    });
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: doctorId, testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(2);
+    const patientIds = res.body.data.data.map((r: { patientId: string }) => r.patientId).sort();
+    expect(patientIds).toEqual(['PAT-001', 'PAT-002']);
+  });
+
+  test('GET /api/lab/radiology?patientId=<allowed> — doctor filtering by an allowed patientId receives only that patient\'s records', async () => {
+    await seedUnassignedPatient();
+    await OPDVisitModel.create({
+      visitId: 'OPD-LABTEST04', tenantId, patientId: 'PAT-002',
+      doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
+      queueNumber: 4, status: 'OPEN', chiefComplaint: 'Follow-up',
+    });
+    await RadiologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, imagingType: 'X-Ray Chest',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: doctorId, imagingType: 'CT Scan',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/radiology')
+      .query({ patientId: 'PAT-001' })
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-001');
+  });
+
+  test('GET /api/lab/radiology?patientId=<out-of-scope> — doctor filtering by an out-of-scope patientId receives zero records', async () => {
+    await seedUnassignedPatient();
+    await RadiologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, imagingType: 'X-Ray Chest',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', imagingType: 'CT Scan',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/radiology')
+      .query({ patientId: 'PAT-002' })
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('GET /api/lab/pathology?patientId=<any> — HOSPITAL_ADMIN filtering by patientId is unaffected by doctor scoping', async () => {
+    await seedUnassignedPatient();
+    await PathologyRequestModel.create([
+      {
+        requestId: uuidv4(), patientId: 'PAT-001', tenantId,
+        requestedBy: doctorId, testType: 'Blood CBC',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+      {
+        requestId: uuidv4(), patientId: 'PAT-002', tenantId,
+        requestedBy: '507f1f77bcf86cd799439011', testType: 'Lipid Profile',
+        status: 'PENDING', requestedAt: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .query({ patientId: 'PAT-002' })
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].patientId).toBe('PAT-002');
+  });
+});
 
 // ─── Radiology ────────────────────────────────────────────────────────────────
 
@@ -604,6 +941,129 @@ describe('DELETE /api/lab/radiology/:requestId', () => {
   test('401 — no auth token', async () => {
     const res = await request(app).delete(`/api/lab/radiology/${requestId}`);
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── Doctor scoping — edit/delete ─────────────────────────────────────────────
+
+describe('Doctor scoping — edit/delete lab requests', () => {
+  let secondDoctorId: string;
+  let secondDoctorToken: string;
+  let pathologyRequestId: string;
+  let radiologyRequestId: string;
+
+  beforeEach(async () => {
+    await PatientModel.create({
+      patientId: 'PAT-003', tenantId, fullName: 'Other Patient',
+      dateOfBirth: new Date('1990-01-01'), gender: 'FEMALE',
+      mobileNumber: '5551234567', address: '789 Another Street',
+    });
+
+    const secondDoctor = await UserModel.create({
+      tenantId, email: 'doctor2@test.com', name: 'Second Doctor', passwordHash: 'x',
+      role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
+    });
+    secondDoctorId = (secondDoctor._id as mongoose.Types.ObjectId).toString();
+
+    await OPDVisitModel.create({
+      visitId:        'OPD-LABTEST02',
+      tenantId,
+      patientId:      'PAT-003',
+      doctorIds:      [secondDoctorId],
+      departmentId:   null,
+      visitDate:      new Date(),
+      queueNumber:    1,
+      status:         'OPEN',
+      chiefComplaint: 'Routine checkup',
+    });
+
+    secondDoctorToken = jwt.sign(
+      { userId: secondDoctorId, tenantId, role: UserRole.DOCTOR, email: 'x@x.com', isFirstLogin: false },
+      JWT_SECRET,
+    );
+
+    pathologyRequestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId: pathologyRequestId, patientId: 'PAT-003', tenantId,
+      requestedBy: secondDoctorId, testType: 'Blood CBC',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+
+    radiologyRequestId = uuidv4();
+    await RadiologyRequestModel.create({
+      requestId: radiologyRequestId, patientId: 'PAT-003', tenantId,
+      requestedBy: secondDoctorId, imagingType: 'X-Ray Chest',
+      status: 'PENDING', priority: 'NORMAL', requestedAt: new Date(),
+    });
+  });
+
+  test('404 — doctor cannot edit another doctor\'s patient\'s pathology request by direct requestId', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ testType: 'Hacked Test' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('404 — doctor cannot delete another doctor\'s patient\'s pathology request by direct requestId', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('404 — doctor cannot edit another doctor\'s patient\'s radiology request by direct requestId', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ imagingType: 'Hacked Imaging' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('404 — doctor cannot delete another doctor\'s patient\'s radiology request by direct requestId', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('200 — the assigned doctor can still edit their own patient\'s pathology request', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${secondDoctorToken}`)
+      .send({ testType: 'Urine Analysis' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.testType).toBe('Urine Analysis');
+  });
+
+  test('200 — the assigned doctor can still delete their own patient\'s radiology request', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${secondDoctorToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('200 — HOSPITAL_ADMIN can still edit a pathology request for any patient (unaffected)', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ testType: 'Admin Edited' });
+
+    expect(res.status).toBe(200);
+  });
+
+  test('200 — HOSPITAL_ADMIN can still delete a radiology request for any patient (unaffected)', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
   });
 });
 

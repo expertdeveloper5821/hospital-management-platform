@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { patientService, DuplicateWarningError } from './patient.service';
 import { IPatient } from './patient.model';
-import { ValidationError } from '../../shared/middleware/error-handler';
+import { ValidationError, NotFoundError } from '../../shared/middleware/error-handler';
 import { patientIdSchema, searchSchema } from '../../shared/utils/validation';
 import { paymentService } from '../payment/payment.service';
 import { PaymentMethod } from '../payment/payment.types';
+import { UserRole } from '../../shared/types/common.types';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
@@ -128,7 +129,11 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
     if (!query.success) throw new ValidationError('Invalid query params');
     const { q, page, limit } = query.data;
 
-    const result = await patientService.searchPatients(req.user!.tenantId!, q, page, limit);
+    const tenantId   = req.user!.tenantId!;
+    const patientIds = (await patientService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role))
+      ?? (await patientService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role));
+
+    const result = await patientService.searchPatients(tenantId, q, page, limit, undefined, patientIds);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -136,7 +141,16 @@ export async function searchPatients(req: Request, res: Response, next: NextFunc
 export async function getPatient(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { patientId } = z.object({ patientId: patientIdSchema }).parse(req.params);
-    const patient = await patientService.getPatientById(req.user!.tenantId!, patientId);
+    const tenantId = req.user!.tenantId!;
+
+    if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
+      const scopedIds = req.user!.role === UserRole.NURSE
+        ? await patientService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role)
+        : await patientService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+      if (!scopedIds?.includes(patientId)) throw new NotFoundError('Patient not found');
+    }
+
+    const patient = await patientService.getPatientById(tenantId, patientId);
     res.status(200).json({ status: 'success', data: toResponse(patient) });
   } catch (err) { next(err); }
 }

@@ -57,6 +57,7 @@ let receptionistToken: string;
 let managerToken:      string;
 let financeToken:      string;
 let doctorToken:       string;
+let adminRoleToken:    string;
 let patientId:         string;
 
 beforeAll(async () => {
@@ -117,12 +118,17 @@ beforeEach(async () => {
     tenantId, email: 'doctor@test.com', name: 'Pay Doctor', passwordHash: 'x',
     role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
   });
+  const adminRole = await UserModel.create({
+    tenantId, email: 'adminrole@test.com', name: 'Pay Admin Role', passwordHash: 'x',
+    role: UserRole.ADMIN, isActive: true, isFirstLogin: false,
+  });
 
   const base = { tenantId, isFirstLogin: false };
   receptionistToken = jwt.sign({ ...base, userId: (receptionist._id as mongoose.Types.ObjectId).toString(), role: UserRole.RECEPTIONIST,  email: 'receptionist@test.com' }, JWT_SECRET, { expiresIn: '1h' });
   managerToken      = jwt.sign({ ...base, userId: (manager._id      as mongoose.Types.ObjectId).toString(), role: UserRole.MANAGER,         email: 'manager@test.com'      }, JWT_SECRET, { expiresIn: '1h' });
   financeToken      = jwt.sign({ ...base, userId: (finance._id      as mongoose.Types.ObjectId).toString(), role: UserRole.FINANCE_MANAGER, email: 'finance@test.com'      }, JWT_SECRET, { expiresIn: '1h' });
   doctorToken       = jwt.sign({ ...base, userId: (doctor._id       as mongoose.Types.ObjectId).toString(), role: UserRole.DOCTOR,          email: 'doctor@test.com'       }, JWT_SECRET, { expiresIn: '1h' });
+  adminRoleToken    = jwt.sign({ ...base, userId: (adminRole._id    as mongoose.Types.ObjectId).toString(), role: UserRole.ADMIN,           email: 'adminrole@test.com'    }, JWT_SECRET, { expiresIn: '1h' });
 });
 
 // ─── U5-B-07: Manual payment endpoints ───────────────────────────────────────
@@ -511,6 +517,79 @@ describe('GET /api/payments/:paymentId/receipt', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.receiptUrl).toBe('https://s3.test/presigned-url');
+  });
+});
+
+// ─── ADMIN role — payment access (parity with HOSPITAL_ADMIN) ────────────────
+
+describe('ADMIN role — payment access', () => {
+  test('ADMIN can create a manual payment (201)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({ patientId, amount: 500, paymentMethod: 'CASH', description: 'Consultation fee' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('ADMIN can create a Razorpay order (201)', async () => {
+    const res = await request(app)
+      .post('/api/payments/razorpay-order')
+      .set('Authorization', `Bearer ${adminRoleToken}`)
+      .send({ patientId, amount: 500, paymentMethod: 'UPI', description: 'Online payment' });
+
+    expect(res.status).toBe(201);
+  });
+
+  test('ADMIN can list payments (200)', async () => {
+    await PaymentModel.create({
+      paymentId:    'pay-admin-role-001',
+      tenantId,
+      patientId,
+      amount:       300,
+      paymentMethod: PaymentMethod.CASH,
+      description:  'Test',
+      status:       PaymentStatus.COMPLETED,
+      receiptS3Key: 'key',
+      createdBy:    'user-001',
+    });
+
+    const res = await request(app)
+      .get('/api/payments')
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+  });
+
+  test('ADMIN can access the payment summary (200)', async () => {
+    const res = await request(app)
+      .get('/api/payments/summary')
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('ADMIN can access a receipt URL (200)', async () => {
+    const payUuid = '650e8400-e29b-41d4-a716-446655440001';
+    await PaymentModel.create({
+      paymentId:    payUuid,
+      tenantId,
+      patientId,
+      amount:       500,
+      paymentMethod: 'CASH',
+      description:  'Test',
+      status:       'COMPLETED',
+      receiptS3Key: `org/${tenantId}/payments/${payUuid}/receipt.pdf`,
+      createdBy:    'user-001',
+    });
+
+    const res = await request(app)
+      .get(`/api/payments/${payUuid}/receipt`)
+      .set('Authorization', `Bearer ${adminRoleToken}`);
+
+    expect(res.status).toBe(200);
   });
 });
 

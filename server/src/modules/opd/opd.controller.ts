@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { opdService } from './opd.service';
 import { IOPDVisit } from './opd.model';
-import { ValidationError } from '../../shared/middleware/error-handler';
+import { ValidationError, NotFoundError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
 
 const createVisitSchema = z.object({
@@ -91,8 +91,9 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     const doctorId = req.user!.role === UserRole.DOCTOR
       ? req.user!.userId
       : query.data.doctorId;
+    const nursePatientIds = await opdService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role);
 
-    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search);
+    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search, nursePatientIds);
     res.status(200).json({
       status: 'success',
       data: visits.map((v) => toResponse(v)),
@@ -102,7 +103,16 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
 
 export async function getVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const visit = await opdService.getVisitById(req.user!.tenantId!, req.params.visitId);
+    const tenantId = req.user!.tenantId!;
+    const visit = await opdService.getVisitById(tenantId, req.params.visitId);
+
+    if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
+      const scopedIds = req.user!.role === UserRole.NURSE
+        ? await opdService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role)
+        : await opdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+      if (!scopedIds?.includes(visit.patientId)) throw new NotFoundError('OPD visit not found');
+    }
+
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
 }
@@ -112,12 +122,15 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
     const body = updateVisitSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
+    const tenantId = req.user!.tenantId!;
+    const scopedPatientIds = await opdService.resolveMutationScopedPatientIds(tenantId, req.user!.userId, req.user!.role);
     const visit = await opdService.updateVisit(
-      req.user!.tenantId!,
+      tenantId,
       req.params.visitId,
       body.data,
       req.user!.userId,
       req.user!.role,
+      scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
@@ -128,11 +141,14 @@ export async function completeVisit(req: Request, res: Response, next: NextFunct
     const body = completeVisitSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
+    const tenantId = req.user!.tenantId!;
+    const scopedPatientIds = await opdService.resolveMutationScopedPatientIds(tenantId, req.user!.userId, req.user!.role);
     const visit = await opdService.completeVisit(
-      req.user!.tenantId!,
+      tenantId,
       req.params.visitId,
       body.data,
       req.user!.userId,
+      scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
@@ -140,10 +156,13 @@ export async function completeVisit(req: Request, res: Response, next: NextFunct
 
 export async function cancelVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const tenantId = req.user!.tenantId!;
+    const scopedPatientIds = await opdService.resolveMutationScopedPatientIds(tenantId, req.user!.userId, req.user!.role);
     const visit = await opdService.cancelVisit(
-      req.user!.tenantId!,
+      tenantId,
       req.params.visitId,
       req.user!.userId,
+      scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
   } catch (err) { next(err); }
@@ -154,11 +173,15 @@ export async function getPatientHistory(req: Request, res: Response, next: NextF
     const query = historyQuerySchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params', { errors: query.error.flatten() });
 
+    const tenantId = req.user!.tenantId!;
     const { page, limit, startDate, endDate, status, search } = query.data;
+    const scopedPatientIds = (await opdService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role))
+      ?? (await opdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role));
     const result = await opdService.getPatientHistory(
-      req.user!.tenantId!,
+      tenantId,
       req.params.patientId,
       { page, limit, startDate, endDate, status, search },
+      scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

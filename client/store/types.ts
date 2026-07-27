@@ -334,6 +334,7 @@ export interface ProgressNote {
   doctorId:  string;
   note:      string;
   timestamp: string;
+  staffName: string | null;
 }
  
 export interface AdmissionResponse {
