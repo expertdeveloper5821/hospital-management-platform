@@ -700,10 +700,11 @@ export default function DashboardPage() {
                       <span className="text-muted-foreground">Total Beds</span>
                       <span className="font-semibold">{data?.totalBeds ?? 0}</span>
                     </div>
-                    <Link href="/ipd" className="block">
-                      <Button variant="outline" size="sm" className="w-full mt-1 text-xs h-7">
-                        View Bed Management →
-                      </Button>
+                    <Link
+                      href="/ipd"
+                      className="block w-full truncate text-xs font-medium text-primary hover:underline mt-1"
+                    >
+                      View Bed Management →
                     </Link>
                   </div>
                 </div>

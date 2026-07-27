@@ -88,16 +88,16 @@ export function Sidebar({ onClose }: SidebarProps) {
       className="flex flex-col h-full w-64 bg-sidebar text-sidebar-foreground border-r shrink-0"
     >
       {/* Branding header */}
-      <div className="flex items-center gap-3 px-4 h-16 border-b border-sidebar-accent/40 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-sidebar-accent/40 shrink-0">
         {headerLogoUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={headerLogoUrl}
             alt={headerTitle}
-            className="h-16 w-16 rounded object-contain shrink-0"
+            className="h-14 w-14 rounded object-contain shrink-0"
           />
         )}
-        <span className="font-bold text-lg truncate flex-1">{headerTitle}</span>
+        <span className="font-bold text-lg leading-tight break-words min-w-0 flex-1">{headerTitle}</span>
         {onClose && (
           <button
             onClick={onClose}
