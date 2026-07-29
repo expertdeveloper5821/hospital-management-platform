@@ -33,14 +33,28 @@ function sanitizeStyleValue(style: string): string {
     .join('; ');
 }
 
-DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
-  if (data.attrName !== 'style') return;
-  const sanitized = sanitizeStyleValue(data.attrValue);
-  if (sanitized) data.attrValue = sanitized;
-  else data.keepAttr = false;
-});
+// In a browser (or a jsdom-backed test environment) DOMPurify binds itself to
+// the real `window`/`document` it finds at import time and is fully usable.
+// During Next.js server-side/prerender execution there is no DOM, so the
+// imported instance falls back to a stub with `isSupported = false` and no
+// `addHook`/`sanitize` methods — calling either would throw at import time
+// and fail the production build.
+if (DOMPurify.isSupported) {
+  DOMPurify.addHook('uponSanitizeAttribute', (_node, data) => {
+    if (data.attrName !== 'style') return;
+    const sanitized = sanitizeStyleValue(data.attrValue);
+    if (sanitized) data.attrValue = sanitized;
+    else data.keepAttr = false;
+  });
+}
 
 export function sanitizeNotesHtml(html: string): string {
+  if (!DOMPurify.isSupported) {
+    // No DOM available (server/build). Strip all markup so nothing
+    // unsanitized ever reaches prerendered output; the browser re-sanitizes
+    // (with the hook above, full formatting preserved) on hydration.
+    return html.replace(/<[^>]*>/g, '');
+  }
   return DOMPurify.sanitize(html, { ALLOWED_TAGS, ALLOWED_ATTR });
 }
 
