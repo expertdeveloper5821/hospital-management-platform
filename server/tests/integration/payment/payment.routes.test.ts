@@ -45,6 +45,9 @@ import { UserModel }  from '../../../src/modules/user/user.model';
 import { TenantModel } from '../../../src/modules/tenant/tenant.model';
 import { PatientModel } from '../../../src/modules/patient/patient.model';
 import { PaymentModel } from '../../../src/modules/payment/payment.model';
+import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
+import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
+import { DepartmentModel } from '../../../src/modules/department/department.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { PaymentStatus, PaymentMethod } from '../../../src/modules/payment/payment.types';
 
@@ -491,6 +494,264 @@ describe('GET /api/payments/summary', () => {
       .set('Authorization', `Bearer ${receptionistToken}`);
 
     expect(res.status).toBe(403);
+  });
+});
+
+// ─── GET /api/payments/summary/by-department ─────────────────────────────────
+
+describe('GET /api/payments/summary/by-department', () => {
+  async function seedDepartment(name: string) {
+    const dept = await DepartmentModel.create({ departmentId: `dept-${name}`, tenantId, name });
+    return dept.departmentId;
+  }
+
+  async function seedOpdVisit(departmentId: string | null, visitId: string) {
+    await OPDVisitModel.create({
+      visitId, tenantId, patientId, departmentId,
+      doctorIds: [], visitDate: new Date(), queueNumber: 1, status: 'OPEN',
+    });
+  }
+
+  async function seedIpdAdmission(departmentId: string | null, admissionId: string) {
+    await IPDAdmissionModel.create({
+      admissionId, tenantId, patientId, departmentId,
+      wardId: 'ward-1', bedId: 'bed-1', bedNumber: '1', wardName: 'Ward A',
+    });
+  }
+
+  test('returns every active department with ₹0 when there are no payments', async () => {
+    await seedDepartment('Cardiology');
+    await seedDepartment('Radiology');
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.departments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Cardiology', total: 0 }),
+        expect.objectContaining({ name: 'Radiology', total: 0 }),
+      ]),
+    );
+    expect(res.body.data.unassignedTotal).toBe(0);
+    expect(res.body.data.grandTotal).toBe(0);
+  });
+
+  test('maps OPD-visit and IPD-admission payments to their department, buckets referenceType-less payments as unassigned, and leaves untouched departments at ₹0', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    const radiologyId  = await seedDepartment('Radiology');
+    await seedDepartment('Neurology'); // no revenue at all
+
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT001');
+    await seedIpdAdmission(radiologyId, 'ADM-DEPT001');
+
+    await PaymentModel.create([
+      // OPD_VISIT → Cardiology
+      { paymentId: 'p1', tenantId, patientId, amount: 500, paymentMethod: 'CASH', description: 'OPD', status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT001', createdBy: 'u' },
+      // IPD_ADMISSION → Radiology
+      { paymentId: 'p2', tenantId, patientId, amount: 800, paymentMethod: 'CARD', description: 'IPD', status: 'COMPLETED', referenceType: 'IPD_ADMISSION', referenceId: 'ADM-DEPT001', createdBy: 'u' },
+      // No referenceType at all (e.g. registration fee) → unassigned, since this patient has no departmentId
+      { paymentId: 'p3', tenantId, patientId, amount: 300, paymentMethod: 'UPI', description: 'Registration', status: 'COMPLETED', createdBy: 'u' },
+      // PENDING — must be excluded from revenue entirely
+      { paymentId: 'p4', tenantId, patientId, amount: 999, paymentMethod: 'CASH', description: 'Pending', status: 'PENDING', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT001', createdBy: 'u' },
+      // FAILED — must be excluded
+      { paymentId: 'p5', tenantId, patientId, amount: 999, paymentMethod: 'CASH', description: 'Failed', status: 'FAILED', createdBy: 'u' },
+      // CANCELLED — must be excluded
+      { paymentId: 'p6', tenantId, patientId, amount: 999, paymentMethod: 'CASH', description: 'Cancelled', status: 'CANCELLED', createdBy: 'u' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    const byName = Object.fromEntries(
+      (res.body.data.departments as Array<{ name: string; total: number }>).map((d) => [d.name, d.total]),
+    );
+    expect(byName['Cardiology']).toBe(500);
+    expect(byName['Radiology']).toBe(800);
+    expect(byName['Neurology']).toBe(0); // department exists but never appears on any payment
+    expect(res.body.data.unassignedTotal).toBe(300);
+    expect(res.body.data.grandTotal).toBe(1600); // 500 + 800 + 300 — pending/failed/cancelled excluded
+
+    // Invariant: department revenue always reconciles with the grand total.
+    const departmentSum = (res.body.data.departments as Array<{ total: number }>)
+      .reduce((sum, d) => sum + d.total, 0);
+    expect(departmentSum + res.body.data.unassignedTotal).toBe(res.body.data.grandTotal);
+  });
+
+  test('an OPD visit with no department assigned is safely bucketed as unassigned, not dropped or errored', async () => {
+    await seedDepartment('Cardiology');
+    await seedOpdVisit(null, 'OPD-NODEPT01'); // old/legacy visit with no department
+
+    await PaymentModel.create({
+      paymentId: 'p1', tenantId, patientId, amount: 400, paymentMethod: 'CASH', description: 'OPD',
+      status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-NODEPT01', createdBy: 'u',
+    });
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.unassignedTotal).toBe(400);
+    expect(res.body.data.grandTotal).toBe(400);
+  });
+
+  test('a payment referencing an OPD visit that no longer exists is safely bucketed as unassigned', async () => {
+    await seedDepartment('Cardiology');
+    // No matching OPDVisit document at all — simulates a data gap/old record.
+    await PaymentModel.create({
+      paymentId: 'p1', tenantId, patientId, amount: 250, paymentMethod: 'CASH', description: 'OPD',
+      status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-MISSING', createdBy: 'u',
+    });
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.unassignedTotal).toBe(250);
+    expect(res.body.data.grandTotal).toBe(250);
+  });
+
+  test('revenue mapped to a since-deleted department folds into unassigned instead of vanishing', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT002');
+    await PaymentModel.create({
+      paymentId: 'p1', tenantId, patientId, amount: 600, paymentMethod: 'CASH', description: 'OPD',
+      status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT002', createdBy: 'u',
+    });
+
+    await DepartmentModel.updateOne({ departmentId: cardiologyId }, { $set: { isDeleted: true, deletedAt: new Date() } });
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.departments).toHaveLength(0); // Cardiology no longer active
+    expect(res.body.data.unassignedTotal).toBe(600);
+    expect(res.body.data.grandTotal).toBe(600);
+  });
+
+  test('applies the dateFrom/dateTo filters, matching the payments list', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT003');
+
+    const inRange  = await PaymentModel.create({
+      paymentId: 'p1', tenantId, patientId, amount: 500, paymentMethod: 'CASH', description: 'In range',
+      status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT003', createdBy: 'u',
+    });
+    await PaymentModel.create({
+      paymentId: 'p2', tenantId, patientId, amount: 900, paymentMethod: 'CASH', description: 'Out of range',
+      status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT003', createdBy: 'u',
+    });
+    // Push p2 outside the query window. Mongoose's timestamps plugin silently
+    // ignores an explicit `createdAt` in a regular updateOne, so go through
+    // the native driver collection to actually backdate it.
+    await PaymentModel.collection.updateOne({ paymentId: 'p2' }, { $set: { createdAt: new Date('2020-01-01') } });
+
+    const dateFrom = new Date(inRange.createdAt.getTime() - 60_000).toISOString();
+    const dateTo   = new Date(inRange.createdAt.getTime() + 60_000).toISOString();
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .query({ dateFrom, dateTo })
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.grandTotal).toBe(500);
+  });
+
+  test('applies the paymentMethod filter', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT004');
+    await PaymentModel.create([
+      { paymentId: 'p1', tenantId, patientId, amount: 500, paymentMethod: 'CASH', description: 'Cash', status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT004', createdBy: 'u' },
+      { paymentId: 'p2', tenantId, patientId, amount: 700, paymentMethod: 'UPI',  description: 'UPI',  status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT004', createdBy: 'u' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .query({ paymentMethod: 'CASH' })
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.grandTotal).toBe(500);
+  });
+
+  test('defaults to COMPLETED-only revenue, but an explicit status filter overrides that default', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT005');
+    await PaymentModel.create([
+      { paymentId: 'p1', tenantId, patientId, amount: 500, paymentMethod: 'CASH', description: 'Completed', status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT005', createdBy: 'u' },
+      { paymentId: 'p2', tenantId, patientId, amount: 250, paymentMethod: 'CASH', description: 'Pending',   status: 'PENDING',   referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT005', createdBy: 'u' },
+    ]);
+
+    const defaultRes = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(defaultRes.body.data.grandTotal).toBe(500);
+
+    const pendingRes = await request(app)
+      .get('/api/payments/summary/by-department')
+      .query({ status: 'PENDING' })
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(pendingRes.body.data.grandTotal).toBe(250);
+  });
+
+  test('tenant isolation — another tenant\'s departments and payments never appear', async () => {
+    const otherTenant = await TenantModel.create({
+      name: 'Other Hospital', adminEmail: 'admin@other.com', status: TenantStatus.ACTIVE,
+      onboardingDocuments: {
+        registrationCertificate: 'cert-002', gstNumber: 'GST002', panCard: 'PAN002',
+        addressLine: '2 Other Rd', city: 'Delhi', state: 'Delhi', pincode: '110001',
+      },
+      branding: { displayName: 'Other Hospital', primaryColor: '#000000', logoUrl: null },
+    });
+    const otherTenantId = (otherTenant._id as mongoose.Types.ObjectId).toString();
+    await DepartmentModel.create({ departmentId: 'dept-other', tenantId: otherTenantId, name: 'OtherDept' });
+    await PaymentModel.create({
+      paymentId: 'p-other', tenantId: otherTenantId, patientId: 'PAT-OTHER', amount: 5000,
+      paymentMethod: 'CASH', description: 'Other tenant', status: 'COMPLETED', createdBy: 'u',
+    });
+
+    await seedDepartment('Cardiology');
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.departments).toHaveLength(1);
+    expect(res.body.data.departments[0].name).toBe('Cardiology');
+    expect(res.body.data.grandTotal).toBe(0);
+  });
+
+  test('Manager, Finance Manager, and Admin can access; Receptionist and Doctor cannot', async () => {
+    await seedDepartment('Cardiology');
+
+    const okRoles = [managerToken, financeToken, adminRoleToken];
+    for (const token of okRoles) {
+      const res = await request(app)
+        .get('/api/payments/summary/by-department')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+    }
+
+    for (const token of [receptionistToken, doctorToken]) {
+      const res = await request(app)
+        .get('/api/payments/summary/by-department')
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(403);
+    }
+  });
+
+  test('401 — unauthenticated', async () => {
+    const res = await request(app).get('/api/payments/summary/by-department');
+    expect(res.status).toBe(401);
   });
 });
 

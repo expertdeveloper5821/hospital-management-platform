@@ -79,8 +79,7 @@ export class OPDRepository {
     if (search) {
       const safe = escapeRegex(search);
       query['$or'] = [
-        { chiefComplaint: { $regex: safe, $options: 'i' } },
-        { diagnosis:      { $regex: safe, $options: 'i' } },
+        { diagnosis: { $regex: safe, $options: 'i' } },
       ];
     }
 

@@ -34,7 +34,6 @@ function makeVisit(overrides: Partial<{
     visitDate:      new Date('2026-05-15T00:00:00.000Z'),
     queueNumber:    1,
     status:         overrides.status   ?? OPDVisitStatus.OPEN,
-    chiefComplaint: 'Fever and headache',
     diagnosis:      null,
     prescription:   null,
     notes:          null,
@@ -44,9 +43,8 @@ function makeVisit(overrides: Partial<{
 }
 
 const VALID_CREATE_REQ = {
-  patientId:      'PAT-ABCD1234',
-  chiefComplaint: 'Fever and headache',
-  visitDate:      '2026-05-15',
+  patientId: 'PAT-ABCD1234',
+  visitDate: '2026-05-15',
 };
 
 describe('OPDService — example-based', () => {
@@ -70,7 +68,6 @@ describe('OPDService — example-based', () => {
       expect(mockOpdRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           status:         OPDVisitStatus.OPEN,
-          chiefComplaint: 'Fever and headache',
           queueNumber:    1,
           diagnosis:      null,
           prescription:   null,
@@ -134,7 +131,7 @@ describe('OPDService — example-based', () => {
       const before = new Date();
       before.setHours(0, 0, 0, 0);
 
-      await service.createVisit('t1', { patientId: 'PAT-ABCD1234', chiefComplaint: 'Cough' }, 'user-1', UserRole.RECEPTIONIST);
+      await service.createVisit('t1', { patientId: 'PAT-ABCD1234' }, 'user-1', UserRole.RECEPTIONIST);
 
       const savedDate = (mockOpdRepo.save.mock.calls[0] as unknown[])[0] as { visitDate: Date };
       expect(savedDate.visitDate.getTime()).toBeGreaterThanOrEqual(before.getTime());
@@ -300,7 +297,6 @@ describe('OPDService — example-based', () => {
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg).toHaveProperty('notes', 'Mild fever');
       expect(updateArg).not.toHaveProperty('diagnosis');
-      expect(updateArg).not.toHaveProperty('chiefComplaint');
     });
 
     // ── past-date validation ──────────────────────────────────────────────────

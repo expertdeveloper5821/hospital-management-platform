@@ -10,6 +10,7 @@ import type {
   PaymentResponse,
   PaymentListResult,
   PaymentSummaryResponse,
+  DepartmentRevenueResponse,
   CreateManualPaymentRequest,
   CreateRazorpayOrderRequest,
   RazorpayOrderResponse,
@@ -82,6 +83,25 @@ export const paymentApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<PaymentSummaryResponse>) => raw.data,
       providesTags: ['Payment'],
     }),
+
+    // Revenue broken down by department — same filter set as the payments
+    // list (dateFrom/dateTo/method/status), so it can mirror whatever the
+    // Payments page table is currently filtered to.
+    getDepartmentRevenue: build.query<
+      DepartmentRevenueResponse,
+      { dateFrom?: string; dateTo?: string; paymentMethod?: string; status?: string }
+    >({
+      query: ({ dateFrom, dateTo, paymentMethod, status } = {}) => {
+        const params = new URLSearchParams();
+        if (dateFrom)      params.set('dateFrom',      toStartOfDay(dateFrom));
+        if (dateTo)        params.set('dateTo',        toEndOfDay(dateTo));
+        if (paymentMethod) params.set('paymentMethod', paymentMethod);
+        if (status)        params.set('status',        status);
+        return `/api/payments/summary/by-department?${params.toString()}`;
+      },
+      transformResponse: (raw: ApiSuccess<DepartmentRevenueResponse>) => raw.data,
+      providesTags: ['Payment'],
+    }),
   }),
 });
 
@@ -93,4 +113,5 @@ export const {
   useCancelRazorpayOrderMutation,
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
+  useGetDepartmentRevenueQuery,
 } = paymentApi;

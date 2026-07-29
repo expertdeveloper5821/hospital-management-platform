@@ -55,8 +55,8 @@ async function searchUsers(tenantId: string, q: string): Promise<SearchResult[]>
 async function searchOpdVisits(tenantId: string, q: string): Promise<SearchResult[]> {
   const re = buildRegex(q);
   const docs = await OPDVisitModel
-    .find({ tenantId, $or: [{ visitId: re }, { patientId: re }, { chiefComplaint: re }] })
-    .select('visitId patientId chiefComplaint status visitDate')
+    .find({ tenantId, $or: [{ visitId: re }, { patientId: re }] })
+    .select('visitId patientId status visitDate')
     .limit(MAX_PER_ENTITY)
     .lean();
 
@@ -64,7 +64,7 @@ async function searchOpdVisits(tenantId: string, q: string): Promise<SearchResul
     id:         d.visitId,
     entityType: SearchEntityType.OPD_VISIT,
     title:      `OPD ${d.visitId}`,
-    subtitle:   `${d.chiefComplaint} · ${d.status}`,
+    subtitle:   `${new Date(d.visitDate).toLocaleDateString()} · ${d.status}`,
     href:       `/opd/${d.visitId}`,
   }));
 }

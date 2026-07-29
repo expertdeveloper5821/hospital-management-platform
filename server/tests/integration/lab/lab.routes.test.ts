@@ -111,7 +111,6 @@ beforeEach(async () => {
     visitDate:      new Date(),
     queueNumber:    1,
     status:         'OPEN',
-    chiefComplaint: 'Routine checkup',
   });
 
   const admin = await UserModel.create({
@@ -446,7 +445,7 @@ describe('Doctor Lab access is scoped to assigned patients', () => {
     await OPDVisitModel.create({
       visitId: 'OPD-LABTEST02', tenantId, patientId: 'PAT-002',
       doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
-      queueNumber: 2, status: 'OPEN', chiefComplaint: 'Follow-up',
+      queueNumber: 2, status: 'OPEN',
     });
     await PathologyRequestModel.create([
       {
@@ -501,7 +500,7 @@ describe('Doctor Lab access is scoped to assigned patients', () => {
     await OPDVisitModel.create({
       visitId: 'OPD-LABTEST03', tenantId, patientId: 'PAT-002',
       doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
-      queueNumber: 3, status: 'OPEN', chiefComplaint: 'Follow-up',
+      queueNumber: 3, status: 'OPEN',
     });
     await PathologyRequestModel.create([
       {
@@ -531,7 +530,7 @@ describe('Doctor Lab access is scoped to assigned patients', () => {
     await OPDVisitModel.create({
       visitId: 'OPD-LABTEST04', tenantId, patientId: 'PAT-002',
       doctorIds: [doctorId], departmentId: null, visitDate: new Date(),
-      queueNumber: 4, status: 'OPEN', chiefComplaint: 'Follow-up',
+      queueNumber: 4, status: 'OPEN',
     });
     await RadiologyRequestModel.create([
       {
@@ -974,7 +973,6 @@ describe('Doctor scoping — edit/delete lab requests', () => {
       visitDate:      new Date(),
       queueNumber:    1,
       status:         'OPEN',
-      chiefComplaint: 'Routine checkup',
     });
 
     secondDoctorToken = jwt.sign(

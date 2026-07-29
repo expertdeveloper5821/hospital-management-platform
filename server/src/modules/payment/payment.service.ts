@@ -13,10 +13,14 @@ import {
   PaymentResponse,
   RazorpayOrderResponse,
   PaymentSummaryResponse,
+  DepartmentRevenueQuery,
+  DepartmentRevenueResponse,
+  DepartmentRevenueEntry,
 } from './payment.types';
 
-import { patientRepository } from '../patient/patient.repository';
-import { tenantRepository }  from '../tenant/tenant.repository';
+import { patientRepository }    from '../patient/patient.repository';
+import { tenantRepository }     from '../tenant/tenant.repository';
+import { departmentRepository } from '../department/department.repository';
 import { pdfService }        from '../../shared/services/pdf.service';
 import { s3Service }         from '../../shared/services/s3.service';
 import { auditService }      from '../../shared/services/audit.service';
@@ -393,6 +397,49 @@ export class PaymentService {
     query:    PaymentSummaryQuery,
   ): Promise<PaymentSummaryResponse> {
     return paymentRepository.sumByMethod(tenantId, query);
+  }
+
+  // ─── Department-wise revenue report ────────────────────────────────────────
+  // Every active department is included (₹0 if it has no matching revenue);
+  // revenue that couldn't be mapped to a department (or maps to a department
+  // that no longer exists) is folded into `unassignedTotal` so `grandTotal`
+  // always equals the sum of the whole breakdown — never computed separately.
+
+  async getDepartmentRevenue(
+    tenantId: string,
+    query:    DepartmentRevenueQuery,
+  ): Promise<DepartmentRevenueResponse> {
+    const [departments, resolvedSums] = await Promise.all([
+      departmentRepository.findAll(tenantId),
+      paymentRepository.sumByResolvedDepartment(tenantId, query),
+    ]);
+
+    const totalByDepartmentId = new Map<string, number>();
+    let unassignedTotal = 0;
+    for (const row of resolvedSums) {
+      if (row.departmentId) {
+        totalByDepartmentId.set(row.departmentId, (totalByDepartmentId.get(row.departmentId) ?? 0) + row.total);
+      } else {
+        unassignedTotal += row.total;
+      }
+    }
+
+    const knownDepartmentIds = new Set(departments.map((d) => d.departmentId));
+    const departmentEntries: DepartmentRevenueEntry[] = departments.map((d) => ({
+      departmentId: d.departmentId,
+      name:         d.name,
+      total:        totalByDepartmentId.get(d.departmentId) ?? 0,
+    }));
+
+    // Revenue resolved to a departmentId that isn't (or no longer is) an
+    // active department — e.g. it was deleted after the payment was made.
+    for (const [departmentId, total] of totalByDepartmentId) {
+      if (!knownDepartmentIds.has(departmentId)) unassignedTotal += total;
+    }
+
+    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + unassignedTotal;
+
+    return { departments: departmentEntries, unassignedTotal, grandTotal };
   }
 }
 

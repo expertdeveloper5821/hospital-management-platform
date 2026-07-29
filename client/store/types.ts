@@ -186,7 +186,6 @@ export interface OPDVisitResponse {
   visitDate:      string;
   queueNumber:    number;
   status:         OPDVisitStatus;
-  chiefComplaint: string;
   diagnosis:      string | null;
   prescription:   string | null;
   notes:          string | null;
@@ -196,14 +195,12 @@ export interface OPDVisitResponse {
  
 export interface CreateOPDVisitRequest {
   patientId:      string;
-  chiefComplaint: string;
   doctorIds?:     string[];
   visitDate?:     string; // YYYY-MM-DD
   notes?:         string;
 }
- 
+
 export interface UpdateOPDVisitRequest {
-  chiefComplaint?: string;
   doctorIds?:      string[];
   visitDate?:      string;
   diagnosis?:      string;
@@ -496,7 +493,19 @@ export interface PaymentSummaryResponse {
   CARD:   number;
   total:  number;
 }
- 
+
+export interface DepartmentRevenueEntry {
+  departmentId: string;
+  name:         string;
+  total:        number;
+}
+
+export interface DepartmentRevenueResponse {
+  departments:     DepartmentRevenueEntry[];
+  unassignedTotal: number;
+  grandTotal:      number;
+}
+
 export interface PaymentListResult {
   data:       PaymentResponse[];
   total:      number;

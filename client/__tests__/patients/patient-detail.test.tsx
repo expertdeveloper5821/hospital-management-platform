@@ -198,7 +198,7 @@ describe('PatientDetailPage — OPD History tab', () => {
 
   test('switching to OPD History tab shows filter controls', () => {
     switchToOPDTab();
-    expect(screen.getByPlaceholderText(/search complaint or diagnosis/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search diagnosis/i)).toBeInTheDocument();
     expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 
@@ -215,7 +215,6 @@ describe('PatientDetailPage — OPD History tab', () => {
           tenantId:       't1',
           patientId:      'PAT-ABCD1234',
           status:         'OPEN',
-          chiefComplaint: 'Fever and headache',
           diagnosis:      null,
           prescription:   null,
           notes:          null,
@@ -230,7 +229,6 @@ describe('PatientDetailPage — OPD History tab', () => {
       isLoading: false, isFetching: false,
     });
     switchToOPDTab();
-    expect(screen.getByText('Fever and headache')).toBeInTheDocument();
     expect(screen.getByText('OPEN')).toBeInTheDocument();
   });
 
@@ -243,7 +241,7 @@ describe('PatientDetailPage — OPD History tab', () => {
 
   test('search input updates its value and query receives undefined before debounce fires', () => {
     switchToOPDTab();
-    const input = screen.getByPlaceholderText(/search complaint or diagnosis/i) as HTMLInputElement;
+    const input = screen.getByPlaceholderText(/search diagnosis/i) as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'fever' } });
     // Input reflects the typed value immediately
     expect(input.value).toBe('fever');

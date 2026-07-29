@@ -29,6 +29,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { CharCounter } from '@/components/ui/char-counter';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import {
   Stethoscope,
   Plus,
@@ -131,7 +133,6 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [editAddDoctorId,  setEditAddDoctorId]  = useState('');
 
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
-    chiefComplaint: visit.chiefComplaint,
     diagnosis:      visit.diagnosis      ?? '',
     prescription:   visit.prescription   ?? '',
     notes:          visit.notes          ?? '',
@@ -157,10 +158,6 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     if (updating || updatingRef.current) return;
     setError('');
-    if ((form.chiefComplaint ?? '').trim().length > 1000) {
-      setError('Reason for visit cannot exceed 1000 characters.');
-      return;
-    }
     if ((form.diagnosis ?? '').trim().length > 2000) {
       setError('Diagnosis cannot exceed 2000 characters.');
       return;
@@ -169,15 +166,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       setError('Prescription cannot exceed 5000 characters.');
       return;
     }
-    if ((form.notes ?? '').trim().length > 2000) {
-      setError('Notes cannot exceed 2000 characters.');
-      return;
-    }
     updatingRef.current = true;
     try {
       // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
       const body: UpdateOPDVisitRequest = {
-        ...(form.chiefComplaint?.trim() ? { chiefComplaint: form.chiefComplaint.trim() } : {}),
         doctorIds:    editDoctorIds,
         ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
         ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
@@ -206,10 +198,6 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     }
     if ((completeForm.prescription ?? '').length > 5000) {
       setError('Prescription cannot exceed 5000 characters.');
-      return;
-    }
-    if ((completeForm.notes ?? '').trim().length > 2000) {
-      setError('Notes cannot exceed 2000 characters.');
       return;
     }
     try {
@@ -270,12 +258,11 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {mode === 'view' && (
             <div>
               {f('Doctor(s)',        doctorNames(visit.doctorIds ?? []))}
-              {f('Reason for Visit', visit.chiefComplaint)}
               {f('Diagnosis',       visit.diagnosis)}
               {f('Prescription',    visit.prescription ? (
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
-              {f('Notes',           visit.notes)}
+              {f('Notes',           <RichTextDisplay value={visit.notes} />)}
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
               {canViewPayment && (
                 <div className="mt-3 pt-3 border-t space-y-0">
@@ -354,17 +341,6 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="ep-complaint">Reason for Visit *</Label>
-                <Input
-                  id="ep-complaint"
-                  value={form.chiefComplaint ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, chiefComplaint: e.target.value }))}
-                  maxLength={1000}
-                  required
-                />
-                <CharCounter value={form.chiefComplaint ?? ''} max={1000} />
-              </div>
-              <div className="space-y-1.5">
                 <Label htmlFor="ep-diagnosis">Diagnosis</Label>
                 <textarea
                   id="ep-diagnosis"
@@ -390,15 +366,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-notes">Notes</Label>
-                <textarea
+                <RichTextEditor
                   id="ep-notes"
                   rows={2}
                   value={form.notes ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
                   maxLength={2000}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
-                <CharCounter value={form.notes ?? ''} max={2000} />
               </div>
             </form>
           )}
@@ -436,15 +410,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cp-notes">Notes</Label>
-                <textarea
+                <RichTextEditor
                   id="cp-notes"
                   rows={2}
                   value={completeForm.notes ?? ''}
-                  onChange={(e) => setCompleteForm((f) => ({ ...f, notes: e.target.value }))}
+                  onChange={(html) => setCompleteForm((f) => ({ ...f, notes: html }))}
                   maxLength={2000}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                 />
-                <CharCounter value={completeForm.notes ?? ''} max={2000} />
               </div>
             </form>
           )}
@@ -549,9 +521,8 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [selectedDoctorIds,    setSelectedDoctorIds]    = useState<string[]>([]);
   const [addDoctorId,          setAddDoctorId]          = useState('');
   const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId' | 'doctorIds'>>({
-    chiefComplaint: '',
-    visitDate:      todayISO(),
-    notes:          '',
+    visitDate: todayISO(),
+    notes:     '',
   });
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
@@ -601,15 +572,6 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
       setError('Past dates are not allowed for OPD visits.');
       return;
     }
-    if (!form.chiefComplaint.trim()) { setError('Reason for visit is required.'); return; }
-    if (form.chiefComplaint.trim().length > 1000) {
-      setError('Reason for visit cannot exceed 1000 characters.');
-      return;
-    }
-    if ((form.notes ?? '').trim().length > 2000) {
-      setError('Notes cannot exceed 2000 characters.');
-      return;
-    }
     const amount = parseFloat(paymentAmount);
     if (!paymentAmount || isNaN(amount) || amount <= 0) {
       setError('Payment amount is required and must be greater than zero.');
@@ -623,7 +585,6 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
       try {
         const body: CreateOPDVisitRequest = {
           patientId:      selectedPatient.patientId,
-          chiefComplaint: form.chiefComplaint,
           doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
           visitDate:      form.visitDate || undefined,
           notes:          form.notes    || undefined,
@@ -793,34 +754,16 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             />
           </div>
 
-          {/* Reason for visit */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nv-complaint">Reason for Visit *</Label>
-            <textarea
-              id="nv-complaint"
-              rows={3}
-              value={form.chiefComplaint}
-              onChange={(e) => setForm((f) => ({ ...f, chiefComplaint: e.target.value }))}
-              placeholder="Describe the patient's reason for visit…"
-              maxLength={1000}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              required
-            />
-            <CharCounter value={form.chiefComplaint} max={1000} />
-          </div>
-
           {/* Notes */}
           <div className="space-y-1.5">
             <Label htmlFor="nv-notes">Notes (optional)</Label>
-            <textarea
+            <RichTextEditor
               id="nv-notes"
               rows={2}
               value={form.notes ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
               maxLength={2000}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
             />
-            <CharCounter value={form.notes ?? ''} max={2000} />
           </div>
 
           {/* Payment */}
@@ -1037,7 +980,6 @@ export default function OPDPage() {
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground w-12">#</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Reason for Visit</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Doctor</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Action</th>
@@ -1059,9 +1001,6 @@ export default function OPDPage() {
                         <p className="text-xs text-muted-foreground">
                           {v.patientId} · {formatDate(v.visitDate)}
                         </p>
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground max-w-xs truncate">
-                        {v.chiefComplaint}
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground max-w-[180px] truncate" title={doctorNames(v.doctorIds ?? [])}>
                         {doctorNames(v.doctorIds ?? [])}

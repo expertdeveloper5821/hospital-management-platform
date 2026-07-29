@@ -13,6 +13,7 @@ import {
   listPayments,
   getReceiptUrl,
   getPaymentSummary,
+  getDepartmentRevenue,
 } from './payment.controller';
 
 const router = express.Router();
@@ -62,6 +63,13 @@ router.get(
   '/summary',
   requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   getPaymentSummary,
+);
+
+// GET /api/payments/summary/by-department — revenue broken down by department
+router.get(
+  '/summary/by-department',
+  requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
+  getDepartmentRevenue,
 );
 
 // GET /api/payments/:paymentId/receipt — pre-signed download URL (U5-B-04)

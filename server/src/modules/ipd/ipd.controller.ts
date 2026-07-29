@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { ipdService } from './ipd.service';
+import { buildDischargeSummaryPdf } from './discharge-summary.pdf';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import {
   CreateAdmissionSchema,
@@ -218,6 +219,32 @@ export async function dischargePatient(
   } catch (err) {
     next(err);
   }
+}
+
+export async function getDischargeSummaryPdf(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const tenantId = req.user!.tenantId as string;
+    const data = await ipdService.getDischargeSummaryData(idResult.data, tenantId, req.user!.role);
+    const pdfBuffer = await buildDischargeSummaryPdf(data);
+
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `attachment; filename="discharge-summary-${idResult.data}.pdf"`,
+        'Content-Length':      pdfBuffer.length.toString(),
+      })
+      .send(pdfBuffer);
+  } catch (err) { next(err); }
 }
 
 export async function getPatientIPDHistory(

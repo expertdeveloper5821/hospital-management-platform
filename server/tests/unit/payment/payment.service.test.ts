@@ -3,14 +3,16 @@ import crypto from 'crypto';
 jest.mock('../../../src/modules/payment/payment.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/tenant/tenant.repository');
+jest.mock('../../../src/modules/department/department.repository');
 jest.mock('../../../src/shared/services/pdf.service');
 jest.mock('../../../src/shared/services/s3.service');
 jest.mock('../../../src/shared/services/audit.service');
 jest.mock('razorpay');
 
-import { paymentRepository } from '../../../src/modules/payment/payment.repository';
-import { patientRepository } from '../../../src/modules/patient/patient.repository';
-import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
+import { paymentRepository }    from '../../../src/modules/payment/payment.repository';
+import { patientRepository }    from '../../../src/modules/patient/patient.repository';
+import { tenantRepository }     from '../../../src/modules/tenant/tenant.repository';
+import { departmentRepository } from '../../../src/modules/department/department.repository';
 import { pdfService }        from '../../../src/shared/services/pdf.service';
 import { s3Service }         from '../../../src/shared/services/s3.service';
 import { PaymentService }    from '../../../src/modules/payment/payment.service';
@@ -18,11 +20,13 @@ import { PaymentStatus, PaymentMethod } from '../../../src/modules/payment/payme
 import { IPayment }          from '../../../src/modules/payment/payment.model';
 import { IPatient }          from '../../../src/modules/patient/patient.model';
 import { ITenant }           from '../../../src/modules/tenant/tenant.model';
+import { IDepartment }       from '../../../src/modules/department/department.model';
 import Razorpay              from 'razorpay';
 
 const mockPayRepo   = paymentRepository as jest.Mocked<typeof paymentRepository>;
 const mockPatRepo   = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockTenantRepo = tenantRepository as jest.Mocked<typeof tenantRepository>;
+const mockDeptRepo   = departmentRepository as jest.Mocked<typeof departmentRepository>;
 const mockPdf       = pdfService       as jest.Mocked<typeof pdfService>;
 const mockS3        = s3Service        as jest.Mocked<typeof s3Service>;
 
@@ -416,5 +420,105 @@ describe('PaymentService — createRazorpayOrder', () => {
         TENANT, USER,
       ),
     ).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+// ─── Department-wise revenue ─────────────────────────────────────────────────
+
+function makeDepartment(overrides: Partial<IDepartment> = {}): IDepartment {
+  return {
+    departmentId: 'dept-001',
+    tenantId:     TENANT,
+    name:         'Cardiology',
+    ...overrides,
+  } as unknown as IDepartment;
+}
+
+describe('PaymentService — getDepartmentRevenue', () => {
+  let service: PaymentService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new PaymentService();
+  });
+
+  test('every active department appears, defaulting to ₹0 when it has no matching revenue', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([
+      makeDepartment({ departmentId: 'dept-cardio', name: 'Cardiology' }),
+      makeDepartment({ departmentId: 'dept-radio',  name: 'Radiology' }),
+    ]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-cardio', total: 500 },
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result.departments).toEqual([
+      { departmentId: 'dept-cardio', name: 'Cardiology', total: 500 },
+      { departmentId: 'dept-radio',  name: 'Radiology',  total: 0 },
+    ]);
+  });
+
+  test('buckets a null (unresolved) departmentId into unassignedTotal', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([makeDepartment()]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-001', total: 200 },
+      { departmentId: null,       total: 300 },
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result.unassignedTotal).toBe(300);
+  });
+
+  test('folds revenue mapped to a departmentId with no matching active department into unassignedTotal', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([makeDepartment({ departmentId: 'dept-001' })]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-001',         total: 100 },
+      { departmentId: 'dept-deleted-999', total: 400 }, // e.g. a since-deleted department
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result.departments).toEqual([{ departmentId: 'dept-001', name: 'Cardiology', total: 100 }]);
+    expect(result.unassignedTotal).toBe(400);
+    expect(result.grandTotal).toBe(500);
+  });
+
+  test('grandTotal always equals the sum of department totals plus unassignedTotal', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([
+      makeDepartment({ departmentId: 'dept-a', name: 'A' }),
+      makeDepartment({ departmentId: 'dept-b', name: 'B' }),
+    ]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-a', total: 111 },
+      { departmentId: 'dept-b', total: 222 },
+      { departmentId: null,     total: 333 },
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    const departmentSum = result.departments.reduce((sum, d) => sum + d.total, 0);
+    expect(result.grandTotal).toBe(departmentSum + result.unassignedTotal);
+    expect(result.grandTotal).toBe(666);
+  });
+
+  test('returns an empty department list with ₹0 totals when the tenant has no departments and no payments', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result).toEqual({ departments: [], unassignedTotal: 0, grandTotal: 0 });
+  });
+
+  test('passes the query filters through to the repository unchanged', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([]);
+
+    const query = { dateFrom: '2026-01-01T00:00:00Z', dateTo: '2026-01-31T00:00:00Z', paymentMethod: PaymentMethod.UPI, status: PaymentStatus.COMPLETED };
+    await service.getDepartmentRevenue(TENANT, query);
+
+    expect(mockPayRepo.sumByResolvedDepartment).toHaveBeenCalledWith(TENANT, query);
   });
 });

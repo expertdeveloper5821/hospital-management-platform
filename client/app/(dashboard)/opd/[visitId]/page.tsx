@@ -1,8 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, User, Stethoscope, ClipboardList, FileText, Calendar, Activity } from 'lucide-react';
+import { ArrowLeft, User, Stethoscope, FileText, Calendar, Activity } from 'lucide-react';
 import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -21,9 +22,9 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
       <span className="mt-0.5 text-muted-foreground shrink-0">{icon}</span>
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-medium break-words whitespace-pre-wrap">
+        <div className="text-sm font-medium break-words whitespace-pre-wrap">
           {value ?? <span className="italic text-muted-foreground">—</span>}
-        </p>
+        </div>
       </div>
     </div>
   );
@@ -77,7 +78,6 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
         <DetailRow icon={<Calendar className="h-4 w-4" />}       label="Visit Date"       value={formatDate(visit.visitDate)} />
         <DetailRow icon={<Activity className="h-4 w-4" />}       label="Queue Number"     value={`#${visit.queueNumber}`} />
         <DetailRow icon={<Stethoscope className="h-4 w-4" />}    label="Doctor(s)"        value={visit.doctorIds?.join(', ') || '—'} />
-        <DetailRow icon={<ClipboardList className="h-4 w-4" />}  label="Reason for Visit" value={visit.chiefComplaint} />
         {visit.diagnosis && (
           <DetailRow icon={<FileText className="h-4 w-4" />} label="Diagnosis" value={visit.diagnosis} />
         )}
@@ -85,7 +85,7 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
           <DetailRow icon={<FileText className="h-4 w-4" />} label="Prescription" value={visit.prescription} />
         )}
         {visit.notes && (
-          <DetailRow icon={<FileText className="h-4 w-4" />} label="Notes" value={visit.notes} />
+          <DetailRow icon={<FileText className="h-4 w-4" />} label="Notes" value={<RichTextDisplay value={visit.notes} />} />
         )}
       </div>
 

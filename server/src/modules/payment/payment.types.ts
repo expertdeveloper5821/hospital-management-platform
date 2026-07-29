@@ -91,6 +91,20 @@ export const PaymentSummaryQuerySchema = z.object({
 
 export type PaymentSummaryQuery = z.infer<typeof PaymentSummaryQuerySchema>;
 
+// Same filter set as the payments list (dateFrom/dateTo/method/status) so the
+// Department-wise Revenue section can mirror whatever the Payments page table
+// is currently filtered to. When `status` is omitted, revenue defaults to
+// COMPLETED-only (successfully collected revenue); an explicit status narrows
+// the breakdown to that status instead.
+export const DepartmentRevenueQuerySchema = z.object({
+  dateFrom:      z.string().datetime({ offset: true }).optional(),
+  dateTo:        z.string().datetime({ offset: true }).optional(),
+  paymentMethod: z.enum(['CASH', 'CHEQUE', 'UPI', 'CARD']).optional(),
+  status:        z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
+});
+
+export type DepartmentRevenueQuery = z.infer<typeof DepartmentRevenueQuerySchema>;
+
 // ─── Response shapes ──────────────────────────────────────────────────────────
 
 export interface PaymentResponse {
@@ -126,4 +140,21 @@ export interface PaymentSummaryResponse {
   UPI:    number;
   CARD:   number;
   total:  number;
+}
+
+export interface DepartmentRevenueEntry {
+  departmentId: string;
+  name:         string;
+  total:        number;
+}
+
+// `unassignedTotal` covers payments that could not be mapped to any active
+// department — e.g. registration fees, payments predating department
+// tracking, or a payment whose linked OPD visit/IPD admission had no
+// department assigned. `grandTotal` is always the sum of the two, so the
+// breakdown reconciles with the filtered payment total by construction.
+export interface DepartmentRevenueResponse {
+  departments:     DepartmentRevenueEntry[];
+  unassignedTotal: number;
+  grandTotal:      number;
 }

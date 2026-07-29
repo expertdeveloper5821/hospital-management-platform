@@ -16,11 +16,19 @@ import {
   AddBedsRequest,
   ProgressNote,
   ProgressNoteResponse,
+  DischargeSummaryData,
+  DischargeSummaryBilling,
 } from './ipd.types';
 
-import { patientRepository } from '../patient/patient.repository';
-import { userRepository }    from '../user/user.repository';
-import { auditService }      from '../../shared/services/audit.service';
+import { patientRepository }    from '../patient/patient.repository';
+import { userRepository }       from '../user/user.repository';
+import { departmentRepository } from '../department/department.repository';
+import { tenantRepository }     from '../tenant/tenant.repository';
+import { labRepository }        from '../lab/lab.repository';
+import { paymentRepository }    from '../payment/payment.repository';
+import { auditService }         from '../../shared/services/audit.service';
+import { s3Service }            from '../../shared/services/s3.service';
+import { AuditLogModel }        from '../audit/audit.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import {
   AppError,
@@ -95,6 +103,59 @@ async function resolveProgressNoteStaffNames(
   const nameMap = await userRepository.findNamesByIds(tenantId, uniqueIds);
 
   return mapProgressNotes(notes, nameMap);
+}
+
+function calculateAge(dob: Date): number {
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const m = today.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
+  return Math.max(0, age);
+}
+
+// ─── Discharge summary — best-effort "who did this" lookups ─────────────────
+// Neither Patient nor IPDAdmission stores who created/discharged them — the
+// only place that fact exists is the audit log, which already records
+// `userId` for every CREATE/UPDATE. These are best-effort: any failure, an
+// expired (365-day TTL) audit trail, or an ambiguous/missing entry all
+// resolve to `null`, so the caller can simply omit that line.
+
+async function resolveRegisteredBy(tenantId: string, patientId: string): Promise<string | null> {
+  try {
+    const entries = await AuditLogModel.find({
+      tenantId, entityType: AuditEntityType.PATIENT, entityId: patientId, action: 'CREATE',
+    }).sort({ timestamp: 1 }).lean();
+    // The genuine registration CREATE never carries `medicalCardGenerated` —
+    // that marker is only written by a later first-time medical-card
+    // generation for the same patientId (see patient.service.ts). Take the
+    // earliest CREATE without it.
+    const registrationEntry = entries.find((e) => !(e.newValue && 'medicalCardGenerated' in e.newValue));
+    if (!registrationEntry) return null;
+    const nameMap = await userRepository.findNamesByIds(tenantId, [registrationEntry.userId]);
+    return nameMap.get(registrationEntry.userId) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Mirrors GET /api/payments' requireRole list exactly — the discharge summary's
+// billing section is included only for roles already allowed to view payments.
+const PAYMENT_VIEW_ROLES: ReadonlySet<UserRole> = new Set([
+  UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST,
+]);
+
+async function resolveDischargedBy(tenantId: string, admissionId: string): Promise<string | null> {
+  try {
+    const entries = await AuditLogModel.find({
+      tenantId, entityType: AuditEntityType.IPD_ADMISSION, entityId: admissionId, action: 'UPDATE',
+    }).sort({ timestamp: -1 }).lean();
+    const dischargeEntry = entries.find((e) => e.newValue?.['status'] === AdmissionStatus.DISCHARGED);
+    if (!dischargeEntry) return null;
+    const nameMap = await userRepository.findNamesByIds(tenantId, [dischargeEntry.userId]);
+    return nameMap.get(dischargeEntry.userId) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 async function toResponse(
@@ -416,6 +477,185 @@ export class IPDService {
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
     return toResponse(updated, tenantId, patient?.fullName ?? null);
+  }
+
+  // ─── Discharge Summary PDF data ─────────────────────────────────────────────
+  // Existing-data-only aggregation across Patient/OPD/IPD/Lab/Payment/User/
+  // Audit records — nothing new is stored, nothing in the discharge workflow
+  // itself changes. Billing is included only when `role` already has
+  // payment-view permission (mirrors GET /api/payments' role gate exactly).
+  async getDischargeSummaryData(
+    admissionId: string,
+    tenantId:    string,
+    role:        UserRole,
+  ): Promise<DischargeSummaryData> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+    if (admission.status !== AdmissionStatus.DISCHARGED) {
+      throw new ConflictError('Discharge summary is only available after the patient has been discharged.');
+    }
+
+    const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const [tenant, ward, opdResult, pathologyResult, radiologyResult, paymentsResult] = await Promise.all([
+      tenantRepository.findById(tenantId),
+      ipdRepository.findWardById(tenantId, admission.wardId),
+      opdRepository.findByPatient(tenantId, admission.patientId, { page: 1, limit: 500 }),
+      labRepository.findPathologyByPatient(tenantId, { patientId: admission.patientId, page: 1, limit: 500 }),
+      labRepository.findRadiologyByPatient(tenantId, { patientId: admission.patientId, page: 1, limit: 500 }),
+      PAYMENT_VIEW_ROLES.has(role)
+        ? paymentRepository.findByFilters(tenantId, { patientId: admission.patientId, page: 1, limit: 500 })
+        : Promise.resolve(null),
+    ]);
+
+    const opdVisits         = opdResult.data;
+    const pathologyRequests = pathologyResult.data;
+    const radiologyRequests = radiologyResult.data;
+
+    // ── Batch-resolve every user and department referenced anywhere below ──
+    const userIds = new Set<string>();
+    admission.assignedDoctorIds.forEach((id) => userIds.add(id));
+    admission.progressNotes.forEach((n) => userIds.add(n.doctorId));
+    (ward?.assignedNurseIds ?? []).forEach((id) => userIds.add(id));
+    opdVisits.forEach((v) => v.doctorIds.forEach((id) => userIds.add(id)));
+    pathologyRequests.forEach((r) => userIds.add(r.requestedBy));
+    radiologyRequests.forEach((r) => userIds.add(r.requestedBy));
+
+    const departmentIds = new Set<string>();
+    if (admission.departmentId) departmentIds.add(admission.departmentId);
+    opdVisits.forEach((v) => { if (v.departmentId) departmentIds.add(v.departmentId); });
+    pathologyRequests.forEach((r) => { if (r.departmentId) departmentIds.add(r.departmentId); });
+    radiologyRequests.forEach((r) => { if (r.departmentId) departmentIds.add(r.departmentId); });
+
+    const uniqueNoteAuthorIds = [...new Set(admission.progressNotes.map((n) => n.doctorId))];
+
+    const [nameMap, departmentEntries, registeredByName, dischargedByName, noteAuthorUsers] = await Promise.all([
+      userRepository.findNamesByIds(tenantId, [...userIds]),
+      Promise.all([...departmentIds].map(async (id) => [id, await departmentRepository.findById(tenantId, id)] as const)),
+      resolveRegisteredBy(tenantId, admission.patientId),
+      resolveDischargedBy(tenantId, admissionId),
+      Promise.all(uniqueNoteAuthorIds.map(async (id) => [id, await userRepository.findById(tenantId, id)] as const)),
+    ]);
+
+    const departmentNameMap = new Map(
+      departmentEntries.filter((entry): entry is [string, NonNullable<typeof entry[1]>] => entry[1] !== null)
+        .map(([id, dept]) => [id, dept.name]),
+    );
+    const authorRoleMap = new Map(
+      noteAuthorUsers.filter((entry): entry is [string, NonNullable<typeof entry[1]>] => entry[1] !== null)
+        .map(([id, user]) => [id, user.role as string]),
+    );
+
+    const namesFor = (ids: string[]) =>
+      ids.map((id) => nameMap.get(id)).filter((n): n is string => !!n);
+
+    // ── Billing (role-gated) ────────────────────────────────────────────────
+    let billing: DischargeSummaryBilling | null = null;
+    if (paymentsResult && paymentsResult.data.length > 0) {
+      billing = {
+        payments: paymentsResult.data.map((p) => ({
+          amount:        p.amount,
+          paymentMethod: p.paymentMethod,
+          status:        p.status,
+          description:   p.description,
+          createdAt:     p.createdAt.toISOString(),
+        })),
+        total: paymentsResult.data
+          .filter((p) => p.status === 'COMPLETED')
+          .reduce((sum, p) => sum + p.amount, 0),
+      };
+    }
+
+    // ── Lab requests — resolve report download links (best-effort) ─────────
+    const labRequestsRaw = [
+      ...pathologyRequests.map((r) => ({
+        requestId: r.requestId, category: 'PATHOLOGY' as const, type: r.testType,
+        status: r.status, priority: r.priority, requestedBy: r.requestedBy,
+        departmentId: r.departmentId, requestedAt: r.requestedAt, notes: r.notes,
+        reportS3Key: r.reportS3Key,
+      })),
+      ...radiologyRequests.map((r) => ({
+        requestId: r.requestId, category: 'RADIOLOGY' as const, type: r.imagingType,
+        status: r.status, priority: r.priority, requestedBy: r.requestedBy,
+        departmentId: r.departmentId, requestedAt: r.requestedAt, notes: r.notes,
+        reportS3Key: r.reportS3Key,
+      })),
+    ];
+
+    const labRequests = await Promise.all(labRequestsRaw.map(async (r) => ({
+      requestId:       r.requestId,
+      category:        r.category,
+      type:            r.type,
+      status:          r.status,
+      priority:        r.priority,
+      requestedByName: nameMap.get(r.requestedBy) ?? null,
+      departmentName:  r.departmentId ? departmentNameMap.get(r.departmentId) ?? null : null,
+      requestedAt:     r.requestedAt.toISOString(),
+      notesHtml:       r.notes,
+      reportUrl:       r.reportS3Key ? await s3Service.getPresignedUrl(r.reportS3Key, 3600).catch(() => null) : null,
+    })));
+
+    const hospitalAddressParts = tenant
+      ? [
+          tenant.onboardingDocuments.addressLine,
+          tenant.onboardingDocuments.city,
+          tenant.onboardingDocuments.state,
+          tenant.onboardingDocuments.pincode,
+        ].filter((part): part is string => !!part)
+      : [];
+
+    return {
+      hospital: {
+        name:         tenant?.branding.displayName || tenant?.name || 'Hospital',
+        logoUrl:      tenant?.branding.logoUrl ?? null,
+        primaryColor: tenant?.branding.primaryColor || '#1A73E8',
+        address:      hospitalAddressParts.length ? hospitalAddressParts.join(', ') : null,
+        email:        tenant?.adminEmail ?? null,
+      },
+      patient: {
+        patientId:        patient.patientId,
+        fullName:         patient.fullName,
+        age:              calculateAge(patient.dateOfBirth),
+        gender:           patient.gender,
+        mobileNumber:     patient.mobileNumber,
+        address:          patient.address || null,
+        registeredAt:     patient.createdAt.toISOString(),
+        registeredByName,
+      },
+      opdVisits: opdVisits.map((v) => ({
+        visitId:        v.visitId,
+        visitDate:      v.visitDate.toISOString(),
+        status:         v.status,
+        departmentName: v.departmentId ? departmentNameMap.get(v.departmentId) ?? null : null,
+        doctorNames:    namesFor(v.doctorIds),
+        diagnosis:      v.diagnosis,
+        prescription:   v.prescription,
+        notesHtml:      v.notes,
+      })),
+      admission: {
+        admissionId:         admission.admissionId,
+        wardName:            admission.wardName,
+        bedNumber:           admission.bedNumber,
+        departmentName:      admission.departmentId ? departmentNameMap.get(admission.departmentId) ?? null : null,
+        assignedDoctorNames: namesFor(admission.assignedDoctorIds),
+        assignedNurseNames:  namesFor(ward?.assignedNurseIds ?? []),
+        admissionDate:       admission.admissionDate.toISOString(),
+        dischargeDate:       admission.dischargeDate!.toISOString(),
+        dischargedByName,
+        progressNotes: [...admission.progressNotes]
+          .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+          .map((n) => ({
+            authorName: nameMap.get(n.doctorId) ?? null,
+            authorRole: authorRoleMap.get(n.doctorId) ?? null,
+            timestamp:  n.timestamp.toISOString(),
+            noteHtml:   n.note,
+          })),
+      },
+      labRequests,
+      billing,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   async listAdmissions(

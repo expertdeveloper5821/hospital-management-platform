@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import { stripRichTextTags } from '../../shared/utils/validation';
+
+// Notes are stored as rich-text HTML (Tiptap) — the 2000-character limit
+// applies to the visible text a user typed, not the wrapping markup, so the
+// raw string is allowed a generous multiple of that for formatting overhead.
+const notesMaxCheck = (v: string) => stripRichTextTags(v).length <= 2000;
+const NOTES_TOO_LONG = 'Notes cannot exceed 2000 characters.';
 
 // ─── LabRequestStatus ─────────────────────────────────────────────────────────
 export const LabRequestStatus = {
@@ -21,7 +28,7 @@ export type LabRequestPriority = typeof LabRequestPriority[keyof typeof LabReque
 export const CreatePathologyRequestSchema = z.object({
   patientId: z.string().min(1, 'patientId is required'),
   testType:  z.string().min(1, 'testType is required').max(200).trim(),
-  notes:     z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
+  notes:     z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).optional(),
 });
 
 export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestSchema>;
@@ -30,7 +37,7 @@ export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestS
 export const CreateRadiologyRequestSchema = z.object({
   patientId:   z.string().min(1, 'patientId is required'),
   imagingType: z.string().min(1, 'imagingType is required').max(200).trim(),
-  notes:       z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
+  notes:       z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).optional(),
 });
 
 export type CreateRadiologyRequestInput = z.infer<typeof CreateRadiologyRequestSchema>;
@@ -45,7 +52,7 @@ export type UpdateLabStatusInput = z.infer<typeof UpdateLabStatusSchema>;
 // ─── Edit schemas ─────────────────────────────────────────────────────────────
 export const EditPathologyRequestSchema = z.object({
   testType: z.string().min(1).max(200).trim().optional(),
-  notes:    z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().nullable().optional(),
+  notes:    z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).nullable().optional(),
   priority: z.enum(['NORMAL', 'URGENT']).optional(),
   status:   z.enum(['PENDING', 'IN_PROGRESS']).optional(),
 });
@@ -54,7 +61,7 @@ export type EditPathologyRequestInput = z.infer<typeof EditPathologyRequestSchem
 
 export const EditRadiologyRequestSchema = z.object({
   imagingType: z.string().min(1).max(200).trim().optional(),
-  notes:       z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().nullable().optional(),
+  notes:       z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).nullable().optional(),
   priority:    z.enum(['NORMAL', 'URGENT']).optional(),
   status:      z.enum(['PENDING', 'IN_PROGRESS']).optional(),
 });

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ArrowLeft, User, BedDouble, Stethoscope, Calendar, FileText, Activity } from 'lucide-react';
 import { useGetAdmissionByIdQuery } from '@/store/api/ipd.api';
+import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -83,6 +84,10 @@ export default function IPDAdmissionDetailPage({ params }: { params: { admission
           <DetailRow icon={<Activity className="h-4 w-4" />}  label="Discharge Date"   value={formatDate(admission.dischargeDate)} />
         )}
       </div>
+
+      {admission.status === 'DISCHARGED' && (
+        <DownloadDischargeSummaryButton admissionId={admission.admissionId} />
+      )}
 
       {admission.progressNotes.length > 0 && (
         <div className="rounded-xl border bg-card">

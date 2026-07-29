@@ -116,7 +116,6 @@ async function seedVisit(tenantId: string, overrides: Partial<{
     visitDate:      new Date('2026-05-15T00:00:00.000Z'),
     queueNumber:    1,
     status:         overrides.status    ?? OPDVisitStatus.OPEN,
-    chiefComplaint: 'Fever and headache',
     diagnosis:      null,
     prescription:   null,
     notes:          null,
@@ -128,9 +127,8 @@ function todayDateStr(): string {
 }
 
 const VALID_VISIT_BODY = {
-  patientId:      'PAT-TEST0001',
-  chiefComplaint: 'Fever and headache',
-  visitDate:      todayDateStr(),
+  patientId: 'PAT-TEST0001',
+  visitDate: todayDateStr(),
 };
 
 // ─── POST /api/opd/visits ─────────────────────────────────────────────────────
@@ -203,54 +201,9 @@ describe('POST /api/opd/visits', () => {
     expect(res.status).toBe(404);
   });
 
-  test('400 — missing chiefComplaint', async () => {
-    const tenant = await seedTenant();
-    const tid    = tenant._id.toString();
-    await seedPatient(tid);
-    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
-    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
-
-    const res = await request(app)
-      .post('/api/opd/visits')
-      .set(bearer(token))
-      .send({ patientId: 'PAT-TEST0001' });
-
-    expect(res.status).toBe(400);
-  });
-
   test('401 — unauthenticated', async () => {
     const res = await request(app).post('/api/opd/visits').send(VALID_VISIT_BODY);
     expect(res.status).toBe(401);
-  });
-
-  test('400 — chiefComplaint exceeds maximum length', async () => {
-    const tenant = await seedTenant();
-    const tid    = tenant._id.toString();
-    await seedPatient(tid);
-    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
-    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
-
-    const res = await request(app)
-      .post('/api/opd/visits')
-      .set(bearer(token))
-      .send({ ...VALID_VISIT_BODY, chiefComplaint: 'A'.repeat(1001) });
-
-    expect(res.status).toBe(400);
-  });
-
-  test('400 — whitespace-only chiefComplaint is rejected', async () => {
-    const tenant = await seedTenant();
-    const tid    = tenant._id.toString();
-    await seedPatient(tid);
-    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
-    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
-
-    const res = await request(app)
-      .post('/api/opd/visits')
-      .set(bearer(token))
-      .send({ ...VALID_VISIT_BODY, chiefComplaint: '   ' });
-
-    expect(res.status).toBe(400);
   });
 
   test('201 — notes with leading/trailing whitespace are trimmed', async () => {
@@ -610,7 +563,6 @@ describe('GET /api/opd/visits/:visitId', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.visitId).toBe('OPD-GET00001');
-    expect(res.body.data.chiefComplaint).toBe('Fever and headache');
   });
 
   test('404 — visit from different tenant returns 404', async () => {
@@ -1483,7 +1435,6 @@ describe('GET /api/opd/patients/:patientId/history', () => {
       visitDate:      new Date('2026-03-01T00:00:00.000Z'),
       queueNumber:    2,
       status:         OPDVisitStatus.COMPLETED,
-      chiefComplaint: 'Cough',
       diagnosis:      'Common cold',
       prescription:   null,
       notes:          null,
@@ -1501,7 +1452,7 @@ describe('GET /api/opd/patients/:patientId/history', () => {
     expect(res.body.data.data[0].status).toBe('COMPLETED');
   });
 
-  test('200 — search filter matches chiefComplaint', async () => {
+  test('200 — search filter matches diagnosis', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedPatient(tid);
@@ -1514,8 +1465,7 @@ describe('GET /api/opd/patients/:patientId/history', () => {
       visitDate:      new Date('2026-04-01T00:00:00.000Z'),
       queueNumber:    2,
       status:         OPDVisitStatus.OPEN,
-      chiefComplaint: 'Back pain',
-      diagnosis:      null,
+      diagnosis:      'Lumbar strain',
       prescription:   null,
       notes:          null,
     });
@@ -1524,12 +1474,12 @@ describe('GET /api/opd/patients/:patientId/history', () => {
 
     const res = await request(app)
       .get('/api/opd/patients/PAT-TEST0001/history')
-      .query({ search: 'back pain' })
+      .query({ search: 'lumbar' })
       .set(bearer(token));
 
     expect(res.status).toBe(200);
     expect(res.body.data.data).toHaveLength(1);
-    expect(res.body.data.data[0].chiefComplaint).toBe('Back pain');
+    expect(res.body.data.data[0].diagnosis).toBe('Lumbar strain');
   });
 
   test('400 — startDate after endDate returns 400', async () => {

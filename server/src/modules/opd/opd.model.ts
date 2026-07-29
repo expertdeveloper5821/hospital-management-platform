@@ -11,7 +11,6 @@ export interface IOPDVisit extends Document {
   visitDate:      Date;
   queueNumber:    number;
   status:         OPDVisitStatus;
-  chiefComplaint: string;
   diagnosis:      string | null;
   prescription:   string | null;
   notes:          string | null;
@@ -30,7 +29,6 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
     visitDate:      { type: Date,   required: true },
     queueNumber:    { type: Number, required: true },
     status:         { type: String, required: true, enum: Object.values(OPDVisitStatus), default: OPDVisitStatus.OPEN },
-    chiefComplaint: { type: String, required: true, trim: true },
     diagnosis:      { type: String, default: null },
     prescription:   { type: String, default: null },
     notes:          { type: String, default: null },

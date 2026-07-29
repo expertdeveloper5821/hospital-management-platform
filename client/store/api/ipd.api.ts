@@ -1,4 +1,6 @@
 import { baseApi } from './base.api';
+import { type FetchBaseQueryError } from '@reduxjs/toolkit/query';
+import type { RootState } from '../index';
 import type {
   ApiSuccess,
   PaginatedResult,
@@ -10,6 +12,8 @@ import type {
   AddProgressNoteRequest,
   ListAdmissionsQuery,
 } from '../types';
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
 
 export const ipdApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -129,6 +133,30 @@ export const ipdApi = baseApi.injectEndpoints({
       invalidatesTags: ['IPD'],
     }),
 
+    // Downloads the Discharge Summary PDF (only available once DISCHARGED);
+    // returns a blob object URL for the <a> tag. Uses queryFn because the
+    // endpoint returns a raw PDF, not JSON — same pattern as downloadMedicalCard.
+    downloadDischargeSummary: build.mutation<string, string>({
+      queryFn: async (admissionId, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        try {
+          const res = await fetch(`${BASE_URL}/api/ipd/admissions/${admissionId}/discharge-summary`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'Failed to download discharge summary' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          return { data: url };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
+
     // ── Patient IPD history ───────────────────────────────────────────────────
 
     getIPDPatientHistory: build.query<PaginatedResult<AdmissionResponse>, {
@@ -174,6 +202,7 @@ export const {
   useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
   useDischargePatientMutation,
+  useDownloadDischargeSummaryMutation,
   useGetIPDPatientHistoryQuery,
   useGetBedOccupancySummaryQuery,
   useGetOccupancySummaryQuery,

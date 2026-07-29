@@ -170,7 +170,7 @@ function AlertCard({
           <p className={cn('text-2xl font-bold', warn && count > 0 ? 'text-orange-600' : 'text-foreground')}>
             {count}
           </p>
-          <p className="text-xs text-muted-foreground truncate">{label}</p>
+          <p className="text-xs text-muted-foreground break-words">{label}</p>
         </div>
         <span className="text-xs text-primary font-medium shrink-0">View →</span>
       </div>
@@ -186,13 +186,13 @@ function MetricCard({
   return (
     <Card>
       <CardContent className="p-5 flex items-center gap-4">
-        <div className={cn('rounded-full p-3', color ?? 'bg-primary/10')}>
+        <div className={cn('rounded-full p-3 shrink-0', color ?? 'bg-primary/10')}>
           <Icon className={cn('h-5 w-5', color ? 'text-white' : 'text-primary')} />
         </div>
-        <div>
-          <p className="text-2xl font-bold text-foreground">{value}</p>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+        <div className="min-w-0 flex-1">
+          <p className="text-2xl font-bold text-foreground break-words">{value}</p>
+          <p className="text-sm text-muted-foreground break-words">{label}</p>
+          {sub && <p className="text-xs text-muted-foreground break-words">{sub}</p>}
         </div>
       </CardContent>
     </Card>
@@ -204,11 +204,11 @@ function QuickAction({ icon: Icon, label, href, color }: {
 }) {
   return (
     <Link href={href}>
-      <Button variant="outline" className="w-full justify-start gap-2 h-10">
-        <div className={cn('rounded p-1', color)}>
+      <Button variant="outline" className="w-full h-auto min-h-10 justify-start gap-2 whitespace-normal">
+        <div className={cn('rounded p-1 shrink-0', color)}>
           <Icon className="h-3.5 w-3.5 text-white" />
         </div>
-        <span className="text-sm">{label}</span>
+        <span className="text-sm break-words">{label}</span>
       </Button>
     </Link>
   );
@@ -407,8 +407,8 @@ export default function DashboardPage() {
           <Card className="lg:col-span-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
-                <IndianRupee className="h-4 w-4 text-green-600" />
-                Revenue Overview
+                <IndianRupee className="h-4 w-4 text-green-600 shrink-0" />
+                <span className="min-w-0 break-words">Revenue Overview</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -446,8 +446,8 @@ export default function DashboardPage() {
           <Card className={cn(hasRevenue ? 'lg:col-span-1' : 'lg:col-span-2')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="h-4 w-4 text-primary" />
-                Today's Activity
+                <Activity className="h-4 w-4 text-primary shrink-0" />
+                <span className="min-w-0 break-words">Today's Activity</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -479,8 +479,8 @@ export default function DashboardPage() {
           <Card className="lg:col-span-1">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
-                <PlusCircle className="h-4 w-4 text-primary" />
-                Quick Actions
+                <PlusCircle className="h-4 w-4 text-primary shrink-0" />
+                <span className="min-w-0 break-words">Quick Actions</span>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -503,9 +503,9 @@ export default function DashboardPage() {
           {hasOpdTrend && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <CalendarDays className="h-4 w-4 text-blue-500" />
-                  OPD Trend
+                <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                  <CalendarDays className="h-4 w-4 text-blue-500 shrink-0" />
+                  <span className="min-w-0 break-words">OPD Trend</span>
                   <span className="text-xs font-normal text-muted-foreground">(Last 30 Days)</span>
                 </CardTitle>
               </CardHeader>
@@ -535,9 +535,9 @@ export default function DashboardPage() {
           {hasRevTrend && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <IndianRupee className="h-4 w-4 text-green-500" />
-                  Revenue Trend
+                <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                  <IndianRupee className="h-4 w-4 text-green-500 shrink-0" />
+                  <span className="min-w-0 break-words">Revenue Trend</span>
                   <span className="text-xs font-normal text-muted-foreground">(Last 30 Days)</span>
                 </CardTitle>
               </CardHeader>
@@ -576,8 +576,8 @@ export default function DashboardPage() {
             <Card className={cn(hasInventory || hasBedData ? 'xl:col-span-1' : 'xl:col-span-3')}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4 text-primary" />
-                  Recent Activities
+                  <ClipboardList className="h-4 w-4 text-primary shrink-0" />
+                  <span className="min-w-0 break-words">Recent Activities</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -610,8 +610,8 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Package className="h-4 w-4 text-yellow-600" />
-                  Inventory Overview
+                  <Package className="h-4 w-4 text-yellow-600 shrink-0" />
+                  <span className="min-w-0 break-words">Inventory Overview</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -651,8 +651,8 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <BedDouble className="h-4 w-4 text-purple-600" />
-                  Bed Occupancy
+                  <BedDouble className="h-4 w-4 text-purple-600 shrink-0" />
+                  <span className="min-w-0 break-words">Bed Occupancy</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
