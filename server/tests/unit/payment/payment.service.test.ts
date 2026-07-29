@@ -459,7 +459,7 @@ describe('PaymentService — getDepartmentRevenue', () => {
     ]);
   });
 
-  test('buckets a null (unresolved) departmentId into unassignedTotal', async () => {
+  test('buckets a null (unresolved) departmentId into otherTotal', async () => {
     mockDeptRepo.findAll = jest.fn().mockResolvedValue([makeDepartment()]);
     mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
       { departmentId: 'dept-001', total: 200 },
@@ -468,10 +468,10 @@ describe('PaymentService — getDepartmentRevenue', () => {
 
     const result = await service.getDepartmentRevenue(TENANT, {});
 
-    expect(result.unassignedTotal).toBe(300);
+    expect(result.otherTotal).toBe(300);
   });
 
-  test('folds revenue mapped to a departmentId with no matching active department into unassignedTotal', async () => {
+  test('folds revenue mapped to a departmentId with no matching active department into otherTotal', async () => {
     mockDeptRepo.findAll = jest.fn().mockResolvedValue([makeDepartment({ departmentId: 'dept-001' })]);
     mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
       { departmentId: 'dept-001',         total: 100 },
@@ -481,11 +481,11 @@ describe('PaymentService — getDepartmentRevenue', () => {
     const result = await service.getDepartmentRevenue(TENANT, {});
 
     expect(result.departments).toEqual([{ departmentId: 'dept-001', name: 'Cardiology', total: 100 }]);
-    expect(result.unassignedTotal).toBe(400);
+    expect(result.otherTotal).toBe(400);
     expect(result.grandTotal).toBe(500);
   });
 
-  test('grandTotal always equals the sum of department totals plus unassignedTotal', async () => {
+  test('grandTotal always equals the sum of department totals plus otherTotal', async () => {
     mockDeptRepo.findAll = jest.fn().mockResolvedValue([
       makeDepartment({ departmentId: 'dept-a', name: 'A' }),
       makeDepartment({ departmentId: 'dept-b', name: 'B' }),
@@ -499,7 +499,7 @@ describe('PaymentService — getDepartmentRevenue', () => {
     const result = await service.getDepartmentRevenue(TENANT, {});
 
     const departmentSum = result.departments.reduce((sum, d) => sum + d.total, 0);
-    expect(result.grandTotal).toBe(departmentSum + result.unassignedTotal);
+    expect(result.grandTotal).toBe(departmentSum + result.otherTotal);
     expect(result.grandTotal).toBe(666);
   });
 
@@ -509,7 +509,23 @@ describe('PaymentService — getDepartmentRevenue', () => {
 
     const result = await service.getDepartmentRevenue(TENANT, {});
 
-    expect(result).toEqual({ departments: [], unassignedTotal: 0, grandTotal: 0 });
+    expect(result).toEqual({ departments: [], otherTotal: 0, grandTotal: 0 });
+  });
+
+  test('does not double-count a department bucket that appears in the resolved rows more than once', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([makeDepartment({ departmentId: 'dept-001', name: 'Cardiology' })]);
+    // The repository can legitimately return more than one row for the same
+    // departmentId (e.g. distinct $group rows from separate lookup branches);
+    // the service must sum them into a single bucket, not one-per-row.
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-001', total: 100 },
+      { departmentId: 'dept-001', total: 50 },
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result.departments).toEqual([{ departmentId: 'dept-001', name: 'Cardiology', total: 150 }]);
+    expect(result.grandTotal).toBe(150);
   });
 
   test('passes the query filters through to the repository unchanged', async () => {

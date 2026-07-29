@@ -534,7 +534,7 @@ describe('GET /api/payments/summary/by-department', () => {
         expect.objectContaining({ name: 'Radiology', total: 0 }),
       ]),
     );
-    expect(res.body.data.unassignedTotal).toBe(0);
+    expect(res.body.data.otherTotal).toBe(0);
     expect(res.body.data.grandTotal).toBe(0);
   });
 
@@ -572,13 +572,13 @@ describe('GET /api/payments/summary/by-department', () => {
     expect(byName['Cardiology']).toBe(500);
     expect(byName['Radiology']).toBe(800);
     expect(byName['Neurology']).toBe(0); // department exists but never appears on any payment
-    expect(res.body.data.unassignedTotal).toBe(300);
+    expect(res.body.data.otherTotal).toBe(300);
     expect(res.body.data.grandTotal).toBe(1600); // 500 + 800 + 300 — pending/failed/cancelled excluded
 
     // Invariant: department revenue always reconciles with the grand total.
     const departmentSum = (res.body.data.departments as Array<{ total: number }>)
       .reduce((sum, d) => sum + d.total, 0);
-    expect(departmentSum + res.body.data.unassignedTotal).toBe(res.body.data.grandTotal);
+    expect(departmentSum + res.body.data.otherTotal).toBe(res.body.data.grandTotal);
   });
 
   test('an OPD visit with no department assigned is safely bucketed as unassigned, not dropped or errored', async () => {
@@ -595,7 +595,7 @@ describe('GET /api/payments/summary/by-department', () => {
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.unassignedTotal).toBe(400);
+    expect(res.body.data.otherTotal).toBe(400);
     expect(res.body.data.grandTotal).toBe(400);
   });
 
@@ -612,7 +612,7 @@ describe('GET /api/payments/summary/by-department', () => {
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.unassignedTotal).toBe(250);
+    expect(res.body.data.otherTotal).toBe(250);
     expect(res.body.data.grandTotal).toBe(250);
   });
 
@@ -632,7 +632,7 @@ describe('GET /api/payments/summary/by-department', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.departments).toHaveLength(0); // Cardiology no longer active
-    expect(res.body.data.unassignedTotal).toBe(600);
+    expect(res.body.data.otherTotal).toBe(600);
     expect(res.body.data.grandTotal).toBe(600);
   });
 
@@ -728,6 +728,35 @@ describe('GET /api/payments/summary/by-department', () => {
     expect(res.body.data.departments).toHaveLength(1);
     expect(res.body.data.departments[0].name).toBe('Cardiology');
     expect(res.body.data.grandTotal).toBe(0);
+  });
+
+  test('multiple payments for the same department are summed once each, never double-counted', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    await seedOpdVisit(cardiologyId, 'OPD-DEPT006');
+    await seedIpdAdmission(cardiologyId, 'ADM-DEPT006');
+
+    await PaymentModel.create([
+      { paymentId: 'p1', tenantId, patientId, amount: 100, paymentMethod: 'CASH', description: 'OPD 1', status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT006', createdBy: 'u' },
+      { paymentId: 'p2', tenantId, patientId, amount: 200, paymentMethod: 'CASH', description: 'OPD 2', status: 'COMPLETED', referenceType: 'OPD_VISIT', referenceId: 'OPD-DEPT006', createdBy: 'u' },
+      { paymentId: 'p3', tenantId, patientId, amount: 300, paymentMethod: 'CASH', description: 'IPD 1', status: 'COMPLETED', referenceType: 'IPD_ADMISSION', referenceId: 'ADM-DEPT006', createdBy: 'u' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    const cardiology = (res.body.data.departments as Array<{ name: string; total: number }>)
+      .find((d) => d.name === 'Cardiology');
+    // Exactly 100 + 200 + 300 — each payment counted once, not per-lookup or per-request.
+    expect(cardiology?.total).toBe(600);
+    expect(res.body.data.grandTotal).toBe(600);
+
+    // Fetching again must not accumulate/duplicate totals.
+    const res2 = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+    expect(res2.body.data.grandTotal).toBe(600);
   });
 
   test('Manager, Finance Manager, and Admin can access; Receptionist and Doctor cannot', async () => {

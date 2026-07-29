@@ -144,6 +144,25 @@ const PAYMENT_VIEW_ROLES: ReadonlySet<UserRole> = new Set([
   UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST,
 ]);
 
+// Discharge summaries must include the *entire* matching record set (a
+// patient's full OPD/lab/payment history), not just the first page — walks
+// every page of an existing paginated repository method and concatenates the
+// results, reusing the same page-size contract the method already exposes.
+const DISCHARGE_SUMMARY_PAGE_SIZE = 500;
+
+async function fetchAllPages<T>(
+  fetchPage: (page: number, limit: number) => Promise<PaginatedResult<T>>,
+  limit: number = DISCHARGE_SUMMARY_PAGE_SIZE,
+): Promise<T[]> {
+  const first = await fetchPage(1, limit);
+  const all = [...first.data];
+  for (let page = 2; page <= first.totalPages; page++) {
+    const next = await fetchPage(page, limit);
+    all.push(...next.data);
+  }
+  return all;
+}
+
 async function resolveDischargedBy(tenantId: string, admissionId: string): Promise<string | null> {
   try {
     const entries = await AuditLogModel.find({
@@ -155,6 +174,24 @@ async function resolveDischargedBy(tenantId: string, admissionId: string): Promi
     return nameMap.get(dischargeEntry.userId) ?? null;
   } catch {
     return null;
+  }
+}
+
+// Canonical admission-scope guard — shared by getAdmissionById and
+// getDischargeSummaryData so the two endpoints cannot diverge in what a
+// nurse/doctor is allowed to reach. `undefined` scope arrays mean "no
+// restriction" (role isn't NURSE/DOCTOR); an empty/non-matching array means
+// the caller has zero visibility into this admission.
+function assertAdmissionInScope(
+  admission:         IIPDAdmission,
+  nurseWardIds?:     string[],
+  doctorPatientIds?: string[],
+): void {
+  if (nurseWardIds && !nurseWardIds.includes(admission.wardId)) {
+    throw new NotFoundError('Admission not found');
+  }
+  if (doctorPatientIds && !doctorPatientIds.includes(admission.patientId)) {
+    throw new NotFoundError('Admission not found');
   }
 }
 
@@ -296,12 +333,7 @@ export class IPDService {
   ): Promise<AdmissionResponse> {
     const admission = await ipdRepository.findById(admissionId, tenantId);
     if (!admission) throw new NotFoundError('Admission not found');
-    if (nurseWardIds && !nurseWardIds.includes(admission.wardId)) {
-      throw new NotFoundError('Admission not found');
-    }
-    if (doctorPatientIds && !doctorPatientIds.includes(admission.patientId)) {
-      throw new NotFoundError('Admission not found');
-    }
+    assertAdmissionInScope(admission, nurseWardIds, doctorPatientIds);
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
     return toResponse(admission, tenantId, patient?.fullName ?? null);
   }
@@ -485,12 +517,15 @@ export class IPDService {
   // itself changes. Billing is included only when `role` already has
   // payment-view permission (mirrors GET /api/payments' role gate exactly).
   async getDischargeSummaryData(
-    admissionId: string,
-    tenantId:    string,
-    role:        UserRole,
+    admissionId:       string,
+    tenantId:          string,
+    role:              UserRole,
+    nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
   ): Promise<DischargeSummaryData> {
     const admission = await ipdRepository.findById(admissionId, tenantId);
     if (!admission) throw new NotFoundError('Admission not found');
+    assertAdmissionInScope(admission, nurseWardIds, doctorPatientIds);
     if (admission.status !== AdmissionStatus.DISCHARGED) {
       throw new ConflictError('Discharge summary is only available after the patient has been discharged.');
     }
@@ -498,20 +533,16 @@ export class IPDService {
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const [tenant, ward, opdResult, pathologyResult, radiologyResult, paymentsResult] = await Promise.all([
+    const [tenant, ward, opdVisits, pathologyRequests, radiologyRequests, payments] = await Promise.all([
       tenantRepository.findById(tenantId),
       ipdRepository.findWardById(tenantId, admission.wardId),
-      opdRepository.findByPatient(tenantId, admission.patientId, { page: 1, limit: 500 }),
-      labRepository.findPathologyByPatient(tenantId, { patientId: admission.patientId, page: 1, limit: 500 }),
-      labRepository.findRadiologyByPatient(tenantId, { patientId: admission.patientId, page: 1, limit: 500 }),
+      fetchAllPages((page, limit) => opdRepository.findByPatient(tenantId, admission.patientId, { page, limit })),
+      fetchAllPages((page, limit) => labRepository.findPathologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
+      fetchAllPages((page, limit) => labRepository.findRadiologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
       PAYMENT_VIEW_ROLES.has(role)
-        ? paymentRepository.findByFilters(tenantId, { patientId: admission.patientId, page: 1, limit: 500 })
+        ? fetchAllPages((page, limit) => paymentRepository.findByFilters(tenantId, { patientId: admission.patientId, page, limit }))
         : Promise.resolve(null),
     ]);
-
-    const opdVisits         = opdResult.data;
-    const pathologyRequests = pathologyResult.data;
-    const radiologyRequests = radiologyResult.data;
 
     // ── Batch-resolve every user and department referenced anywhere below ──
     const userIds = new Set<string>();
@@ -530,12 +561,13 @@ export class IPDService {
 
     const uniqueNoteAuthorIds = [...new Set(admission.progressNotes.map((n) => n.doctorId))];
 
-    const [nameMap, departmentEntries, registeredByName, dischargedByName, noteAuthorUsers] = await Promise.all([
+    const [nameMap, departmentEntries, registeredByName, dischargedByName, noteAuthorUsers, hospitalLogoUrl] = await Promise.all([
       userRepository.findNamesByIds(tenantId, [...userIds]),
       Promise.all([...departmentIds].map(async (id) => [id, await departmentRepository.findById(tenantId, id)] as const)),
       resolveRegisteredBy(tenantId, admission.patientId),
       resolveDischargedBy(tenantId, admissionId),
       Promise.all(uniqueNoteAuthorIds.map(async (id) => [id, await userRepository.findById(tenantId, id)] as const)),
+      tenant?.branding.logoUrl ? s3Service.getPresignedUrl(tenant.branding.logoUrl, 86400).catch(() => null) : Promise.resolve(null),
     ]);
 
     const departmentNameMap = new Map(
@@ -552,16 +584,16 @@ export class IPDService {
 
     // ── Billing (role-gated) ────────────────────────────────────────────────
     let billing: DischargeSummaryBilling | null = null;
-    if (paymentsResult && paymentsResult.data.length > 0) {
+    if (payments && payments.length > 0) {
       billing = {
-        payments: paymentsResult.data.map((p) => ({
+        payments: payments.map((p) => ({
           amount:        p.amount,
           paymentMethod: p.paymentMethod,
           status:        p.status,
           description:   p.description,
           createdAt:     p.createdAt.toISOString(),
         })),
-        total: paymentsResult.data
+        total: payments
           .filter((p) => p.status === 'COMPLETED')
           .reduce((sum, p) => sum + p.amount, 0),
       };
@@ -607,11 +639,15 @@ export class IPDService {
 
     return {
       hospital: {
-        name:         tenant?.branding.displayName || tenant?.name || 'Hospital',
-        logoUrl:      tenant?.branding.logoUrl ?? null,
-        primaryColor: tenant?.branding.primaryColor || '#1A73E8',
-        address:      hospitalAddressParts.length ? hospitalAddressParts.join(', ') : null,
-        email:        tenant?.adminEmail ?? null,
+        name:               tenant?.branding.displayName || tenant?.name || 'Hospital',
+        logoUrl:            hospitalLogoUrl,
+        // No hardcoded brand hue here — an unconfigured/missing color is
+        // handled by discharge-summary.pdf's hexToRgb, which falls back to
+        // black rather than a hardcoded blue.
+        primaryColor:       tenant?.branding.primaryColor || '',
+        address:            hospitalAddressParts.length ? hospitalAddressParts.join(', ') : null,
+        email:              tenant?.adminEmail ?? null,
+        registrationNumber: tenant?.onboardingDocuments.gstNumber ?? null,
       },
       patient: {
         patientId:        patient.patientId,

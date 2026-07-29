@@ -4,15 +4,18 @@ import { opdService } from './opd.service';
 import { IOPDVisit } from './opd.model';
 import { ValidationError, NotFoundError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
-import { stripRichTextTags } from '../../shared/utils/validation';
+import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
 
 // Notes are stored as rich-text HTML (Tiptap) — the 2000-character limit
 // applies to the visible text a user typed, not the wrapping markup, so the
 // raw string is allowed a generous multiple of that for formatting overhead.
+// sanitizeRichTextHtml strips any tag/CSS the editor itself would never
+// produce, so a direct API request can't store unsupported HTML or CSS.
 const notesSchema = z.string()
   .max(12000, 'Notes content is too large.')
   .trim()
   .refine((v) => stripRichTextTags(v).length <= 2000, 'Notes cannot exceed 2000 characters.')
+  .transform(sanitizeRichTextHtml)
   .optional();
 
 const createVisitSchema = z.object({

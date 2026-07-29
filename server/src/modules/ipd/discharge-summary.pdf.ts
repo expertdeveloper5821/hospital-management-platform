@@ -22,16 +22,42 @@ function formatDateTime(iso: string): string {
   return `${formatDate(iso)}, ${hh}:${mm} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-function formatINR(amount: number): string {
-  return `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+// The 14 standard PDF fonts (Helvetica/Helvetica-Bold — the only fonts this
+// document uses) are locked to WinAnsiEncoding, which has no glyph for ₹
+// (U+20B9): requesting it renders a broken/replacement glyph instead of
+// failing. Only a custom embedded (TTF) font can carry the glyph, so the
+// symbol is only emitted for fonts outside this standard set.
+const STANDARD_PDF_FONTS = new Set([
+  'Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique',
+  'Courier', 'Courier-Bold', 'Courier-Oblique', 'Courier-BoldOblique',
+  'Times-Roman', 'Times-Bold', 'Times-Italic', 'Times-BoldItalic',
+  'Symbol', 'ZapfDingbats',
+]);
+
+export function fontSupportsRupeeSymbol(fontName: string): boolean {
+  return !STANDARD_PDF_FONTS.has(fontName);
 }
 
-function hexToRgb(hex: string): [number, number, number] {
-  const h = (hex || '#1A73E8').replace('#', '').padEnd(6, '0').slice(0, 6);
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return [isNaN(r) ? 26 : r, isNaN(g) ? 115 : g, isNaN(b) ? 232 : b];
+export function formatCurrency(amount: number, fontName: string): string {
+  const formatted = amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fontSupportsRupeeSymbol(fontName) ? `₹${formatted}` : formatted;
+}
+
+// No valid primary color configured (missing/malformed hex) falls back to
+// black rather than a hardcoded brand hue.
+export function hexToRgb(hex: string): [number, number, number] {
+  const h = (hex || '').replace('#', '');
+  if (!/^[0-9A-Fa-f]{6}$/.test(h)) return [0, 0, 0];
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+// Perceived-brightness heuristic (ITU-R BT.601 luma) — picks the readable
+// foreground (white on dark brands, near-black on light/pastel brands) for
+// text sitting directly on the primary-color letterhead band.
+export function getContrastTextColor(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  return brightness > 150 ? '#1a1a1a' : '#ffffff';
 }
 
 async function fetchBuffer(url: string): Promise<Buffer | null> {
@@ -53,8 +79,14 @@ async function fetchBuffer(url: string): Promise<Buffer | null> {
 }
 
 export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Promise<Buffer> {
+  // pdfkit's color normalizer only accepts hex strings, named colors, or
+  // [r,g,b]/[c,m,y,k] arrays — a CSS `rgb(r,g,b)` string silently fails to
+  // normalize, so `.fill()`/`.fillColor()` become no-ops and every branded
+  // element quietly keeps whatever fill color was last set (black, for the
+  // very first shape in the document). Pass the array form instead.
   const [pr, pg, pb] = hexToRgb(data.hospital.primaryColor);
-  const primary = `rgb(${pr},${pg},${pb})`;
+  const primary: [number, number, number] = [pr, pg, pb];
+  const onPrimary = getContrastTextColor(data.hospital.primaryColor);
   const logo = data.hospital.logoUrl ? await fetchBuffer(data.hospital.logoUrl).catch(() => null) : null;
 
   return new Promise<Buffer>((resolve, reject) => {
@@ -129,35 +161,71 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
         doc.moveDown(0.35);
       }
 
-      // Small running header on every page after the first.
+      // Compact branded running header on every page after the first — a thin
+      // primary-color bar (not the full letterhead) so it doesn't compete
+      // with the section content for space on continuation pages.
+      const COMPACT_HEADER_HEIGHT = 26;
       doc.on('pageAdded', () => {
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(primary)
-          .text(data.hospital.name, PAGE_MARGIN, PAGE_MARGIN - 10, { continued: true, width: CONTENT_WIDTH / 2, lineBreak: false });
-        doc.font('Helvetica').fontSize(8).fillColor('#666')
+        doc.rect(0, 0, doc.page.width, COMPACT_HEADER_HEIGHT).fill(primary);
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(onPrimary)
+          .text(data.hospital.name, PAGE_MARGIN, 8, { continued: true, width: CONTENT_WIDTH / 2, lineBreak: false });
+        doc.font('Helvetica').fontSize(8).fillColor(onPrimary).fillOpacity(0.85)
           .text(`  Discharge Summary — ${data.patient.fullName} (${data.patient.patientId})`, { lineBreak: false });
-        doc.y = PAGE_MARGIN + 10;
+        doc.fillOpacity(1);
+        doc.y = COMPACT_HEADER_HEIGHT + 14;
         doc.x = PAGE_MARGIN;
         doc.fillColor('#1a1a1a');
       });
 
-      // ── Header (first page) ─────────────────────────────────────────────────
-      let headerY = PAGE_MARGIN;
-      if (logo) {
-        try { doc.image(logo, PAGE_MARGIN, headerY, { fit: [50, 50] }); } catch { /* skip */ }
-      }
-      const titleX = logo ? PAGE_MARGIN + 62 : PAGE_MARGIN;
-      doc.font('Helvetica-Bold').fontSize(16).fillColor(primary)
-        .text(data.hospital.name, titleX, headerY, { width: CONTENT_WIDTH - (titleX - PAGE_MARGIN) });
-      doc.font('Helvetica').fontSize(8.5).fillColor('#555');
-      if (data.hospital.address) doc.text(data.hospital.address, titleX, doc.y, { width: CONTENT_WIDTH - (titleX - PAGE_MARGIN) });
-      if (data.hospital.email)   doc.text(data.hospital.email,   titleX, doc.y, { width: CONTENT_WIDTH - (titleX - PAGE_MARGIN) });
+      // ── Letterhead (first page) ──────────────────────────────────────────────
+      // Full-bleed primary-color band across the top of the page carrying the
+      // logo (aspect-ratio preserved via `fit`, never stretched/cropped) and
+      // hospital identity. Falls back cleanly when logo/address/email/GSTIN
+      // are unavailable — each line is only drawn when present.
+      const LETTERHEAD_PAD_X = PAGE_MARGIN;
+      const LETTERHEAD_PAD_Y = 16;
+      const LOGO_BOX = 56;
+      const textX = logo ? LETTERHEAD_PAD_X + LOGO_BOX + 14 : LETTERHEAD_PAD_X;
+      const textWidth = doc.page.width - textX - PAGE_MARGIN;
 
-      doc.y = Math.max(doc.y, headerY + 55);
+      const metaLines: string[] = [];
+      if (data.hospital.address) metaLines.push(data.hospital.address);
+      if (data.hospital.email) metaLines.push(data.hospital.email);
+      if (data.hospital.registrationNumber) metaLines.push(`GSTIN: ${data.hospital.registrationNumber}`);
+
+      doc.font('Helvetica-Bold').fontSize(16);
+      const nameHeight = doc.heightOfString(data.hospital.name, { width: textWidth });
+      doc.font('Helvetica').fontSize(8.5);
+      const metaHeight = metaLines.reduce(
+        (sum, line) => sum + doc.heightOfString(line, { width: textWidth }) + 2, 0,
+      );
+      const textBlockHeight = nameHeight + (metaLines.length ? 4 + metaHeight : 0);
+
+      const letterheadHeight = LETTERHEAD_PAD_Y * 2 + Math.max(logo ? LOGO_BOX : 0, textBlockHeight);
+      doc.rect(0, 0, doc.page.width, letterheadHeight).fill(primary);
+      // Neutral separator so the band stays visible even on near-white brand colors.
+      doc.strokeColor('#e0e0e0').lineWidth(0.75)
+        .moveTo(0, letterheadHeight).lineTo(doc.page.width, letterheadHeight).stroke();
+
+      const contentY = LETTERHEAD_PAD_Y;
+      if (logo) {
+        try { doc.image(logo, LETTERHEAD_PAD_X, contentY, { fit: [LOGO_BOX, LOGO_BOX] }); } catch { /* skip */ }
+      }
+      doc.font('Helvetica-Bold').fontSize(16).fillColor(onPrimary)
+        .text(data.hospital.name, textX, contentY, { width: textWidth });
+      if (metaLines.length) {
+        doc.moveDown(0.2);
+        doc.font('Helvetica').fontSize(8.5).fillColor(onPrimary).fillOpacity(0.85);
+        metaLines.forEach((line) => doc.text(line, textX, doc.y, { width: textWidth }));
+        doc.fillOpacity(1);
+      }
+
+      doc.y = letterheadHeight + 14;
       doc.x = PAGE_MARGIN;
-      doc.moveDown(0.5);
+      doc.fillColor('#1a1a1a');
 
       doc.rect(PAGE_MARGIN, doc.y, CONTENT_WIDTH, 26).fill(primary);
-      doc.fillColor('white').font('Helvetica-Bold').fontSize(14)
+      doc.fillColor(onPrimary).font('Helvetica-Bold').fontSize(14)
         .text('PATIENT DISCHARGE SUMMARY', PAGE_MARGIN, doc.y + 6, { width: CONTENT_WIDTH, align: 'center', lineBreak: false });
       doc.y += 10;
       doc.fillColor('#1a1a1a');
@@ -262,7 +330,7 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
             p.description,
             p.paymentMethod,
             p.status,
-            formatINR(p.amount),
+            formatCurrency(p.amount, 'Helvetica'),
           ]);
         });
         doc.moveDown(0.5);
@@ -270,7 +338,7 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
         doc.rect(PAGE_MARGIN, doc.y, CONTENT_WIDTH, 22).fill('#f0f0f0');
         doc.fillColor('#1a1a1a').font('Helvetica-Bold').fontSize(10)
           .text('Total Collected (Completed Payments):', PAGE_MARGIN + 8, doc.y + 6, { continued: true, width: CONTENT_WIDTH - 150 });
-        doc.text(formatINR(data.billing.total), { align: 'right', width: 100 });
+        doc.text(formatCurrency(data.billing.total, 'Helvetica-Bold'), { align: 'right', width: 100 });
         doc.y += 6;
       }
 

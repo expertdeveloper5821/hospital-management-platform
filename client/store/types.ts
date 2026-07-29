@@ -501,9 +501,9 @@ export interface DepartmentRevenueEntry {
 }
 
 export interface DepartmentRevenueResponse {
-  departments:     DepartmentRevenueEntry[];
-  unassignedTotal: number;
-  grandTotal:      number;
+  departments: DepartmentRevenueEntry[];
+  otherTotal:  number;
+  grandTotal:  number;
 }
 
 export interface PaymentListResult {

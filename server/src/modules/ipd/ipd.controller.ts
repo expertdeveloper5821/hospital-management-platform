@@ -234,7 +234,15 @@ export async function getDischargeSummaryPdf(
     }
 
     const tenantId = req.user!.tenantId as string;
-    const data = await ipdService.getDischargeSummaryData(idResult.data, tenantId, req.user!.role);
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const data = await ipdService.getDischargeSummaryData(
+      idResult.data,
+      tenantId,
+      req.user!.role,
+      nurseWardIds,
+      doctorPatientIds,
+    );
     const pdfBuffer = await buildDischargeSummaryPdf(data);
 
     res.status(200)

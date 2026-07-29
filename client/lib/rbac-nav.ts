@@ -30,6 +30,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Inventory", href: "/inventory", icon: "package" },
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
+    { label: "Revenue", href: "/revenue", icon: "trending-up" },
     { label: "Billing", href: "/billing", icon: "receipt" },
     { label: "Audit Logs", href: "/audit", icon: "file-text" },
   ],
@@ -45,6 +46,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
 
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
+    { label: "Revenue", href: "/revenue", icon: "trending-up" },
     { label: "Billing", href: "/billing", icon: "receipt" },
   ],
   DOCTOR: [
@@ -84,6 +86,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
+    { label: "Revenue", href: "/revenue", icon: "trending-up" },
     { label: "Billing", href: "/billing", icon: "receipt" },
   ],
   HR: [
@@ -103,6 +106,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Wards", href: "/wards", icon: "layout-grid" },
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
+    { label: "Revenue", href: "/revenue", icon: "trending-up" },
     { label: "Billing", href: "/billing", icon: "receipt" },
   ],
   STAFF: [{ label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" }],

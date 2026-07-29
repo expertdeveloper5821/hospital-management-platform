@@ -402,7 +402,7 @@ export class PaymentService {
   // ─── Department-wise revenue report ────────────────────────────────────────
   // Every active department is included (₹0 if it has no matching revenue);
   // revenue that couldn't be mapped to a department (or maps to a department
-  // that no longer exists) is folded into `unassignedTotal` so `grandTotal`
+  // that no longer exists) is folded into `otherTotal` so `grandTotal`
   // always equals the sum of the whole breakdown — never computed separately.
 
   async getDepartmentRevenue(
@@ -415,12 +415,12 @@ export class PaymentService {
     ]);
 
     const totalByDepartmentId = new Map<string, number>();
-    let unassignedTotal = 0;
+    let otherTotal = 0;
     for (const row of resolvedSums) {
       if (row.departmentId) {
         totalByDepartmentId.set(row.departmentId, (totalByDepartmentId.get(row.departmentId) ?? 0) + row.total);
       } else {
-        unassignedTotal += row.total;
+        otherTotal += row.total;
       }
     }
 
@@ -434,12 +434,12 @@ export class PaymentService {
     // Revenue resolved to a departmentId that isn't (or no longer is) an
     // active department — e.g. it was deleted after the payment was made.
     for (const [departmentId, total] of totalByDepartmentId) {
-      if (!knownDepartmentIds.has(departmentId)) unassignedTotal += total;
+      if (!knownDepartmentIds.has(departmentId)) otherTotal += total;
     }
 
-    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + unassignedTotal;
+    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + otherTotal;
 
-    return { departments: departmentEntries, unassignedTotal, grandTotal };
+    return { departments: departmentEntries, otherTotal, grandTotal };
   }
 }
 

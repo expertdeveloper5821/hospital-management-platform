@@ -222,6 +222,26 @@ describe('POST /api/opd/visits', () => {
     expect(res.body.data.notes).toBe('routine visit');
   });
 
+  test('201 — unsafe CSS in notes is stripped on the server, even bypassing the editor', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({
+        ...VALID_VISIT_BODY,
+        notes: '<p><span style="font-size: 14px; position: fixed; top: 0; z-index: 99999; '
+          + 'background: url(https://evil.test/track.png);">Note text</span></p>',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.notes).toBe('<p><span style="font-size: 14px">Note text</span></p>');
+  });
+
   test('403 — Manager role cannot create visits', async () => {
     const tenant  = await seedTenant();
     const tid     = tenant._id.toString();

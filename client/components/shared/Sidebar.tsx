@@ -22,6 +22,7 @@ import {
   Receipt,
   FolderOpen,
   Gift,
+  TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 import { cn, toTitleCase } from '@/lib/utils';
@@ -48,6 +49,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'receipt':          Receipt,
   'folder-open':      FolderOpen,
   'gift':             Gift,
+  'trending-up':      TrendingUp,
 };
 
 interface SidebarProps {

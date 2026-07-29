@@ -231,14 +231,14 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
     expect(res.status).toBe(403);
   });
 
-  test('200 — Doctor, Nurse, Manager, and Receptionist can all access it (ADMISSION_READERS)', async () => {
+  test('200 — Manager and Receptionist (unscoped ADMISSION_READERS) can access it', async () => {
     const tenant  = await seedTenant();
     const tid     = toId(tenant);
     const patient = await seedPatient(tid);
     const doctor  = await seedUser(UserRole.DOCTOR, tid);
     await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
 
-    for (const role of [UserRole.DOCTOR, UserRole.NURSE, UserRole.MANAGER, UserRole.RECEPTIONIST]) {
+    for (const role of [UserRole.MANAGER, UserRole.RECEPTIONIST]) {
       const token = makeToken('u-' + role, tid, role);
       const res = await request(app)
         .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
@@ -250,5 +250,89 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
   test('401 — unauthenticated', async () => {
     const res = await request(app).get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary');
     expect(res.status).toBe(401);
+  });
+
+  // ─── Assignment-scoped authorization (same as GET /admissions/:admissionId) ──
+  test('200 — a doctor assigned to the admission can download the discharge summary', async () => {
+    const tenant  = await seedTenant();
+    const tid     = toId(tenant);
+    const patient = await seedPatient(tid);
+    const doctor  = await seedUser(UserRole.DOCTOR, tid);
+    await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
+
+    const token = makeToken(toId(doctor), tid, UserRole.DOCTOR);
+    const res = await request(app)
+      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+  });
+
+  test('404 — a doctor not assigned to the admission (nor its OPD/IPD history) is rejected', async () => {
+    const tenant       = await seedTenant();
+    const tid          = toId(tenant);
+    const patient      = await seedPatient(tid);
+    const doctor       = await seedUser(UserRole.DOCTOR, tid);
+    const otherDoctor  = await UserModel.create({
+      name: 'Other Doctor', tenantId: tid, email: 'other-doctor@dischargetest.com',
+      passwordHash: '$2a$12$hashedpwd', role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
+    });
+    await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
+
+    const token = makeToken(toId(otherDoctor), tid, UserRole.DOCTOR);
+    const res = await request(app)
+      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  test('200 — a nurse assigned to the admission\'s ward can download the discharge summary', async () => {
+    const tenant  = await seedTenant();
+    const tid     = toId(tenant);
+    const patient = await seedPatient(tid);
+    const doctor  = await seedUser(UserRole.DOCTOR, tid);
+    const nurse   = await seedUser(UserRole.NURSE, tid);
+
+    const ward = await WardModel.create({ name: 'General Ward', tenantId: tid, assignedNurseIds: [toId(nurse)] });
+    const bed  = await BedModel.create({ wardId: toId(ward), bedNumber: 'G-01', isOccupied: false, tenantId: tid });
+    await IPDAdmissionModel.create({
+      admissionId: '11111111-1111-4111-8111-111111111111',
+      patientId: patient.patientId, tenantId: tid,
+      wardId: toId(ward), bedId: toId(bed), bedNumber: 'G-01', wardName: 'General Ward',
+      assignedDoctorIds: [toId(doctor)], departmentId: null,
+      status: AdmissionStatus.DISCHARGED,
+      admissionDate: new Date('2026-01-06T08:00:00.000Z'),
+      dischargeDate: new Date('2026-01-10T14:30:00.000Z'),
+      progressNotes: [],
+    });
+
+    const token = makeToken(toId(nurse), tid, UserRole.NURSE);
+    const res = await request(app)
+      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+  });
+
+  test('404 — a nurse outside the admission\'s ward is rejected', async () => {
+    const tenant  = await seedTenant();
+    const tid     = toId(tenant);
+    const patient = await seedPatient(tid);
+    const doctor  = await seedUser(UserRole.DOCTOR, tid);
+    const nurse   = await seedUser(UserRole.NURSE, tid);
+
+    const otherWard = await WardModel.create({ name: 'Other Ward', tenantId: tid, assignedNurseIds: [toId(nurse)] });
+    await seedDischargedAdmission(tid, patient.patientId, toId(doctor)); // admission is in 'General Ward', not otherWard
+    void otherWard;
+
+    const token = makeToken(toId(nurse), tid, UserRole.NURSE);
+    const res = await request(app)
+      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { stripRichTextTags } from '../../shared/utils/validation';
+import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
 
 // ─── AdmissionStatus ──────────────────────────────────────────────────────────
 export const AdmissionStatus = {
@@ -42,13 +42,15 @@ export type CreateAdmissionInput = z.infer<typeof CreateAdmissionSchema>;
 // Progress notes are stored as rich-text HTML (Tiptap) — the 5000-character
 // limit applies to the visible text a user typed, not the wrapping markup,
 // so the raw string is allowed a generous multiple of that for formatting
-// overhead.
+// overhead. sanitizeRichTextHtml strips any tag/CSS the editor itself would
+// never produce, so a direct API request can't store unsupported HTML or CSS.
 export const AddProgressNoteSchema = z.object({
   note: z.string()
     .min(1, 'Note cannot be empty')
     .max(30000, 'Note content is too large.')
     .trim()
-    .refine((v) => stripRichTextTags(v).length <= 5000, 'Note cannot exceed 5000 characters'),
+    .refine((v) => stripRichTextTags(v).length <= 5000, 'Note cannot exceed 5000 characters')
+    .transform(sanitizeRichTextHtml),
 });
 
 export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
@@ -113,11 +115,12 @@ export interface StatusUpdate {
 // rather than showing a placeholder.
 
 export interface DischargeSummaryHospitalInfo {
-  name:         string;
-  logoUrl:      string | null;
-  primaryColor: string;
-  address:      string | null;
-  email:        string | null;
+  name:               string;
+  logoUrl:            string | null;
+  primaryColor:       string;
+  address:            string | null;
+  email:              string | null;
+  registrationNumber: string | null; // GSTIN, from onboardingDocuments.gstNumber
 }
 
 export interface DischargeSummaryPatientInfo {

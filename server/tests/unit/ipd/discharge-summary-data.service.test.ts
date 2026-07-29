@@ -76,7 +76,7 @@ const BASE_PATIENT = {
 const BASE_TENANT = {
   name: 'City Hospital', adminEmail: 'admin@city.test',
   branding: { displayName: 'City Hospital', primaryColor: '#1A73E8', logoUrl: null },
-  onboardingDocuments: { addressLine: '1 Main St', city: 'Metropolis', state: 'State', pincode: '100001' },
+  onboardingDocuments: { addressLine: '1 Main St', city: 'Metropolis', state: 'State', pincode: '100001', gstNumber: '22AAAAA0000A1Z5' },
 };
 
 const BASE_WARD = { wardId: 'ward-001', name: 'General Ward', assignedNurseIds: [NURSE_ID] };
@@ -133,6 +133,7 @@ describe('IPDService — getDischargeSummaryData', () => {
 
     expect(result.hospital.name).toBe('City Hospital');
     expect(result.hospital.address).toContain('Metropolis');
+    expect(result.hospital.registrationNumber).toBe('22AAAAA0000A1Z5');
     expect(result.patient.fullName).toBe('Ravi Kumar');
     expect(result.patient.age).toBeGreaterThan(0);
     expect(result.admission.wardName).toBe('General Ward');
@@ -214,6 +215,69 @@ describe('IPDService — getDischargeSummaryData', () => {
 
     const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
     expect(result.labRequests[0].reportUrl).toBeNull();
+  });
+
+  describe('hospital logo — S3 key resolved to a presigned URL', () => {
+    test('a configured logo key is resolved to a presigned URL (not passed through as a raw S3 key)', async () => {
+      mockTenRepo.findById = jest.fn().mockResolvedValue({
+        ...BASE_TENANT,
+        branding: { ...BASE_TENANT.branding, logoUrl: 'tenants/tenant-001/logos/logo.png' },
+      } as never);
+      mockS3.getPresignedUrl = jest.fn().mockResolvedValue('https://s3.test/presigned-logo.png');
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+
+      expect(mockS3.getPresignedUrl).toHaveBeenCalledWith('tenants/tenant-001/logos/logo.png', 86400);
+      expect(result.hospital.logoUrl).toBe('https://s3.test/presigned-logo.png');
+    });
+
+    test('no configured logo yields hospital.logoUrl: null without calling S3', async () => {
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.hospital.logoUrl).toBeNull();
+      expect(mockS3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    test('a failed presigned-URL lookup degrades to hospital.logoUrl: null rather than throwing', async () => {
+      mockTenRepo.findById = jest.fn().mockResolvedValue({
+        ...BASE_TENANT,
+        branding: { ...BASE_TENANT.branding, logoUrl: 'tenants/tenant-001/logos/logo.png' },
+      } as never);
+      mockS3.getPresignedUrl = jest.fn().mockRejectedValue(new Error('S3 unavailable'));
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.hospital.logoUrl).toBeNull();
+    });
+  });
+
+  describe('hospital branding — used for the discharge-summary letterhead', () => {
+    test('the exact primaryColor saved by the Hospital Admin in Branding settings is passed through unchanged', async () => {
+      mockTenRepo.findById = jest.fn().mockResolvedValue({
+        ...BASE_TENANT,
+        branding: { ...BASE_TENANT.branding, primaryColor: '#7B1FA2' },
+      } as never);
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.hospital.primaryColor).toBe('#7B1FA2');
+    });
+
+    test('registrationNumber is sourced from onboardingDocuments.gstNumber', async () => {
+      mockTenRepo.findById = jest.fn().mockResolvedValue({
+        ...BASE_TENANT,
+        onboardingDocuments: { ...BASE_TENANT.onboardingDocuments, gstNumber: '07BBBBB1111B2Z6' },
+      } as never);
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.hospital.registrationNumber).toBe('07BBBBB1111B2Z6');
+    });
+
+    test('falls back to name/branding/address/registrationNumber defaults when the tenant record is missing (no crash)', async () => {
+      mockTenRepo.findById = jest.fn().mockResolvedValue(null);
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.hospital.name).toBe('Hospital');
+      expect(result.hospital.primaryColor).toBe(''); // no tenant → no configured color → PDF falls back to black, not a hardcoded hue
+      expect(result.hospital.address).toBeNull();
+      expect(result.hospital.email).toBeNull();
+      expect(result.hospital.registrationNumber).toBeNull();
+      expect(result.hospital.logoUrl).toBeNull();
+    });
   });
 
   describe('billing — role-gated inclusion', () => {
@@ -322,5 +386,99 @@ describe('IPDService — getDischargeSummaryData', () => {
     const before = Date.now();
     const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
     expect(new Date(result.generatedAt).getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  // ─── Assignment-scope authorization (mirrors getAdmissionById) ────────────
+  // BASE_ADMISSION.wardId = 'ward-001', patientId = PATIENT_ID.
+  describe('assignment-scope enforcement', () => {
+    test('rejects with NotFoundError when nurseWardIds does not include the admission ward, before aggregating any data', async () => {
+      await expect(
+        service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.NURSE, ['some-other-ward'], undefined),
+      ).rejects.toThrow(NotFoundError);
+      expect(mockPatRepo.findByPatientId).not.toHaveBeenCalled();
+      expect(mockOpdRepo.findByPatient).not.toHaveBeenCalled();
+      expect(mockLabRepo.findPathologyByPatient).not.toHaveBeenCalled();
+    });
+
+    test('allows access when nurseWardIds includes the admission ward', async () => {
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.NURSE, ['ward-001'], undefined);
+      expect(result.patient.fullName).toBe('Ravi Kumar');
+    });
+
+    test('rejects with NotFoundError when doctorPatientIds does not include the admission patient, before aggregating any data', async () => {
+      await expect(
+        service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.DOCTOR, undefined, ['some-other-patient']),
+      ).rejects.toThrow(NotFoundError);
+      expect(mockPatRepo.findByPatientId).not.toHaveBeenCalled();
+      expect(mockOpdRepo.findByPatient).not.toHaveBeenCalled();
+    });
+
+    test('allows access when doctorPatientIds includes the admission patient', async () => {
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.DOCTOR, undefined, [PATIENT_ID]);
+      expect(result.patient.fullName).toBe('Ravi Kumar');
+    });
+
+    test('unrestricted (undefined scope) roles like HOSPITAL_ADMIN bypass both checks', async () => {
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN, undefined, undefined);
+      expect(result.patient.fullName).toBe('Ravi Kumar');
+    });
+  });
+
+  // ─── Pagination — no silent truncation past the first page ────────────────
+  // Each source repository call is a paginated method; a patient with more
+  // than one page's worth of history must not have records silently dropped.
+  describe('pagination — fetches every page, not just the first', () => {
+    function pagedSlice<T>(items: T[], page: number, limit: number) {
+      const start = (page - 1) * limit;
+      return { data: items.slice(start, start + limit), total: items.length, page, limit, totalPages: Math.ceil(items.length / limit) };
+    }
+
+    test('OPD visits beyond the first page are still included', async () => {
+      const visits = Array.from({ length: 501 }, (_, i) => ({
+        visitId: `OPD-${i}`, visitDate: new Date('2026-01-01T00:00:00.000Z'), status: 'COMPLETED',
+        departmentId: null, doctorIds: [], diagnosis: null, prescription: null, notes: null,
+      }));
+      mockOpdRepo.findByPatient = jest.fn().mockImplementation((_t: string, _p: string, filters: { page: number; limit: number }) =>
+        Promise.resolve(pagedSlice(visits, filters.page, filters.limit) as never));
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.opdVisits).toHaveLength(501);
+      expect(mockOpdRepo.findByPatient).toHaveBeenCalledTimes(2);
+    });
+
+    test('pathology and radiology requests beyond the first page are still included', async () => {
+      const pathology = Array.from({ length: 520 }, (_, i) => ({
+        requestId: `LAB-P-${i}`, testType: 'CBC', status: 'COMPLETED', priority: 'NORMAL',
+        requestedBy: DOCTOR_ID, departmentId: null, requestedAt: new Date('2026-01-01T00:00:00.000Z'),
+        notes: null, reportS3Key: null,
+      }));
+      const radiology = Array.from({ length: 510 }, (_, i) => ({
+        requestId: `LAB-R-${i}`, imagingType: 'X-Ray', status: 'PENDING', priority: 'NORMAL',
+        requestedBy: DOCTOR_ID, departmentId: null, requestedAt: new Date('2026-01-01T00:00:00.000Z'),
+        notes: null, reportS3Key: null,
+      }));
+      mockLabRepo.findPathologyByPatient = jest.fn().mockImplementation((_t: string, query: { page: number; limit: number }) =>
+        Promise.resolve(pagedSlice(pathology, query.page, query.limit) as never));
+      mockLabRepo.findRadiologyByPatient = jest.fn().mockImplementation((_t: string, query: { page: number; limit: number }) =>
+        Promise.resolve(pagedSlice(radiology, query.page, query.limit) as never));
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.labRequests.filter((r) => r.category === 'PATHOLOGY')).toHaveLength(520);
+      expect(result.labRequests.filter((r) => r.category === 'RADIOLOGY')).toHaveLength(510);
+    });
+
+    test('the collected-payment total is calculated across the full payment set, not just the first page', async () => {
+      const payments = Array.from({ length: 750 }, (_, i) => ({
+        amount: 100, paymentMethod: 'CASH', status: 'COMPLETED', description: `Payment ${i}`,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      }));
+      mockPayRepo.findByFilters = jest.fn().mockImplementation((_t: string, query: { page: number; limit: number }) =>
+        Promise.resolve(pagedSlice(payments, query.page, query.limit) as never));
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.billing?.payments).toHaveLength(750);
+      expect(result.billing?.total).toBe(75000);
+      expect(mockPayRepo.findByFilters).toHaveBeenCalledTimes(2);
+    });
   });
 });

@@ -19,14 +19,16 @@ const NonInclusiveBold      = BoldExtension.extend({ inclusive: false });
 const NonInclusiveItalic    = ItalicExtension.extend({ inclusive: false });
 const NonInclusiveUnderline = UnderlineExtension.extend({ inclusive: false });
 
-const FONT_SIZES = [
+// Exported so notes-html.ts can restrict the `style` attribute it allows
+// through sanitization to exactly the values this toolbar can produce.
+export const FONT_SIZES = [
   { label: 'Small',   value: '12px' },
   { label: 'Normal',  value: '14px' },
   { label: 'Large',   value: '16px' },
   { label: 'X-Large', value: '20px' },
 ];
 
-const FONT_FAMILIES = [
+export const FONT_FAMILIES = [
   { label: 'Arial',           value: 'Arial, Helvetica, sans-serif' },
   { label: 'Helvetica',       value: 'Helvetica, Arial, sans-serif' },
   { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },

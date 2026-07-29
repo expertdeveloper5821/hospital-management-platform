@@ -122,7 +122,7 @@ export class PaymentRepository {
   //     carries no reference at all.
   // A payment resolves to `departmentId: null` whenever the linked record
   // (or the patient) has no department set — old data included — rather than
-  // throwing, so the caller can bucket it as "unassigned".
+  // throwing, so the caller can bucket it as "other".
   async sumByResolvedDepartment(
     tenantId: string,
     query:    DepartmentRevenueQuery,

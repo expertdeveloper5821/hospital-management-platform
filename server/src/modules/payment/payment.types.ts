@@ -148,13 +148,13 @@ export interface DepartmentRevenueEntry {
   total:        number;
 }
 
-// `unassignedTotal` covers payments that could not be mapped to any active
+// `otherTotal` covers payments that could not be mapped to any active
 // department — e.g. registration fees, payments predating department
 // tracking, or a payment whose linked OPD visit/IPD admission had no
 // department assigned. `grandTotal` is always the sum of the two, so the
 // breakdown reconciles with the filtered payment total by construction.
 export interface DepartmentRevenueResponse {
-  departments:     DepartmentRevenueEntry[];
-  unassignedTotal: number;
-  grandTotal:      number;
+  departments: DepartmentRevenueEntry[];
+  otherTotal:  number;
+  grandTotal:  number;
 }

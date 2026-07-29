@@ -10,7 +10,6 @@ import {
   useCancelRazorpayOrderMutation,
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
-  useGetDepartmentRevenueQuery,
 } from "@/store/api/payment.api";
 import { useAppSelector } from "@/store/hooks";
 import type {
@@ -40,7 +39,6 @@ import {
   Clock,
   XCircle,
   BarChart3,
-  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -857,71 +855,6 @@ function SummaryCard({ dateFrom, dateTo }: SummaryCardProps) {
   );
 }
 
-interface DepartmentRevenueSectionProps {
-  dateFrom: string;
-  dateTo: string;
-  methodFilter: string;
-  statusFilter: string;
-}
-
-// Revenue collected per department, honoring the same From Date / To Date /
-// Method / Status filters as the payment list and table below. Every active
-// department is shown (₹0 if it has no matching revenue); revenue that
-// couldn't be mapped to a department (e.g. a registration fee, or an old
-// record predating department tracking) is shown separately as "Unassigned"
-// so the total always reconciles.
-function DepartmentRevenueSection({ dateFrom, dateTo, methodFilter, statusFilter }: DepartmentRevenueSectionProps) {
-  const { data, isFetching } = useGetDepartmentRevenueQuery({
-    dateFrom: dateFrom || undefined,
-    dateTo: dateTo || undefined,
-    paymentMethod: methodFilter || undefined,
-    status: statusFilter || undefined,
-  });
-
-  const showEmptyState = !isFetching && data && data.departments.length === 0 && data.unassignedTotal === 0;
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-          <CardTitle className="text-base">Department-wise Revenue</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isFetching ? (
-          <div className="py-4 text-center text-sm text-muted-foreground">Loading…</div>
-        ) : showEmptyState ? (
-          <div className="py-4 text-center text-sm text-muted-foreground">No departments have been created yet.</div>
-        ) : data ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {data.departments.map((dept) => (
-                <div key={dept.departmentId} className="rounded-md border bg-muted/20 p-3 space-y-0.5 min-w-0">
-                  <p className="text-xs text-muted-foreground break-words">{dept.name}</p>
-                  <p className="text-base font-bold tabular-nums break-words">{formatINR(dept.total)}</p>
-                </div>
-              ))}
-              {data.unassignedTotal > 0 && (
-                <div className="rounded-md border border-dashed bg-muted/10 p-3 space-y-0.5 min-w-0">
-                  <p className="text-xs text-muted-foreground italic">Unassigned</p>
-                  <p className="text-base font-bold tabular-nums text-muted-foreground break-words">
-                    {formatINR(data.unassignedTotal)}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between rounded-md border px-4 py-3 bg-muted/30">
-              <span className="text-sm font-medium">Total Revenue</span>
-              <span className="text-xl font-bold tabular-nums">{formatINR(data.grandTotal)}</span>
-            </div>
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -1082,16 +1015,6 @@ export default function PaymentsPage() {
 
       {/* Summary report */}
       {canSummary && <SummaryCard dateFrom={dateFrom} dateTo={dateTo} />}
-
-      {/* Department-wise revenue */}
-      {canSummary && (
-        <DepartmentRevenueSection
-          dateFrom={dateFrom}
-          dateTo={dateTo}
-          methodFilter={methodFilter}
-          statusFilter={statusFilter}
-        />
-      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">

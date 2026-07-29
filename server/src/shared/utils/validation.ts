@@ -50,3 +50,73 @@ export function stripRichTextTags(html: string): string {
     .replace(RICH_TEXT_TAG_REGEX, '')
     .replace(/&(amp|lt|gt|quot|#39|nbsp);/g, (_, entity) => RICH_TEXT_ENTITIES[entity] ?? '');
 }
+
+/**
+ * Server-side counterpart to the client's `sanitizeNotesHtml`
+ * (client/lib/notes-html.ts). A rich-text Notes/Progress-note field reaches
+ * the database through this API, so a direct request bypassing the editor
+ * could otherwise store any tag/CSS it likes. This drops any tag outside the
+ * editor's own set (keeping the tag's text content) and rewrites `style` to
+ * only the font-family/font-size declarations the editor's toolbar can
+ * actually produce — no other CSS property (position, z-index, dimensions,
+ * background/url(...), etc.) can be stored and later rendered for another
+ * user.
+ */
+const RICH_TEXT_ALLOWED_TAGS = new Set(['p', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'br', 'span']);
+
+// Must stay in sync with FONT_SIZES / FONT_FAMILIES in
+// client/components/ui/rich-text-editor.tsx — the only values the editor's
+// toolbar can ever produce.
+const RICH_TEXT_ALLOWED_FONT_SIZES = new Set(['12px', '14px', '16px', '20px']);
+const RICH_TEXT_ALLOWED_FONT_FAMILIES = new Set([
+  'Arial, Helvetica, sans-serif',
+  'Helvetica, Arial, sans-serif',
+  '"Times New Roman", Times, serif',
+  'Georgia, serif',
+  'Verdana, Geneva, sans-serif',
+  'Tahoma, Geneva, sans-serif',
+  '"Trebuchet MS", sans-serif',
+  '"Courier New", Courier, monospace',
+  'monospace',
+]);
+
+function sanitizeRichTextStyleValue(style: string): string {
+  return style
+    .split(';')
+    .map((decl) => decl.trim())
+    .filter(Boolean)
+    .map((decl) => {
+      const idx = decl.indexOf(':');
+      if (idx === -1) return null;
+      const prop  = decl.slice(0, idx).trim().toLowerCase();
+      const value = decl.slice(idx + 1).trim();
+      if (prop === 'font-size' && RICH_TEXT_ALLOWED_FONT_SIZES.has(value)) return `font-size: ${value}`;
+      if (prop === 'font-family' && RICH_TEXT_ALLOWED_FONT_FAMILIES.has(value)) return `font-family: ${value}`;
+      return null;
+    })
+    .filter((v): v is string => v !== null)
+    .join('; ');
+}
+
+function sanitizeRichTextTagAttrs(attrs: string): string {
+  const styleMatch = /style\s*=\s*"([^"]*)"/i.exec(attrs);
+  if (!styleMatch) return '';
+  const sanitized = sanitizeRichTextStyleValue(styleMatch[1]);
+  return sanitized ? ` style="${sanitized}"` : '';
+}
+
+const RICH_TEXT_TAG_OR_TEXT_REGEX = /<(\/?)([a-zA-Z]+)([^>]*)>|([^<]+)/g;
+
+export function sanitizeRichTextHtml(html: string): string {
+  let out = '';
+  let m: RegExpExecArray | null;
+  RICH_TEXT_TAG_OR_TEXT_REGEX.lastIndex = 0;
+  while ((m = RICH_TEXT_TAG_OR_TEXT_REGEX.exec(html)) !== null) {
+    const [, closing, rawName, attrs, text] = m;
+    if (text !== undefined) { out += text; continue; }
+    const name = rawName.toLowerCase();
+    if (!RICH_TEXT_ALLOWED_TAGS.has(name)) continue; // drop tag, keep surrounding text
+    out += closing ? `</${name}>` : `<${name}${sanitizeRichTextTagAttrs(attrs)}>`;
+  }
+  return out;
+}
