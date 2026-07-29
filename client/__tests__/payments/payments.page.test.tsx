@@ -49,3 +49,14 @@ describe('PaymentsPage — role access gating', () => {
     expect(screen.getByText(/you do not have access to the payments module/i)).toBeInTheDocument();
   });
 });
+
+describe('PaymentsPage — Department-wise Revenue moved to /revenue', () => {
+  test('no longer renders the Department-wise Revenue section for any role', () => {
+    for (const role of ['HOSPITAL_ADMIN', 'MANAGER', 'FINANCE_MANAGER', 'ADMIN', 'RECEPTIONIST']) {
+      mockRole = role;
+      const { unmount } = render(<PaymentsPage />);
+      expect(screen.queryByText('Department-wise Revenue')).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+});

@@ -21,6 +21,9 @@ import { Button } from '@/components/ui/button';
 import { Input }  from '@/components/ui/input';
 import { Label }  from '@/components/ui/label';
 import { Badge }  from '@/components/ui/badge';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
+import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
 import {
   Bed,
   PlusCircle,
@@ -28,6 +31,7 @@ import {
   X,
   Search,
   AlertTriangle,
+  CheckCircle2,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -570,6 +574,11 @@ function AdmissionPanel({
             )}
           </div>
         )}
+        {!isAdmitted && (
+          <div className="shrink-0 border-t p-4">
+            <DownloadDischargeSummaryButton admissionId={admission.admissionId} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -630,7 +639,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
     }
     if (!paymentMode) { setError('Payment mode is required.'); return; }
     try {
-      await createAdmission({
+      const admission = await createAdmission({
         patientId:         patient.patientId,
         wardId,
         bedId,
@@ -641,6 +650,8 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
         amount,
         paymentMethod: paymentMode,
         description:   'IPD Admission',
+        referenceType: 'IPD_ADMISSION',
+        referenceId:   admission.admissionId,
       }).unwrap();
       onClose();
     } catch (err: unknown) {
@@ -914,7 +925,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
                     {n.staffName ?? doctorMap[n.doctorId] ?? `Staff ${n.doctorId.slice(0, 8)}…`}
                   </span>
                 </p>
-                <p className="text-sm whitespace-pre-wrap">{n.note}</p>
+                <RichTextDisplay value={n.note} />
               </div>
             ))
           )}
@@ -924,19 +935,17 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
         {canAdd && admission.status === 'ADMITTED' && (
           <form onSubmit={handleSubmit} className="border-t px-6 py-4 space-y-3 shrink-0">
             <Label htmlFor="pn-note">New Note</Label>
-            <textarea
+            <RichTextEditor
               id="pn-note"
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={setNote}
               maxLength={5000}
               rows={3}
               placeholder="Clinical observations, treatment changes…"
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
             />
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{note.length}/5000</span>
               {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button type="submit" size="sm" disabled={isLoading || !note.trim()}>
+              <Button type="submit" size="sm" disabled={isLoading || !note.trim()} className="ml-auto">
                 {isLoading ? 'Saving…' : 'Add Note'}
               </Button>
             </div>
@@ -1000,6 +1009,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const [viewFor,         setViewFor]         = useState<AdmissionResponse | null>(null);
   const [notesFor,        setNotesFor]        = useState<AdmissionResponse | null>(null);
   const [dischargeFor,    setDischargeFor]    = useState<AdmissionResponse | null>(null);
+  const [justDischarged,  setJustDischarged]  = useState<AdmissionResponse | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(searchQ.trim()); setPage(1); }, 400);
@@ -1053,8 +1063,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
       setDischargeFor(null);
       return;
     }
-    await discharge(dischargeFor.admissionId);
+    const result = await discharge(dischargeFor.admissionId);
     setDischargeFor(null);
+    if ('data' in result && result.data) setJustDischarged(result.data);
   }
 
   return (
@@ -1319,6 +1330,26 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           onCancel={() => setDischargeFor(null)}
           loading={discharging}
         />
+      )}
+      {justDischarged && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="font-semibold">Patient Discharged</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Bed <span className="font-medium text-foreground">{justDischarged.bedNumber}</span> in{' '}
+                  <span className="font-medium text-foreground">{justDischarged.wardName}</span> has been released.
+                </p>
+              </div>
+            </div>
+            <DownloadDischargeSummaryButton admissionId={justDischarged.admissionId} variant="default" />
+            <Button variant="outline" className="w-full" onClick={() => setJustDischarged(null)}>
+              Close
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

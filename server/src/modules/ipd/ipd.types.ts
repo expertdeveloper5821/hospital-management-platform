@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
 
 // ─── AdmissionStatus ──────────────────────────────────────────────────────────
 export const AdmissionStatus = {
@@ -38,11 +39,18 @@ export const CreateAdmissionSchema = z.object({
 
 export type CreateAdmissionInput = z.infer<typeof CreateAdmissionSchema>;
 
+// Progress notes are stored as rich-text HTML (Tiptap) — the 5000-character
+// limit applies to the visible text a user typed, not the wrapping markup,
+// so the raw string is allowed a generous multiple of that for formatting
+// overhead. sanitizeRichTextHtml strips any tag/CSS the editor itself would
+// never produce, so a direct API request can't store unsupported HTML or CSS.
 export const AddProgressNoteSchema = z.object({
   note: z.string()
     .min(1, 'Note cannot be empty')
-    .max(5000, 'Note cannot exceed 5000 characters')
-    .trim(),
+    .max(30000, 'Note content is too large.')
+    .trim()
+    .refine((v) => stripRichTextTags(v).length <= 5000, 'Note cannot exceed 5000 characters')
+    .transform(sanitizeRichTextHtml),
 });
 
 export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
@@ -98,4 +106,97 @@ export interface AddBedsRequest {
 export interface StatusUpdate {
   status:        AdmissionStatus;
   dischargeDate: Date;
+}
+
+// ─── Discharge Summary PDF — data contract ────────────────────────────────────
+// Generated on demand (never persisted) from existing Patient/OPD/IPD/Lab/
+// Payment/User/Audit records only. Any field the source data doesn't have is
+// `null`/omitted here so the PDF builder can skip that line/section entirely
+// rather than showing a placeholder.
+
+export interface DischargeSummaryHospitalInfo {
+  name:               string;
+  logoUrl:            string | null;
+  primaryColor:       string;
+  address:            string | null;
+  email:              string | null;
+  registrationNumber: string | null; // GSTIN, from onboardingDocuments.gstNumber
+}
+
+export interface DischargeSummaryPatientInfo {
+  patientId:        string;
+  fullName:         string;
+  age:              number;
+  gender:           string;
+  mobileNumber:     string;
+  address:          string | null;
+  registeredAt:     string;
+  registeredByName: string | null;
+}
+
+export interface DischargeSummaryOpdVisit {
+  visitId:        string;
+  visitDate:      string;
+  status:         string;
+  departmentName: string | null;
+  doctorNames:    string[];
+  diagnosis:      string | null;
+  prescription:   string | null;
+  notesHtml:      string | null;
+}
+
+export interface DischargeSummaryProgressNote {
+  authorName: string | null;
+  authorRole: string | null;
+  timestamp:  string;
+  noteHtml:   string;
+}
+
+export interface DischargeSummaryAdmission {
+  admissionId:          string;
+  wardName:             string;
+  bedNumber:             string;
+  departmentName:       string | null;
+  assignedDoctorNames:  string[];
+  assignedNurseNames:   string[];
+  admissionDate:        string;
+  dischargeDate:        string;
+  dischargedByName:     string | null;
+  progressNotes:        DischargeSummaryProgressNote[];
+}
+
+export interface DischargeSummaryLabRequest {
+  requestId:       string;
+  category:        'PATHOLOGY' | 'RADIOLOGY';
+  type:            string;
+  status:          string;
+  priority:        string;
+  requestedByName: string | null;
+  departmentName:  string | null;
+  requestedAt:     string;
+  notesHtml:       string | null;
+  reportUrl:       string | null;
+}
+
+export interface DischargeSummaryPayment {
+  amount:        number;
+  paymentMethod: string;
+  status:        string;
+  description:   string;
+  createdAt:     string;
+}
+
+export interface DischargeSummaryBilling {
+  payments: DischargeSummaryPayment[];
+  total:    number; // sum of COMPLETED payments only
+}
+
+export interface DischargeSummaryData {
+  hospital:    DischargeSummaryHospitalInfo;
+  patient:     DischargeSummaryPatientInfo;
+  opdVisits:   DischargeSummaryOpdVisit[];
+  admission:   DischargeSummaryAdmission;
+  labRequests: DischargeSummaryLabRequest[];
+  billing:     DischargeSummaryBilling | null; // null: role lacks permission, or omitted at build time
+  generatedAt: string;
 }

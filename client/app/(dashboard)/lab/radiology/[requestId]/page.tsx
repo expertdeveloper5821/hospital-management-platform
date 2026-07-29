@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ArrowLeft, User, ScanLine, FileText, Calendar, Activity, Download } from 'lucide-react';
 import { useGetRadiologyRequestQuery } from '@/store/api/lab.api';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -20,9 +21,9 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
       <span className="mt-0.5 text-muted-foreground shrink-0">{icon}</span>
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-medium break-words whitespace-pre-wrap">
+        <div className="text-sm font-medium break-words whitespace-pre-wrap">
           {value ?? <span className="italic text-muted-foreground">—</span>}
-        </p>
+        </div>
       </div>
     </div>
   );
@@ -77,7 +78,7 @@ export default function RadiologyDetailPage({ params }: { params: { requestId: s
         <DetailRow icon={<Activity className="h-4 w-4" />} label="Requested By"  value={request.requestedBy} />
         <DetailRow icon={<Calendar className="h-4 w-4" />} label="Requested On"  value={formatDate(request.requestedAt)} />
         {request.notes && (
-          <DetailRow icon={<FileText className="h-4 w-4" />} label="Notes"       value={request.notes} />
+          <DetailRow icon={<FileText className="h-4 w-4" />} label="Notes"       value={<RichTextDisplay value={request.notes} />} />
         )}
       </div>
 

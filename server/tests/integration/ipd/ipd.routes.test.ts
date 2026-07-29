@@ -745,7 +745,6 @@ describe('GET /api/ipd/admissions — doctor patient-assignment scoping (OPD + I
       visitDate:      new Date(),
       queueNumber:    1,
       status:         'OPEN',
-      chiefComplaint: 'Routine checkup',
     });
     // Admission itself has no assignedDoctorIds — the doctor is only linked via OPD.
     await seedAdmission({ admissionId: ADM_ID, patientId: 'PAT-LIST-OPD', assignedDoctorIds: [], tenantId: toId(tenant) });

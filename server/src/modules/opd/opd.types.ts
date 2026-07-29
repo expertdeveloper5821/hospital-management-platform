@@ -14,14 +14,12 @@ export const TERMINAL_STATUSES: ReadonlySet<OPDVisitStatus> = new Set([
 
 export interface CreateOPDVisitRequest {
   patientId:      string;
-  chiefComplaint: string;
   doctorIds?:     string[];
   visitDate?:     string; // YYYY-MM-DD, defaults to today
   notes?:         string;
 }
 
 export interface UpdateOPDVisitRequest {
-  chiefComplaint?: string;
   doctorIds?:      string[];
   visitDate?:      string; // YYYY-MM-DD — triggers queue number recalculation
   diagnosis?:      string;
@@ -44,7 +42,6 @@ export interface OPDVisitResponse {
   visitDate:      Date;
   queueNumber:    number;
   status:         OPDVisitStatus;
-  chiefComplaint: string;
   diagnosis:      string | null;
   prescription:   string | null;
   notes:          string | null;

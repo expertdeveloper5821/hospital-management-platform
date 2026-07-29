@@ -6,6 +6,7 @@ import {
   CreateRazorpayOrderSchema,
   ListPaymentsQuerySchema,
   PaymentSummaryQuerySchema,
+  DepartmentRevenueQuerySchema,
 } from './payment.types';
 
 const paymentIdSchema = z.string().uuid('paymentId must be a valid UUID');
@@ -132,6 +133,22 @@ export async function getPaymentSummary(
       return;
     }
     const result = await paymentService.getPaymentSummary(req.user!.tenantId as string, parsed.data);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── Department-wise revenue report ───────────────────────────────────────────
+
+export async function getDepartmentRevenue(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const parsed = DepartmentRevenueQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+    const result = await paymentService.getDepartmentRevenue(req.user!.tenantId as string, parsed.data);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

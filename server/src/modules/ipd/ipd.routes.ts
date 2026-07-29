@@ -11,6 +11,7 @@ import {
   updateAdmission,
   addProgressNote,
   dischargePatient,
+  getDischargeSummaryPdf,
   getPatientIPDHistory,
   getBedOccupancySummary,
   createWard,
@@ -142,6 +143,17 @@ const ADMISSION_READERS = [
   UserRole.NURSE,
   UserRole.RECEPTIONIST,
 ];
+
+// GET /api/ipd/admissions/:admissionId/discharge-summary — discharge summary PDF
+// (available once the admission is DISCHARGED; generated fresh on every request,
+// never persisted — same reader roles as viewing the admission itself)
+router.get(
+  '/admissions/:admissionId/discharge-summary',
+  ...protect,
+  requireRole(...ADMISSION_READERS),
+  requireFirstPasswordChange,
+  getDischargeSummaryPdf,
+);
 
 // GET /api/ipd/patients/:patientId/history — IPD admission history for a patient
 router.get(

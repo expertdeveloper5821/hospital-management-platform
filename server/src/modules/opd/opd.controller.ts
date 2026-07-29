@@ -4,28 +4,39 @@ import { opdService } from './opd.service';
 import { IOPDVisit } from './opd.model';
 import { ValidationError, NotFoundError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
+import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
+
+// Notes are stored as rich-text HTML (Tiptap) — the 2000-character limit
+// applies to the visible text a user typed, not the wrapping markup, so the
+// raw string is allowed a generous multiple of that for formatting overhead.
+// sanitizeRichTextHtml strips any tag/CSS the editor itself would never
+// produce, so a direct API request can't store unsupported HTML or CSS.
+const notesSchema = z.string()
+  .max(12000, 'Notes content is too large.')
+  .trim()
+  .refine((v) => stripRichTextTags(v).length <= 2000, 'Notes cannot exceed 2000 characters.')
+  .transform(sanitizeRichTextHtml)
+  .optional();
 
 const createVisitSchema = z.object({
   patientId:      z.string().min(1),
-  chiefComplaint: z.string().min(1, 'Reason for visit is required.').max(1000, 'Reason for visit cannot exceed 1000 characters.').trim(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  notes:          z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
+  notes:          notesSchema,
 });
 
 const updateVisitSchema = z.object({
-  chiefComplaint: z.string().min(1, 'Reason for visit is required.').max(1000, 'Reason for visit cannot exceed 1000 characters.').trim().optional(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   diagnosis:      z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
   prescription:   z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
-  notes:          z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
+  notes:          notesSchema,
 });
 
 const completeVisitSchema = z.object({
   diagnosis:    z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim(),
   prescription: z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
-  notes:        z.string().max(2000, 'Notes cannot exceed 2000 characters.').trim().optional(),
+  notes:        notesSchema,
 });
 
 const queueQuerySchema = z.object({
@@ -62,7 +73,6 @@ function toResponse(v: IOPDVisit) {
     visitDate:      v.visitDate,
     queueNumber:    v.queueNumber,
     status:         v.status,
-    chiefComplaint: v.chiefComplaint,
     diagnosis:      v.diagnosis,
     prescription:   v.prescription,
     notes:          v.notes,

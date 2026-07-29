@@ -986,7 +986,6 @@ describe('Doctor patient-assignment scoping', () => {
       visitDate:      new Date(),
       queueNumber:    1,
       status:         'OPEN',
-      chiefComplaint: 'Routine checkup',
     });
   }
 

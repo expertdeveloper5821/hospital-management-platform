@@ -248,8 +248,8 @@ describe('GET /api/dashboard/stats — Doctor dashboard data is scoped by doctor
 
     // Doctor A: 2 OPD visits today (2 distinct patients) + 1 active IPD admission (a 3rd patient).
     await OPDVisitModel.create([
-      { visitId: 'v-a-1', tenantId, patientId: 'PAT-A1', doctorIds: [DOCTOR_A], visitDate: today, queueNumber: 1, status: 'OPEN', chiefComplaint: 'Fever' },
-      { visitId: 'v-a-2', tenantId, patientId: 'PAT-A2', doctorIds: [DOCTOR_A], visitDate: today, queueNumber: 2, status: 'OPEN', chiefComplaint: 'Cough' },
+      { visitId: 'v-a-1', tenantId, patientId: 'PAT-A1', doctorIds: [DOCTOR_A], visitDate: today, queueNumber: 1, status: 'OPEN' },
+      { visitId: 'v-a-2', tenantId, patientId: 'PAT-A2', doctorIds: [DOCTOR_A], visitDate: today, queueNumber: 2, status: 'OPEN' },
     ]);
     await IPDAdmissionModel.create([
       { admissionId: 'adm-a-1', tenantId, patientId: 'PAT-A3', wardId: 'w1', bedId: 'b1', bedNumber: '1', wardName: 'General', assignedDoctorIds: [DOCTOR_A], status: 'ADMITTED', admissionDate: today },
@@ -267,7 +267,7 @@ describe('GET /api/dashboard/stats — Doctor dashboard data is scoped by doctor
 
     // Doctor B: different visits/admissions/requests entirely — must never appear in Doctor A's stats.
     await OPDVisitModel.create([
-      { visitId: 'v-b-1', tenantId, patientId: 'PAT-B1', doctorIds: [DOCTOR_B], visitDate: today, queueNumber: 3, status: 'OPEN', chiefComplaint: 'Headache' },
+      { visitId: 'v-b-1', tenantId, patientId: 'PAT-B1', doctorIds: [DOCTOR_B], visitDate: today, queueNumber: 3, status: 'OPEN' },
     ]);
     await IPDAdmissionModel.create([
       { admissionId: 'adm-b-1', tenantId, patientId: 'PAT-B2', wardId: 'w1', bedId: 'b2', bedNumber: '2', wardName: 'General', assignedDoctorIds: [DOCTOR_B], status: 'ADMITTED', admissionDate: today },

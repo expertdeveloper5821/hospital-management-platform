@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { CharCounter } from '@/components/ui/char-counter';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
+import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
 import {
   Card,
   CardHeader,
@@ -853,6 +855,9 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                           <p><span className="font-medium text-foreground">Discharged:</span> {new Date(a.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                         )}
                       </div>
+                      {a.status === 'DISCHARGED' && (
+                        <DownloadDischargeSummaryButton admissionId={a.admissionId} />
+                      )}
                     </div>
                   ))}
                   {ipdTotalPages > 1 && (
@@ -899,10 +904,14 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                         </Badge>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">
-                        <p><span className="font-medium text-foreground">Reason for Visit:</span> {v.chiefComplaint}</p>
                         {v.diagnosis    && <p><span className="font-medium text-foreground">Diagnosis:</span> {v.diagnosis}</p>}
                         {v.prescription && <p><span className="font-medium text-foreground">Prescription:</span> {v.prescription}</p>}
-                        {v.notes        && <p><span className="font-medium text-foreground">Notes:</span> {v.notes}</p>}
+                        {v.notes        && (
+                          <div>
+                            <span className="font-medium text-foreground">Notes:</span>{' '}
+                            <RichTextDisplay value={v.notes} />
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}

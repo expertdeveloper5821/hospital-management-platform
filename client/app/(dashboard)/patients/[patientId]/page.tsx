@@ -115,7 +115,7 @@ function OPDHistoryTab({ patientId }: { patientId: string }) {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search complaint or diagnosis…"
+            placeholder="Search diagnosis…"
             value={search}
             onChange={(e) => handleFilterChange(() => setSearch(e.target.value))}
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
@@ -174,7 +174,6 @@ function OPDHistoryTab({ patientId }: { patientId: string }) {
                   {visit.status}
                 </span>
               </div>
-              <p className="text-sm font-medium">{visit.chiefComplaint}</p>
               {visit.diagnosis && (
                 <p className="text-xs text-muted-foreground">Dx: {visit.diagnosis}</p>
               )}

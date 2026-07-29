@@ -96,15 +96,15 @@ describe('SearchService.search', () => {
   describe('OPD visit search', () => {
     test('returns OPD results with visitId in title', async () => {
       (OPDVisitModel.find as jest.Mock) = makeFindMock([
-        { visitId: 'OPD-001', patientId: 'PAT-001', chiefComplaint: 'Fever', status: 'OPEN', visitDate: new Date() },
+        { visitId: 'OPD-001', patientId: 'PAT-001', status: 'OPEN', visitDate: new Date() },
       ]);
 
-      const result = await service.search(TENANT, 'Fever');
+      const result = await service.search(TENANT, 'OPD-001');
 
       const visit = result.results.find((r) => r.entityType === SearchEntityType.OPD_VISIT);
       expect(visit).toBeDefined();
       expect(visit!.title).toContain('OPD-001');
-      expect(visit!.subtitle).toContain('Fever');
+      expect(visit!.subtitle).toContain('OPEN');
     });
   });
 

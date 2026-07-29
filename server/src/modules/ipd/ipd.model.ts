@@ -25,7 +25,7 @@ const progressNoteSchema = new Schema<ProgressNote>(
   {
     noteId:    { type: String, required: true },
     doctorId:  { type: String, required: true },
-    note:      { type: String, required: true, trim: true, maxlength: 5000 },
+    note:      { type: String, required: true, trim: true, maxlength: 30000 },
     timestamp: { type: Date,   required: true, default: () => new Date() },
   },
   { _id: false },
