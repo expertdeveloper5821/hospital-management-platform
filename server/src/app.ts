@@ -37,6 +37,7 @@ import staffDocumentsRouter from './modules/staff-documents/staff-documents.rout
 import chargesRouter        from './modules/charges/charges.routes';
 import searchRouter      from './modules/search/search.routes';
 import departmentRouter  from './modules/department/department.routes';
+import attendanceRouter  from './modules/attendance/attendance.routes';
 
 const app = express();
 
@@ -155,6 +156,7 @@ app.use('/api/staff-documents', staffDocumentsRouter);
 app.use('/api/charges',        chargesRouter);
 app.use('/api/search',      searchRouter);
 app.use('/api/departments', departmentRouter);
+app.use('/api/attendance', attendanceRouter);
 
 // 404 HANDLER
 app.use((_req, _res, next) => {

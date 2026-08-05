@@ -763,3 +763,43 @@ export interface UpdateDepartmentRequest {
   description?:  string | null;
   headDoctorId?: string | null;
 }
+
+// ─── Attendance ─────────────────────────────────────────────────────────────
+
+export type AttendanceStatus = 'PRESENT' | 'IN_PROGRESS' | 'ABSENT';
+
+export interface AttendanceRecord {
+  attendanceId:   string | null;
+  userId:         string;
+  employeeName?:  string; // present only on tenant-wide (all-employees) responses
+  attendanceDate: string; // YYYY-MM-DD
+  checkIn:        string | null;
+  checkOut:       string | null;
+  totalHours:     number | null;
+  status:         AttendanceStatus;
+}
+
+export interface AttendanceSummary {
+  totalWorkingDays:  number;
+  daysWorked:        number;
+  presentDays:       number;
+  totalWorkingHours: number;
+}
+
+export interface AttendanceMonthResponse {
+  summary: AttendanceSummary;
+  records: AttendanceRecord[];
+}
+
+export interface UpdateAttendanceRequest {
+  checkIn?:  string | null;
+  checkOut?: string | null;
+}
+
+// Active-employee roster entry for the attendance "Employee" filter (tenant +
+// isActive scoped, alphabetical — see server attendance.types.ts).
+export interface EmployeeRosterEntry {
+  userId: string;
+  name:   string;
+  email:  string;
+}

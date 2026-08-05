@@ -19,6 +19,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   HOSPITAL_ADMIN: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Departments", href: "/departments", icon: "building-2" },
     { label: "Users", href: "/admin", icon: "users" },
     { label: "Staff", href: "/staff", icon: "file-badge" },
@@ -36,6 +37,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   MANAGER: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Departments", href: "/departments", icon: "building-2" },
     { label: "Patients", href: "/patients", icon: "heart-pulse" },
     { label: "OPD", href: "/opd", icon: "stethoscope" },
@@ -51,6 +53,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   DOCTOR: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Patients", href: "/patients", icon: "heart-pulse" },
     { label: "OPD", href: "/opd", icon: "stethoscope" },
     { label: "IPD", href: "/ipd", icon: "bed" },
@@ -60,6 +63,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   NURSE: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Patients", href: "/patients", icon: "heart-pulse" },
     { label: "OPD", href: "/opd", icon: "stethoscope" },
     { label: "IPD", href: "/ipd", icon: "bed" },
@@ -67,6 +71,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   RECEPTIONIST: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Patients", href: "/patients", icon: "heart-pulse" },
     { label: "OPD", href: "/opd", icon: "stethoscope" },
     { label: "IPD", href: "/ipd", icon: "bed" },
@@ -76,14 +81,17 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   PATHOLOGIST: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Lab", href: "/lab", icon: "flask-conical" },
   ],
   RADIOLOGIST: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Lab", href: "/lab", icon: "flask-conical" },
   ],
   FINANCE_MANAGER: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
     { label: "Revenue", href: "/revenue", icon: "trending-up" },
@@ -91,11 +99,13 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   ],
   HR: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Users", href: "/admin", icon: "users" },
     { label: "Staff", href: "/staff", icon: "file-badge" },
   ],
   ADMIN: [
     { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
     { label: "Departments", href: "/departments", icon: "building-2" },
     { label: "Users", href: "/admin", icon: "users" },
     { label: "Patients", href: "/patients", icon: "heart-pulse" },
@@ -109,7 +119,10 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "Revenue", href: "/revenue", icon: "trending-up" },
     { label: "Billing", href: "/billing", icon: "receipt" },
   ],
-  STAFF: [{ label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" }],
+  STAFF: [
+    { label: "Dashboard", href: "/dashboard", icon: "layout-dashboard" },
+    { label: "Attendance", href: "/attendance", icon: "calendar-check" },
+  ],
 };
 
 export function getNavItems(role: UserRole): NavItem[] {

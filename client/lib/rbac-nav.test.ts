@@ -110,10 +110,11 @@ describe('getNavItems — RBAC nav filtering', () => {
     expect(hrefs).not.toContain('/payments');
   });
 
-  it('STAFF sees only dashboard', () => {
+  it('STAFF sees only dashboard and attendance', () => {
     const items = getNavItems('STAFF');
-    expect(items).toHaveLength(1);
+    expect(items).toHaveLength(2);
     expect(items[0].href).toBe('/dashboard');
+    expect(items[1].href).toBe('/attendance');
   });
 
   it('all nav items have label, href, and icon', () => {
@@ -129,5 +130,23 @@ describe('getNavItems — RBAC nav filtering', () => {
         expect(item.icon).toBeTruthy();
       }
     }
+  });
+
+  it('every role with a Dashboard entry has Attendance immediately after it', () => {
+    const rolesWithDashboard: UserRole[] = [
+      'HOSPITAL_ADMIN', 'MANAGER', 'DOCTOR', 'NURSE',
+      'RECEPTIONIST', 'PATHOLOGIST', 'RADIOLOGIST', 'FINANCE_MANAGER',
+      'HR', 'ADMIN', 'STAFF',
+    ];
+    for (const role of rolesWithDashboard) {
+      const items = getNavItems(role);
+      expect(items[0].href).toBe('/dashboard');
+      expect(items[1].href).toBe('/attendance');
+    }
+  });
+
+  it('SUPER_ADMIN does not see Attendance (no tenant/self attendance)', () => {
+    const hrefs = getNavItems('SUPER_ADMIN').map((i) => i.href);
+    expect(hrefs).not.toContain('/attendance');
   });
 });

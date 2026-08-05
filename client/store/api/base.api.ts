@@ -27,6 +27,8 @@ const endpointSuccessMessages: Record<string, string> = {
   resetPassword: 'Password reset successfully.',
   completeSetup: 'Setup completed successfully.',
   logout: 'Signed out successfully.',
+  checkIn: 'Checked in successfully.',
+  checkOut: 'Checked out successfully.',
 };
 
 const quietSuccessEndpoints = new Set([
@@ -128,6 +130,7 @@ export const baseApi = createApi({
     'StaffDocument',
     'StaffIdCard',
     'Department',
+    'Attendance',
   ],
   endpoints: () => ({}),
 });
