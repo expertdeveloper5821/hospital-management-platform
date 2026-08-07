@@ -79,6 +79,21 @@ export class UserRepository {
     return { data: data as IUser[], total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  // Minimal active-employee roster for a tenant (id/name/email only) — used to
+  // build tenant-wide reports (e.g. attendance) without paginating.
+  async findActiveRoster(tenantId: string): Promise<Array<{ userId: string; name: string; email: string }>> {
+    assertDbConnected();
+    const docs = await UserModel.find({ tenantId, isActive: true })
+      .select('_id name email')
+      .sort({ name: 1 })
+      .lean();
+    return docs.map((u) => ({
+      userId: (u._id as { toString(): string }).toString(),
+      name:   u.name as string,
+      email:  u.email as string,
+    }));
+  }
+
   async countActiveAdmins(tenantId: string): Promise<number> {
     assertDbConnected();
     return UserModel.countDocuments({

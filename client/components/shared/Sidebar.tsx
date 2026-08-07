@@ -23,6 +23,7 @@ import {
   FolderOpen,
   Gift,
   TrendingUp,
+  CalendarCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { cn, toTitleCase } from '@/lib/utils';
@@ -50,6 +51,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'folder-open':      FolderOpen,
   'gift':             Gift,
   'trending-up':      TrendingUp,
+  'calendar-check':   CalendarCheck,
 };
 
 interface SidebarProps {
