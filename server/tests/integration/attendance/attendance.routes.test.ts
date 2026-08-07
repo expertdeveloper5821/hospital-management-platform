@@ -11,6 +11,7 @@ import app                 from '../../../src/app';
 import { UserModel }       from '../../../src/modules/user/user.model';
 import { TenantModel }     from '../../../src/modules/tenant/tenant.model';
 import { AttendanceModel } from '../../../src/modules/attendance/attendance.model';
+import { getIstDateParts } from '../../../src/modules/attendance/attendance.timezone';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -22,9 +23,12 @@ let nurseToken:   string;
 let adminId:      string;
 let adminToken:   string;
 
+// Attendance buckets by hospital-local (IST) day, so "today"/"this month" for
+// these assertions must be resolved in IST too — not the test runner's UTC
+// clock, which can be a different calendar day/month in the hour before
+// midnight IST.
 const now   = new Date();
-const month = now.getUTCMonth() + 1;
-const year  = now.getUTCFullYear();
+const { month, year } = getIstDateParts(now);
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();

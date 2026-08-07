@@ -41,9 +41,14 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
+// Hospital-local calendar month/year — deliberately local (not UTC) getters so
+// this matches the browser's local clock (the hospital's IST timezone), the
+// same assumption the rest of this file relies on (see getRecordDateParts,
+// fromTimeLocal). Using UTC here would default to the wrong month for a
+// request made just after midnight IST but before midnight UTC.
 const now          = new Date();
-const CURRENT_MONTH = now.getUTCMonth() + 1;
-const CURRENT_YEAR  = now.getUTCFullYear();
+const CURRENT_MONTH = now.getMonth() + 1;
+const CURRENT_YEAR  = now.getFullYear();
 
 function formatDate(dateKey: string) {
   return new Date(`${dateKey}T00:00:00.000Z`).toLocaleDateString('en-IN', {

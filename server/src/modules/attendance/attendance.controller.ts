@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { attendanceService } from './attendance.service';
 import { IAttendance } from './attendance.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { getIstDateParts } from './attendance.timezone';
 
 const currentYear = new Date().getUTCFullYear();
 
@@ -28,10 +29,13 @@ const updateAttendanceSchema = z.object({
 });
 
 function defaultedMonthYear(parsed: { month?: number; year?: number }) {
-  const now = new Date();
+  // Defaults to the hospital-local (IST) current month/year, not the server's
+  // UTC clock — otherwise a request made just after midnight IST but before
+  // midnight UTC would default to the wrong (previous) month.
+  const ist = getIstDateParts(new Date());
   return {
-    month: parsed.month ?? now.getUTCMonth() + 1,
-    year:  parsed.year  ?? now.getUTCFullYear(),
+    month: parsed.month ?? ist.month,
+    year:  parsed.year  ?? ist.year,
   };
 }
 

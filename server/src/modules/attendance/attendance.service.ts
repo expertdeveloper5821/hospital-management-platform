@@ -6,14 +6,7 @@ import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType } from '../../shared/types/common.types';
 import { ConflictError, NotFoundError, AppError } from '../../shared/middleware/error-handler';
 import { UpdateAttendanceRequest, AttendanceMonthResponse, AttendanceRecordResponse, AttendanceSummary, EmployeeRosterEntry } from './attendance.types';
-
-function toUtcMidnight(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-
-function toDateKey(date: Date): string {
-  return date.toISOString().substring(0, 10);
-}
+import { getIstDateParts, istMidnightFor, toIstMidnight, toIstDateKey } from './attendance.timezone';
 
 function roundHours(ms: number): number {
   return Math.round((ms / 3_600_000) * 100) / 100;
@@ -25,15 +18,18 @@ function emptySummary(): AttendanceSummary {
 
 // Resolves a requested (month, year) to the day range that has actually
 // elapsed: the full month for past months, up through today for the current
-// month, and nothing at all for a month entirely in the future.
+// month, and nothing at all for a month entirely in the future. "Today" and
+// "current month" are both resolved in hospital-local (IST) calendar terms.
 function monthRange(month: number, year: number): { firstDay: Date; rangeEnd: Date; isFuture: boolean } {
   const now      = new Date();
-  const today    = toUtcMidnight(now);
-  const firstDay = new Date(Date.UTC(year, month - 1, 1));
-  const lastDay  = new Date(Date.UTC(year, month, 0)); // last calendar day of the month
+  const istNow   = getIstDateParts(now);
+  const today    = toIstMidnight(now);
+  const firstDay = istMidnightFor(year, month, 1);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate(); // last calendar day of the month
+  const lastDay  = istMidnightFor(year, month, daysInMonth);
 
   const requestedKey = year * 12 + month;
-  const currentKey   = now.getUTCFullYear() * 12 + (now.getUTCMonth() + 1);
+  const currentKey   = istNow.year * 12 + istNow.month;
 
   if (requestedKey > currentKey) return { firstDay, rangeEnd: lastDay, isFuture: true };
 
@@ -49,13 +45,13 @@ function buildDayGrid(
   firstDay:  Date,
   rangeEnd:  Date,
 ): { records: AttendanceRecordResponse[]; summary: AttendanceSummary } {
-  const byDateKey = new Map(stored.map((r) => [toDateKey(r.attendanceDate), r]));
+  const byDateKey = new Map(stored.map((r) => [toIstDateKey(r.attendanceDate), r]));
 
   const records: AttendanceRecordResponse[] = [];
   const summary = emptySummary();
 
   for (let d = new Date(firstDay); d.getTime() <= rangeEnd.getTime(); d.setUTCDate(d.getUTCDate() + 1)) {
-    const dateKey = toDateKey(d);
+    const dateKey = toIstDateKey(d);
     const record  = byDateKey.get(dateKey);
 
     let status: AttendanceStatus;
@@ -91,7 +87,7 @@ function buildDayGrid(
 
 export class AttendanceService {
   async checkIn(tenantId: string, userId: string): Promise<IAttendance> {
-    const today = toUtcMidnight(new Date());
+    const today = toIstMidnight(new Date());
     const existing = await attendanceRepository.findByUserAndDate(tenantId, userId, today);
     if (existing && existing.checkIn) throw new ConflictError('Already checked in today.');
 
@@ -120,7 +116,7 @@ export class AttendanceService {
   }
 
   async checkOut(tenantId: string, userId: string): Promise<IAttendance> {
-    const today = toUtcMidnight(new Date());
+    const today = toIstMidnight(new Date());
     const existing = await attendanceRepository.findByUserAndDate(tenantId, userId, today);
     if (!existing || !existing.checkIn) throw new AppError('You must check in before checking out.', 400);
     if (existing.checkOut) throw new ConflictError('Already checked out today.');

@@ -6,7 +6,7 @@ export interface IAttendance extends Document {
   attendanceId:   string;
   tenantId:       string;
   userId:         string;
-  attendanceDate: Date; // UTC midnight of the calendar day
+  attendanceDate: Date; // 00:00 IST (hospital-local midnight) of the calendar day
   checkIn:        Date | null;
   checkOut:       Date | null;
   totalHours:     number | null;
