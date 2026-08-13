@@ -114,7 +114,7 @@ export function Sidebar({ onClose }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1" aria-label="Primary navigation">
+      <nav className="sidebar-scroll flex-1 overflow-y-auto py-4 px-2 space-y-1" aria-label="Primary navigation">
         {navItems.map((item) => {
           const Icon    = ICON_MAP[item.icon] ?? LayoutDashboard;
           // Only the most specific matching item is highlighted, so a nested

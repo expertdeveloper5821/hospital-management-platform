@@ -49,7 +49,9 @@ export class OPDRepository {
     // every patient's visits.
     if (patientIds)   query.patientId = { $in: patientIds };
 
-    return OPDVisitModel.find(query).sort({ queueNumber: 1 });
+    // Newest-created visit first, so the OPD queue list surfaces a freshly
+    // registered visit at the top rather than after same-day earlier tokens.
+    return OPDVisitModel.find(query).sort({ createdAt: -1 });
   }
 
   async findByPatient(

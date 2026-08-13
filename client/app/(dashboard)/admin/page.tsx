@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { cn } from '@/lib/utils';
 import {
   Users,
   RefreshCw,
@@ -46,8 +48,13 @@ const ASSIGNABLE_ROLES = [
 const USER_NAME_RE = /^[A-Za-z][A-Za-z .'-]{1,199}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function roleBadgeVariant(role: string): 'default' | 'secondary' | 'outline' {
-  if (role === 'HOSPITAL_ADMIN') return 'default';
+// Fixed size so every Status pill (Active / Inactive) renders identically —
+// same width, height, padding, and centered text regardless of label length.
+const STATUS_BADGE_CLASS = 'w-20 h-6 justify-center text-center whitespace-nowrap';
+
+function roleBadgeVariant(role: string): 'info' | 'secondary' | 'outline' {
+  // Role badges are informational, not brand — never tenant-color them.
+  if (role === 'HOSPITAL_ADMIN') return 'info';
   if (role === 'DOCTOR' || role === 'MANAGER') return 'secondary';
   return 'outline';
 }
@@ -108,7 +115,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Create User</h2>
@@ -206,7 +213,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -222,7 +229,7 @@ interface DeactivateModalProps {
 
 function DeactivateModal({ user, onConfirm, onClose, isLoading, error }: DeactivateModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">Deactivate User</h2>
@@ -251,7 +258,7 @@ function DeactivateModal({ user, onConfirm, onClose, isLoading, error }: Deactiv
           </Button>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -498,7 +505,7 @@ function UsersTab() {
                           <Badge variant={roleBadgeVariant(user.role)} className="text-xs">
                             {user.role.replace(/_/g, ' ')}
                           </Badge>
-                          <Badge variant={user.isActive ? 'default' : 'destructive'} className="text-xs">
+                          <Badge variant={user.isActive ? 'success' : 'destructive'} className={cn(STATUS_BADGE_CLASS, 'text-xs')}>
                             {user.isActive ? 'Active' : 'Inactive'}
                           </Badge>
                         </div>
@@ -603,13 +610,11 @@ function UsersTab() {
                                 {roleError && <p className="text-xs text-destructive">{roleError}</p>}
                               </div>
                             ) : (
-                              <Badge variant={roleBadgeVariant(user.role)}>
-                                {user.role.replace(/_/g, ' ')}
-                              </Badge>
+                              <span>{user.role.replace(/_/g, ' ')}</span>
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <Badge variant={user.isActive ? 'default' : 'destructive'}>
+                            <Badge variant={user.isActive ? 'success' : 'destructive'} className={STATUS_BADGE_CLASS}>
                               {user.isActive ? 'Active' : 'Inactive'}
                             </Badge>
                           </td>

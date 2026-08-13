@@ -11,8 +11,12 @@ import { tenantCache } from '../../shared/config/tenant-cache';
 import config from '../../shared/config/env';
 import { TenantStatus, AuditEntityType, UserRole, JWTPayload, PaginatedResult } from '../../shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError, UnauthorizedError } from '../../shared/middleware/error-handler';
-import { CreateTenantRequest, UpdateBrandingRequest, BrandingConfig } from './tenant.types';
+import {
+  CreateTenantRequest, UpdateBrandingRequest, BrandingConfig, HospitalProfileResponse,
+  OPDSettingsConfig,
+} from './tenant.types';
 import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
+import { DEFAULT_OPD_VALIDITY_DAYS } from './tenant.constants';
 
 const INVITE_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
 const MAX_LOGO_BYTES   = 2 * 1024 * 1024;       // 2 MB
@@ -185,7 +189,7 @@ export class TenantService {
     });
   }
 
-  async getBranding(tenantId: string): Promise<BrandingConfig> {
+  async getBranding(tenantId: string): Promise<HospitalProfileResponse> {
     const tenant = await tenantRepository.findById(tenantId);
     if (!tenant) throw new NotFoundError('Tenant not found');
 
@@ -193,7 +197,14 @@ export class TenantService {
     if (branding.logoUrl) {
       branding.logoUrl = await s3Service.getPresignedUrl(branding.logoUrl, 86400);
     }
-    return branding;
+    return {
+      ...branding,
+      addressLine:  tenant.onboardingDocuments.addressLine,
+      city:         tenant.onboardingDocuments.city,
+      state:        tenant.onboardingDocuments.state,
+      pincode:      tenant.onboardingDocuments.pincode,
+      contactEmail: tenant.adminEmail,
+    };
   }
 
   async updateBranding(
@@ -236,6 +247,34 @@ export class TenantService {
       previousValue: { branding: tenant.branding, ...(syncedName !== undefined && { name: tenant.name }) },
       newValue:      { branding: update, ...(syncedName !== undefined && { name: syncedName }) },
     });
+  }
+
+  // ─── OPD settings (Hospital Admin configurable) ────────────────────────────
+
+  async getOpdSettings(tenantId: string): Promise<OPDSettingsConfig> {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Tenant not found');
+    return { validityDays: tenant.opdSettings?.validityDays ?? DEFAULT_OPD_VALIDITY_DAYS };
+  }
+
+  async updateOpdSettings(tenantId: string, validityDays: number, adminId: string): Promise<OPDSettingsConfig> {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Tenant not found');
+
+    const previousValidityDays = tenant.opdSettings?.validityDays ?? DEFAULT_OPD_VALIDITY_DAYS;
+    await tenantRepository.updateOpdValidityDays(tenantId, validityDays);
+
+    await auditService.log({
+      entityType:    AuditEntityType.TENANT,
+      entityId:      tenantId,
+      action:        'UPDATE',
+      userId:        adminId,
+      tenantId,
+      previousValue: { opdSettings: { validityDays: previousValidityDays } },
+      newValue:      { opdSettings: { validityDays } },
+    });
+
+    return { validityDays };
   }
 }
 

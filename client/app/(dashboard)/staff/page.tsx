@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useAppSelector } from '@/store/hooks';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -53,7 +52,7 @@ export default function StaffPage() {
               </div>
 
               <div className="flex items-center gap-3 ml-4 shrink-0">
-                <Badge variant="outline" className="text-xs">{user.role}</Badge>
+                <span className="w-44 pr-4 text-sm font-bold text-muted-foreground whitespace-nowrap">{user.role}</span>
 
                 <Link href={`/staff/${user.userId}/documents`}>
                   <Button variant="outline" size="sm">Documents</Button>

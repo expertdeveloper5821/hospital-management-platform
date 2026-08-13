@@ -67,7 +67,7 @@ describe('PatientService — example-based', () => {
     } as const;
 
     test('creates patient and returns it when no duplicate exists', async () => {
-      mockRepo.findByMobile.mockResolvedValue(null);
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
       mockRepo.save.mockResolvedValue({ ...BASE_PATIENT } as never);
 
       const result = await service.createPatient('t1', validReq, 'admin-1');
@@ -78,8 +78,8 @@ describe('PatientService — example-based', () => {
       );
     });
 
-    test('throws DuplicateWarningError when mobile exists and forceCreate is not set', async () => {
-      mockRepo.findByMobile.mockResolvedValue({ ...BASE_PATIENT } as never);
+    test('throws DuplicateWarningError when name AND mobile both match and forceCreate is not set', async () => {
+      mockRepo.findByMobileAndName.mockResolvedValue({ ...BASE_PATIENT } as never);
 
       await expect(service.createPatient('t1', validReq, 'admin-1'))
         .rejects.toThrow(DuplicateWarningError);
@@ -88,14 +88,14 @@ describe('PatientService — example-based', () => {
     });
 
     test('DuplicateWarningError carries existingPatientId', async () => {
-      mockRepo.findByMobile.mockResolvedValue({ ...BASE_PATIENT } as never);
+      mockRepo.findByMobileAndName.mockResolvedValue({ ...BASE_PATIENT } as never);
 
       await expect(service.createPatient('t1', validReq, 'admin-1'))
         .rejects.toMatchObject({ existingPatientId: 'PAT-ABCD1234', isDuplicateWarning: true });
     });
 
-    test('proceeds when forceCreate:true even if mobile is duplicate', async () => {
-      mockRepo.findByMobile.mockResolvedValue({ ...BASE_PATIENT } as never);
+    test('proceeds when forceCreate:true even if name+mobile is duplicate', async () => {
+      mockRepo.findByMobileAndName.mockResolvedValue({ ...BASE_PATIENT } as never);
       mockRepo.save.mockResolvedValue({ ...BASE_PATIENT, patientId: 'PAT-NEW00001' } as never);
 
       const result = await service.createPatient('t1', { ...validReq, forceCreate: true }, 'admin-1');
@@ -104,8 +104,24 @@ describe('PatientService — example-based', () => {
       expect(result.patientId).toBe('PAT-NEW00001');
     });
 
+    test('proceeds without warning when mobile matches but name differs (family member)', async () => {
+      // Repository is queried with both mobile and name — a mismatched name means no match is found.
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
+      mockRepo.save.mockResolvedValue({ ...BASE_PATIENT, fullName: 'Sita Kumar', patientId: 'PAT-FAM00001' } as never);
+
+      const result = await service.createPatient(
+        't1',
+        { ...validReq, fullName: 'Sita Kumar' },
+        'admin-1',
+      );
+
+      expect(mockRepo.findByMobileAndName).toHaveBeenCalledWith('t1', validReq.mobileNumber, 'Sita Kumar');
+      expect(mockRepo.save).toHaveBeenCalled();
+      expect(result.patientId).toBe('PAT-FAM00001');
+    });
+
     test('generated patientId has PAT- prefix', async () => {
-      mockRepo.findByMobile.mockResolvedValue(null);
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
       let savedPatientId = '';
       mockRepo.save.mockImplementation(async (data) => {
         savedPatientId = (data as { patientId: string }).patientId;
@@ -118,7 +134,7 @@ describe('PatientService — example-based', () => {
     });
 
     test('sets optional fields to null when not provided', async () => {
-      mockRepo.findByMobile.mockResolvedValue(null);
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
       mockRepo.save.mockResolvedValue({ ...BASE_PATIENT } as never);
 
       await service.createPatient('t1', validReq, 'admin-1');
@@ -134,7 +150,7 @@ describe('PatientService — example-based', () => {
     });
 
     test('includes optional fields when provided', async () => {
-      mockRepo.findByMobile.mockResolvedValue(null);
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
       mockRepo.save.mockResolvedValue({ ...BASE_PATIENT, bloodGroup: BloodGroup.O_POS } as never);
 
       await service.createPatient('t1', { ...validReq, bloodGroup: BloodGroup.O_POS, aadhaarNumber: '123456789012' }, 'admin-1');
@@ -409,7 +425,7 @@ describe('PatientService — property-based', () => {
         async (n) => {
           const ids = new Set<string>();
 
-          mockRepo.findByMobile.mockResolvedValue(null);
+          mockRepo.findByMobileAndName.mockResolvedValue(null);
           mockRepo.save.mockImplementation(async (data) => {
             const d = data as { patientId: string };
             ids.add(d.patientId);

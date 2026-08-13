@@ -13,6 +13,7 @@ import { useGetOPDPatientHistoryQuery } from '@/store/api/opd.api';
 import { useGetIPDPatientHistoryQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import { UserRole } from '@/store/types';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 
 function formatDate(iso: string | Date): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -43,7 +44,7 @@ function DeleteModal({
   errorMessage?: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-lg space-y-4">
         <h2 className="text-base font-semibold">Delete Patient</h2>
         <p className="text-sm text-muted-foreground">
@@ -70,7 +71,7 @@ function DeleteModal({
           </button>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 

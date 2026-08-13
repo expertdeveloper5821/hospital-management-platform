@@ -1,19 +1,25 @@
 jest.mock('../../../src/modules/opd/opd.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/ipd/ipd.service');
+jest.mock('../../../src/modules/payment/payment.repository');
+jest.mock('../../../src/modules/tenant/tenant.service');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { opdRepository }     from '../../../src/modules/opd/opd.repository';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { ipdService }        from '../../../src/modules/ipd/ipd.service';
+import { paymentRepository } from '../../../src/modules/payment/payment.repository';
+import { tenantService }     from '../../../src/modules/tenant/tenant.service';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
-import { OPDVisitStatus }    from '../../../src/modules/opd/opd.types';
+import { OPDVisitStatus, OPDPaymentValidityReason } from '../../../src/modules/opd/opd.types';
 import { UserRole }          from '../../../src/shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError } from '../../../src/shared/middleware/error-handler';
 
 const mockOpdRepo     = opdRepository     as jest.Mocked<typeof opdRepository>;
 const mockPatientRepo = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockIpdService  = ipdService        as jest.Mocked<typeof ipdService>;
+const mockPaymentRepo = paymentRepository as jest.Mocked<typeof paymentRepository>;
+const mockTenantSvc   = tenantService     as jest.Mocked<typeof tenantService>;
 
 const BASE_PATIENT = {
   patientId: 'PAT-ABCD1234',
@@ -576,6 +582,125 @@ describe('OPDService — example-based', () => {
       expect(result).toBeUndefined();
       expect(mockIpdService.resolveNursePatientIds).not.toHaveBeenCalled();
       expect(mockIpdService.resolveDoctorPatientIds).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── getPaymentValidity ─────────────────────────────────────────────────────
+  describe('getPaymentValidity', () => {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    // Offsets from "now" rather than fixed dates, so the comparison against
+    // the service's internal "today" always lands on the intended side of the
+    // validity boundary regardless of when the suite runs.
+    function daysAgo(n: number): Date {
+      return new Date(Date.now() - n * MS_PER_DAY);
+    }
+
+    function makePayment(overrides: Partial<{ paymentId: string; createdAt: Date }> = {}) {
+      return {
+        paymentId: overrides.paymentId ?? 'pay-1',
+        tenantId:  't1',
+        patientId: 'PAT-ABCD1234',
+        createdAt: overrides.createdAt ?? daysAgo(0),
+      };
+    }
+
+    beforeEach(() => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+    });
+
+    test('throws NotFoundError when the patient does not exist', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(null as never);
+
+      await expect(service.getPaymentValidity('t1', 'PAT-MISSING')).rejects.toThrow(NotFoundError);
+    });
+
+    test('NO_PAYMENT — patient has no completed OPD payment', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(null as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result).toMatchObject({
+        paymentRequired:   true,
+        reason:            OPDPaymentValidityReason.NO_PAYMENT,
+        latestPaymentId:   null,
+        latestPaymentDate: null,
+        validUntil:        null,
+        validityDays:      15,
+      });
+      expect(mockPaymentRepo.findLatestCompletedByPatientAndReferenceType)
+        .toHaveBeenCalledWith('t1', 'PAT-ABCD1234', 'OPD_VISIT');
+    });
+
+    test('VALID — latest payment is well within the configured validity window', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(5) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+      expect(result.paymentRequired).toBe(false);
+    });
+
+    test('EXPIRED — latest payment is well past the configured validity window', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(20) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.EXPIRED);
+      expect(result.paymentRequired).toBe(true);
+    });
+
+    test('boundary — payment made exactly validityDays ago is still VALID (inclusive)', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(15) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+      expect(result.paymentRequired).toBe(false);
+    });
+
+    test('boundary — the day after validityDays has elapsed is EXPIRED', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(16) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.EXPIRED);
+      expect(result.paymentRequired).toBe(true);
+    });
+
+    test('configurable validity — the same payment age can be VALID or EXPIRED depending on the tenant setting', async () => {
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(5) }) as never);
+
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 3 });
+      const expired = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+      expect(expired.reason).toBe(OPDPaymentValidityReason.EXPIRED);
+
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 10 });
+      const valid = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+      expect(valid.reason).toBe(OPDPaymentValidityReason.VALID);
+    });
+
+    test('multiple payments — only the repository-resolved latest COMPLETED payment governs validity', async () => {
+      // The repository is responsible for the "latest" resolution (sorted by
+      // createdAt desc); the service must not re-sort or second-guess it.
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ paymentId: 'pay-latest', createdAt: daysAgo(1) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.latestPaymentId).toBe('pay-latest');
+      expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
     });
   });
 });

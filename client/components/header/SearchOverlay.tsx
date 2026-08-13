@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Search, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,10 @@ export function SearchOverlay({ open, onClose }: SearchOverlayProps) {
   const [debounceTimer,   setDebounceTimer]   = useState<ReturnType<typeof setTimeout> | null>(null);
 
   const [triggerSearch, { data, isFetching }] = useLazySearchQuery();
+
+  // Portals need a browser document; guards against SSR/hydration mismatches.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Focus input when overlay opens
   useEffect(() => {
@@ -93,9 +98,14 @@ export function SearchOverlay({ open, onClose }: SearchOverlayProps) {
     }
   }
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
-  return (
+  // Portaled directly under <body> — the root cause fix for a backdrop that
+  // fails to cover the full viewport (e.g. a gap above the header): this
+  // overlay is no longer a descendant of the dashboard layout's header/
+  // sidebar/main tree, so it can never be clipped or offset by an ancestor's
+  // overflow/stacking context. The page's main scrollbar is untouched.
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -170,7 +180,7 @@ export function SearchOverlay({ open, onClose }: SearchOverlayProps) {
                   onClick={() => handleSelect(result)}
                   onMouseEnter={() => setActiveIndex(i)}
                 >
-                  <span className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-primary/10 text-primary">
+                  <span className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-info/10 text-info">
                     {ENTITY_LABELS[result.entityType] ?? result.entityType}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -200,6 +210,7 @@ export function SearchOverlay({ open, onClose }: SearchOverlayProps) {
           <span><kbd className="rounded border px-1 py-0.5 font-mono text-[10px]">Esc</kbd> close</span>
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

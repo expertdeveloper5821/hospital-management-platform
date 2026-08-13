@@ -60,11 +60,21 @@ export interface ResetPasswordRequest {
  
 // ─── Tenant / Branding ────────────────────────────────────────────────────────
  
-/** Shape returned by GET /api/tenants/:tenantId/branding */
+/**
+ * Shape returned by GET /api/tenants/:tenantId/branding.
+ * Also carries the hospital's registered address/contact info (from
+ * onboarding) so printouts/letterheads can render real tenant data — no
+ * phone/website fields exist on the tenant record, so none are included.
+ */
 export interface BrandingConfig {
-  logoUrl?:     string | null; // S3 presigned URL or key, may be absent
-  displayName:  string;        // tenant display name
-  primaryColor: string;        // hex e.g. #1A73E8
+  logoUrl?:      string | null; // S3 presigned URL or key, may be absent
+  displayName:   string;        // tenant display name
+  primaryColor:  string;        // hex e.g. #1A73E8
+  addressLine?:  string;
+  city?:         string;
+  state?:        string;
+  pincode?:      string;
+  contactEmail?: string;
 }
  
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -221,7 +231,22 @@ export interface OPDPatientHistory {
   limit:      number;
   totalPages: number;
 }
- 
+
+// Backend-authoritative answer to "does this patient need to pay for OPD
+// again right now?" — see OPDService.getPaymentValidity. Never compute this
+// on the frontend; always read it from GET .../payment-validity.
+export type OPDPaymentValidityReason = 'NO_PAYMENT' | 'EXPIRED' | 'VALID';
+
+export interface OPDPaymentValidityResponse {
+  patientId:         string;
+  paymentRequired:   boolean;
+  reason:            OPDPaymentValidityReason;
+  latestPaymentId:   string | null;
+  latestPaymentDate: string | null;
+  validUntil:        string | null;
+  validityDays:      number;
+}
+
 // ─── Lab ──────────────────────────────────────────────────────────────────────
 
 export type LabRequestStatus   = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';

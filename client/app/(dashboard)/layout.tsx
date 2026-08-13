@@ -73,17 +73,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <BrandingProvider>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
         {/* Mobile drawer — hidden on md+; MobileNav handles backdrop + transition */}
-        <MobileNav open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <div className="print:hidden">
+          <MobileNav open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        </div>
 
-        {/* Sidebar — static on md+ */}
-        <div className="hidden md:block shrink-0">
+        {/* Sidebar — static on md+; hidden entirely when printing */}
+        <div className="hidden md:block shrink-0 print:hidden">
           <Sidebar />
         </div>
 
-        <div className="flex flex-col flex-1 overflow-hidden min-w-0">
-          <header className="flex items-center justify-between h-16 px-4 sm:px-6 border-b bg-background shrink-0">
+        <div className="flex flex-col flex-1 overflow-hidden min-w-0 print:block print:overflow-visible print:w-full">
+          <header className="flex items-center justify-between h-16 px-4 sm:px-6 border-b bg-background shrink-0 print:hidden">
             {/* Left: hamburger (mobile) + greeting (desktop) */}
             <div className="flex items-center gap-3 min-w-0">
               <button
@@ -105,7 +107,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <ProfileDropdown />
             </div>
           </header>
-          <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 print:overflow-visible print:p-0">{children}</main>
         </div>
       </div>
     </BrandingProvider>

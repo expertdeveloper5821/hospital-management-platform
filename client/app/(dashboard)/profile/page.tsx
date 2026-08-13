@@ -50,7 +50,7 @@ function SuperAdminProfile() {
         </div>
         <div className="space-y-1 min-w-0">
           <p className="text-base font-semibold truncate">{data.email}</p>
-          <span className="inline-block rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium">
+          <span className="inline-block rounded-full bg-info/10 text-info px-2.5 py-0.5 text-xs font-medium">
             {formatRole(data.role)}
           </span>
         </div>
@@ -269,7 +269,7 @@ function UserProfile() {
         <div className="min-w-0">
           <p className="font-semibold truncate">{profile.name || profile.email}</p>
           <p className="text-sm text-muted-foreground truncate">{profile.email}</p>
-          <span className="inline-block mt-0.5 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium">
+          <span className="inline-block mt-0.5 rounded-full bg-info/10 text-info px-2.5 py-0.5 text-xs font-medium">
             {formatRole(profile.role)}
           </span>
         </div>

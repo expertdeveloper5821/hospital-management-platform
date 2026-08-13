@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CharCounter } from '@/components/ui/char-counter';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { Building2, Plus, Pencil, Trash2, X, RefreshCw } from 'lucide-react';
 
 // ─── Create / Edit Modal ──────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">{existing ? 'Edit Department' : 'Create Department'}</h2>
@@ -181,7 +182,7 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -197,7 +198,7 @@ interface DeleteModalProps {
 
 function DeleteModal({ dept, onConfirm, onClose, isLoading, error }: DeleteModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">Delete Department</h2>
@@ -218,7 +219,7 @@ function DeleteModal({ dept, onConfirm, onClose, isLoading, error }: DeleteModal
           </Button>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -327,7 +328,7 @@ export default function DepartmentsPage() {
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {names.map((n) => (
-                          <span key={n} className="inline-flex max-w-[160px] items-center px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">
+                          <span key={n} className="inline-flex max-w-[160px] items-center px-2 py-0.5 rounded-full text-xs bg-info/10 text-info font-medium">
                             <span className="truncate min-w-0" title={n}>{n}</span>
                           </span>
                         ))}

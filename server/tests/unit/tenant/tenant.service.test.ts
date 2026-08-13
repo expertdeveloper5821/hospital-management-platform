@@ -117,4 +117,43 @@ describe('TenantService — example-based', () => {
       service.updateBranding('tid1', {}, bigBuffer, 'image/jpeg', 'admin-1'),
     ).rejects.toThrow(ValidationError);
   });
+
+  // ── OPD settings ────────────────────────────────────────────────────────────
+  describe('getOpdSettings / updateOpdSettings', () => {
+    test('getOpdSettings falls back to the default (15 days) when unset', async () => {
+      mockRepo.findById.mockResolvedValue({ _id: 'tid1', opdSettings: undefined, toString: () => 'tid1' } as never);
+
+      const result = await service.getOpdSettings('tid1');
+
+      expect(result).toEqual({ validityDays: 15 });
+    });
+
+    test('getOpdSettings returns the tenant-configured value when set', async () => {
+      mockRepo.findById.mockResolvedValue({ _id: 'tid1', opdSettings: { validityDays: 30 }, toString: () => 'tid1' } as never);
+
+      const result = await service.getOpdSettings('tid1');
+
+      expect(result).toEqual({ validityDays: 30 });
+    });
+
+    test('getOpdSettings throws NotFoundError for an unknown tenant', async () => {
+      mockRepo.findById.mockResolvedValue(null);
+      await expect(service.getOpdSettings('unknown')).rejects.toThrow(NotFoundError);
+    });
+
+    test('updateOpdSettings persists the new value and writes an audit log', async () => {
+      mockRepo.findById.mockResolvedValue({ _id: 'tid1', opdSettings: { validityDays: 15 }, toString: () => 'tid1' } as never);
+      mockRepo.updateOpdValidityDays.mockResolvedValue(undefined);
+
+      const result = await service.updateOpdSettings('tid1', 30, 'admin-1');
+
+      expect(result).toEqual({ validityDays: 30 });
+      expect(mockRepo.updateOpdValidityDays).toHaveBeenCalledWith('tid1', 30);
+    });
+
+    test('updateOpdSettings throws NotFoundError for an unknown tenant', async () => {
+      mockRepo.findById.mockResolvedValue(null);
+      await expect(service.updateOpdSettings('unknown', 30, 'admin-1')).rejects.toThrow(NotFoundError);
+    });
+  });
 });

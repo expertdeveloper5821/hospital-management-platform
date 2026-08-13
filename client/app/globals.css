@@ -23,13 +23,28 @@
     --ring: 221.2 83.2% 53.3%;
     --radius: 0.5rem;
 
+    /* ─── Semantic/status colors ────────────────────────────────────────────
+       Fixed meanings (Active/Success, Pending/Warning, Info/In-Progress).
+       These are NEVER overridden by tenant branding — only --primary/--ring
+       (below) respond to the tenant's chosen brand color. Use these instead
+       of --primary for status badges, doctor/staff chips, and non-brand
+       action styling so meaning stays consistent across every tenant. */
+    --success: 142 71% 40%;
+    --success-foreground: 210 40% 98%;
+    --warning: 38 92% 45%;
+    --warning-foreground: 26 90% 12%;
+    --info: 217 91% 55%;
+    --info-foreground: 210 40% 98%;
+
     /* Sidebar */
     --sidebar: 222.2 47.4% 11.2%;
     --sidebar-foreground: 210 40% 98%;
     --sidebar-accent: 217.2 32.6% 17.5%;
     --sidebar-accent-foreground: 210 40% 98%;
 
-    /* Tenant branding — overridden at runtime via JS */
+    /* Tenant branding — overridden at runtime via JS. Reserved for brand
+       identity (primary CTAs, selected nav/tabs, links, focus rings) — must
+       never be used for status, badges, or other semantic UI. */
     --tenant-primary: 221.2 83.2% 53.3%;
     --tenant-name: "HMS";
   }
@@ -82,4 +97,76 @@
   height: 0;
   pointer-events: none;
   color: hsl(var(--muted-foreground));
+}
+
+/* ─── Sidebar scrollbar ────────────────────────────────────────────────────── */
+/* Thin, transparent-track scrollbar that blends with the dark sidebar theme
+   instead of the default white browser scrollbar. Scoped to the sidebar nav
+   only — the page's main scrollbar is untouched. */
+.sidebar-scroll {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: hsl(var(--sidebar-accent)) transparent; /* Firefox */
+}
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px; /* Chrome/Edge/Safari */
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--sidebar-accent));
+  border-radius: 9999px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--sidebar-accent-foreground) / 0.3);
+}
+
+/* ─── Themed time inputs ───────────────────────────────────────────────────── */
+/* Hides the browser's built-in clock glyph on <input type="time"> (WebKit/Blink
+   only — Firefox and Safari never render one) while keeping that region fully
+   clickable, so a single app-styled clock icon (positioned in the input's
+   right padding by the component) is the only one visible, in every browser. */
+.time-input::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ─── OPD Parcha (A4 print) ────────────────────────────────────────────────── */
+/* @page margin is 0 — the .parcha-sheet element supplies its own padding
+   (in mm, via Tailwind arbitrary values) so the exact spacing seen in the
+   on-screen preview is what gets sent to the printer, with no compounding
+   between page margin and element padding across browsers. */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+.parcha-sheet {
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  background: white;
+  color: #111111;
+  box-sizing: border-box;
+}
+
+@media screen {
+  .parcha-sheet {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+  }
+}
+
+@media print {
+  html, body {
+    background: white !important;
+  }
+  .parcha-sheet {
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    box-shadow: none;
+    border-radius: 0;
+    break-after: avoid;
+  }
 }

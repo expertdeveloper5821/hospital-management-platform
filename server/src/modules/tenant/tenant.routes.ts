@@ -18,6 +18,8 @@ import {
   completeTenantSetup,
   getBranding,
   updateBranding,
+  getOpdSettings,
+  updateOpdSettings,
   getPlatformSettings,
   updatePlatformTitle,
   uploadPlatformLogo,
@@ -78,6 +80,12 @@ router.post('/setup', publicRateLimiter, completeTenantSetup);
 // Branding — accessible by Hospital Admin within their tenant
 router.get('/:tenantId/branding',   getBranding);
 router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), logoUpload.single('logo'), updateBranding);
+
+// OPD settings — readable by any authenticated tenant role (drives the New OPD
+// Visit payment check); editable by Hospital Admin only. Tenant-pinned in the
+// controller (assertOwnTenant), not just role-gated.
+router.get('/:tenantId/opd-settings',   authenticateJWT, requireFirstPasswordChange, getOpdSettings);
+router.patch('/:tenantId/opd-settings', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), updateOpdSettings);
 
 // Platform settings — GET is public (rate-limited); PATCH + POST require Super Admin auth
 const platformSettingsRateLimiter = rateLimit({

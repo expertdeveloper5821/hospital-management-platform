@@ -178,6 +178,14 @@ export async function cancelVisit(req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 }
 
+export async function getPaymentValidity(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const tenantId = req.user!.tenantId!;
+    const result = await opdService.getPaymentValidity(tenantId, req.params.patientId);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
 export async function getPatientHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const query = historyQuerySchema.safeParse(req.query);

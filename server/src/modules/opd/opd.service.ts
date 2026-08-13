@@ -2,6 +2,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
 import { ipdService } from '../ipd/ipd.service';
 import { patientRepository } from '../patient/patient.repository';
+import { paymentRepository } from '../payment/payment.repository';
+import { PaymentReferenceType } from '../payment/payment.types';
+import { tenantService } from '../tenant/tenant.service';
+import { toIstMidnight } from '../attendance/attendance.timezone';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { auditService } from '../../shared/services/audit.service';
@@ -13,7 +17,11 @@ import {
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
   OPDVisitResponse,
+  OPDPaymentValidityResponse,
+  OPDPaymentValidityReason,
 } from './opd.types';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { fullName?: string } {
   return Object.assign(visit, { fullName });
@@ -315,6 +323,58 @@ export class OPDService {
         createdAt:      visit.createdAt,
         updatedAt:      visit.updatedAt,
       })),
+    };
+  }
+
+  // ─── OPD payment validity (Hospital-configurable validity window) ──────────
+  //
+  // Rule: a completed OPD payment covers this patient for
+  // `opdSettings.validityDays` calendar days *after* the day it was made
+  // (inclusive of both the payment day and the last covered day) — e.g. a
+  // payment made on day 0 with validityDays=15 covers days 0 through 15
+  // inclusive; day 16 is the first day a new payment is required. Day
+  // boundaries are computed in IST (hospital-local), matching the rest of the
+  // day-bucketed logic in this codebase (see attendance.timezone.ts), so a
+  // server running in UTC never mis-expires a payment near midnight IST.
+  //
+  // This is the sole source of truth the frontend must defer to — it must
+  // never compute "is this payment still valid" locally.
+  async getPaymentValidity(tenantId: string, patientId: string): Promise<OPDPaymentValidityResponse> {
+    const patient = await patientRepository.findByPatientId(tenantId, patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const { validityDays } = await tenantService.getOpdSettings(tenantId);
+
+    const latestPayment = await paymentRepository.findLatestCompletedByPatientAndReferenceType(
+      tenantId, patientId, PaymentReferenceType.OPD_VISIT,
+    );
+
+    if (!latestPayment) {
+      return {
+        patientId,
+        paymentRequired:  true,
+        reason:           OPDPaymentValidityReason.NO_PAYMENT,
+        latestPaymentId:  null,
+        latestPaymentDate: null,
+        validUntil:        null,
+        validityDays,
+      };
+    }
+
+    const paymentDay = toIstMidnight(latestPayment.createdAt);
+    const validUntil = new Date(paymentDay.getTime() + validityDays * MS_PER_DAY);
+    const today       = toIstMidnight(new Date());
+
+    const isValid = today.getTime() <= validUntil.getTime();
+
+    return {
+      patientId,
+      paymentRequired:   !isValid,
+      reason:            isValid ? OPDPaymentValidityReason.VALID : OPDPaymentValidityReason.EXPIRED,
+      latestPaymentId:   latestPayment.paymentId,
+      latestPaymentDate: latestPayment.createdAt,
+      validUntil,
+      validityDays,
     };
   }
 

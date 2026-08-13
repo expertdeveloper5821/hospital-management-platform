@@ -30,9 +30,11 @@ import { PatientModel }   from '../../../src/modules/patient/patient.model';
 import { OPDVisitModel }  from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { WardModel }         from '../../../src/modules/ipd/ward.model';
+import { PaymentModel }      from '../../../src/modules/payment/payment.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { OPDVisitStatus }         from '../../../src/modules/opd/opd.types';
 import { Gender }                 from '../../../src/modules/patient/patient.types';
+import { PaymentMethod, PaymentStatus, PaymentReferenceType } from '../../../src/modules/payment/payment.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -124,6 +126,46 @@ async function seedVisit(tenantId: string, overrides: Partial<{
 
 function todayDateStr(): string {
   return new Date().toISOString().substring(0, 10);
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+function daysAgo(n: number): Date {
+  return new Date(Date.now() - n * MS_PER_DAY);
+}
+
+// Seeds a COMPLETED OPD payment with an explicit createdAt (bypassing
+// mongoose's automatic timestamps so validity-boundary scenarios are
+// deterministic regardless of when the suite runs).
+async function seedOpdPayment(tenantId: string, overrides: Partial<{
+  patientId: string;
+  visitId:   string;
+  createdAt: Date;
+  status:    PaymentStatus;
+}> = {}) {
+  const paymentId = `pay-${Math.random().toString(36).slice(2, 10)}`;
+  await PaymentModel.create({
+    paymentId,
+    tenantId,
+    patientId:     overrides.patientId ?? 'PAT-TEST0001',
+    fullName:      'Ravi Kumar',
+    amount:        500,
+    paymentMethod: PaymentMethod.CASH,
+    description:   'OPD Consultation',
+    status:        overrides.status ?? PaymentStatus.COMPLETED,
+    referenceType: PaymentReferenceType.OPD_VISIT,
+    referenceId:   overrides.visitId ?? 'OPD-TEST0001',
+    createdBy:     'rc-1',
+  });
+  if (overrides.createdAt) {
+    // Goes through the native driver, not Mongoose's updateOne — Mongoose's
+    // query layer silently no-ops this particular $set (acknowledged:false)
+    // for a timestamped schema, so the raw collection handle is used instead.
+    await PaymentModel.collection.updateOne(
+      { paymentId },
+      { $set: { createdAt: overrides.createdAt } },
+    );
+  }
+  return paymentId;
 }
 
 const VALID_VISIT_BODY = {
@@ -461,6 +503,66 @@ describe('GET /api/opd/visits', () => {
     expect(visitIds).toContain('OPD-INPR0001');
     expect(visitIds).toContain('OPD-DONE0001');
     expect(visitIds).toContain('OPD-CANC0001');
+  });
+
+  test('200 — orders visits by newest-created first, regardless of queueNumber/insertion order', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+
+    // Insert out of chronological order, with explicit createdAt timestamps,
+    // so the assertion can only pass if the query sorts by createdAt desc
+    // rather than relying on insertion/document order.
+    await OPDVisitModel.create({
+      visitId:        'OPD-MID00001',
+      tenantId:       tid,
+      patientId:      'PAT-TEST0001',
+      doctorIds:      [],
+      visitDate:      new Date('2026-05-15T00:00:00.000Z'),
+      queueNumber:    2,
+      status:         OPDVisitStatus.OPEN,
+      diagnosis:      null,
+      prescription:   null,
+      notes:          null,
+      createdAt:      new Date('2026-05-15T09:00:00.000Z'),
+    });
+    await OPDVisitModel.create({
+      visitId:        'OPD-OLD00001',
+      tenantId:       tid,
+      patientId:      'PAT-TEST0001',
+      doctorIds:      [],
+      visitDate:      new Date('2026-05-15T00:00:00.000Z'),
+      queueNumber:    1,
+      status:         OPDVisitStatus.OPEN,
+      diagnosis:      null,
+      prescription:   null,
+      notes:          null,
+      createdAt:      new Date('2026-05-15T08:00:00.000Z'),
+    });
+    await OPDVisitModel.create({
+      visitId:        'OPD-NEW00001',
+      tenantId:       tid,
+      patientId:      'PAT-TEST0001',
+      doctorIds:      [],
+      visitDate:      new Date('2026-05-15T00:00:00.000Z'),
+      queueNumber:    3,
+      status:         OPDVisitStatus.OPEN,
+      diagnosis:      null,
+      prescription:   null,
+      notes:          null,
+      createdAt:      new Date('2026-05-15T10:00:00.000Z'),
+    });
+
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/visits')
+      .query({ date: '2026-05-15' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    expect(visitIds).toEqual(['OPD-NEW00001', 'OPD-MID00001', 'OPD-OLD00001']);
   });
 
   test('200 — filters queue by doctorId', async () => {
@@ -1515,5 +1617,167 @@ describe('GET /api/opd/patients/:patientId/history', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(400);
+  });
+});
+
+// ─── GET /api/opd/patients/:patientId/payment-validity ───────────────────────
+describe('GET /api/opd/patients/:patientId/payment-validity', () => {
+  test('200 — NO_PAYMENT when the patient has never paid for OPD', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      paymentRequired:   true,
+      reason:            'NO_PAYMENT',
+      latestPaymentId:   null,
+      validUntil:        null,
+      validityDays:      15,
+    });
+  });
+
+  test('200 — VALID when the latest payment is within the default 15-day window', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedOpdPayment(tid, { createdAt: daysAgo(5) });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reason).toBe('VALID');
+    expect(res.body.data.paymentRequired).toBe(false);
+  });
+
+  test('200 — EXPIRED when the latest payment is past the default 15-day window', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedOpdPayment(tid, { createdAt: daysAgo(20) });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reason).toBe('EXPIRED');
+    expect(res.body.data.paymentRequired).toBe(true);
+  });
+
+  test('200 — respects a hospital-configured validity period instead of the hardcoded default', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await TenantModel.findByIdAndUpdate(tid, { $set: { 'opdSettings.validityDays': 3 } });
+    await seedPatient(tid);
+    await seedOpdPayment(tid, { createdAt: daysAgo(5) }); // valid under 15-day default, expired under 3-day config
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reason).toBe('EXPIRED');
+    expect(res.body.data.validityDays).toBe(3);
+  });
+
+  test('200 — only the latest of multiple payments governs validity', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    // An old, already-expired payment plus a fresh one — the fresh one must win.
+    await seedOpdPayment(tid, { createdAt: daysAgo(40) });
+    const latestId = await seedOpdPayment(tid, { createdAt: daysAgo(2) });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reason).toBe('VALID');
+    expect(res.body.data.latestPaymentId).toBe(latestId);
+  });
+
+  test('200 — a PENDING/FAILED payment does not count toward validity', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedOpdPayment(tid, { createdAt: daysAgo(1), status: PaymentStatus.FAILED });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.reason).toBe('NO_PAYMENT');
+  });
+
+  test('404 — unknown patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc     = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-UNKNOWN/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('tenant isolation — a patient (and their payment) belonging to another tenant is not visible', async () => {
+    const tenantA = await seedTenant('Hospital A');
+    const tenantB = await seedTenant('Hospital B');
+    const tidA = tenantA._id.toString();
+    const tidB = tenantB._id.toString();
+
+    await seedPatient(tidB, 'PAT-TEST0002');
+    await seedOpdPayment(tidB, { patientId: 'PAT-TEST0002', createdAt: daysAgo(1) });
+
+    const rcA    = await seedUser(tidA, 'rc@a.com', UserRole.RECEPTIONIST);
+    const tokenA = tokenFor(rcA._id.toString(), tidA, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0002/payment-validity')
+      .set(bearer(tokenA));
+
+    expect(res.status).toBe(404);
+  });
+
+  test('403 — Doctor cannot call the payment-validity check (not in the create-visit role set)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const doc   = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    const token = tokenFor(doc._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  test('401 — unauthenticated', async () => {
+    const res = await request(app).get('/api/opd/patients/PAT-TEST0001/payment-validity');
+    expect(res.status).toBe(401);
   });
 });

@@ -40,7 +40,7 @@ export default function PatientAssignmentsPage() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Badge variant={a.status === 'ACTIVE' ? 'default' : 'secondary'}>{a.status}</Badge>
+              <Badge variant={a.status === 'ACTIVE' ? 'success' : 'destructive'}>{a.status}</Badge>
               {canCancel && a.status === 'ACTIVE' && (
                 <Button
                   size="sm"

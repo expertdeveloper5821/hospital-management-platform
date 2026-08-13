@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, X, CheckCheck, Circle, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { markAllRead, markRead as markReadSlice } from '@/store/slices/notification.slice';
 import {
@@ -107,8 +108,8 @@ export function NotificationBell() {
       {panelOpen && (
         <>
           {/* Mobile backdrop */}
-          <div
-            className="fixed inset-0 bg-black/20 z-40 sm:hidden"
+          <DialogOverlay
+            className="z-40 bg-black/20 sm:hidden"
             onClick={() => setPanelOpen(false)}
             aria-hidden="true"
           />
@@ -174,7 +175,7 @@ export function NotificationBell() {
                 role="listitem"
                 className={cn(
                   'flex gap-3 px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors',
-                  !msg.read && 'bg-primary/5',
+                  !msg.read && 'bg-info/5',
                 )}
                 onClick={() => handleMarkRead(msg)}
               >
@@ -183,7 +184,7 @@ export function NotificationBell() {
                   {msg.read ? (
                     <Circle className="h-2 w-2 text-muted-foreground/40 fill-muted-foreground/20" />
                   ) : (
-                    <Circle className="h-2 w-2 text-primary fill-primary" aria-label="Unread" />
+                    <Circle className="h-2 w-2 text-info fill-info" aria-label="Unread" />
                   )}
                 </span>
 

@@ -220,7 +220,7 @@ describe('POST /api/patients', () => {
     expect(res.body.data.aadhaarNumber).toBe('123456789012');
   });
 
-  test('409 with isDuplicateWarning — same mobile in same tenant without forceCreate', async () => {
+  test('409 with isDuplicateWarning — same name AND same mobile in same tenant without forceCreate', async () => {
     const tenant = await seedTenant();
     const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
     const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
@@ -228,15 +228,33 @@ describe('POST /api/patients', () => {
     // First registration
     await request(app).post('/api/patients').set(bearer(token)).send(VALID_PATIENT_BODY);
 
-    // Duplicate — same mobile
+    // Duplicate — same name (case-insensitive) and same mobile
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, fullName: 'priya sharma' });
+
+    expect(res.status).toBe(409);
+    expect(res.body.data.isDuplicateWarning).toBe(true);
+    expect(res.body.data.existingPatientId).toMatch(/^PAT-/);
+  });
+
+  test('201 — same mobile but different name is allowed (family member sharing one mobile number)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    // First registration
+    await request(app).post('/api/patients').set(bearer(token)).send(VALID_PATIENT_BODY);
+
+    // Same mobile, different name — should register without a duplicate warning
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
       .send({ ...VALID_PATIENT_BODY, fullName: 'Priya Sharma Copy' });
 
-    expect(res.status).toBe(409);
-    expect(res.body.data.isDuplicateWarning).toBe(true);
-    expect(res.body.data.existingPatientId).toMatch(/^PAT-/);
+    expect(res.status).toBe(201);
+    expect(res.body.data.fullName).toBe('Priya Sharma Copy');
   });
 
   test('201 — forceCreate:true bypasses duplicate warning', async () => {
@@ -249,7 +267,7 @@ describe('POST /api/patients', () => {
     const res = await request(app)
       .post('/api/patients')
       .set(bearer(token))
-      .send({ ...VALID_PATIENT_BODY, fullName: 'Priya Sharma 2', forceCreate: true });
+      .send({ ...VALID_PATIENT_BODY, forceCreate: true });
 
     expect(res.status).toBe(201);
   });

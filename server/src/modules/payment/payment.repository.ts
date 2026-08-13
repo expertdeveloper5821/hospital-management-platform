@@ -61,6 +61,24 @@ export class PaymentRepository {
     };
   }
 
+  // Most recent COMPLETED payment of a given reference type for a patient —
+  // used by OPDService.getPaymentValidity to find the payment that governs
+  // the current validity window. Only COMPLETED payments count: a PENDING/
+  // FAILED/CANCELLED Razorpay attempt never granted validity.
+  async findLatestCompletedByPatientAndReferenceType(
+    tenantId:      string,
+    patientId:     string,
+    referenceType: PaymentReferenceType,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    return PaymentModel.findOne({
+      tenantId,
+      patientId,
+      referenceType,
+      status: PaymentStatus.COMPLETED,
+    }).sort({ createdAt: -1 });
+  }
+
   async save(data: Partial<IPayment>): Promise<IPayment> {
     assertDbConnected();
     return PaymentModel.create(data);

@@ -66,7 +66,7 @@ export default function PackageDetailPage() {
     <div className="p-6 space-y-6 max-w-2xl mx-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{pkg.name}</h1>
-        <Badge variant={pkg.status === 'ACTIVE' ? 'default' : 'secondary'}>{pkg.status}</Badge>
+        <Badge variant={pkg.status === 'ACTIVE' ? 'success' : 'destructive'}>{pkg.status}</Badge>
       </div>
 
       <Card>

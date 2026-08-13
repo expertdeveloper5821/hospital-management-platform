@@ -82,7 +82,7 @@ export default function StaffDocumentsPage() {
               {checklist.map((item) => (
                 <div key={item.category} className="flex items-center justify-between border rounded p-2">
                   <span className="capitalize">{item.category.replace(/_/g, ' ').toLowerCase()}</span>
-                  <Badge variant={item.status === 'complete' ? 'default' : 'secondary'}>
+                  <Badge variant={item.status === 'complete' ? 'success' : 'warning'}>
                     {item.status === 'complete' ? '✓' : '✗'} {item.status}
                   </Badge>
                 </div>
@@ -135,7 +135,7 @@ export default function StaffDocumentsPage() {
                   <a href={doc.presignedUrl} target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 underline">Download</a>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => handleDelete(doc.documentId)}>Delete</Button>
+                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => handleDelete(doc.documentId)}>Delete</Button>
               </div>
             ))}
           </CardContent>

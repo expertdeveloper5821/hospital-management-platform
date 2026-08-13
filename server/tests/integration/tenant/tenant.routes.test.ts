@@ -103,6 +103,27 @@ async function seedActiveTenant(name = 'Active Hospital') {
   });
 }
 
+// seedActiveTenant hardcodes its adminEmail regardless of `name`, so a second
+// tenant in the same test needs an explicit distinct email to avoid the
+// unique-index collision.
+async function seedTenantWithEmail(name: string, adminEmail: string) {
+  return TenantModel.create({
+    name,
+    adminEmail,
+    status: TenantStatus.ACTIVE,
+    onboardingDocuments: {
+      registrationCertificate: 's3-key-1',
+      gstNumber:               'GST123',
+      panCard:                 's3-key-2',
+      addressLine:            '123 Test Street',
+      city:                    'Mumbai',
+      state:                   'Maharashtra',
+      pincode:                 '400001',
+    },
+    branding: { displayName: name, primaryColor: '#1A73E8' },
+  });
+}
+
 async function seedInactiveTenant(name = 'Inactive Hospital') {
   return TenantModel.create({
     name,
@@ -455,6 +476,137 @@ describe('PATCH /api/tenants/:tenantId/branding', () => {
       .patch(`/api/tenants/${tenant._id}/branding`)
       .send({ displayName: 'Hack' });
 
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── GET /api/tenants/:tenantId/opd-settings ─────────────────────────────────
+function receptionistToken(tenantId: string, userId = 'rc-1') {
+  return jwt.sign(
+    { userId, tenantId, role: UserRole.RECEPTIONIST, email: 'rc@h.com', isFirstLogin: false },
+    JWT_SECRET,
+    { expiresIn: '1h' },
+  );
+}
+
+describe('GET /api/tenants/:tenantId/opd-settings', () => {
+  test('200 — defaults to 15 days when never configured', async () => {
+    const tenant = await seedActiveTenant('OPD Settings Hospital');
+    const token  = hospitalAdminToken(tenant._id.toString());
+
+    const res = await request(app)
+      .get(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ validityDays: 15 });
+  });
+
+  test('200 — any authenticated tenant role (e.g. Receptionist) can read it', async () => {
+    const tenant = await seedActiveTenant('OPD Settings Hospital 2');
+    const token  = receptionistToken(tenant._id.toString());
+
+    const res = await request(app)
+      .get(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+  });
+
+  test('403 — cannot read another hospital\'s OPD settings', async () => {
+    const tenant       = await seedActiveTenant('OPD Settings Hospital 3');
+    const otherTenant  = await seedTenantWithEmail('Other Hospital', 'admin@otherhospital1.com');
+    const token        = hospitalAdminToken(otherTenant._id.toString());
+
+    const res = await request(app)
+      .get(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  test('401 — unauthenticated', async () => {
+    const tenant = await seedActiveTenant();
+    const res = await request(app).get(`/api/tenants/${tenant._id}/opd-settings`);
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── PATCH /api/tenants/:tenantId/opd-settings ───────────────────────────────
+describe('PATCH /api/tenants/:tenantId/opd-settings', () => {
+  test('200 — Hospital Admin updates validityDays', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = hospitalAdminToken(tenant._id.toString());
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token))
+      .send({ validityDays: 30 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ validityDays: 30 });
+
+    const updated = await TenantModel.findById(tenant._id).lean();
+    expect(updated?.opdSettings?.validityDays).toBe(30);
+  });
+
+  test('403 — Receptionist cannot update OPD settings', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = receptionistToken(tenant._id.toString());
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token))
+      .send({ validityDays: 30 });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — Hospital Admin cannot update another hospital\'s OPD settings', async () => {
+    const tenant      = await seedActiveTenant('OPD Settings Hospital 4');
+    const otherTenant = await seedTenantWithEmail('Other Hospital 2', 'admin@otherhospital2.com');
+    const token       = hospitalAdminToken(otherTenant._id.toString());
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token))
+      .send({ validityDays: 30 });
+
+    expect(res.status).toBe(403);
+
+    const untouched = await TenantModel.findById(tenant._id).lean();
+    expect(untouched?.opdSettings?.validityDays ?? 15).toBe(15);
+  });
+
+  test('400 — validityDays must be a positive whole number within range', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = hospitalAdminToken(tenant._id.toString());
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token))
+      .send({ validityDays: 0 });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('400 — validityDays above 365 is rejected', async () => {
+    const tenant = await seedActiveTenant();
+    const token  = hospitalAdminToken(tenant._id.toString());
+
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .set(bearer(token))
+      .send({ validityDays: 400 });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('401 — unauthenticated', async () => {
+    const tenant = await seedActiveTenant();
+    const res = await request(app)
+      .patch(`/api/tenants/${tenant._id}/opd-settings`)
+      .send({ validityDays: 30 });
     expect(res.status).toBe(401);
   });
 });

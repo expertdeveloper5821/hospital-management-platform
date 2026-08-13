@@ -33,6 +33,29 @@ export interface CompleteOPDVisitRequest {
   notes?:        string;
 }
 
+// ─── OPD Payment Validity ───────────────────────────────────────────────────
+// Computed by OPDService.getPaymentValidity — the authoritative answer to
+// "does this patient need to pay for OPD again right now?", derived from the
+// patient's latest COMPLETED OPD payment + the tenant's configured
+// opdSettings.validityDays. Never derived on the frontend.
+export const OPDPaymentValidityReason = {
+  NO_PAYMENT: 'NO_PAYMENT', // patient has no prior completed OPD payment — existing manual payment flow applies
+  EXPIRED:    'EXPIRED',    // latest payment's validity window has passed — a new payment is required
+  VALID:      'VALID',      // latest payment still covers today — no new payment required
+} as const;
+
+export type OPDPaymentValidityReason = typeof OPDPaymentValidityReason[keyof typeof OPDPaymentValidityReason];
+
+export interface OPDPaymentValidityResponse {
+  patientId:         string;
+  paymentRequired:   boolean;
+  reason:             OPDPaymentValidityReason;
+  latestPaymentId:    string | null;
+  latestPaymentDate:  Date | null;
+  validUntil:         Date | null; // last calendar day the latest payment covers (inclusive)
+  validityDays:       number;
+}
+
 export interface OPDVisitResponse {
   visitId:        string;
   tenantId:       string;

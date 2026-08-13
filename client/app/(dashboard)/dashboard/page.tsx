@@ -145,6 +145,9 @@ const ENTITY_BADGE: Record<string, { label: string; cls: string }> = {
   CHARGE:             { label: 'Billing',   cls: 'bg-emerald-100 text-emerald-700' },
   USER_ACCOUNT:       { label: 'Staff',     cls: 'bg-indigo-100 text-indigo-700' },
   DEPARTMENT:         { label: 'Dept',      cls: 'bg-slate-100 text-slate-700' },
+  PACKAGE:            { label: 'Package',   cls: 'bg-pink-100 text-pink-700' },
+  PACKAGE_ASSIGNMENT: { label: 'Package',   cls: 'bg-pink-100 text-pink-700' },
+  TENANT:             { label: 'Hospital',  cls: 'bg-teal-100 text-teal-700' },
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -353,7 +356,7 @@ export default function DashboardPage() {
         <div>
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2 text-foreground">
             <AlertTriangle className="h-4 w-4 text-orange-500" />
-            Critical Alerts
+            Hospital Overview
           </h2>
           <div className={cn('grid grid-cols-1 gap-4', alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2')}>
             {data?.lowStockCount !== undefined && (
@@ -584,16 +587,21 @@ export default function DashboardPage() {
                 {!hasActivities ? (
                   <p className="text-sm text-muted-foreground text-center py-8">No recent activity</p>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="divide-y divide-border">
                     {(data?.recentActivities ?? []).map((a, i) => {
                       const badge = ENTITY_BADGE[a.entityType] ?? { label: friendlyEntity(a.entityType), cls: 'bg-muted text-muted-foreground' };
                       return (
-                        <div key={i} className="flex items-start gap-3">
-                          <span className="text-xs text-muted-foreground shrink-0 w-12 mt-0.5">{fmtTime(a.timestamp)}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-foreground leading-tight">{activityLabel(a)}</p>
-                          </div>
-                          <span className={cn('text-xs px-2 py-0.5 rounded font-medium shrink-0', badge.cls)}>
+                        <div key={i} className="flex items-center gap-3 py-2.5 first:pt-0.5 last:pb-0.5">
+                          <span className="w-14 shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {fmtTime(a.timestamp)}
+                          </span>
+                          <p className="min-w-0 flex-1 truncate text-sm text-foreground">
+                            {activityLabel(a)}
+                          </p>
+                          <span className={cn(
+                            'inline-flex shrink-0 items-center justify-center rounded-full px-2.5 py-1 min-w-[64px] text-center text-[11px] font-medium leading-none',
+                            badge.cls,
+                          )}>
                             {badge.label}
                           </span>
                         </div>

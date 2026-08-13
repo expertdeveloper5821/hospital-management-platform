@@ -12,6 +12,24 @@ export class PatientRepository {
     return PatientModel.findOne({ tenantId, mobileNumber, isDeleted: { $ne: true } });
   }
 
+  // Matches only when BOTH the mobile number and the (case-insensitive, trimmed) full name
+  // coincide with an existing patient — family members sharing one mobile number but with
+  // different names are not considered duplicates.
+  async findByMobileAndName(
+    tenantId:     string,
+    mobileNumber: string,
+    fullName:     string,
+  ): Promise<IPatient | null> {
+    assertDbConnected();
+    const safeName = escapeRegex(fullName.trim());
+    return PatientModel.findOne({
+      tenantId,
+      mobileNumber,
+      fullName:  { $regex: `^${safeName}$`, $options: 'i' },
+      isDeleted: { $ne: true },
+    });
+  }
+
   async findByPatientId(tenantId: string, patientId: string): Promise<IPatient | null> {
     assertDbConnected();
     return PatientModel.findOne({ tenantId, patientId, isDeleted: { $ne: true } });

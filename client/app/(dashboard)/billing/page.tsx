@@ -9,6 +9,7 @@ import type { ChargeCategory, ChargeStatus } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { todayLocalISO, clampToToday } from '@/lib/date';
 import { cn, toTitleCase } from '@/lib/utils';
 import { Plus, X } from 'lucide-react';
@@ -90,8 +91,8 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    <DialogOverlay
+      className="items-center justify-center bg-black/50 p-4"
       onClick={onClose}
     >
       <div
@@ -186,7 +187,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
