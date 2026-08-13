@@ -1,7 +1,11 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
+
+const mockGetOPDPaymentValidity = jest.fn();
+const mockSearchPatients        = jest.fn();
 
 jest.mock('@/store/api/opd.api', () => ({
   useGetOPDQueueQuery: () => ({ data: [], isFetching: false, refetch: jest.fn() }),
@@ -9,6 +13,12 @@ jest.mock('@/store/api/opd.api', () => ({
   useUpdateOPDVisitMutation: () => [jest.fn(), { isLoading: false }],
   useCompleteOPDVisitMutation: () => [jest.fn(), { isLoading: false }],
   useCancelOPDVisitMutation: () => [jest.fn(), { isLoading: false }],
+  // Mirrors RTK Query's real `skip` behaviour (data is undefined until a
+  // patient is actually selected) so the component's "reset on patient
+  // change" and "sync to validity result" effects interact the same way
+  // they would against the real hook.
+  useGetOPDPaymentValidityQuery: (patientId: string, options?: { skip?: boolean }) =>
+    mockGetOPDPaymentValidity(patientId, options),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -17,7 +27,7 @@ jest.mock('@/store/api/payment.api', () => ({
 }));
 
 jest.mock('@/store/api/patient.api', () => ({
-  useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
+  useSearchPatientsQuery: (...args: unknown[]) => mockSearchPatients(...args),
 }));
 
 jest.mock('@/store/api/user.api', () => ({
@@ -47,25 +57,101 @@ import OPDPage from '@/app/(dashboard)/opd/page';
 describe('OPDPage — New Visit role gating', () => {
   test('RECEPTIONIST sees the New Visit button', () => {
     mockRole = 'RECEPTIONIST';
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
     render(<OPDPage />);
     expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
   });
 
   test('DOCTOR does not see the New Visit button', () => {
     mockRole = 'DOCTOR';
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
     render(<OPDPage />);
     expect(screen.queryByRole('button', { name: /new visit/i })).not.toBeInTheDocument();
   });
 
   test('HOSPITAL_ADMIN sees the New Visit button', () => {
     mockRole = 'HOSPITAL_ADMIN';
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
     render(<OPDPage />);
     expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
   });
 
   test('NURSE does not see the New Visit button', () => {
     mockRole = 'NURSE';
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
     render(<OPDPage />);
     expect(screen.queryByRole('button', { name: /new visit/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('OPDPage — New Visit OPD payment validity check', () => {
+  const PATIENT = { patientId: 'PAT-1', fullName: 'Ravi Kumar', mobileNumber: '9876543210' };
+
+  async function openModalAndSelectPatient(user: ReturnType<typeof userEvent.setup>) {
+    mockSearchPatients.mockReturnValue({ data: { data: [PATIENT] }, isFetching: false });
+    render(<OPDPage />);
+    await user.click(screen.getByRole('button', { name: /new visit/i }));
+    await user.type(screen.getByPlaceholderText(/search patient by name or mobile/i), 'Ravi');
+    await waitFor(() => expect(screen.getByText('Ravi Kumar')).toBeInTheDocument(), { timeout: 2000 });
+    await user.click(screen.getByText('Ravi Kumar'));
+  }
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    jest.clearAllMocks();
+  });
+
+  test('VALID — shows a no-charge banner and hides the Free/Paid toggle', async () => {
+    const user = userEvent.setup();
+    const validityData = {
+      patientId: 'PAT-1', paymentRequired: false, reason: 'VALID',
+      latestPaymentId: 'pay-1', latestPaymentDate: '2026-08-01T00:00:00.000Z',
+      validUntil: '2026-08-16T00:00:00.000Z', validityDays: 15,
+    };
+    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+      ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
+
+    await openModalAndSelectPatient(user);
+
+    expect(await screen.findByText(/no new payment is required/i)).toBeInTheDocument();
+    expect(screen.queryByText(/registration type/i)).not.toBeInTheDocument();
+  });
+
+  test('EXPIRED — shows a renewal-required banner and forces the Paid fields (no Free option)', async () => {
+    const user = userEvent.setup();
+    const validityData = {
+      patientId: 'PAT-1', paymentRequired: true, reason: 'EXPIRED',
+      latestPaymentId: 'pay-1', latestPaymentDate: '2026-07-01T00:00:00.000Z',
+      validUntil: '2026-07-16T00:00:00.000Z', validityDays: 15,
+    };
+    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+      ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
+
+    await openModalAndSelectPatient(user);
+
+    expect(await screen.findByText(/a new opd payment is required/i)).toBeInTheDocument();
+    expect(screen.queryByText(/registration type/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/amount/i)).toBeInTheDocument();
+    expect(screen.getByText(/payment mode/i)).toBeInTheDocument();
+  });
+
+  test('NO_PAYMENT — falls back to the existing manual Free/Paid toggle', async () => {
+    const user = userEvent.setup();
+    const validityData = {
+      patientId: 'PAT-1', paymentRequired: true, reason: 'NO_PAYMENT',
+      latestPaymentId: null, latestPaymentDate: null, validUntil: null, validityDays: 15,
+    };
+    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+      ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
+
+    await openModalAndSelectPatient(user);
+
+    expect(await screen.findByText(/registration type/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^free$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^paid$/i })).toBeInTheDocument();
   });
 });

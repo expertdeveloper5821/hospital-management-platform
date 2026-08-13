@@ -12,6 +12,7 @@ import {
   completeVisit,
   cancelVisit,
   getPatientHistory,
+  getPaymentValidity,
 } from './opd.controller';
 
 const router  = Router();
@@ -69,6 +70,14 @@ router.get('/patients/:patientId/history',
   ...protect,
   requireRole(...CLINICAL_ROLES),
   getPatientHistory,
+);
+
+// Consulted by the New OPD Visit form right after a patient is selected —
+// same role set as visit creation (RECEPTIONIST, NURSE, HOSPITAL_ADMIN).
+router.get('/patients/:patientId/payment-validity',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  getPaymentValidity,
 );
 
 export default router;

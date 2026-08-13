@@ -87,8 +87,8 @@ export default function SuperAdminPage() {
         {tenant.status === 'PENDING_VERIFICATION' && (
           <Button
             size="sm"
-            variant="outline"
-            className="h-7 w-28 justify-center px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
+            variant="success"
+            className="h-7 w-28 justify-center px-2 text-xs"
             disabled={isBusy}
             onClick={() => approveTenant(tenant._id)}
           >
@@ -123,8 +123,8 @@ export default function SuperAdminPage() {
         {tenant.status === 'INACTIVE' && (
           <Button
             size="sm"
-            variant="outline"
-            className="h-7 w-28 justify-center px-2 text-xs bg-green-600 text-white border-green-600 hover:bg-green-700 hover:border-green-700"
+            variant="success"
+            className="h-7 w-28 justify-center px-2 text-xs"
             disabled={isBusy}
             onClick={() => reactivateTenant(tenant._id)}
           >

@@ -14,6 +14,7 @@ import { StatCard } from '@/components/dashboard/StatCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { cn } from '@/lib/utils';
 import type { AttendanceRecord } from '@/store/types';
 import {
@@ -61,6 +62,11 @@ function formatTime(iso: string | null) {
   return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Fixed size so every Status pill (Present / In Progress / Absent) renders at
+// the same compact, balanced footprint — identical height, padding, font
+// size, and border radius, with text centered regardless of label length.
+const STATUS_PILL_BASE = 'inline-flex items-center justify-center h-6 w-24 rounded-full text-xs font-medium whitespace-nowrap';
+
 function statusBadge(status: AttendanceRecord['status']) {
   const styles: Record<AttendanceRecord['status'], string> = {
     PRESENT:     'bg-green-500/10 text-green-700 dark:text-green-400',
@@ -71,7 +77,7 @@ function statusBadge(status: AttendanceRecord['status']) {
     PRESENT: 'Present', IN_PROGRESS: 'In Progress', ABSENT: 'Absent',
   };
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${styles[status]}`}>
+    <span className={`${STATUS_PILL_BASE} ${styles[status]}`}>
       {labels[status]}
     </span>
   );
@@ -126,7 +132,7 @@ function EmployeeCombobox({ id, employees, value, onChange, includeMyself }: Emp
         type="button"
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}
-        className="h-10 min-w-[220px] flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm"
+        className="h-10 w-full sm:w-56 flex items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <span className="truncate">{selectedLabel}</span>
         <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -233,7 +239,7 @@ function ConfirmActionModal({ action, isLoading, onCancel, onConfirm }: ConfirmA
   const Icon = isCheckIn ? LogIn : LogOut;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-xl border shadow-xl w-full max-w-sm p-6 space-y-5 text-center">
         <div className={cn(
           'mx-auto flex h-14 w-14 items-center justify-center rounded-full',
@@ -260,7 +266,7 @@ function ConfirmActionModal({ action, isLoading, onCancel, onConfirm }: ConfirmA
           </Button>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -404,6 +410,68 @@ function fromTimeLocal(time: string, date: DateParts): string | null {
   return new Date(date.year, date.month, date.day, hours, minutes, 0, 0).toISOString();
 }
 
+// A time <Input> with a themed clock glyph pinned to the right edge (the
+// native browser icon is hidden via the `.time-input` rule in globals.css so
+// only this one shows), matching the compact, single-icon look of the rest
+// of the form controls.
+//
+// Selection is restricted to the native picker dialog — typing/arrow-key
+// editing of the segments is blocked (see blockKeyboardEntry) and both the
+// field and the icon call showPicker() on click, so the dialog is the only
+// way to set a value. Enter/Space also open it, for keyboard-only users who
+// tab to the field. onChange (fired by the native picker) is untouched, so
+// state/validation/submit behavior is unchanged.
+interface TimeFieldProps {
+  id:       string;
+  label:    string;
+  value:    string;
+  onChange: (value: string) => void;
+}
+
+function TimeField({ id, label, value, onChange }: TimeFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function openPicker() {
+    const el = inputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    try {
+      el?.showPicker?.();
+    } catch {
+      // showPicker() throws if called outside a user gesture or if unsupported
+      // (older Firefox/Safari) — the native indicator underneath the themed
+      // icon (see .time-input in globals.css) still works as a fallback there.
+    }
+  }
+
+  function blockKeyboardEntry(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Tab') return; // keep keyboard focus navigation working
+    e.preventDefault();
+    if (e.key === 'Enter' || e.key === ' ') openPicker();
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          ref={inputRef}
+          type="time"
+          step={60}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={blockKeyboardEntry}
+          onClick={openPicker}
+          className="time-input pr-9 cursor-pointer caret-transparent"
+        />
+        <Clock3
+          onClick={openPicker}
+          className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground cursor-pointer"
+        />
+      </div>
+    </div>
+  );
+}
+
 interface EditAttendanceModalProps {
   record:  AttendanceRecord;
   onClose: () => void;
@@ -434,48 +502,30 @@ function EditAttendanceModal({ record, onClose }: EditAttendanceModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md p-6 space-y-5">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Edit Attendance — {formatDate(record.attendanceDate)}</h2>
+          <h2 className="text-base font-semibold">Edit Attendance — {formatDate(record.attendanceDate)}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="edit-checkin">Check In</Label>
-            <Input
-              id="edit-checkin"
-              type="time"
-              step={60}
-              value={checkIn}
-              onChange={(e) => setCheckIn(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="edit-checkout">Check Out</Label>
-            <Input
-              id="edit-checkout"
-              type="time"
-              step={60}
-              value={checkOut}
-              onChange={(e) => setCheckOut(e.target.value)}
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <TimeField id="edit-checkin"  label="Check In"  value={checkIn}  onChange={setCheckIn} />
+          <TimeField id="edit-checkout" label="Check Out" value={checkOut} onChange={setCheckOut} />
 
           {error && (
             <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
           )}
 
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>{isLoading ? 'Saving…' : 'Save Changes'}</Button>
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -598,56 +648,58 @@ export default function AttendancePage() {
       )}
 
       {/* Summary cards — part of the personal/employee attendance view, not shown in the
-          Super Admin's management-only view. */}
+          Super Admin's management-only view. "Days Worked" is intentionally omitted:
+          it duplicated "Present Days" 1:1, so only the latter is kept. */}
       {!isSuperAdmin && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatCard icon={CalendarDays}   label="Total Working Days"  value={summary.totalWorkingDays} />
-          <StatCard icon={CheckCircle2}   label="Days Worked"         value={summary.daysWorked} />
           <StatCard icon={CheckCircle2}   label="Present Days"        value={summary.presentDays} />
           <StatCard icon={Clock3}         label="Total Working Hours" value={formatHoursMinutes(summary.totalWorkingHours)} />
         </div>
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="filter-month">Month</Label>
-          <select
-            id="filter-month"
-            value={month}
-            onChange={(e) => setMonth(Number(e.target.value))}
-            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-          >
-            {MONTH_NAMES.map((name, idx) => (
-              <option key={name} value={idx + 1}>{name}</option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="filter-year">Year</Label>
-          <select
-            id="filter-year"
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
-          >
-            {Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i).map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </div>
-        {canManageOthers && (
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-employee">Employee</Label>
-            <EmployeeCombobox
-              id="filter-employee"
-              employees={employees}
-              value={selectedEmployeeId}
-              onChange={setSelectedEmployeeId}
-              includeMyself={!isSuperAdmin}
-            />
+      <div className="rounded-lg border bg-card p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:gap-6">
+          <div className="flex flex-col gap-1.5 w-full sm:w-auto">
+            <Label htmlFor="filter-month">Month</Label>
+            <select
+              id="filter-month"
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              className="h-10 w-full sm:w-40 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {MONTH_NAMES.map((name, idx) => (
+                <option key={name} value={idx + 1}>{name}</option>
+              ))}
+            </select>
           </div>
-        )}
+          <div className="flex flex-col gap-1.5 w-full sm:w-auto">
+            <Label htmlFor="filter-year">Year</Label>
+            <select
+              id="filter-year"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="h-10 w-full sm:w-32 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          {canManageOthers && (
+            <div className="flex flex-col gap-1.5 w-full sm:w-auto">
+              <Label htmlFor="filter-employee">Employee</Label>
+              <EmployeeCombobox
+                id="filter-employee"
+                employees={employees}
+                value={selectedEmployeeId}
+                onChange={setSelectedEmployeeId}
+                includeMyself={!isSuperAdmin}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Table */}

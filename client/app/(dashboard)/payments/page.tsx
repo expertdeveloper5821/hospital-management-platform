@@ -12,6 +12,7 @@ import {
   useGetPaymentSummaryQuery,
 } from "@/store/api/payment.api";
 import { useAppSelector } from "@/store/hooks";
+import { DialogOverlay } from "@/components/ui/dialog-overlay";
 import type {
   PaymentResponse,
   PaymentMethod,
@@ -283,7 +284,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
@@ -387,7 +388,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -515,7 +516,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
@@ -622,7 +623,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -710,8 +711,8 @@ function PaymentDetailPanel({ payment, onClose }: PaymentDetailPanelProps) {
   }[payment.status];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/40"
+    <DialogOverlay
+      className="justify-end bg-black/40"
       onClick={onClose}
     >
       <div
@@ -782,7 +783,7 @@ function PaymentDetailPanel({ payment, onClose }: PaymentDetailPanelProps) {
           </div>
         )}
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 

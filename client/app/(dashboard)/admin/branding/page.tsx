@@ -4,6 +4,8 @@ import { useState, useRef } from 'react';
 import {
   useGetBrandingQuery,
   useUpdateBrandingMutation,
+  useGetOpdSettingsQuery,
+  useUpdateOpdSettingsMutation,
 } from '@/store/api/tenant.api';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { setBranding } from '@/store/slices/auth.slice';
@@ -208,6 +210,97 @@ export default function BrandingPage() {
           </Button>
         </div>
       </form>
+
+      <OpdSettingsSection tenantId={tenantId} />
+    </div>
+  );
+}
+
+// ─── OPD Payment Validity Settings ─────────────────────────────────────────────
+// Hospital-configurable: how many days a completed OPD payment covers further
+// OPD visits before a new payment is required (default 15, set on the backend
+// — see tenant.constants.ts). Drives OPDService.getPaymentValidity, consulted
+// by the New OPD Visit form.
+
+function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
+  const { data: opdSettings, isLoading } = useGetOpdSettingsQuery(tenantId ?? '', { skip: !tenantId });
+  const [updateOpdSettings, { isLoading: saving }] = useUpdateOpdSettingsMutation();
+
+  const [validityDays, setValidityDays] = useState('');
+  const [initialised,  setInitialised]  = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [success,      setSuccess]      = useState<string | null>(null);
+
+  if (opdSettings && !initialised) {
+    setValidityDays(String(opdSettings.validityDays));
+    setInitialised(true);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    const days = parseInt(validityDays, 10);
+    if (!validityDays || isNaN(days) || days < 1 || days > 365) {
+      setError('Validity days must be a whole number between 1 and 365.');
+      return;
+    }
+
+    try {
+      await updateOpdSettings({ tenantId: tenantId!, validityDays: days }).unwrap();
+      setSuccess('OPD payment validity updated successfully.');
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to save OPD payment validity.');
+    }
+  }
+
+  if (!tenantId) return null;
+
+  return (
+    <div className="space-y-6 max-w-lg pt-2 border-t">
+      <div className="pt-6">
+        <h2 className="text-lg font-semibold tracking-tight">OPD Payment Validity</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Number of days a completed OPD payment remains valid — a patient can have new OPD
+          visits created within this window without paying again. Once it lapses, the next
+          OPD visit requires a new payment.
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="space-y-2 max-w-xs">
+            <Label htmlFor="opd-validity-days">Validity Period (days)</Label>
+            <Input
+              id="opd-validity-days"
+              type="number"
+              min="1"
+              max="365"
+              step="1"
+              value={validityDays}
+              onChange={(e) => setValidityDays(e.target.value)}
+              required
+            />
+          </div>
+
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+          )}
+          {success && (
+            <p className="text-sm text-green-700 bg-green-50 rounded-md px-3 py-2">{success}</p>
+          )}
+
+          <div className="flex justify-end">
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : 'Save Validity Period'}
+            </Button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

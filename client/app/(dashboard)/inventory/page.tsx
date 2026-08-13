@@ -23,6 +23,7 @@ import { Label }                         from '@/components/ui/label';
 import { Badge }                         from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { CharCounter } from '@/components/ui/char-counter';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import {
   Package,
   Plus,
@@ -117,7 +118,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">Add Inventory Item</h2>
@@ -221,7 +222,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -264,7 +265,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">Edit Inventory Item</h2>
@@ -355,7 +356,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -385,7 +386,7 @@ function DeleteItemModal({ item, onClose }: DeleteItemModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-sm rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold text-destructive">Delete Item</h2>
@@ -414,7 +415,7 @@ function DeleteItemModal({ item, onClose }: DeleteItemModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -446,7 +447,7 @@ function StockHistoryDrawer({ item, onClose }: StockHistoryDrawerProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
       <div
         className="relative flex flex-col h-full w-full max-w-md bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -522,7 +523,7 @@ function StockHistoryDrawer({ item, onClose }: StockHistoryDrawerProps) {
           </div>
         )}
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -564,7 +565,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
@@ -659,7 +660,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -690,7 +691,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-sm rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <div>
@@ -732,7 +733,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -757,7 +758,7 @@ function ItemDetailPanel({ item, canManage, onClose }: ItemDetailPanelProps) {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
         <div
           className="relative flex flex-col h-full w-full max-w-md bg-background shadow-xl"
           onClick={(e) => e.stopPropagation()}
@@ -813,7 +814,7 @@ function ItemDetailPanel({ item, canManage, onClose }: ItemDetailPanelProps) {
             </div>
           )}
         </div>
-      </div>
+      </DialogOverlay>
 
       {showStock && (
         <StockUpdateModal

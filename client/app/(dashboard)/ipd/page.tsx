@@ -24,9 +24,11 @@ import { Badge }  from '@/components/ui/badge';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import {
   Bed,
   PlusCircle,
+  Plus,
   RefreshCw,
   X,
   Search,
@@ -352,7 +354,7 @@ function AdmissionPanel({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
       <div
         className="relative flex flex-col h-full w-full max-w-lg bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -361,7 +363,7 @@ function AdmissionPanel({
         <div className="flex items-start justify-between p-5 border-b shrink-0">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2">
-              <Badge variant={admission.status === 'ADMITTED' ? 'default' : 'secondary'}>
+              <Badge variant={admission.status === 'ADMITTED' ? 'success' : 'secondary'}>
                 {admission.status}
               </Badge>
             </div>
@@ -439,7 +441,7 @@ function AdmissionPanel({
                 {editDoctors.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {editDoctors.map((d) => (
-                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
                         <span className="truncate min-w-0" title={d.name}>{d.name}</span>
                         <button type="button" onClick={() => setEditDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
                           <X className="h-3 w-3" />
@@ -580,7 +582,7 @@ function AdmissionPanel({
           </div>
         )}
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -663,32 +665,32 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const selectedWard = wards.find((w) => w.wardId === wardId);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b">
-          <h2 className="text-lg font-semibold">New Admission</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h2 className="text-base font-semibold">New Admission</h2>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
 
           {/* Step 1 — Patient */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Patient</Label>
             <PatientSearch value={patient} onChange={setPatient} />
           </div>
 
           {/* Step 2 — Ward */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="na-ward">Ward</Label>
             <select
               id="na-ward"
               value={wardId}
               onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
               required
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Select ward…</option>
               {wards.map((w) => (
@@ -701,7 +703,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
 
           {/* Step 3 — Bed selector */}
           {wardId && (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label>Bed</Label>
               {allBeds.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No beds in this ward yet.</p>
@@ -748,13 +750,13 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           )}
 
           {/* Step 4 — Department filter (optional) */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="na-dept">Department <span className="text-muted-foreground font-normal">(optional)</span></Label>
             <select
               id="na-dept"
               value={selectedDepartmentId}
               onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">— All Departments —</option>
               {departments.map((dept) => (
@@ -764,12 +766,12 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           </div>
 
           {/* Step 5 — Doctors (optional) */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label>Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
             {selectedDoctors.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 mb-2">
                 {selectedDoctors.map((d) => (
-                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
                     <span className="truncate min-w-0" title={d.name}>{d.name}</span>
                     <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
                       <X className="h-3 w-3" />
@@ -782,14 +784,14 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
               <select
                 value={addDoctorId}
                 onChange={(e) => setAddDoctorId(e.target.value)}
-                className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— Add doctor —</option>
                 {doctorList.filter((d) => !selectedDoctors.some((x) => x.userId === d.userId)).map((d) => (
                   <option key={d.userId} value={d.userId}>{d.name}</option>
                 ))}
               </select>
-              <button
+              <Button
                 type="button"
                 disabled={!addDoctorId}
                 onClick={() => {
@@ -799,10 +801,11 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
                     setAddDoctorId('');
                   }
                 }}
-                className="shrink-0 rounded-md border border-input bg-background px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+                className="shrink-0 h-10"
               >
-                Add
-              </button>
+                <Plus className="h-4 w-4 mr-1.5" />
+                Add Doctor
+              </Button>
             </div>
           </div>
 
@@ -811,7 +814,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             <p className="text-sm font-medium">Payment *</p>
             <div className="space-y-1.5">
               <Label htmlFor="na-pay-amount">Amount (₹) *</Label>
-              <input
+              <Input
                 id="na-pay-amount"
                 type="number"
                 min="1"
@@ -819,7 +822,6 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
                 placeholder="0.00"
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 required
               />
             </div>
@@ -862,7 +864,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -896,7 +898,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-lg max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b shrink-0">
           <div>
@@ -952,7 +954,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
           </form>
         )}
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -967,7 +969,7 @@ interface DischargeConfirmProps {
 
 function DischargeConfirm({ admission, onConfirm, onCancel, loading }: DischargeConfirmProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
         <div className="flex items-start gap-3">
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
@@ -990,7 +992,7 @@ function DischargeConfirm({ admission, onConfirm, onCancel, loading }: Discharge
           </Button>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -1146,7 +1148,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                       <p className="text-xs text-muted-foreground">{a.assignedDoctorIds?.length ? a.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ') : '—'}</p>
                     </div>
                     <div className="shrink-0 flex flex-col items-end gap-1">
-                      <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'} className="text-xs">
+                      <Badge variant={a.status === 'ADMITTED' ? 'success' : 'secondary'} className="text-xs">
                         {a.status}
                       </Badge>
                       {a.progressNotes.length > 0 && (
@@ -1172,7 +1174,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                     <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setNotesFor(a)}>
                       Notes
                       {a.progressNotes.length > 0 && (
-                        <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">
+                        <span className="ml-1 rounded-full bg-muted text-muted-foreground px-1.5 text-[10px] font-semibold">
                           {a.progressNotes.length}
                         </span>
                       )}
@@ -1230,7 +1232,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={a.status === 'ADMITTED' ? 'default' : 'secondary'}>
+                        <Badge variant={a.status === 'ADMITTED' ? 'success' : 'secondary'}>
                           {a.status}
                         </Badge>
                         {a.progressNotes.length > 0 && (
@@ -1258,7 +1260,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                           >
                             Notes
                             {a.progressNotes.length > 0 && (
-                              <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 text-[10px] font-semibold">
+                              <span className="ml-1 rounded-full bg-muted text-muted-foreground px-1.5 text-[10px] font-semibold">
                                 {a.progressNotes.length}
                               </span>
                             )}
@@ -1332,7 +1334,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
         />
       )}
       {justDischarged && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4">
           <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
@@ -1349,7 +1351,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
               Close
             </Button>
           </div>
-        </div>
+        </DialogOverlay>
       )}
     </div>
   );

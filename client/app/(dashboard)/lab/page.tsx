@@ -30,6 +30,7 @@ import { Badge }                         from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import {
   FlaskConical,
   Plus,
@@ -52,10 +53,15 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function statusVariant(s: LabRequestStatus): 'default' | 'secondary' | 'outline' {
-  if (s === 'PENDING')     return 'default';
-  if (s === 'IN_PROGRESS') return 'secondary';
-  return 'outline';
+// Fixed width so every Status pill (PENDING / IN PROGRESS / COMPLETED) renders
+// at the same size — content centered, text never clipped or wrapped.
+const STATUS_BADGE_CLASS = 'w-28 justify-center text-center whitespace-nowrap';
+
+function statusVariant(s: LabRequestStatus): 'warning' | 'info' | 'success' {
+  // Fixed semantic statuses — never tenant-brand-colored.
+  if (s === 'PENDING')     return 'warning';
+  if (s === 'IN_PROGRESS') return 'info';
+  return 'success';
 }
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -183,7 +189,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">
@@ -239,7 +245,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -290,7 +296,7 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-md rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">Upload Report</h2>
@@ -335,7 +341,7 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -398,7 +404,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">
@@ -469,7 +475,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -509,7 +515,7 @@ function DeleteRequestModal({ requestId, type, onClose }: DeleteRequestModalProp
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-sm rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">Delete Request</h2>
@@ -537,7 +543,7 @@ function DeleteRequestModal({ requestId, type, onClose }: DeleteRequestModalProp
           </div>
         </div>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -570,7 +576,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+      <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
         <div
           className="relative flex flex-col h-full w-full max-w-md bg-background shadow-xl"
           onClick={(e) => e.stopPropagation()}
@@ -578,7 +584,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
           <div className="flex items-start justify-between p-5 border-b shrink-0">
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Badge variant={statusVariant(request.status)}>{request.status.replace('_', ' ')}</Badge>
+                <Badge variant={statusVariant(request.status)} className={STATUS_BADGE_CLASS}>{request.status.replace('_', ' ')}</Badge>
                 <span className="text-xs text-muted-foreground capitalize">{type}</span>
               </div>
               <p className="text-sm font-semibold">{testLabel}</p>
@@ -645,7 +651,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
             </div>
           )}
         </div>
-      </div>
+      </DialogOverlay>
 
       {showUpload && (
         <ReportUploadModal
@@ -820,7 +826,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                           {formatDate(r.requestedAt)}
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={statusVariant(r.status)}>{r.status.replace('_', ' ')}</Badge>
+                          <Badge variant={statusVariant(r.status)} className={STATUS_BADGE_CLASS}>{r.status.replace('_', ' ')}</Badge>
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell">
                           <span className={cn(

@@ -7,7 +7,7 @@ import { useAppSelector } from '@/store/hooks';
 import type { PackageStatus } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 
 export default function PackagesPage() {
   const profile = useAppSelector((s) => s.auth.profile);
@@ -52,18 +52,21 @@ export default function PackagesPage() {
       <div className="grid gap-4">
         {data?.data.map((pkg) => (
           <Link key={pkg.packageId} href={`/packages/${pkg.packageId}`}>
-            <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between text-base">
-                  {pkg.name}
-                  <Badge variant={pkg.status === 'ACTIVE' ? 'default' : 'secondary'}>
-                    {pkg.status}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground flex gap-6">
-                <span>₹{pkg.price.toFixed(2)}</span>
-                <span>{pkg.includedServices.length} services</span>
+            <Card className="h-24 cursor-pointer transition-colors hover:bg-muted/50">
+              <CardContent className="flex h-full items-center justify-between gap-4 p-5">
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <p className="truncate text-base font-semibold leading-none text-foreground">{pkg.name}</p>
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">₹{pkg.price.toFixed(2)}</span>
+                    <span>{pkg.includedServices.length} service{pkg.includedServices.length === 1 ? '' : 's'}</span>
+                  </div>
+                </div>
+                <Badge
+                  variant={pkg.status === 'ACTIVE' ? 'success' : 'destructive'}
+                  className="w-[88px] h-6 shrink-0 justify-center text-center"
+                >
+                  {pkg.status}
+                </Badge>
               </CardContent>
             </Card>
           </Link>

@@ -8,6 +8,8 @@ import { AuditEntityType } from '../../shared/types/common.types';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { objectIdSchema, searchSchema } from '../../shared/utils/validation';
 import { passwordSchema } from '../../shared/utils/password';
+import { UserRole } from '../../shared/types/common.types';
+import { ForbiddenError } from '../../shared/middleware/error-handler';
 
 const createTenantSchema = z.object({
   name:       z.string().min(1).max(200),
@@ -30,6 +32,13 @@ const updateBrandingSchema = z.object({
 
 const tenantIdParamSchema = z.object({
   tenantId: objectIdSchema,
+});
+
+const updateOpdSettingsSchema = z.object({
+  validityDays: z.number({ invalid_type_error: 'validityDays must be a number' })
+    .int('validityDays must be a whole number')
+    .min(1, 'validityDays must be at least 1')
+    .max(365, 'validityDays cannot exceed 365'),
 });
 
 export async function createTenant(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -119,6 +128,37 @@ export async function updateBranding(req: Request, res: Response, next: NextFunc
       req.user!.userId,
     );
     res.status(200).json({ status: 'success', data: { message: 'Branding updated' } });
+  } catch (err) { next(err); }
+}
+
+// ─── OPD Settings (Hospital Admin configurable) ───────────────────────────────
+
+// Tenant-scoped self-service settings — unlike branding (public letterhead
+// data), OPD validity is an internal business rule, so every request must be
+// pinned to the caller's own tenant regardless of the :tenantId path param.
+function assertOwnTenant(req: Request, tenantId: string): void {
+  if (req.user!.role !== UserRole.SUPER_ADMIN && req.user!.tenantId !== tenantId) {
+    throw new ForbiddenError('Cannot access another hospital\'s settings');
+  }
+}
+
+export async function getOpdSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    assertOwnTenant(req, tenantId);
+    const settings = await tenantService.getOpdSettings(tenantId);
+    res.status(200).json({ status: 'success', data: settings });
+  } catch (err) { next(err); }
+}
+
+export async function updateOpdSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    assertOwnTenant(req, tenantId);
+    const body = updateOpdSettingsSchema.safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+    const settings = await tenantService.updateOpdSettings(tenantId, body.data.validityDays, req.user!.userId);
+    res.status(200).json({ status: 'success', data: settings });
   } catch (err) { next(err); }
 }
 

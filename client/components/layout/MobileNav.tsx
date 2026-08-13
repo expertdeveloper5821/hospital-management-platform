@@ -2,6 +2,7 @@
 
 import { useEffect }     from 'react';
 import { Sidebar }       from '@/components/shared/Sidebar';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 
 interface MobileNavProps {
   open:    boolean;
@@ -25,8 +26,8 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
     <>
       {/* Backdrop — only on mobile (hidden md+, because Sidebar is static there) */}
       {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+        <DialogOverlay
+          className="z-40 bg-black/50 md:hidden"
           onClick={onClose}
           aria-hidden="true"
         />

@@ -16,6 +16,7 @@ import type { WardResponse, UserResponse } from '@/store/types';
 import { Button }   from '@/components/ui/button';
 import { Input }    from '@/components/ui/input';
 import { Label }    from '@/components/ui/label';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import {
   Bed,
   Building2,
@@ -56,7 +57,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <DialogOverlay className="items-center justify-center bg-black/50">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Add Beds — {ward.name}</h2>
@@ -85,7 +86,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -110,7 +111,7 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <DialogOverlay className="items-center justify-center bg-black/50">
       <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-5">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Create Ward</h2>
@@ -134,7 +135,7 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
   );
 }
 

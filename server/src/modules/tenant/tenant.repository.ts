@@ -53,6 +53,11 @@ export class TenantRepository {
     await TenantModel.findByIdAndUpdate(tenantId, { $set: update });
   }
 
+  async updateOpdValidityDays(tenantId: string, validityDays: number): Promise<void> {
+    assertDbConnected();
+    await TenantModel.findByIdAndUpdate(tenantId, { $set: { 'opdSettings.validityDays': validityDays } });
+  }
+
   async saveInviteToken(tenantId: string, token: string, expiry: Date): Promise<void> {
     assertDbConnected();
     await TenantModel.findByIdAndUpdate(tenantId, {

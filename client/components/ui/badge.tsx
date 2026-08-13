@@ -10,6 +10,11 @@ const badgeVariants = cva(
         secondary:   'bg-secondary text-secondary-foreground',
         destructive: 'bg-destructive/15 text-destructive',
         outline:     'border border-input text-foreground',
+        // Fixed semantic statuses — never tenant-brand-colored. Use these
+        // (not `default`) for Active/Pending/Completed/etc. status badges.
+        success:     'bg-success/15 text-success',
+        warning:     'bg-warning/15 text-warning',
+        info:        'bg-info/15 text-info',
       },
     },
     defaultVariants: { variant: 'default' },

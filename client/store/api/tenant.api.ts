@@ -35,6 +35,10 @@ interface BrandingDetail {
   primaryColor: string;
 }
 
+export interface OPDSettingsDetail {
+  validityDays: number;
+}
+
 export const tenantApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
@@ -100,6 +104,24 @@ export const tenantApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<BrandingDetail>) => raw.data,
       providesTags: ['Tenant'],
     }),
+
+    // GET /:tenantId/opd-settings — readable by any authenticated tenant role
+    getOpdSettings: build.query<OPDSettingsDetail, string>({
+      query: (tenantId) => `/api/tenants/${tenantId}/opd-settings`,
+      transformResponse: (raw: ApiSuccess<OPDSettingsDetail>) => raw.data,
+      providesTags: ['Tenant'],
+    }),
+
+    // PATCH /:tenantId/opd-settings — Hospital Admin only
+    updateOpdSettings: build.mutation<OPDSettingsDetail, { tenantId: string; validityDays: number }>({
+      query: ({ tenantId, validityDays }) => ({
+        url: `/api/tenants/${tenantId}/opd-settings`,
+        method: 'PATCH',
+        body: { validityDays },
+      }),
+      transformResponse: (raw: ApiSuccess<OPDSettingsDetail>) => raw.data,
+      invalidatesTags: ['Tenant'],
+    }),
   }),
 });
 
@@ -112,4 +134,6 @@ export const {
   useResendInviteMutation,
   useUpdateBrandingMutation,
   useGetBrandingQuery,
+  useGetOpdSettingsQuery,
+  useUpdateOpdSettingsMutation,
 } = tenantApi;

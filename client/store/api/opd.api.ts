@@ -6,6 +6,7 @@ import type {
   CreateOPDVisitRequest,
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
+  OPDPaymentValidityResponse,
 } from '../types';
 
 export const opdApi = baseApi.injectEndpoints({
@@ -74,6 +75,15 @@ export const opdApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<OPDPatientHistory>) => raw.data,
       providesTags: ['OPD'],
     }),
+
+    // GET /api/opd/patients/:patientId/payment-validity — consulted by the New
+    // OPD Visit form right after a patient is selected; backend is the sole
+    // authority on whether a new OPD payment is required.
+    getOPDPaymentValidity: build.query<OPDPaymentValidityResponse, string>({
+      query: (patientId) => `/api/opd/patients/${patientId}/payment-validity`,
+      transformResponse: (raw: ApiSuccess<OPDPaymentValidityResponse>) => raw.data,
+      providesTags: ['OPD', 'Payment'],
+    }),
   }),
 });
 
@@ -85,4 +95,5 @@ export const {
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
   useGetOPDPatientHistoryQuery,
+  useGetOPDPaymentValidityQuery,
 } = opdApi;

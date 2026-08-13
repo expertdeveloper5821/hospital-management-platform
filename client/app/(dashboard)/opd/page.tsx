@@ -7,6 +7,7 @@ import {
   useUpdateOPDVisitMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
+  useGetOPDPaymentValidityQuery,
 } from '@/store/api/opd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
@@ -14,6 +15,7 @@ import { useListUsersQuery } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListWardsQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
+import { PatientFormModal } from '@/components/patients/patient-form-modal';
 import type {
   OPDVisitResponse,
   OPDVisitStatus,
@@ -31,6 +33,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import {
   Stethoscope,
   Plus,
@@ -40,6 +43,8 @@ import {
   Search,
   ClipboardList,
   RefreshCw,
+  UserPlus,
+  Printer,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -57,10 +62,11 @@ function formatINR(amount: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
 }
 
-function statusVariant(s: OPDVisitStatus): 'default' | 'secondary' | 'outline' | 'destructive' {
-  if (s === 'OPEN')        return 'default';
-  if (s === 'IN_PROGRESS') return 'secondary';
-  if (s === 'COMPLETED')   return 'outline';
+function statusVariant(s: OPDVisitStatus): 'info' | 'success' | 'destructive' {
+  // Fixed semantic statuses — never tenant-brand-colored.
+  if (s === 'OPEN')        return 'info';
+  if (s === 'IN_PROGRESS') return 'info';
+  if (s === 'COMPLETED')   return 'success';
   return 'destructive';
 }
 
@@ -228,7 +234,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
       <div
         className="relative flex flex-col h-full w-full max-w-lg bg-background shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -304,7 +310,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                     {editDoctorIds.map((id) => {
                       const d = allDoctors.find((u) => u.userId === id);
                       return (
-                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
                           <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
                           <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
                             <X className="h-3 w-3" />
@@ -424,16 +430,24 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
 
         {/* Footer actions */}
         {!isTerminal && (
-          <div className="shrink-0 border-t p-4 space-y-3">
+          <div className="shrink-0 border-t border-border bg-white px-5 py-4">
             {mode === 'view' && (
-              <div className="flex flex-wrap items-stretch gap-2">
+              <div className="flex items-stretch gap-3">
                 {canEdit && (
-                  <Button variant="outline" size="sm" className="flex-1 min-w-[7rem]" onClick={() => setMode('edit')}>
+                  <Button
+                    variant="outline"
+                    className="flex-1 h-10 rounded-lg border-slate-300 bg-white font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+                    onClick={() => setMode('edit')}
+                  >
                     Edit Visit
                   </Button>
                 )}
                 {canComplete && (
-                  <Button size="sm" className="flex-1 min-w-[7rem]" onClick={() => setMode('complete')}>
+                  <Button
+                    variant="success"
+                    className="flex-1 h-10 rounded-lg border border-emerald-600 bg-emerald-600 font-medium text-white transition-colors hover:border-emerald-700 hover:bg-emerald-700"
+                    onClick={() => setMode('complete')}
+                  >
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Complete
                   </Button>
@@ -441,29 +455,28 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 {canCancel && (
                   <Button
                     variant="destructive"
-                    size="sm"
-                    className="shrink-0 px-3"
+                    className="flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
                     onClick={() => setShowCancelConfirm(true)}
                     disabled={cancelling}
                   >
-                    <XCircle className="h-4 w-4 mr-1" />
+                    <XCircle className="h-4 w-4 mr-2" />
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
                 )}
               </div>
             )}
             {mode === 'edit' && (
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => setMode('view')}>Back</Button>
-                <Button type="submit" form="editForm" className="flex-1" disabled={updating}>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 h-10 rounded-lg" onClick={() => setMode('view')}>Back</Button>
+                <Button type="submit" form="editForm" className="flex-1 h-10 rounded-lg" disabled={updating}>
                   {updating ? 'Saving…' : 'Save Changes'}
                 </Button>
               </div>
             )}
             {mode === 'complete' && (
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => setMode('view')}>Back</Button>
-                <Button type="submit" form="completeForm" className="flex-1" disabled={completing}>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 h-10 rounded-lg" onClick={() => setMode('view')}>Back</Button>
+                <Button type="submit" form="completeForm" variant="success" className="flex-1 h-10 rounded-lg" disabled={completing}>
                   {completing ? 'Completing…' : 'Confirm Complete'}
                 </Button>
               </div>
@@ -473,7 +486,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       </div>
 
       {showCancelConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4">
           <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
             <div className="flex items-start gap-3">
               <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
@@ -493,9 +506,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               </Button>
             </div>
           </div>
-        </div>
+        </DialogOverlay>
       )}
-    </div>
+    </DialogOverlay>
   );
 }
 
@@ -524,9 +537,46 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
     visitDate: todayISO(),
     notes:     '',
   });
+  const [regType,       setRegType]       = useState<'free' | 'paid'>('free');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
   const [error, setError] = useState('');
+  const [showAddPatient, setShowAddPatient] = useState(false);
+
+  // Reset to the default manual choice whenever the selected patient changes,
+  // so a stale EXPIRED/VALID determination from a previously-selected patient
+  // can never leak into the new patient's payment section while the fresh
+  // validity check is in flight.
+  useEffect(() => {
+    setRegType('free');
+    setPaymentAmount('');
+    setPaymentMode('');
+  }, [selectedPatient?.patientId]);
+
+  // Backend-authoritative OPD payment validity check for the selected patient —
+  // decides whether this visit is covered by a still-valid prior OPD payment,
+  // whether that payment expired (a new one is mandatory), or whether no OPD
+  // payment exists yet (existing manual Free/Paid flow applies unchanged).
+  const {
+    data: paymentValidity,
+    isFetching: checkingValidity,
+    refetch: refetchPaymentValidity,
+  } = useGetOPDPaymentValidityQuery(selectedPatient?.patientId ?? '', { skip: !selectedPatient });
+
+  // Sync the registration type to the backend's determination whenever it's
+  // known — VALID never charges, EXPIRED always requires a fresh payment.
+  // NO_PAYMENT (or not yet loaded) leaves the receptionist's manual Free/Paid
+  // choice untouched, preserving today's flow for a patient's first payment.
+  useEffect(() => {
+    if (!paymentValidity) return;
+    if (paymentValidity.reason === 'VALID') {
+      setRegType('free');
+      setPaymentAmount('');
+      setPaymentMode('');
+    } else if (paymentValidity.reason === 'EXPIRED') {
+      setRegType('paid');
+    }
+  }, [paymentValidity]);
 
   // Only Hospital Admins may backdate an OPD visit (e.g. paper-register backfill);
   // every other role is restricted to today/future dates, both here and on the backend.
@@ -572,12 +622,34 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
       setError('Past dates are not allowed for OPD visits.');
       return;
     }
-    const amount = parseFloat(paymentAmount);
-    if (!paymentAmount || isNaN(amount) || amount <= 0) {
-      setError('Payment amount is required and must be greater than zero.');
-      return;
+
+    // Re-check payment validity right before submitting — the backend is the
+    // final authority, and this form may have sat open long enough for a
+    // previously-fetched validity window to have lapsed since it was checked.
+    let validity = paymentValidity;
+    try {
+      const fresh = await refetchPaymentValidity();
+      if (fresh.data) validity = fresh.data;
+    } catch {
+      // Network hiccup on the re-check — fall back to the last known result
+      // (or the manual toggle, if none was ever loaded) rather than blocking submission.
     }
-    if (!paymentMode) { setError('Payment mode is required.'); return; }
+
+    const paymentCovered = validity?.reason === 'VALID';    // still within validity — never charge
+    const paymentForced  = validity?.reason === 'EXPIRED';  // validity lapsed — payment mandatory
+    const effectiveRegType: 'free' | 'paid' = paymentCovered ? 'free' : paymentForced ? 'paid' : regType;
+
+    let amount = 0;
+    let mode: OPDPaymentMode | undefined;
+    if (effectiveRegType === 'paid') {
+      amount = parseFloat(paymentAmount);
+      if (!paymentAmount || isNaN(amount) || amount <= 0) {
+        setError('Payment amount is required and must be greater than zero.');
+        return;
+      }
+      if (!paymentMode) { setError('Payment mode is required.'); return; }
+      mode = paymentMode;
+    }
 
     submittingRef.current = true;
     try {
@@ -595,28 +667,35 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
         return;
       }
 
-      try {
-        await createManualPayment({
-          patientId:     selectedPatient.patientId,
-          amount,
-          paymentMethod: paymentMode,
-          description:   `OPD Consultation – Visit #${visit.queueNumber}`,
-          referenceType: 'OPD_VISIT',
-          referenceId:   visit.visitId,
-        }).unwrap();
-        onClose();
-      } catch (err: any) {
-        setError(
-          `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
-        );
+      if (effectiveRegType === 'paid' && mode) {
+        try {
+          await createManualPayment({
+            patientId:     selectedPatient.patientId,
+            amount,
+            paymentMethod: mode,
+            description:   paymentForced
+              ? `OPD Consultation – Visit #${visit.queueNumber} (OPD Renewal)`
+              : `OPD Consultation – Visit #${visit.queueNumber}`,
+            referenceType: 'OPD_VISIT',
+            referenceId:   visit.visitId,
+          }).unwrap();
+        } catch (err: any) {
+          setError(
+            `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
+          );
+          return;
+        }
       }
+
+      onClose();
     } finally {
       submittingRef.current = false;
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <>
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
           <h2 className="text-base font-semibold">New OPD Visit</h2>
@@ -648,53 +727,73 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                 </button>
               </div>
             ) : (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  className="pl-9"
-                  placeholder="Search patient by name or mobile…"
-                  value={patientSearch}
-                  onChange={(e) => setPatientSearch(e.target.value)}
-                />
-                {debouncedPSearch && (
-                  <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
-                    {fetchingPatients && (
-                      <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
-                    )}
-                    {!fetchingPatients && patients.length === 0 && (
-                      <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
-                    )}
-                    {patients.map((p) => (
-                      <button
-                        key={p.patientId}
-                        type="button"
-                        className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
-                        onClick={() => { setSelectedPatient(p); setPatientSearch(''); }}
-                      >
-                        <span className="text-sm font-medium">{p.fullName}</span>
-                        <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search patient by name or mobile…"
+                    value={patientSearch}
+                    onChange={(e) => setPatientSearch(e.target.value)}
+                  />
+                  {debouncedPSearch && (
+                    <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                      {fetchingPatients && (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+                      )}
+                      {!fetchingPatients && patients.length === 0 && (
+                        <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
+                      )}
+                      {patients.map((p) => (
+                        <button
+                          key={p.patientId}
+                          type="button"
+                          className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                          onClick={() => { setSelectedPatient(p); setPatientSearch(''); }}
+                        >
+                          <span className="text-sm font-medium">{p.fullName}</span>
+                          <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <Button type="button" onClick={() => setShowAddPatient(true)} className="shrink-0 h-10">
+                  <UserPlus className="h-4 w-4 mr-1.5" />
+                  Add Patient
+                </Button>
               </div>
             )}
           </div>
 
-          {/* Department */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nv-dept">Department</Label>
-            <select
-              id="nv-dept"
-              value={selectedDepartmentId}
-              onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">— All Departments —</option>
-              {departments.map((dept) => (
-                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
-              ))}
-            </select>
+          {/* Department + Visit Date */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="nv-dept">Department</Label>
+              <select
+                id="nv-dept"
+                value={selectedDepartmentId}
+                onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— All Departments —</option>
+                {departments.map((dept) => (
+                  <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="nv-date">Visit Date</Label>
+              <Input
+                id="nv-date"
+                type="date"
+                min={canBackdate ? undefined : todayISO()}
+                value={form.visitDate ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
+                className="relative pr-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-3 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:bottom-0 [&::-webkit-calendar-picker-indicator]:my-auto [&::-webkit-calendar-picker-indicator]:h-5 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+              />
+            </div>
           </div>
 
           {/* Doctors */}
@@ -705,7 +804,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                 {selectedDoctorIds.map((id) => {
                   const d = allDoctors.find((u) => u.userId === id);
                   return (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary max-w-[160px]">
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
                       <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
                       <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
                         <X className="h-3 w-3" />
@@ -726,7 +825,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                   <option key={d.userId} value={d.userId}>{d.name}</option>
                 ))}
               </select>
-              <button
+              <Button
                 type="button"
                 disabled={!addDoctorId}
                 onClick={() => {
@@ -735,23 +834,12 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                     setAddDoctorId('');
                   }
                 }}
-                className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
+                className="shrink-0 h-10"
               >
-                Add
-              </button>
+                <Plus className="h-4 w-4 mr-1.5" />
+                Add Doctor
+              </Button>
             </div>
-          </div>
-
-          {/* Visit date */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nv-date">Visit Date</Label>
-            <Input
-              id="nv-date"
-              type="date"
-              min={canBackdate ? undefined : todayISO()}
-              value={form.visitDate ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
-            />
           </div>
 
           {/* Notes */}
@@ -766,42 +854,93 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             />
           </div>
 
-          {/* Payment */}
+          {/* Registration Type / Payment — driven by the backend's OPD payment
+              validity check for the selected patient (see getOPDPaymentValidity). */}
           <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
-            <p className="text-sm font-medium">Payment *</p>
-            <div className="space-y-1.5">
-              <Label htmlFor="nv-pay-amount">Amount (₹) *</Label>
-              <Input
-                id="nv-pay-amount"
-                type="number"
-                min="1"
-                step="0.01"
-                placeholder="0.00"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payment Mode *</Label>
-              <div className="flex gap-2">
-                {PAYMENT_MODES.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setPaymentMode(value)}
-                    className={cn(
-                      'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                      paymentMode === value
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-input bg-background hover:bg-muted',
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <p className="text-sm font-medium">OPD Payment</p>
+
+            {!selectedPatient ? (
+              <p className="text-sm text-muted-foreground">Select a patient to check OPD payment status.</p>
+            ) : checkingValidity && !paymentValidity ? (
+              <p className="text-sm text-muted-foreground">Checking previous OPD payment…</p>
+            ) : paymentValidity?.reason === 'VALID' ? (
+              <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+                Existing OPD payment is valid until {formatDate(paymentValidity.validUntil!)}. No new payment is required for this visit.
+              </p>
+            ) : (
+              <>
+                {paymentValidity?.reason === 'EXPIRED' && (
+                  <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+                    Previous OPD payment validity expired on {formatDate(paymentValidity.validUntil!)}. A new OPD payment is required to continue.
+                  </p>
+                )}
+
+                {paymentValidity?.reason !== 'EXPIRED' && (
+                  <>
+                    <p className="text-xs text-muted-foreground -mt-1">Registration Type *</p>
+                    <div className="flex gap-2">
+                      {(['free', 'paid'] as const).map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            setRegType(t);
+                            if (t === 'free') { setPaymentAmount(''); setPaymentMode(''); }
+                            setError('');
+                          }}
+                          className={[
+                            'flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize transition-colors',
+                            regType === t
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-input bg-background hover:bg-muted',
+                          ].join(' ')}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {regType === 'paid' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="nv-pay-amount">Amount (₹) *</Label>
+                      <Input
+                        id="nv-pay-amount"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Payment Mode *</Label>
+                      <div className="flex gap-2">
+                        {PAYMENT_MODES.map(({ value, label }) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setPaymentMode(value)}
+                            className={cn(
+                              'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                              paymentMode === value
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : 'border-input bg-background hover:bg-muted',
+                            )}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
           </div>
 
           <div className="flex justify-end gap-3 pt-1">
@@ -812,7 +951,15 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           </div>
         </form>
       </div>
-    </div>
+    </DialogOverlay>
+    {showAddPatient && (
+      <PatientFormModal
+        mode="register"
+        onClose={() => setShowAddPatient(false)}
+        onSuccess={(p) => { setSelectedPatient(p); setShowAddPatient(false); }}
+      />
+    )}
+    </>
   );
 }
 
@@ -978,7 +1125,6 @@ export default function OPDPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-12">#</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Doctor</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
@@ -995,7 +1141,6 @@ export default function OPDPage() {
                       )}
                       onClick={() => setSelectedVisit(v)}
                     >
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{v.queueNumber}</td>
                       <td className="px-4 py-3 max-w-[180px]">
                         <p className="font-medium truncate" title={v.fullName ?? v.patientId}>{v.fullName ?? v.patientId}</p>
                         <p className="text-xs text-muted-foreground">
@@ -1006,12 +1151,30 @@ export default function OPDPage() {
                         {doctorNames(v.doctorIds ?? [])}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={statusVariant(v.status)}>{statusLabel(v.status)}</Badge>
+                        <Badge
+                          variant={statusVariant(v.status)}
+                          className="h-6 w-28 justify-center whitespace-nowrap"
+                        >
+                          {statusLabel(v.status)}
+                        </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button className="text-xs text-primary hover:underline">
-                          {TERMINAL.has(v.status) ? 'View' : 'Open'}
-                        </button>
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            title="Print OPD "
+                            aria-label="Print OPD "
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(`/opd/${v.visitId}/print`, '_blank', 'noopener,noreferrer');
+                            }}
+                          >
+                            <Printer className="h-4 w-4" />
+                          </button>
+                          <button className="text-xs text-primary hover:underline">
+                            {TERMINAL.has(v.status) ? 'View' : 'Open'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

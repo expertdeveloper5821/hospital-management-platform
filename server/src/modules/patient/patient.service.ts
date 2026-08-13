@@ -29,10 +29,12 @@ export class PatientService {
     data:      CreatePatientRequest,
     createdBy: string,
   ): Promise<IPatient> {
-    const existing = await patientRepository.findByMobile(tenantId, data.mobileNumber);
+    // Only warn when BOTH name and mobile number match an existing patient — a shared
+    // mobile number with a different name (e.g. family members) is allowed through.
+    const existing = await patientRepository.findByMobileAndName(tenantId, data.mobileNumber, data.fullName);
     if (existing && !data.forceCreate) {
       throw new DuplicateWarningError(
-        `A patient with mobile ${data.mobileNumber} already exists. Send forceCreate:true to proceed.`,
+        `A patient named "${data.fullName}" with mobile ${data.mobileNumber} already exists. Send forceCreate:true to proceed.`,
         existing.patientId,
       );
     }

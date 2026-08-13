@@ -58,6 +58,11 @@ const ACTION_COLORS: Record<string, string> = {
 const ACTION_BADGE_BASE =
   'inline-block w-32 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset text-center align-middle truncate';
 
+// Same badge, slightly taller/roomier — used only in the desktop table's Action
+// column, where the extra breathing room reads better against the wider row.
+const ACTION_BADGE_TABLE =
+  'inline-block w-32 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset text-center align-middle truncate';
+
 // Past-tense, human-readable label for an audit action (CREATE → Created, …).
 // Falls back to Title Case for any action not explicitly mapped.
 const ACTION_LABELS: Record<string, string> = {
@@ -371,11 +376,11 @@ export default function AuditPage() {
                         <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-muted-foreground" title={log.entityId}>
                           {truncate(log.entityId, 16)}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-4 py-3.5 whitespace-nowrap">
                           <span
                             title={formatAction(log.action)}
                             className={cn(
-                              ACTION_BADGE_BASE,
+                              ACTION_BADGE_TABLE,
                               ACTION_COLORS[log.action] ?? 'bg-slate-100 text-slate-700 ring-slate-600/20',
                             )}
                           >
