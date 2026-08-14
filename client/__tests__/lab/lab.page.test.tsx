@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -65,5 +66,47 @@ describe('LabPage — New Request role gating', () => {
     mockRole = 'MANAGER';
     render(<LabPage />);
     expect(screen.queryByRole('button', { name: /new request/i })).not.toBeInTheDocument();
+  });
+
+  test('PATHOLOGIST sees the New Request button on the Pathology tab (default)', () => {
+    mockRole = 'PATHOLOGIST';
+    render(<LabPage />);
+    expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
+  });
+
+  test('PATHOLOGIST does not see the New Request button on the Radiology tab', async () => {
+    const user = userEvent.setup();
+    mockRole = 'PATHOLOGIST';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /radiology/i }));
+    expect(screen.queryByRole('button', { name: /new request/i })).not.toBeInTheDocument();
+  });
+
+  test('RADIOLOGIST sees the New Request button on the Radiology tab', async () => {
+    const user = userEvent.setup();
+    mockRole = 'RADIOLOGIST';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /radiology/i }));
+    expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
+  });
+
+  test('RADIOLOGIST does not see the New Request button on the Pathology tab (default)', () => {
+    mockRole = 'RADIOLOGIST';
+    render(<LabPage />);
+    expect(screen.queryByRole('button', { name: /new request/i })).not.toBeInTheDocument();
+  });
+
+  test('RECEPTIONIST sees the New Request button on the Pathology tab (default)', () => {
+    mockRole = 'RECEPTIONIST';
+    render(<LabPage />);
+    expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
+  });
+
+  test('RECEPTIONIST sees the New Request button on the Radiology tab', async () => {
+    const user = userEvent.setup();
+    mockRole = 'RECEPTIONIST';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /radiology/i }));
+    expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
   });
 });

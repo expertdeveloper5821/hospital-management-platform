@@ -17,6 +17,7 @@ const router  = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
 
 const ADMIN_ROLES   = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN];
+const CREATE_ROLES  = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST];
 const READER_ROLES  = [
   UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER,
   UserRole.FINANCE_MANAGER, UserRole.RECEPTIONIST, UserRole.DOCTOR,
@@ -26,7 +27,7 @@ const CANCEL_ROLES  = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTI
 
 router.post('/',
   ...protect,
-  requireRole(...ADMIN_ROLES),
+  requireRole(...CREATE_ROLES),
   createPackage,
 );
 

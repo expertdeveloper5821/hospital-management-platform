@@ -33,6 +33,24 @@ jest.mock('@/store/api/department.api', () => ({
   useListDepartmentsQuery: () => ({ data: undefined }),
 }));
 
+// The IPD New Admission modal's "Add Patient" button reuses the shared
+// register-patient modal (same component the OPD New Visit flow uses) — its
+// own form/validation/submission logic is exercised elsewhere, so here it's
+// stubbed to a minimal component that lets us verify the wiring: the button
+// opens it, and its onSuccess callback selects the new patient.
+jest.mock('@/components/patients/patient-form-modal', () => ({
+  PatientFormModal: ({ onSuccess, onClose }: { onSuccess?: (p: unknown) => void; onClose: () => void }) => (
+    <div data-testid="patient-form-modal">
+      <button
+        onClick={() => onSuccess?.({ patientId: 'PAT-NEW-1', fullName: 'Newly Registered Patient', mobileNumber: '9998887776' })}
+      >
+        Mock Register Patient
+      </button>
+      <button onClick={onClose}>Mock Close</button>
+    </div>
+  ),
+}));
+
 let mockRole = 'RECEPTIONIST';
 
 jest.mock('@/store/hooks', () => ({
@@ -74,6 +92,37 @@ describe('IPDPage — New Admission role gating', () => {
     mockRole = 'NURSE';
     render(<IPDPage />);
     expect(screen.queryByRole('button', { name: /new admission/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('IPDPage — New Admission Add Patient flow', () => {
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+  });
+
+  test('shows an Add Patient button next to the patient search field', () => {
+    render(<IPDPage />);
+    fireEvent.click(screen.getByRole('button', { name: /new admission/i }));
+    expect(screen.getByRole('button', { name: /add patient/i })).toBeInTheDocument();
+  });
+
+  test('clicking Add Patient opens the shared register-patient modal', () => {
+    render(<IPDPage />);
+    fireEvent.click(screen.getByRole('button', { name: /new admission/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add patient/i }));
+    expect(screen.getByTestId('patient-form-modal')).toBeInTheDocument();
+  });
+
+  test('successfully registering a new patient auto-selects them in the admission form and closes the register modal', () => {
+    render(<IPDPage />);
+    fireEvent.click(screen.getByRole('button', { name: /new admission/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add patient/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /mock register patient/i }));
+
+    expect(screen.queryByTestId('patient-form-modal')).not.toBeInTheDocument();
+    expect(screen.getByText('Newly Registered Patient')).toBeInTheDocument();
+    expect(screen.getByText(/PAT-NEW-1/)).toBeInTheDocument();
   });
 });
 

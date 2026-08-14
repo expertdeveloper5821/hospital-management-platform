@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   useListDepartmentsQuery,
   useCreateDepartmentMutation,
@@ -15,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CharCounter } from '@/components/ui/char-counter';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
-import { Building2, Plus, Pencil, Trash2, X, RefreshCw } from 'lucide-react';
+import { Building2, Plus, Pencil, Trash2, X, RefreshCw, Search } from 'lucide-react';
 
 // ─── Create / Edit Modal ──────────────────────────────────────────────────────
 
@@ -223,6 +224,122 @@ function DeleteModal({ dept, onConfirm, onClose, isLoading, error }: DeleteModal
   );
 }
 
+// ─── Doctors Cell (chips + overflow popover) ──────────────────────────────────
+
+const DOCTOR_CHIP_LIMIT = 3; // max chips shown inline before collapsing to "+N more"
+
+function DoctorChip({ name, className = '' }: { name: string; className?: string }) {
+  return (
+    <span
+      className={`inline-flex max-w-[110px] items-center px-2 py-0.5 rounded-full text-xs bg-info/10 text-info font-medium ${className}`}
+    >
+      <span className="truncate min-w-0" title={name}>{name}</span>
+    </span>
+  );
+}
+
+function DoctorsCell({ names }: { names: string[] }) {
+  const [open, setOpen]         = useState(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  const triggerRef  = useRef<HTMLButtonElement>(null);
+  const popoverRef  = useRef<HTMLDivElement>(null);
+  const closeTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearCloseTimer() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function openPopover() {
+    clearCloseTimer();
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const width = 224; // matches w-56 popover
+      const left  = Math.min(rect.left, window.innerWidth - width - 8);
+      setPosition({ top: rect.bottom + 6, left: Math.max(8, left) });
+    }
+    setOpen(true);
+  }
+
+  function scheduleClose() {
+    clearCloseTimer();
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  }
+
+  // Close on outside click / Escape / any ancestor scroll (keeps the fixed-position popover from going stale).
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (popoverRef.current?.contains(e.target as Node) || triggerRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    function handleScroll() { setOpen(false); }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [open]);
+
+  if (names.length === 0) {
+    return <span className="text-muted-foreground italic">—</span>;
+  }
+
+  const visible  = names.slice(0, DOCTOR_CHIP_LIMIT);
+  const overflow = names.length - visible.length;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {visible.map((n) => <DoctorChip key={n} name={n} />)}
+
+      {overflow > 0 && (
+        <button
+          type="button"
+          ref={triggerRef}
+          onClick={() => (open ? setOpen(false) : openPopover())}
+          onMouseEnter={openPopover}
+          onMouseLeave={scheduleClose}
+          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground font-medium hover:bg-muted/80 transition-colors"
+        >
+          +{overflow} more
+        </button>
+      )}
+
+      {open && overflow > 0 && position && createPortal(
+        <div
+          ref={popoverRef}
+          onMouseEnter={clearCloseTimer}
+          onMouseLeave={scheduleClose}
+          style={{ top: position.top, left: position.left }}
+          className="fixed z-50 w-56 rounded-md border bg-background shadow-lg p-2 space-y-2"
+        >
+          <p className="text-xs font-semibold text-muted-foreground px-1">
+            {names.length} doctor{names.length !== 1 ? 's' : ''}
+          </p>
+
+          <div className="max-h-48 overflow-y-auto space-y-0.5">
+            {names.map((n) => (
+              <div key={n} className="px-2 py-1 rounded text-xs hover:bg-muted/40 truncate" title={n}>
+                {n}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DepartmentsPage() {
@@ -235,6 +352,7 @@ export default function DepartmentsPage() {
   const [deleting, setDeleting]         = useState<DepartmentResponse | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError]   = useState<string | null>(null);
+  const [search, setSearch]             = useState('');
 
   const allDoctors = usersResult?.data ?? [];
   // Map departmentId → list of doctor names for quick lookup in the table
@@ -244,6 +362,15 @@ export default function DepartmentsPage() {
     }
     return acc;
   }, {});
+
+  // Global search — live-filters by department name OR any assigned doctor's name.
+  const query = search.trim().toLowerCase();
+  const filteredDepartments = (departments ?? []).filter((dept) => {
+    if (!query) return true;
+    if (dept.name.toLowerCase().includes(query)) return true;
+    const doctorNames = doctorsByDept[dept.departmentId] ?? [];
+    return doctorNames.some((n) => n.toLowerCase().includes(query));
+  });
 
   async function handleDelete() {
     if (!deleting) return;
@@ -271,15 +398,27 @@ export default function DepartmentsPage() {
             <p className="text-sm text-muted-foreground">Manage clinical departments and assign head doctors</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Refresh
-          </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
-            <Plus className="h-4 w-4 mr-1" />
-            New Department
-          </Button>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search by department ,doctor…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 h-9"
+              aria-label="Search departments"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Refresh
+            </Button>
+            <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              New Department
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -312,7 +451,14 @@ export default function DepartmentsPage() {
                 </td>
               </tr>
             )}
-            {!isLoading && departments?.map((dept) => {
+            {!isLoading && departments && departments.length > 0 && filteredDepartments.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                  No departments or doctors match &ldquo;{search.trim()}&rdquo;.
+                </td>
+              </tr>
+            )}
+            {!isLoading && filteredDepartments.map((dept) => {
               const names = doctorsByDept[dept.departmentId] ?? [];
               return (
                 <tr key={dept.departmentId} className="border-b hover:bg-muted/30 transition-colors">
@@ -320,19 +466,11 @@ export default function DepartmentsPage() {
                   <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell max-w-xs truncate" title={dept.description ?? undefined}>
                     {dept.description ?? <span className="italic">—</span>}
                   </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
+                  <td className="px-4 py-3 hidden md:table-cell max-w-[240px]">
                     {doctorsLoading ? (
                       <span className="text-muted-foreground italic text-xs">Loading…</span>
-                    ) : names.length === 0 ? (
-                      <span className="text-muted-foreground italic">—</span>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {names.map((n) => (
-                          <span key={n} className="inline-flex max-w-[160px] items-center px-2 py-0.5 rounded-full text-xs bg-info/10 text-info font-medium">
-                            <span className="truncate min-w-0" title={n}>{n}</span>
-                          </span>
-                        ))}
-                      </div>
+                      <DoctorsCell names={names} />
                     )}
                   </td>
                   <td className="px-4 py-3">

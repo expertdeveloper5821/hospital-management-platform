@@ -94,6 +94,15 @@ describe('InventoryService — createItem', () => {
       'INVENTORY_ITEM',
       'item-001',
     );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'ADMIN',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledTimes(3);
   });
 
   test('does NOT send notification when created above threshold', async () => {
@@ -182,6 +191,15 @@ describe('InventoryService — updateStock', () => {
       'INVENTORY_ITEM',
       'item-001',
     );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'ADMIN',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledTimes(3);
   });
 
   test('does NOT send notification when stock was already below threshold', async () => {
@@ -308,6 +326,15 @@ describe('InventoryService — updateMetadata', () => {
       'INVENTORY_ITEM',
       'item-001',
     );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledWith(
+      'ADMIN',
+      TENANT,
+      expect.stringContaining('Low Stock'),
+      expect.any(String),
+      'INVENTORY_ITEM',
+      'item-001',
+    );
+    expect(mockNotifSvc.sendToRole).toHaveBeenCalledTimes(3);
   });
 
   test('does NOT send notification when item was already low-stock before update', async () => {

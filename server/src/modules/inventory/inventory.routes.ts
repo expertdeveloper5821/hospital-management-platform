@@ -22,7 +22,7 @@ router.use(authenticateJWT, scopeTenant);
 
 router.post(
   '/',
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER),
   createInventoryItem,
 );
 
@@ -40,13 +40,13 @@ router.get(
 
 router.patch(
   '/:itemId/stock',
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER),
   updateStock,
 );
 
 router.patch(
   '/:itemId/threshold',
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER),
   updateThreshold,
 );
 

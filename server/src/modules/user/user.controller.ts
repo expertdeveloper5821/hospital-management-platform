@@ -177,11 +177,23 @@ export async function createUser(req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 }
 
+// PATHOLOGIST/RADIOLOGIST only need this endpoint to populate the "Referred by
+// doctor" dropdown on the New Pathology/Radiology Request form — they must
+// never be able to browse the full staff directory (that's Staff Management,
+// restricted to HOSPITAL_ADMIN/ADMIN/MANAGER/HR). Hard-pin the role filter to
+// DOCTOR for them regardless of what the query string asks for.
+const DOCTOR_LOOKUP_ONLY_ROLES: UserRole[] = [UserRole.PATHOLOGIST, UserRole.RADIOLOGIST];
+
 export async function listUsers(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const query = userListSchema.safeParse(req.query);
     if (!query.success) throw new ValidationError('Invalid query params');
     const { page, limit, role, isActive, status, search, sortBy, sortOrder } = query.data;
+
+    const requesterRole = req.user!.role;
+    const resolvedRole = DOCTOR_LOOKUP_ONLY_ROLES.includes(requesterRole)
+      ? UserRole.DOCTOR
+      : (role as UserRole | undefined);
 
     // `status` (ACTIVE/INACTIVE) takes precedence over legacy `isActive` boolean
     let resolvedIsActive: boolean | undefined = isActive;
@@ -193,7 +205,7 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
     const result = await userService.listUsers(
       req.user!.tenantId!,
       {
-        role:      role as UserRole | undefined,
+        role:      resolvedRole,
         isActive:  resolvedIsActive,
         search,
         sortBy:    sortBy as 'name' | 'createdAt' | 'role' | undefined,

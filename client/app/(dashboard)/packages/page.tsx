@@ -16,7 +16,7 @@ export default function PackagesPage() {
 
   const { data, isLoading, isError } = useListPackagesQuery({ status: statusFilter, page, limit: 20 });
 
-  const canCreate = profile?.role === 'HOSPITAL_ADMIN' || profile?.role === 'ADMIN';
+  const canCreate = profile?.role === 'HOSPITAL_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'RECEPTIONIST';
 
   return (
     <div className="p-6 space-y-6">

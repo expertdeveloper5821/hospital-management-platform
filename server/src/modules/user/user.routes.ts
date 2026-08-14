@@ -28,7 +28,10 @@ router.post('/me/profile-image',          ...protect, profileImageUpload.single(
 router.patch('/me/password',              ...protect, changeMyPassword);
 
 router.post('/',                          ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), createUser);
-router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER, UserRole.NURSE), listUsers);
+// PATHOLOGIST/RADIOLOGIST are admitted here too, but listUsers() hard-pins them
+// to role=DOCTOR — they populate the New Request form's doctor dropdown only,
+// never the full staff directory.
+router.get('/',                           ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HR, UserRole.MANAGER, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST), listUsers);
 router.get('/:userId',                    ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR, UserRole.MANAGER), getUserById);
 router.patch('/:userId',                  ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserProfile);
 router.patch('/:userId/role',             ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserRole);

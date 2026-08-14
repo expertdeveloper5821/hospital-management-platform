@@ -215,13 +215,13 @@ describe('POST /api/payments/manual', () => {
     expect(res.status).toBe(201);
   });
 
-  test('Manager cannot create manual payment (403)', async () => {
+  test('Manager can create manual payment', async () => {
     const res = await request(app)
       .post('/api/payments/manual')
       .set('Authorization', `Bearer ${managerToken}`)
       .send({ patientId, amount: 100, paymentMethod: 'CASH', description: 'Fee' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
   });
 
   test('rejects empty description with 400', async () => {

@@ -21,9 +21,11 @@ const router = express.Router();
 router.use(authenticateJWT, scopeTenant);
 
 // POST /api/payments/manual — record a Cash/Cheque payment (U5-B-05)
+// NURSE and MANAGER included so the mandatory payment step of nurse/manager-created
+// OPD visits (client/app/(dashboard)/opd/page.tsx NewVisitModal) can record the fee.
 router.post(
   '/manual',
-  requireRole(UserRole.RECEPTIONIST, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   createManualPayment,
 );
 

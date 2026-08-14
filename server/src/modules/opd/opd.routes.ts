@@ -28,9 +28,11 @@ const CLINICAL_ROLES = [
 
 // DOCTOR is deliberately excluded — doctors may view and act on visits assigned
 // to them, but must not be able to create new OPD visits (UI, direct URL, or API).
+// NURSE is also excluded — nurses have view-only access to Doctor Visits and must
+// not be able to create, edit, complete, or cancel them.
 router.post('/visits',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
   createVisit,
 );
 
@@ -44,13 +46,13 @@ router.get('/visits',
 // them as the visitId param.
 router.patch('/visits/:visitId/complete',
   ...protect,
-  requireRole(UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
   completeVisit,
 );
 
 router.patch('/visits/:visitId/cancel',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
   cancelVisit,
 );
 
@@ -62,7 +64,7 @@ router.get('/visits/:visitId',
 
 router.patch('/visits/:visitId',
   ...protect,
-  requireRole(UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
   updateVisit,
 );
 
@@ -73,10 +75,10 @@ router.get('/patients/:patientId/history',
 );
 
 // Consulted by the New OPD Visit form right after a patient is selected —
-// same role set as visit creation (RECEPTIONIST, NURSE, HOSPITAL_ADMIN).
+// same role set as visit creation (RECEPTIONIST, NURSE, HOSPITAL_ADMIN, MANAGER).
 router.get('/patients/:patientId/payment-validity',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
   getPaymentValidity,
 );
 

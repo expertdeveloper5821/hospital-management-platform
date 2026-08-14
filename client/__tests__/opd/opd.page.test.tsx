@@ -79,12 +79,20 @@ describe('OPDPage — New Visit role gating', () => {
     expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
   });
 
-  test('NURSE does not see the New Visit button', () => {
+  test('NURSE does not see the New Visit button (view-only access to Doctor Visits)', () => {
     mockRole = 'NURSE';
     mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
     mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
     render(<OPDPage />);
     expect(screen.queryByRole('button', { name: /new visit/i })).not.toBeInTheDocument();
+  });
+
+  test('MANAGER sees the New Visit button', () => {
+    mockRole = 'MANAGER';
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
+    render(<OPDPage />);
+    expect(screen.getByRole('button', { name: /new visit/i })).toBeInTheDocument();
   });
 });
 
