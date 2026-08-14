@@ -1,7 +1,7 @@
 import { OPDVisitModel, IOPDVisit } from './opd.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
-import { OPDVisitStatus } from './opd.types';
+import { OPDVisitStatus, ACTIVE_STATUSES } from './opd.types';
 import { ConflictError } from '../../shared/middleware/error-handler';
 
 const DUPLICATE_APPOINTMENT_MESSAGE =
@@ -162,6 +162,22 @@ export class OPDRepository {
       }
       throw err;
     }
+  }
+
+  // Sweep visits left on the queue after their visit date has passed. Bulk
+  // $set (not findOneAndUpdate) so a backlog of stale days costs one round trip;
+  // the { tenantId, visitDate, status } index makes the match cheap.
+  async markStaleAsNoShow(tenantId: string, before: Date): Promise<number> {
+    assertDbConnected();
+    const result = await OPDVisitModel.updateMany(
+      {
+        tenantId,
+        visitDate: { $lt: before },
+        status:    { $in: [...ACTIVE_STATUSES] }, // spread — Mongoose rejects a readonly array
+      },
+      { $set: { status: OPDVisitStatus.NO_SHOW } },
+    );
+    return result.modifiedCount ?? 0;
   }
 
   // Patients this doctor has ever had an OPD visit with — one half of the

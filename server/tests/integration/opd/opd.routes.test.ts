@@ -1905,3 +1905,183 @@ describe('GET /api/opd/patients/:patientId/payment-validity', () => {
     });
   });
 });
+
+// ─── PATCH /api/opd/visits/:visitId/start ─────────────────────────────────────
+// OPEN → IN_PROGRESS. Before this existed, IN_PROGRESS was declared in the enum
+// but never written by anything, so every visit sat at OPEN until completion.
+describe('PATCH /api/opd/visits/:visitId/start', () => {
+  // HOSPITAL_ADMIN is used for the state-machine cases: a DOCTOR's requests are
+  // scoped to their own patients, so an unassigned doctor gets a masking 404
+  // rather than the status conflict these tests are asserting on.
+  test('200 — moves an OPEN visit to IN_PROGRESS', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-START001', status: OPDVisitStatus.OPEN });
+    const ha    = await seedUser(tid, 'ha@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(ha._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-START001/start')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe(OPDVisitStatus.IN_PROGRESS);
+
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-START001' });
+    expect(stored!.status).toBe(OPDVisitStatus.IN_PROGRESS);
+  });
+
+  test('200 — the assigned Doctor can start their own visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const doc    = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
+    await seedVisit(tid, {
+      visitId:   'OPD-START005',
+      status:    OPDVisitStatus.OPEN,
+      doctorIds: [doc._id.toString()],
+    });
+    const token = tokenFor(doc._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-START005/start')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe(OPDVisitStatus.IN_PROGRESS);
+  });
+
+  test('409 — starting an already IN_PROGRESS visit is rejected', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-START002', status: OPDVisitStatus.IN_PROGRESS });
+    const ha    = await seedUser(tid, 'ha@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(ha._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-START002/start')
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+  });
+
+  test('409 — cannot start a COMPLETED visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-START003', status: OPDVisitStatus.COMPLETED });
+    const ha    = await seedUser(tid, 'ha@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(ha._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-START003/start')
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+  });
+
+  test('403 — a Receptionist cannot start a consultation', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-START004', status: OPDVisitStatus.OPEN });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-START004/start')
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  test('401 — unauthenticated', async () => {
+    const res = await request(app).patch('/api/opd/visits/OPD-START001/start');
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─── Stale-visit sweep ────────────────────────────────────────────────────────
+// A visit left on the queue after its date has passed used to stay OPEN
+// forever, so yesterday's queue rendered as if those patients were still
+// waiting. Reading the queue now resolves them to NO_SHOW.
+describe('stale OPD visits are swept to NO_SHOW', () => {
+  async function seedVisitOn(tid: string, visitId: string, visitDate: Date, status: OPDVisitStatus) {
+    return OPDVisitModel.create({
+      visitId, tenantId: tid, patientId: 'PAT-TEST0001', doctorIds: [],
+      visitDate, queueNumber: 1, status,
+      diagnosis: null, prescription: null, notes: null,
+    });
+  }
+
+  test("a previous day's OPEN visit becomes NO_SHOW when the queue is read", async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisitOn(tid, 'OPD-STALE001', daysAgo(3), OPDVisitStatus.OPEN);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    await request(app).get('/api/opd/visits').set(bearer(token)).expect(200);
+
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-STALE001' });
+    expect(stored!.status).toBe(OPDVisitStatus.NO_SHOW);
+  });
+
+  test('an IN_PROGRESS visit from a previous day is also swept', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisitOn(tid, 'OPD-STALE002', daysAgo(1), OPDVisitStatus.IN_PROGRESS);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    await request(app).get('/api/opd/visits').set(bearer(token)).expect(200);
+
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-STALE002' });
+    expect(stored!.status).toBe(OPDVisitStatus.NO_SHOW);
+  });
+
+  // The boundary case that matters: a server running in UTC must not expire the
+  // current IST day's queue during the 18:30–24:00 UTC window.
+  test("today's OPEN visit is left alone", async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisitOn(tid, 'OPD-FRESH001', new Date(), OPDVisitStatus.OPEN);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    await request(app).get('/api/opd/visits').set(bearer(token)).expect(200);
+
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-FRESH001' });
+    expect(stored!.status).toBe(OPDVisitStatus.OPEN);
+  });
+
+  test('a past COMPLETED visit is not rewritten', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisitOn(tid, 'OPD-DONE001', daysAgo(5), OPDVisitStatus.COMPLETED);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    await request(app).get('/api/opd/visits').set(bearer(token)).expect(200);
+
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DONE001' });
+    expect(stored!.status).toBe(OPDVisitStatus.COMPLETED);
+  });
+
+  test('the sweep does not cross tenants', async () => {
+    const a = await seedTenant('Hospital A');
+    const b = await seedTenant('Hospital B');
+    const aid = a._id.toString();
+    const bid = b._id.toString();
+    await seedPatient(aid);
+    await seedVisitOn(bid, 'OPD-OTHER001', daysAgo(3), OPDVisitStatus.OPEN);
+    const rc    = await seedUser(aid, 'rc@a.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), aid, UserRole.RECEPTIONIST);
+
+    await request(app).get('/api/opd/visits').set(bearer(token)).expect(200);
+
+    const other = await OPDVisitModel.findOne({ tenantId: bid, visitId: 'OPD-OTHER001' });
+    expect(other!.status).toBe(OPDVisitStatus.OPEN);
+  });
+});

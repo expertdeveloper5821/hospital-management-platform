@@ -9,6 +9,7 @@ import {
   getQueue,
   getVisit,
   updateVisit,
+  startConsultation,
   completeVisit,
   cancelVisit,
   getPatientHistory,
@@ -40,8 +41,14 @@ router.get('/visits',
   getQueue,
 );
 
-// /complete and /cancel must come before /:visitId so Express does not treat
-// them as the visitId param.
+// /start, /complete and /cancel must come before /:visitId so Express does not
+// treat them as the visitId param.
+router.patch('/visits/:visitId/start',
+  ...protect,
+  requireRole(UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),
+  startConsultation,
+);
+
 router.patch('/visits/:visitId/complete',
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN),

@@ -184,7 +184,7 @@ export interface PatientSearchResult {
  
 // ─── OPD ──────────────────────────────────────────────────────────────────────
  
-export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
  
 export interface OPDVisitResponse {
   visitId:        string;
