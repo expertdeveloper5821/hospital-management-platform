@@ -1,8 +1,13 @@
+// Stored values are deliberately unchanged from FR-07.1/07.3 (`OPEN`,
+// `COMPLETED`) — the queue UI relabels them (Waiting / In Consultation) without
+// a data migration. NO_SHOW is the resolution for a visit nobody ever attended:
+// see OPDService.expireStaleVisits.
 export const OPDVisitStatus = {
   OPEN:        'OPEN',
   IN_PROGRESS: 'IN_PROGRESS',
   COMPLETED:   'COMPLETED',
   CANCELLED:   'CANCELLED',
+  NO_SHOW:     'NO_SHOW',
 } as const;
 
 export type OPDVisitStatus = typeof OPDVisitStatus[keyof typeof OPDVisitStatus];
@@ -10,7 +15,16 @@ export type OPDVisitStatus = typeof OPDVisitStatus[keyof typeof OPDVisitStatus];
 export const TERMINAL_STATUSES: ReadonlySet<OPDVisitStatus> = new Set([
   OPDVisitStatus.COMPLETED,
   OPDVisitStatus.CANCELLED,
+  OPDVisitStatus.NO_SHOW,
 ]);
+
+// Statuses a visit can still move out of — i.e. it is on the live queue. A
+// visit left in one of these after its visit date has passed is stale and gets
+// swept to NO_SHOW.
+export const ACTIVE_STATUSES: readonly OPDVisitStatus[] = [
+  OPDVisitStatus.OPEN,
+  OPDVisitStatus.IN_PROGRESS,
+];
 
 export interface CreateOPDVisitRequest {
   patientId:      string;

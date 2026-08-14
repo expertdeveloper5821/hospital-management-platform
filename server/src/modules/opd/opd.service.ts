@@ -178,6 +178,60 @@ export class OPDService {
     return withFullName(updated, patient?.fullName);
   }
 
+  // OPEN → IN_PROGRESS. Called when the doctor actually starts seeing the
+  // patient, so the queue can distinguish "waiting" from "being seen" —
+  // previously every visit sat at OPEN until it was completed.
+  async startConsultation(
+    tenantId:          string,
+    visitId:           string,
+    startedBy:         string,
+    scopedPatientIds?: string[],
+  ): Promise<IOPDVisit & { fullName?: string }> {
+    const visit = await opdRepository.findByVisitId(tenantId, visitId);
+    if (!visit) throw new NotFoundError('OPD visit not found');
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+      throw new NotFoundError('OPD visit not found');
+    }
+
+    if (TERMINAL_STATUSES.has(visit.status)) {
+      throw new ConflictError(`Cannot start a visit with status ${visit.status}`);
+    }
+    if (visit.status === OPDVisitStatus.IN_PROGRESS) {
+      throw new ConflictError('This consultation has already started.');
+    }
+
+    const updated = await opdRepository.update(tenantId, visitId, {
+      status: OPDVisitStatus.IN_PROGRESS,
+    } as Partial<IOPDVisit>, scopedPatientIds);
+    if (!updated) throw new NotFoundError('OPD visit not found');
+
+    await auditService.log({
+      entityType:    AuditEntityType.OPD_VISIT,
+      entityId:      visitId,
+      action:        'UPDATE',
+      userId:        startedBy,
+      tenantId,
+      previousValue: { status: visit.status },
+      newValue:      { status: OPDVisitStatus.IN_PROGRESS },
+    });
+
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return withFullName(updated, patient?.fullName);
+  }
+
+  // Resolve visits still sitting on the queue after their date has passed.
+  // Without this a visit nobody completed stays OPEN forever, so yesterday's
+  // queue keeps rendering as if those patients were still waiting.
+  //
+  // "Today" is IST midnight, not server midnight, so a server running in UTC
+  // never expires the current day's queue during the 18:30–24:00 UTC window.
+  // Runs off the queue read rather than a scheduler — the codebase has no cron,
+  // and this is self-healing: the first person to open OPD each day clears the
+  // backlog. Safe to call from a scheduler later without changing the result.
+  async expireStaleVisits(tenantId: string): Promise<number> {
+    return opdRepository.markStaleAsNoShow(tenantId, toIstMidnight(new Date()));
+  }
+
   async completeVisit(
     tenantId:          string,
     visitId:           string,
@@ -262,6 +316,12 @@ export class OPDService {
     patientIds?: string[],
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
+
+    // Sweep before reading so a stale visit is never rendered as still waiting.
+    // Best-effort: a failed sweep must not take the queue down with it.
+    try {
+      await this.expireStaleVisits(tenantId);
+    } catch { /* non-blocking — the queue read is the caller's actual request */ }
 
     let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds);
 

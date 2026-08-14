@@ -164,6 +164,20 @@ export async function completeVisit(req: Request, res: Response, next: NextFunct
   } catch (err) { next(err); }
 }
 
+export async function startConsultation(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const tenantId = req.user!.tenantId!;
+    const scopedPatientIds = await opdService.resolveMutationScopedPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const visit = await opdService.startConsultation(
+      tenantId,
+      req.params.visitId,
+      req.user!.userId,
+      scopedPatientIds,
+    );
+    res.status(200).json({ status: 'success', data: toResponse(visit) });
+  } catch (err) { next(err); }
+}
+
 export async function cancelVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const tenantId = req.user!.tenantId!;

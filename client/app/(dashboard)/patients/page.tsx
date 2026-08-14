@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { opdStatusLabel, opdStatusVariant } from '@/lib/opd-status';
 import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
@@ -56,16 +57,6 @@ function calcAge(dob: string) {
 // renders at the same footprint — identical width, height, padding, font
 // size, and border radius, with text centered regardless of label length.
 const BLOOD_GROUP_BADGE_CLASS = 'inline-flex w-12 h-6 items-center justify-center whitespace-nowrap';
-
-// ─── OPD status helpers ───────────────────────────────────────────────────────
-
-function visitStatusVariant(s: OPDVisitResponse['status']): 'info' | 'success' | 'destructive' {
-  // Fixed semantic statuses — never tenant-brand-colored.
-  if (s === 'OPEN')        return 'info';
-  if (s === 'IN_PROGRESS') return 'info';
-  if (s === 'COMPLETED')   return 'success';
-  return 'destructive';
-}
 
 // ─── Patient Detail Panel ─────────────────────────────────────────────────────
 
@@ -301,8 +292,8 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                             <span className="ml-2 text-xs text-muted-foreground font-normal">Queue #{v.queueNumber}</span>
                           </p>
                         </div>
-                        <Badge variant={visitStatusVariant(v.status)} className="text-xs shrink-0">
-                          {v.status.replace('_', ' ')}
+                        <Badge variant={opdStatusVariant(v.status)} className="text-xs shrink-0">
+                          {opdStatusLabel(v.status)}
                         </Badge>
                       </div>
                       <div className="space-y-1 text-xs text-muted-foreground">

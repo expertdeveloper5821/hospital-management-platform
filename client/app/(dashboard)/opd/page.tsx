@@ -5,6 +5,7 @@ import {
   useGetOPDQueueQuery,
   useCreateOPDVisitMutation,
   useUpdateOPDVisitMutation,
+  useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
   useGetOPDPaymentValidityQuery,
@@ -34,12 +35,14 @@ import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { opdStatusLabel, opdStatusVariant } from '@/lib/opd-status';
 import {
   Stethoscope,
   Plus,
   X,
   CheckCircle,
   XCircle,
+  PlayCircle,
   Search,
   ClipboardList,
   RefreshCw,
@@ -62,18 +65,6 @@ function formatINR(amount: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(amount);
 }
 
-function statusVariant(s: OPDVisitStatus): 'info' | 'success' | 'destructive' {
-  // Fixed semantic statuses — never tenant-brand-colored.
-  if (s === 'OPEN')        return 'info';
-  if (s === 'IN_PROGRESS') return 'info';
-  if (s === 'COMPLETED')   return 'success';
-  return 'destructive';
-}
-
-function statusLabel(s: OPDVisitStatus) {
-  return s.replace('_', ' ');
-}
-
 // The backend returns 409 with a ready-to-display message when the same patient
 // already has an active appointment with the selected doctor/date; fall back to
 // that exact wording if the response body is ever missing a message.
@@ -87,7 +78,7 @@ function opdErrorMessage(err: any, fallback: string): string {
   return err?.data?.message ?? fallback;
 }
 
-const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED']);
+const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW']);
 
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
 
@@ -153,8 +144,22 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
+  const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
   const [cancelVisit,   { isLoading: cancelling }] = useCancelOPDVisitMutation();
+
+  // Waiting → In Consultation. Keeps the panel open on the updated visit so the
+  // doctor can go straight on to Complete.
+  async function handleStartConsultation() {
+    if (starting) return;
+    setError('');
+    try {
+      const updated = await startConsultation(visit.visitId).unwrap();
+      onUpdate(updated);
+    } catch (err: any) {
+      setError(opdErrorMessage(err, 'Failed to start the consultation.'));
+    }
+  }
 
   // Synchronous guard against a double-click firing two update requests before
   // the mutation's isLoading flag has propagated through a render.
@@ -244,7 +249,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono text-muted-foreground">#{visit.queueNumber}</span>
-              <Badge variant={statusVariant(visit.status)}>{statusLabel(visit.status)}</Badge>
+              <Badge variant={opdStatusVariant(visit.status)}>{opdStatusLabel(visit.status)}</Badge>
             </div>
             <p className="text-sm font-semibold truncate">{visit.fullName ?? visit.patientId}</p>
             <p className="text-xs text-muted-foreground">{visit.patientId} · {formatDate(visit.visitDate)}</p>
@@ -432,20 +437,33 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         {!isTerminal && (
           <div className="shrink-0 border-t border-border bg-white px-5 py-4">
             {mode === 'view' && (
-              <div className="flex items-stretch gap-3">
+              // Wraps to a second row rather than crushing four buttons into
+              // the 448px panel when the visit is still waiting.
+              <div className="flex flex-wrap items-stretch gap-3">
                 {canEdit && (
                   <Button
                     variant="outline"
-                    className="flex-1 h-10 rounded-lg border-slate-300 bg-white font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg border-slate-300 bg-white font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
                     onClick={() => setMode('edit')}
                   >
                     Edit Visit
                   </Button>
                 )}
+                {canComplete && visit.status === 'OPEN' && (
+                  <Button
+                    variant="default"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg font-medium"
+                    onClick={handleStartConsultation}
+                    disabled={starting}
+                  >
+                    <PlayCircle className="h-4 w-4 mr-2" />
+                    {starting ? 'Starting…' : 'Start'}
+                  </Button>
+                )}
                 {canComplete && (
                   <Button
                     variant="success"
-                    className="flex-1 h-10 rounded-lg border border-emerald-600 bg-emerald-600 font-medium text-white transition-colors hover:border-emerald-700 hover:bg-emerald-700"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg border border-emerald-600 bg-emerald-600 font-medium text-white transition-colors hover:border-emerald-700 hover:bg-emerald-700"
                     onClick={() => setMode('complete')}
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
@@ -455,7 +473,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 {canCancel && (
                   <Button
                     variant="destructive"
-                    className="flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
                     onClick={() => setShowCancelConfirm(true)}
                     disabled={cancelling}
                   >
@@ -1177,9 +1195,14 @@ export default function OPDPage() {
                   {visits.map((v) => (
                     <tr
                       key={v.visitId}
+                      // Finished visits are tinted, not faded. Row-level opacity
+                      // dropped the doctor name to 2.3:1 and the action link to
+                      // 2.55:1 — both below the 4.5:1 AA floor, and the dimmed
+                      // link read as disabled. The status badge already carries
+                      // the state, so the tint is only a scanning aid.
                       className={cn(
                         'border-b last:border-0 transition-colors cursor-pointer hover:bg-muted/30',
-                        TERMINAL.has(v.status) && 'opacity-60',
+                        TERMINAL.has(v.status) && 'bg-muted/30',
                       )}
                       onClick={() => setSelectedVisit(v)}
                     >
@@ -1194,10 +1217,10 @@ export default function OPDPage() {
                       </td>
                       <td className="px-4 py-3">
                         <Badge
-                          variant={statusVariant(v.status)}
+                          variant={opdStatusVariant(v.status)}
                           className="h-6 w-28 justify-center whitespace-nowrap"
                         >
-                          {statusLabel(v.status)}
+                          {opdStatusLabel(v.status)}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -1213,8 +1236,11 @@ export default function OPDPage() {
                           >
                             <Printer className="h-4 w-4" />
                           </button>
+                          {/* Both states open the same panel — "Open" also read
+                              as the old OPEN status, which now displays as
+                              "Waiting". */}
                           <button className="text-xs text-primary hover:underline">
-                            {TERMINAL.has(v.status) ? 'View' : 'Open'}
+                            View
                           </button>
                         </div>
                       </td>

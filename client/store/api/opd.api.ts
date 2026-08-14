@@ -43,6 +43,12 @@ export const opdApi = baseApi.injectEndpoints({
       invalidatesTags: ['OPD'],
     }),
 
+    startOPDConsultation: build.mutation<OPDVisitResponse, string>({
+      query: (visitId) => ({ url: `/api/opd/visits/${visitId}/start`, method: 'PATCH' }),
+      transformResponse: (raw: ApiSuccess<OPDVisitResponse>) => raw.data,
+      invalidatesTags: ['OPD'],
+    }),
+
     completeOPDVisit: build.mutation<OPDVisitResponse, { visitId: string } & CompleteOPDVisitRequest>({
       query: ({ visitId, ...body }) => ({ url: `/api/opd/visits/${visitId}/complete`, method: 'PATCH', body }),
       transformResponse: (raw: ApiSuccess<OPDVisitResponse>) => raw.data,
@@ -99,6 +105,7 @@ export const {
   useGetOPDVisitByIdQuery,
   useCreateOPDVisitMutation,
   useUpdateOPDVisitMutation,
+  useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
   useGetOPDPatientHistoryQuery,

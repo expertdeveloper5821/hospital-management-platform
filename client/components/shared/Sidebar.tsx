@@ -159,20 +159,20 @@ export function Sidebar({ onClose }: SidebarProps) {
         </button>
       </div>
 
-      {/* Platform logo — shown when set by Super Admin */}
+      {/* Platform attribution — shown when the Super Admin has set a logo.
+          Labelled and scaled down so it reads as the vendor mark rather than a
+          second hospital logo competing with the branding header above. */}
       {platformSettings?.logoUrl && (
-        <div className="shrink-0 border-t border-sidebar-accent/40 px-4 py-3 flex items-center gap-2">
+        <div className="shrink-0 border-t border-sidebar-accent/40 px-4 py-2.5 flex items-center gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60 whitespace-nowrap shrink-0">
+            Powered by
+          </span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={platformSettings.logoUrl}
             alt={platformSettings.platformTitle ?? 'Platform'}
-            className="h-12 w-auto max-w-[80px] object-contain opacity-80 shrink-0"
+            className="h-6 w-auto max-w-[120px] min-w-0 object-contain object-left opacity-80"
           />
-          {/* {platformSettings.platformTitle && (
-            <span className="text-xs text-sidebar-foreground/60 truncate">
-              {platformSettings.platformTitle}
-            </span>
-          )} */}
         </div>
       )}
     </aside>
