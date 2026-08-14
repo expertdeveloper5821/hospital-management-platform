@@ -6,7 +6,7 @@ import { requireRole } from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
 import { UserRole } from '../../shared/types/common.types';
 import {
-  createUser, listUsers, getUserById, updateUserRole, deactivateUser, updateUserProfile,
+  createUser, listUsers, getUserById, updateUserRole, deactivateUser, reactivateUser, updateUserProfile,
   getMyProfile, updateMyProfile, uploadProfileImage, changeMyPassword,
 } from './user.controller';
 
@@ -33,5 +33,6 @@ router.get('/:userId',                    ...protect, requireRole(UserRole.HOSPI
 router.patch('/:userId',                  ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserProfile);
 router.patch('/:userId/role',             ...protect, requireRole(UserRole.HOSPITAL_ADMIN, UserRole.HR), updateUserRole);
 router.patch('/:userId/deactivate',       ...protect, requireRole(UserRole.HOSPITAL_ADMIN), deactivateUser);
+router.patch('/:userId/reactivate',       ...protect, requireRole(UserRole.HOSPITAL_ADMIN), reactivateUser);
 
 export default router;

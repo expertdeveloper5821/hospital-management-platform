@@ -30,6 +30,7 @@ function makePathologyDoc(overrides: Partial<IPathologyRequest> = {}): IPatholog
     tenantId:    TENANT,
     requestedBy: DOCTOR,
     testType:    'Blood CBC',
+    referredBy:  'SELF',
     status:      LabRequestStatus.PENDING,
     priority:    'NORMAL',
     notes:       null,
@@ -50,6 +51,7 @@ function makeRadiologyDoc(overrides: Partial<IRadiologyRequest> = {}): IRadiolog
     tenantId:    TENANT,
     requestedBy: DOCTOR,
     imagingType: 'X-Ray Chest',
+    referredBy:  'SELF',
     status:      LabRequestStatus.PENDING,
     priority:    'NORMAL',
     notes:       null,
@@ -78,7 +80,7 @@ describe('LabService — createPathologyRequest', () => {
     mockLabRepo.savePathology = jest.fn().mockResolvedValue(doc);
 
     const result = await service.createPathologyRequest(
-      { patientId: 'patient-001', testType: 'Blood CBC' },
+      { patientId: 'patient-001', testType: 'Blood CBC', referredBy: 'SELF' },
       TENANT,
       DOCTOR,
     );
@@ -92,7 +94,7 @@ describe('LabService — createPathologyRequest', () => {
     mockPatientRepo.findByPatientId = jest.fn().mockResolvedValue(null);
 
     await expect(
-      service.createPathologyRequest({ patientId: 'unknown', testType: 'CBC' }, TENANT, DOCTOR),
+      service.createPathologyRequest({ patientId: 'unknown', testType: 'CBC', referredBy: 'SELF' }, TENANT, DOCTOR),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 
@@ -100,7 +102,7 @@ describe('LabService — createPathologyRequest', () => {
     mockLabRepo.savePathology = jest.fn().mockResolvedValue(makePathologyDoc());
 
     await service.createPathologyRequest(
-      { patientId: 'patient-001', testType: 'Blood CBC' },
+      { patientId: 'patient-001', testType: 'Blood CBC', referredBy: 'SELF' },
       TENANT,
       DOCTOR,
     );

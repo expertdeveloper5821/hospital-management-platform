@@ -89,6 +89,26 @@ export class UserService {
     });
   }
 
+  async reactivateUser(tenantId: string, userId: string, requestedBy: string): Promise<void> {
+    const user = await userRepository.findById(tenantId, userId);
+    if (!user) throw new NotFoundError('User not found');
+    if (user.isActive) throw new ConflictError('User must be inactive to reactivate');
+
+    // No role/permission/data changes — reactivation only restores isActive so
+    // the user regains login access and their existing role's permissions.
+    await userRepository.setActive(tenantId, userId, true);
+
+    await auditService.log({
+      entityType:    AuditEntityType.USER_ACCOUNT,
+      entityId:      userId,
+      action:        'UPDATE',
+      userId:        requestedBy,
+      tenantId,
+      previousValue: { isActive: false },
+      newValue:      { isActive: true },
+    });
+  }
+
   async updateUserRole(
     tenantId: string,
     userId: string,

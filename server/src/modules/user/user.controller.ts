@@ -254,6 +254,14 @@ export async function deactivateUser(req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 }
 
+export async function reactivateUser(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { userId } = userIdParamSchema.parse(req.params);
+    await userService.reactivateUser(req.user!.tenantId!, userId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: { message: 'User reactivated' } });
+  } catch (err) { next(err); }
+}
+
 const updateProfileSchema = z.object({
   name:  z.string().min(1).max(200).optional(),
   email: z.string().email().max(254).optional(),

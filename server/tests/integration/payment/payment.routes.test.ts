@@ -186,6 +186,26 @@ describe('POST /api/payments/manual', () => {
     expect(res.status).toBe(404);
   });
 
+  test('stores and returns an optional transactionId when provided (UPI)', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 500, paymentMethod: 'UPI', description: 'Fee', transactionId: 'UPI-REF-9988' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.transactionId).toBe('UPI-REF-9988');
+  });
+
+  test('transactionId is optional — omitting it never blocks payment creation', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 500, paymentMethod: 'CARD', description: 'Fee' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.transactionId).toBeNull();
+  });
+
   test('Finance Manager can create manual payment', async () => {
     const res = await request(app)
       .post('/api/payments/manual')
@@ -534,7 +554,7 @@ describe('GET /api/payments/summary/by-department', () => {
         expect.objectContaining({ name: 'Radiology', total: 0 }),
       ]),
     );
-    expect(res.body.data.otherTotal).toBe(0);
+    expect(res.body.data.other.total).toBe(0);
     expect(res.body.data.grandTotal).toBe(0);
   });
 
@@ -572,13 +592,13 @@ describe('GET /api/payments/summary/by-department', () => {
     expect(byName['Cardiology']).toBe(500);
     expect(byName['Radiology']).toBe(800);
     expect(byName['Neurology']).toBe(0); // department exists but never appears on any payment
-    expect(res.body.data.otherTotal).toBe(300);
+    expect(res.body.data.other.total).toBe(300);
     expect(res.body.data.grandTotal).toBe(1600); // 500 + 800 + 300 — pending/failed/cancelled excluded
 
     // Invariant: department revenue always reconciles with the grand total.
     const departmentSum = (res.body.data.departments as Array<{ total: number }>)
       .reduce((sum, d) => sum + d.total, 0);
-    expect(departmentSum + res.body.data.otherTotal).toBe(res.body.data.grandTotal);
+    expect(departmentSum + res.body.data.other.total).toBe(res.body.data.grandTotal);
   });
 
   test('an OPD visit with no department assigned is safely bucketed as unassigned, not dropped or errored', async () => {
@@ -595,7 +615,7 @@ describe('GET /api/payments/summary/by-department', () => {
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.otherTotal).toBe(400);
+    expect(res.body.data.other.total).toBe(400);
     expect(res.body.data.grandTotal).toBe(400);
   });
 
@@ -612,7 +632,7 @@ describe('GET /api/payments/summary/by-department', () => {
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.otherTotal).toBe(250);
+    expect(res.body.data.other.total).toBe(250);
     expect(res.body.data.grandTotal).toBe(250);
   });
 
@@ -632,7 +652,7 @@ describe('GET /api/payments/summary/by-department', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.departments).toHaveLength(0); // Cardiology no longer active
-    expect(res.body.data.otherTotal).toBe(600);
+    expect(res.body.data.other.total).toBe(600);
     expect(res.body.data.grandTotal).toBe(600);
   });
 

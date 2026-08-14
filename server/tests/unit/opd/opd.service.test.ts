@@ -702,5 +702,79 @@ describe('OPDService — example-based', () => {
       expect(result.latestPaymentId).toBe('pay-latest');
       expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
     });
+
+    // ── doctor-specific validity ─────────────────────────────────────────────
+    describe('doctor-specific validity', () => {
+      test('doctorIds given — delegates to the doctor-scoped repository lookup, not the patient-wide one', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType
+          .mockResolvedValue(makePayment({ createdAt: daysAgo(5) }) as never);
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', ['doc-1']);
+
+        expect(mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType)
+          .toHaveBeenCalledWith('t1', 'PAT-ABCD1234', ['doc-1'], 'OPD_VISIT');
+        expect(mockPaymentRepo.findLatestCompletedByPatientAndReferenceType).not.toHaveBeenCalled();
+        expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+      });
+
+      test('VALID — same doctor, payment within the validity window', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType
+          .mockResolvedValue(makePayment({ createdAt: daysAgo(5) }) as never);
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', ['doc-1']);
+
+        expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+        expect(result.paymentRequired).toBe(false);
+      });
+
+      test('EXPIRED — same doctor, payment past the validity window', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType
+          .mockResolvedValue(makePayment({ createdAt: daysAgo(20) }) as never);
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', ['doc-1']);
+
+        expect(result.reason).toBe(OPDPaymentValidityReason.EXPIRED);
+        expect(result.paymentRequired).toBe(true);
+      });
+
+      test('DIFFERENT_DOCTOR — no payment for the requested doctor, but the patient has a completed OPD payment for another doctor', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType.mockResolvedValue(null as never);
+        mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+          .mockResolvedValue(makePayment({ createdAt: daysAgo(1) }) as never); // still valid for the *other* doctor
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', ['doc-2']);
+
+        expect(result.reason).toBe(OPDPaymentValidityReason.DIFFERENT_DOCTOR);
+        expect(result.paymentRequired).toBe(true);
+        expect(result.latestPaymentId).toBeNull();
+        expect(result.validUntil).toBeNull();
+      });
+
+      test('NO_PAYMENT — doctorIds given, but the patient has never made any completed OPD payment', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType.mockResolvedValue(null as never);
+        mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(null as never);
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', ['doc-1']);
+
+        expect(result.reason).toBe(OPDPaymentValidityReason.NO_PAYMENT);
+        expect(result.paymentRequired).toBe(true);
+      });
+
+      test('no doctorIds (none selected yet) — falls back to the patient-wide check, matching pre-selection UI state', async () => {
+        mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+        mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+          .mockResolvedValue(makePayment({ createdAt: daysAgo(5) }) as never);
+
+        const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234', []);
+
+        expect(mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType).not.toHaveBeenCalled();
+        expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+      });
+    });
   });
 });

@@ -7,11 +7,14 @@ import {
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
-// One resolved-department revenue bucket. `departmentId: null` means the
-// payment could not be mapped to any department (see sumByResolvedDepartment).
+// One resolved-department revenue bucket, split by `referenceType` so the
+// caller can further break each department's revenue into OPD/IPD/direct.
+// `departmentId: null` means the payment could not be mapped to any
+// department (see sumByResolvedDepartment).
 export interface ResolvedDepartmentRevenue {
-  departmentId: string | null;
-  total:        number;
+  departmentId:  string | null;
+  referenceType: string | null;
+  total:         number;
 }
 
 export class PaymentRepository {
@@ -77,6 +80,47 @@ export class PaymentRepository {
       referenceType,
       status: PaymentStatus.COMPLETED,
     }).sort({ createdAt: -1 });
+  }
+
+  // Doctor-scoped variant of findLatestCompletedByPatientAndReferenceType —
+  // only a payment whose referenced OPD visit's doctorIds is a superset of
+  // every requested doctorId counts (the visit may have additional doctors
+  // too; that still means the patient saw all of the requested doctors on
+  // it). Resolved via $lookup on the collection name (not an OPDVisit model
+  // import) to avoid a payment↔opd module dependency cycle — same pattern as
+  // sumByResolvedDepartment below. Used by OPDService.getPaymentValidity to
+  // make OPD payment validity doctor-specific rather than patient-wide.
+  async findLatestCompletedByPatientDoctorsAndReferenceType(
+    tenantId:      string,
+    patientId:     string,
+    doctorIds:     string[],
+    referenceType: PaymentReferenceType,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    const rows = await PaymentModel.aggregate([
+      { $match: { tenantId, patientId, referenceType, status: PaymentStatus.COMPLETED } },
+      {
+        $lookup: {
+          from: 'opd_visits',
+          let:  { refId: '$referenceId' },
+          pipeline: [
+            { $match: { tenantId, $expr: { $eq: ['$visitId', '$$refId'] } } },
+            { $project: { _id: 0, doctorIds: 1 } },
+          ],
+          as: 'visit',
+        },
+      },
+      {
+        $match: {
+          $expr: {
+            $setIsSubset: [doctorIds, { $ifNull: [{ $arrayElemAt: ['$visit.doctorIds', 0] }, []] }],
+          },
+        },
+      },
+      { $sort: { createdAt: -1 } },
+      { $limit: 1 },
+    ]);
+    return (rows[0] as IPayment) ?? null;
   }
 
   async save(data: Partial<IPayment>): Promise<IPayment> {
@@ -213,12 +257,18 @@ export class PaymentRepository {
           },
         },
       },
-      { $group: { _id: '$resolvedDepartmentId', total: { $sum: '$amount' } } },
+      {
+        $group: {
+          _id:   { departmentId: '$resolvedDepartmentId', referenceType: '$referenceType' },
+          total: { $sum: '$amount' },
+        },
+      },
     ]);
 
     return rows.map((row) => ({
-      departmentId: (row._id as string | null) ?? null,
-      total:        row.total as number,
+      departmentId:  (row._id.departmentId as string | null) ?? null,
+      referenceType: (row._id.referenceType as string | null) ?? null,
+      total:         row.total as number,
     }));
   }
 }

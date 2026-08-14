@@ -9,6 +9,10 @@ jest.mock('@/store/api/dashboard.api', () => ({
   useGetDashboardStatsQuery: (...args: unknown[]) => mockGetDashboardStats(...args),
 }));
 
+jest.mock('@/store/api/user.api', () => ({
+  useGetMyProfileQuery: () => ({ data: { name: 'Test User' } }),
+}));
+
 const mockDispatch = jest.fn();
 
 jest.mock('@/store/hooks', () => ({

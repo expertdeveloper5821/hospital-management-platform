@@ -17,6 +17,10 @@ jest.mock('@/store/api/dashboard.api', () => ({
   useGetDashboardStatsQuery: (...args: unknown[]) => mockGetDashboardStats(...args),
 }));
 
+jest.mock('@/store/api/user.api', () => ({
+  useGetMyProfileQuery: () => ({ data: { name: 'Test User' } }),
+}));
+
 let mockRole = 'HOSPITAL_ADMIN';
 
 jest.mock('@/store/hooks', () => ({

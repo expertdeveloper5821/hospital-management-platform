@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { LabRequestStatus, LabRequestPriority } from './lab.types';
+import { LabRequestStatus, LabRequestPriority, LAB_REFERRED_BY_SELF } from './lab.types';
 
 // ─── PathologyRequest ─────────────────────────────────────────────────────────
 export interface IPathologyRequest extends Document {
@@ -9,6 +9,7 @@ export interface IPathologyRequest extends Document {
   tenantId:     string;
   requestedBy:  string;
   testType:     string;
+  referredBy:   string;
   departmentId: string | null;
   status:       LabRequestStatus;
   priority:     LabRequestPriority;
@@ -28,6 +29,7 @@ const pathologyRequestSchema = new Schema<IPathologyRequest>(
     tenantId:    { type: String, required: true },
     requestedBy:  { type: String, required: true },
     testType:     { type: String, required: true, trim: true, maxlength: 200 },
+    referredBy:   { type: String, required: true, trim: true, maxlength: 120, default: LAB_REFERRED_BY_SELF },
     departmentId: { type: String, default: null },
     status: {
       type:     String,
@@ -71,6 +73,7 @@ export interface IRadiologyRequest extends Document {
   tenantId:     string;
   requestedBy:  string;
   imagingType:  string;
+  referredBy:   string;
   departmentId: string | null;
   status:       LabRequestStatus;
   priority:     LabRequestPriority;
@@ -90,6 +93,7 @@ const radiologyRequestSchema = new Schema<IRadiologyRequest>(
     tenantId:    { type: String, required: true },
     requestedBy:  { type: String, required: true },
     imagingType:  { type: String, required: true, trim: true, maxlength: 200 },
+    referredBy:   { type: String, required: true, trim: true, maxlength: 120, default: LAB_REFERRED_BY_SELF },
     departmentId: { type: String, default: null },
     status: {
       type:     String,

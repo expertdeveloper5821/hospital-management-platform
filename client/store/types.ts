@@ -233,9 +233,11 @@ export interface OPDPatientHistory {
 }
 
 // Backend-authoritative answer to "does this patient need to pay for OPD
-// again right now?" — see OPDService.getPaymentValidity. Never compute this
-// on the frontend; always read it from GET .../payment-validity.
-export type OPDPaymentValidityReason = 'NO_PAYMENT' | 'EXPIRED' | 'VALID';
+// again right now?" — see OPDService.getPaymentValidity. Doctor-specific:
+// DIFFERENT_DOCTOR means the patient has a completed OPD payment, but not
+// for the currently-selected doctor(s). Never compute this on the frontend;
+// always read it from GET .../payment-validity.
+export type OPDPaymentValidityReason = 'NO_PAYMENT' | 'EXPIRED' | 'VALID' | 'DIFFERENT_DOCTOR';
 
 export interface OPDPaymentValidityResponse {
   patientId:         string;
@@ -260,6 +262,8 @@ export interface PathologyRequestResponse {
   requestedBy:      string;
   requestedByName?: string;
   testType:         string;
+  referredBy:       string;
+  referredByName:   string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -276,6 +280,8 @@ export interface RadiologyRequestResponse {
   requestedBy:      string;
   requestedByName?: string;
   imagingType:      string;
+  referredBy:       string;
+  referredByName:   string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -284,15 +290,20 @@ export interface RadiologyRequestResponse {
   updatedAt:   string;
 }
 
+// 'SELF' or a referring doctor's userId — 'SELF' is the default/top dropdown option.
+export const LAB_REFERRED_BY_SELF = 'SELF';
+
 export interface CreatePathologyRequest {
-  patientId: string;
-  testType:  string;
-  notes?:    string;
+  patientId:   string;
+  testType:    string;
+  referredBy:  string;
+  notes?:      string;
 }
 
 export interface CreateRadiologyRequest {
   patientId:   string;
   imagingType: string;
+  referredBy:  string;
   notes?:      string;
 }
 
@@ -482,6 +493,7 @@ export interface PaymentResponse {
   razorpayPaymentId: string | null;
   referenceType:     PaymentReferenceType | null;
   referenceId:       string | null;
+  transactionId:     string | null;
   createdBy:         string;
   createdAt:         string;
   updatedAt:         string;
@@ -494,6 +506,9 @@ export interface CreateManualPaymentRequest {
   description:    string;
   referenceType?: PaymentReferenceType;
   referenceId?:   string;
+  // Optional UPI/Card reference number — only surfaced on the form for those
+  // two payment modes; never required to submit a payment.
+  transactionId?: string;
 }
  
 export interface CreateRazorpayOrderRequest {
@@ -519,15 +534,21 @@ export interface PaymentSummaryResponse {
   total:  number;
 }
 
-export interface DepartmentRevenueEntry {
+export interface DepartmentRevenueBreakdown {
+  opdRevenue:    number;
+  ipdRevenue:    number;
+  directPayment: number;
+  total:         number;
+}
+
+export interface DepartmentRevenueEntry extends DepartmentRevenueBreakdown {
   departmentId: string;
   name:         string;
-  total:        number;
 }
 
 export interface DepartmentRevenueResponse {
   departments: DepartmentRevenueEntry[];
-  otherTotal:  number;
+  other:       DepartmentRevenueBreakdown;
   grandTotal:  number;
 }
 

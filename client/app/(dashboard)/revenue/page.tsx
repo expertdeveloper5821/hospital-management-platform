@@ -63,6 +63,10 @@ export default function RevenuePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
+  // "ALL" | a departmentId | "OTHER" — filters which row(s) the table shows;
+  // it never affects the underlying date-filtered query or the grand total.
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
+
   const { dateFrom, dateTo } = useMemo(() => {
     switch (filterType) {
       case "TODAY":
@@ -100,7 +104,20 @@ export default function RevenuePage() {
     );
   }
 
-  const showEmptyState = !isFetching && !isError && data && data.departments.length === 0 && data.otherTotal === 0;
+  const showEmptyState = !isFetching && !isError && data && data.departments.length === 0 && data.other.total === 0;
+
+  const allRows = useMemo(() => {
+    if (!data) return [];
+    return [
+      ...data.departments.map((dept) => ({ ...dept, key: dept.departmentId, id: dept.departmentId })),
+      { key: "OTHER", id: "OTHER", name: "Other Revenue", ...data.other },
+    ];
+  }, [data]);
+
+  const visibleRows = useMemo(
+    () => (departmentFilter === "ALL" ? allRows : allRows.filter((row) => row.id === departmentFilter)),
+    [allRows, departmentFilter],
+  );
 
   return (
     <div className="space-y-6">
@@ -200,9 +217,28 @@ export default function RevenuePage() {
       {/* Department-wise revenue */}
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-            <CardTitle className="text-base">Department-wise Revenue</CardTitle>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+              <CardTitle className="text-base">Department-wise Revenue</CardTitle>
+            </div>
+            {data && !showEmptyState && (
+              <div className="space-y-1">
+                <Label htmlFor="revenue-department-filter" className="text-xs sm:sr-only">Department</Label>
+                <select
+                  id="revenue-department-filter"
+                  className="flex h-9 rounded-md border border-input bg-background px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  value={departmentFilter}
+                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                >
+                  <option value="ALL">All Departments</option>
+                  {data.departments.map((dept) => (
+                    <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+                  ))}
+                  <option value="OTHER">Other Revenue</option>
+                </select>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -218,16 +254,38 @@ export default function RevenuePage() {
             </div>
           ) : data ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {data.departments.map((dept) => (
-                  <div key={dept.departmentId} className="rounded-md border bg-muted/20 p-3 space-y-0.5 min-w-0">
-                    <p className="text-xs text-muted-foreground break-words">{dept.name}</p>
-                    <p className="text-base font-bold tabular-nums break-words">{formatINR(dept.total)}</p>
-                  </div>
-                ))}
-                <div className="rounded-md border bg-muted/20 p-3 space-y-0.5 min-w-0">
-                  <p className="text-xs text-muted-foreground break-words">Other Revenue</p>
-                  <p className="text-base font-bold tabular-nums break-words">{formatINR(data.otherTotal)}</p>
+              <div className="rounded-md border overflow-x-auto">
+                <div className="max-h-96 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 bg-muted/50">
+                      <tr className="text-left text-xs text-muted-foreground">
+                        <th className="px-4 py-2 font-medium">Department</th>
+                        <th className="px-4 py-2 font-medium text-right">OPD Revenue</th>
+                        <th className="px-4 py-2 font-medium text-right">IPD Revenue</th>
+                        <th className="px-4 py-2 font-medium text-right">Direct Payment</th>
+                        <th className="px-4 py-2 font-medium text-right">Total Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-4 text-center text-muted-foreground">
+                            No matching department.
+                          </td>
+                        </tr>
+                      ) : (
+                        visibleRows.map((row) => (
+                          <tr key={row.key} className="border-t">
+                            <td className="px-4 py-2.5 break-words">{row.name}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(row.opdRevenue)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(row.ipdRevenue)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(row.directPayment)}</td>
+                            <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{formatINR(row.total)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
               <div className="flex items-center justify-between rounded-md border px-4 py-3 bg-muted/30">

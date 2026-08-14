@@ -540,6 +540,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [regType,       setRegType]       = useState<'free' | 'paid'>('free');
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMode,   setPaymentMode]   = useState<OPDPaymentMode | ''>('');
+  const [transactionId, setTransactionId] = useState('');
   const [error, setError] = useState('');
   const [showAddPatient, setShowAddPatient] = useState(false);
 
@@ -551,29 +552,40 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
     setRegType('free');
     setPaymentAmount('');
     setPaymentMode('');
+    setTransactionId('');
   }, [selectedPatient?.patientId]);
 
-  // Backend-authoritative OPD payment validity check for the selected patient —
-  // decides whether this visit is covered by a still-valid prior OPD payment,
-  // whether that payment expired (a new one is mandatory), or whether no OPD
-  // payment exists yet (existing manual Free/Paid flow applies unchanged).
+  // Backend-authoritative OPD payment validity check for the selected patient
+  // + currently-selected doctor(s) — decides whether this visit is covered by
+  // a still-valid prior OPD payment for this doctor, whether that payment
+  // expired (a new one is mandatory), whether the patient is visiting a
+  // different doctor than the one they last paid for (a new one is also
+  // mandatory), or whether no OPD payment exists yet (existing manual
+  // Free/Paid flow applies unchanged). Re-fetches whenever the doctor
+  // selection changes, since validity is doctor-specific, not just
+  // patient-specific.
   const {
     data: paymentValidity,
     isFetching: checkingValidity,
     refetch: refetchPaymentValidity,
-  } = useGetOPDPaymentValidityQuery(selectedPatient?.patientId ?? '', { skip: !selectedPatient });
+  } = useGetOPDPaymentValidityQuery(
+    { patientId: selectedPatient?.patientId ?? '', doctorIds: selectedDoctorIds },
+    { skip: !selectedPatient },
+  );
 
   // Sync the registration type to the backend's determination whenever it's
-  // known — VALID never charges, EXPIRED always requires a fresh payment.
-  // NO_PAYMENT (or not yet loaded) leaves the receptionist's manual Free/Paid
-  // choice untouched, preserving today's flow for a patient's first payment.
+  // known — VALID never charges, EXPIRED and DIFFERENT_DOCTOR both always
+  // require a fresh payment. NO_PAYMENT (or not yet loaded) leaves the
+  // receptionist's manual Free/Paid choice untouched, preserving today's flow
+  // for a patient's first payment.
   useEffect(() => {
     if (!paymentValidity) return;
     if (paymentValidity.reason === 'VALID') {
       setRegType('free');
       setPaymentAmount('');
       setPaymentMode('');
-    } else if (paymentValidity.reason === 'EXPIRED') {
+      setTransactionId('');
+    } else if (paymentValidity.reason === 'EXPIRED' || paymentValidity.reason === 'DIFFERENT_DOCTOR') {
       setRegType('paid');
     }
   }, [paymentValidity]);
@@ -635,8 +647,9 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
       // (or the manual toggle, if none was ever loaded) rather than blocking submission.
     }
 
-    const paymentCovered = validity?.reason === 'VALID';    // still within validity — never charge
-    const paymentForced  = validity?.reason === 'EXPIRED';  // validity lapsed — payment mandatory
+    const paymentCovered = validity?.reason === 'VALID';        // still within validity for this doctor — never charge
+    const paymentForced  = validity?.reason === 'EXPIRED'        // validity lapsed for this doctor — payment mandatory
+      || validity?.reason === 'DIFFERENT_DOCTOR';                // visiting a doctor never paid for — payment mandatory
     const effectiveRegType: 'free' | 'paid' = paymentCovered ? 'free' : paymentForced ? 'paid' : regType;
 
     let amount = 0;
@@ -673,11 +686,16 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             patientId:     selectedPatient.patientId,
             amount,
             paymentMethod: mode,
-            description:   paymentForced
+            description:   validity?.reason === 'DIFFERENT_DOCTOR'
+              ? `OPD Consultation – Visit #${visit.queueNumber} (New Doctor)`
+              : paymentForced
               ? `OPD Consultation – Visit #${visit.queueNumber} (OPD Renewal)`
               : `OPD Consultation – Visit #${visit.queueNumber}`,
             referenceType: 'OPD_VISIT',
             referenceId:   visit.visitId,
+            transactionId: (mode === 'UPI' || mode === 'CARD') && transactionId.trim()
+              ? transactionId.trim()
+              : undefined,
           }).unwrap();
         } catch (err: any) {
           setError(
@@ -855,7 +873,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           </div>
 
           {/* Registration Type / Payment — driven by the backend's OPD payment
-              validity check for the selected patient (see getOPDPaymentValidity). */}
+              validity check for the selected patient + doctor(s) (see getOPDPaymentValidity). */}
           <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
             <p className="text-sm font-medium">OPD Payment</p>
 
@@ -875,7 +893,13 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                   </p>
                 )}
 
-                {paymentValidity?.reason !== 'EXPIRED' && (
+                {paymentValidity?.reason === 'DIFFERENT_DOCTOR' && (
+                  <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+                    This patient&apos;s existing OPD payment does not cover the selected doctor(s). A new OPD payment is required to continue.
+                  </p>
+                )}
+
+                {paymentValidity?.reason !== 'EXPIRED' && paymentValidity?.reason !== 'DIFFERENT_DOCTOR' && (
                   <>
                     <p className="text-xs text-muted-foreground -mt-1">Registration Type *</p>
                     <div className="flex gap-2">
@@ -885,7 +909,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                           type="button"
                           onClick={() => {
                             setRegType(t);
-                            if (t === 'free') { setPaymentAmount(''); setPaymentMode(''); }
+                            if (t === 'free') { setPaymentAmount(''); setPaymentMode(''); setTransactionId(''); }
                             setError('');
                           }}
                           className={[
@@ -924,7 +948,10 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                           <button
                             key={value}
                             type="button"
-                            onClick={() => setPaymentMode(value)}
+                            onClick={() => {
+                              setPaymentMode(value);
+                              if (value === 'CASH') setTransactionId('');
+                            }}
                             className={cn(
                               'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
                               paymentMode === value
@@ -937,6 +964,19 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                         ))}
                       </div>
                     </div>
+
+                    {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="nv-pay-txn">Transaction ID (optional)</Label>
+                        <Input
+                          id="nv-pay-txn"
+                          type="text"
+                          placeholder="e.g. UPI reference / last 4 digits"
+                          value={transactionId}
+                          onChange={(e) => setTransactionId(e.target.value)}
+                        />
+                      </div>
+                    )}
                   </>
                 )}
               </>

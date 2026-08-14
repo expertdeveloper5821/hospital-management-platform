@@ -178,10 +178,25 @@ export async function cancelVisit(req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 }
 
+// doctorIds is a comma-separated list of currently-selected doctor(s) on the
+// New/Edit OPD Visit form — omitted (or empty) before any doctor is chosen,
+// in which case validity falls back to the patient's most recent completed
+// OPD payment regardless of doctor (see OPDService.getPaymentValidity).
+const paymentValidityQuerySchema = z.object({
+  doctorIds: z.string().optional(),
+});
+
 export async function getPaymentValidity(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const query = paymentValidityQuerySchema.safeParse(req.query);
+    if (!query.success) throw new ValidationError('Invalid query params');
+
+    const doctorIds = query.data.doctorIds
+      ? query.data.doctorIds.split(',').map((id) => id.trim()).filter(Boolean)
+      : [];
+
     const tenantId = req.user!.tenantId!;
-    const result = await opdService.getPaymentValidity(tenantId, req.params.patientId);
+    const result = await opdService.getPaymentValidity(tenantId, req.params.patientId, doctorIds);
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

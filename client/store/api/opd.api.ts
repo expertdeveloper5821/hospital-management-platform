@@ -77,10 +77,17 @@ export const opdApi = baseApi.injectEndpoints({
     }),
 
     // GET /api/opd/patients/:patientId/payment-validity — consulted by the New
-    // OPD Visit form right after a patient is selected; backend is the sole
-    // authority on whether a new OPD payment is required.
-    getOPDPaymentValidity: build.query<OPDPaymentValidityResponse, string>({
-      query: (patientId) => `/api/opd/patients/${patientId}/payment-validity`,
+    // OPD Visit form right after a patient is selected, and re-consulted as
+    // doctors are added/removed (validity is doctor-specific, not just
+    // patient-specific); backend is the sole authority on whether a new OPD
+    // payment is required.
+    getOPDPaymentValidity: build.query<OPDPaymentValidityResponse, { patientId: string; doctorIds?: string[] }>({
+      query: ({ patientId, doctorIds }) => {
+        const params = new URLSearchParams();
+        if (doctorIds && doctorIds.length) params.set('doctorIds', doctorIds.join(','));
+        const qs = params.toString();
+        return `/api/opd/patients/${patientId}/payment-validity${qs ? `?${qs}` : ''}`;
+      },
       transformResponse: (raw: ApiSuccess<OPDPaymentValidityResponse>) => raw.data,
       providesTags: ['OPD', 'Payment'],
     }),

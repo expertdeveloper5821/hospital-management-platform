@@ -328,32 +328,60 @@ export class OPDService {
 
   // ─── OPD payment validity (Hospital-configurable validity window) ──────────
   //
-  // Rule: a completed OPD payment covers this patient for
-  // `opdSettings.validityDays` calendar days *after* the day it was made
-  // (inclusive of both the payment day and the last covered day) — e.g. a
-  // payment made on day 0 with validityDays=15 covers days 0 through 15
-  // inclusive; day 16 is the first day a new payment is required. Day
-  // boundaries are computed in IST (hospital-local), matching the rest of the
-  // day-bucketed logic in this codebase (see attendance.timezone.ts), so a
-  // server running in UTC never mis-expires a payment near midnight IST.
+  // Rule: a completed OPD payment covers this patient *for the doctor(s) it
+  // was paid against* for `opdSettings.validityDays` calendar days *after*
+  // the day it was made (inclusive of both the payment day and the last
+  // covered day) — e.g. a payment made on day 0 with validityDays=15 covers
+  // days 0 through 15 inclusive; day 16 is the first day a new payment is
+  // required. Day boundaries are computed in IST (hospital-local), matching
+  // the rest of the day-bucketed logic in this codebase (see
+  // attendance.timezone.ts), so a server running in UTC never mis-expires a
+  // payment near midnight IST.
+  //
+  // Validity is doctor-specific, not department-specific: when `doctorIds` is
+  // given, only a payment tied to a visit that included every one of those
+  // doctors can grant validity — a still-valid payment for a *different*
+  // doctor never covers a visit to a new doctor. When no doctor has been
+  // selected yet (`doctorIds` empty), the check falls back to the patient's
+  // most recent completed OPD payment regardless of doctor, matching the
+  // pre-selection UI state.
   //
   // This is the sole source of truth the frontend must defer to — it must
   // never compute "is this payment still valid" locally.
-  async getPaymentValidity(tenantId: string, patientId: string): Promise<OPDPaymentValidityResponse> {
+  async getPaymentValidity(
+    tenantId:   string,
+    patientId:  string,
+    doctorIds:  string[] = [],
+  ): Promise<OPDPaymentValidityResponse> {
     const patient = await patientRepository.findByPatientId(tenantId, patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
     const { validityDays } = await tenantService.getOpdSettings(tenantId);
 
-    const latestPayment = await paymentRepository.findLatestCompletedByPatientAndReferenceType(
-      tenantId, patientId, PaymentReferenceType.OPD_VISIT,
-    );
+    const hasDoctors = doctorIds.length > 0;
+    const latestPayment = hasDoctors
+      ? await paymentRepository.findLatestCompletedByPatientDoctorsAndReferenceType(
+          tenantId, patientId, doctorIds, PaymentReferenceType.OPD_VISIT,
+        )
+      : await paymentRepository.findLatestCompletedByPatientAndReferenceType(
+          tenantId, patientId, PaymentReferenceType.OPD_VISIT,
+        );
 
     if (!latestPayment) {
+      // No payment tied to the requested doctor(s). If the patient has a
+      // completed OPD payment at all, it just doesn't cover this doctor —
+      // that's a DIFFERENT_DOCTOR case, not a brand-new patient, and a new
+      // payment is required regardless of that other payment's validity window.
+      const reason = hasDoctors && await paymentRepository.findLatestCompletedByPatientAndReferenceType(
+        tenantId, patientId, PaymentReferenceType.OPD_VISIT,
+      )
+        ? OPDPaymentValidityReason.DIFFERENT_DOCTOR
+        : OPDPaymentValidityReason.NO_PAYMENT;
+
       return {
         patientId,
         paymentRequired:  true,
-        reason:           OPDPaymentValidityReason.NO_PAYMENT,
+        reason,
         latestPaymentId:  null,
         latestPaymentDate: null,
         validUntil:        null,

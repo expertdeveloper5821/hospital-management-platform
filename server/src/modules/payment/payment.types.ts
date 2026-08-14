@@ -55,6 +55,9 @@ export const CreateManualPaymentSchema = z.object({
   description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
   referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
   referenceId:   z.string().min(1).optional(),
+  // Optional UPI/Card reference number — never required, regardless of
+  // paymentMethod; the frontend only surfaces the field for UPI/Card.
+  transactionId: z.string().max(100, 'Transaction ID cannot exceed 100 characters').trim().optional(),
 });
 
 export type CreateManualPaymentInput = z.infer<typeof CreateManualPaymentSchema>;
@@ -121,6 +124,7 @@ export interface PaymentResponse {
   razorpayPaymentId: string | null;
   referenceType:     PaymentReferenceType | null;
   referenceId:       string | null;
+  transactionId:     string | null;
   createdBy:         string;
   createdAt:         string;
   updatedAt:         string;
@@ -142,19 +146,30 @@ export interface PaymentSummaryResponse {
   total:  number;
 }
 
-export interface DepartmentRevenueEntry {
-  departmentId: string;
-  name:         string;
-  total:        number;
+// Revenue for one bucket (a department, or the "other/unassigned" bucket),
+// split by where it was collected. `directPayment` covers registration fees
+// and any other payment not tied to an OPD visit or IPD admission.
+// `opdRevenue + ipdRevenue + directPayment` always equals `total`.
+export interface DepartmentRevenueBreakdown {
+  opdRevenue:    number;
+  ipdRevenue:    number;
+  directPayment: number;
+  total:         number;
 }
 
-// `otherTotal` covers payments that could not be mapped to any active
+export interface DepartmentRevenueEntry extends DepartmentRevenueBreakdown {
+  departmentId: string;
+  name:         string;
+}
+
+// `other` covers payments that could not be mapped to any active
 // department — e.g. registration fees, payments predating department
 // tracking, or a payment whose linked OPD visit/IPD admission had no
-// department assigned. `grandTotal` is always the sum of the two, so the
-// breakdown reconciles with the filtered payment total by construction.
+// department assigned. `grandTotal` is always the sum of the department
+// totals plus `other.total`, so the breakdown reconciles with the filtered
+// payment total by construction.
 export interface DepartmentRevenueResponse {
   departments: DepartmentRevenueEntry[];
-  otherTotal:  number;
+  other:       DepartmentRevenueBreakdown;
   grandTotal:  number;
 }
