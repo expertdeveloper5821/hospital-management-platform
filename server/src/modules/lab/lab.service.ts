@@ -13,6 +13,7 @@ import {
   PATHOLOGY_REPORT_MAX_BYTES,
   RADIOLOGY_REPORT_MAX_BYTES,
   LabTestTypeResponse,
+  LAB_REFERRED_BY_SELF,
 } from './lab.types';
 import { patientRepository }   from '../patient/patient.repository';
 import { userRepository }      from '../user/user.repository';
@@ -64,13 +65,22 @@ async function getRequesterName(tenantId: string, userId: string): Promise<strin
   return user?.name ?? user?.email;
 }
 
+// 'SELF' displays as "Self"; any other value is a referring doctor's userId,
+// resolved to their display name.
+async function getReferredByName(tenantId: string, referredBy: string): Promise<string> {
+  if (referredBy === LAB_REFERRED_BY_SELF) return 'Self';
+  const doctor = await userRepository.findById(tenantId, referredBy);
+  return doctor?.name ?? doctor?.email ?? 'Self';
+}
+
 async function toPathologyResponse(
   doc: IPathologyRequest,
   fullName?: string,
 ): Promise<PathologyRequestResponse> {
-  const [patientName, requesterName, reportUrl] = await Promise.all([
+  const [patientName, requesterName, referredByName, reportUrl] = await Promise.all([
     fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
     getRequesterName(doc.tenantId, doc.requestedBy),
+    getReferredByName(doc.tenantId, doc.referredBy),
     resolveReportUrl(doc.reportS3Key),
   ]);
   return {
@@ -81,6 +91,8 @@ async function toPathologyResponse(
     requestedBy:      doc.requestedBy,
     requestedByName:  requesterName,
     testType:         doc.testType,
+    referredBy:       doc.referredBy,
+    referredByName,
     status:           doc.status,
     priority:         doc.priority,
     notes:            doc.notes,
@@ -94,9 +106,10 @@ async function toRadiologyResponse(
   doc: IRadiologyRequest,
   fullName?: string,
 ): Promise<RadiologyRequestResponse> {
-  const [patientName, requesterName, reportUrl] = await Promise.all([
+  const [patientName, requesterName, referredByName, reportUrl] = await Promise.all([
     fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
     getRequesterName(doc.tenantId, doc.requestedBy),
+    getReferredByName(doc.tenantId, doc.referredBy),
     resolveReportUrl(doc.reportS3Key),
   ]);
   return {
@@ -107,6 +120,8 @@ async function toRadiologyResponse(
     requestedBy:      doc.requestedBy,
     requestedByName:  requesterName,
     imagingType:      doc.imagingType,
+    referredBy:       doc.referredBy,
+    referredByName,
     status:           doc.status,
     priority:         doc.priority,
     notes:            doc.notes,
@@ -119,6 +134,16 @@ async function toRadiologyResponse(
 // ─── LabService ───────────────────────────────────────────────────────────────
 
 export class LabService {
+
+  // Rejects a referredBy value that isn't 'SELF' and isn't a real Doctor in
+  // this tenant — keeps the stored value trustworthy for display/reporting.
+  private async assertValidReferredBy(tenantId: string, referredBy: string): Promise<void> {
+    if (referredBy === LAB_REFERRED_BY_SELF) return;
+    const doctor = await userRepository.findById(tenantId, referredBy);
+    if (!doctor || doctor.role !== UserRole.DOCTOR) {
+      throw new AppError('Invalid referredBy: doctor not found', 400);
+    }
+  }
 
   // ─── Pathology ─────────────────────────────────────────────────────────────
 
@@ -136,6 +161,7 @@ export class LabService {
     }
 
     const requester = await userRepository.findById(tenantId, userId);
+    await this.assertValidReferredBy(tenantId, input.referredBy);
 
     const doc = await labRepository.savePathology({
       requestId:    uuidv4(),
@@ -143,6 +169,7 @@ export class LabService {
       tenantId,
       requestedBy:  userId,
       testType:     input.testType,
+      referredBy:   input.referredBy,
       departmentId: requester?.departmentIds?.[0] ?? null,
       status:       LabRequestStatus.PENDING,
       notes:        input.notes ?? null,
@@ -277,6 +304,7 @@ export class LabService {
     }
 
     const requester = await userRepository.findById(tenantId, userId);
+    await this.assertValidReferredBy(tenantId, input.referredBy);
 
     const doc = await labRepository.saveRadiology({
       requestId:    uuidv4(),
@@ -284,6 +312,7 @@ export class LabService {
       tenantId,
       requestedBy:  userId,
       imagingType:  input.imagingType,
+      referredBy:   input.referredBy,
       departmentId: requester?.departmentIds?.[0] ?? null,
       status:       LabRequestStatus.PENDING,
       notes:        input.notes ?? null,

@@ -1780,4 +1780,128 @@ describe('GET /api/opd/patients/:patientId/payment-validity', () => {
     const res = await request(app).get('/api/opd/patients/PAT-TEST0001/payment-validity');
     expect(res.status).toBe(401);
   });
+
+  // ── doctor-specific validity ─────────────────────────────────────────────
+  describe('doctorIds query param — doctor-specific validity', () => {
+    test('200 — VALID when the payment is tied to a visit with the requested doctor, within the window', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] });
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(5) });
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-1')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('VALID');
+      expect(res.body.data.paymentRequired).toBe(false);
+    });
+
+    test('200 — DIFFERENT_DOCTOR when the patient has a valid payment, but for a different doctor', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] });
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(1) }); // still within window, but for doc-1
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-2')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('DIFFERENT_DOCTOR');
+      expect(res.body.data.paymentRequired).toBe(true);
+      expect(res.body.data.latestPaymentId).toBeNull();
+    });
+
+    test('200 — EXPIRED when the same doctor is requested but the validity window has passed', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] });
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(20) });
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-1')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('EXPIRED');
+      expect(res.body.data.paymentRequired).toBe(true);
+    });
+
+    test('200 — NO_PAYMENT when doctorIds is given but the patient has never paid at all', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-1')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('NO_PAYMENT');
+    });
+
+    test('200 — a visit covering an additional doctor beyond the ones requested still counts (superset match)', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1', 'doc-2'] });
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(2) });
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-1')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('VALID');
+    });
+
+    test('200 — requesting multiple doctors requires the visit to include every one of them', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] }); // only doc-1, not doc-2
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(2) });
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity?doctorIds=doc-1,doc-2')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('DIFFERENT_DOCTOR');
+    });
+
+    test('200 — no doctorIds param falls back to the patient-wide check (pre-doctor-selection UI state)', async () => {
+      const tenant = await seedTenant();
+      const tid    = tenant._id.toString();
+      await seedPatient(tid);
+      await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] });
+      await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(2) });
+      const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+      const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+      const res = await request(app)
+        .get('/api/opd/patients/PAT-TEST0001/payment-validity')
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe('VALID');
+    });
+  });
 });

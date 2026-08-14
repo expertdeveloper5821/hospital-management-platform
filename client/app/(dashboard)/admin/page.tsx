@@ -6,6 +6,7 @@ import {
   useCreateUserMutation,
   useUpdateUserRoleMutation,
   useDeactivateUserMutation,
+  useReactivateUserMutation,
 } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector } from '@/store/hooks';
@@ -359,6 +360,7 @@ function UsersTab() {
 
   const [updateUserRole, { isLoading: updatingRole }] = useUpdateUserRoleMutation();
   const [deactivateUser, { isLoading: deactivating }] = useDeactivateUserMutation();
+  const [reactivateUser, { isLoading: reactivating }] = useReactivateUserMutation();
 
   const users      = data?.data ?? [];
   const total      = data?.total ?? 0;
@@ -410,6 +412,10 @@ function UsersTab() {
       const msg = (err as { data?: { message?: string } })?.data?.message;
       setDeactivateError(msg ?? 'Failed to deactivate user.');
     }
+  }
+
+  function handleReactivate(user: UserResponse) {
+    reactivateUser(user.userId);
   }
 
   const sortState = { sortBy, sortOrder };
@@ -532,24 +538,36 @@ function UsersTab() {
                           </div>
                           {roleError && <p className="text-xs text-destructive">{roleError}</p>}
                         </div>
+                      ) : user.isActive ? (
+                        <div className="flex flex-wrap gap-2">
+                          {user.userId !== currentUserId && (
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                              Edit Role
+                            </Button>
+                          )}
+                          {canDeactivate && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                              onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
+                            >
+                              Deactivate
+                            </Button>
+                          )}
+                        </div>
                       ) : (
-                        user.isActive && (
+                        canDeactivate && (
                           <div className="flex flex-wrap gap-2">
-                            {user.userId !== currentUserId && (
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                                Edit Role
-                              </Button>
-                            )}
-                            {canDeactivate && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
-                              >
-                                Deactivate
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="success"
+                              className="h-7 px-2 text-xs"
+                              disabled={reactivating}
+                              onClick={() => handleReactivate(user)}
+                            >
+                              Reactivate
+                            </Button>
                           </div>
                         )
                       )}
@@ -623,24 +641,38 @@ function UsersTab() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end gap-2">
-                              {user.isActive && editingRoleId !== user.userId && (
-                                <>
-                                  {user.userId !== currentUserId && (
-                                    <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                                      Edit Role
-                                    </Button>
-                                  )}
-                                  {canDeactivate && (
+                              {editingRoleId !== user.userId && (
+                                user.isActive ? (
+                                  <>
+                                    {user.userId !== currentUserId && (
+                                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
+                                        Edit Role
+                                      </Button>
+                                    )}
+                                    {canDeactivate && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                                        onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
+                                      >
+                                        Deactivate
+                                      </Button>
+                                    )}
+                                  </>
+                                ) : (
+                                  canDeactivate && (
                                     <Button
                                       size="sm"
-                                      variant="outline"
-                                      className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                      onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
+                                      variant="success"
+                                      className="h-7 px-2 text-xs"
+                                      disabled={reactivating}
+                                      onClick={() => handleReactivate(user)}
                                     >
-                                      Deactivate
+                                      Reactivate
                                     </Button>
-                                  )}
-                                </>
+                                  )
+                                )
                               )}
                             </div>
                           </td>

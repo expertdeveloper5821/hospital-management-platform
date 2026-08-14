@@ -17,8 +17,8 @@ jest.mock('@/store/api/opd.api', () => ({
   // patient is actually selected) so the component's "reset on patient
   // change" and "sync to validity result" effects interact the same way
   // they would against the real hook.
-  useGetOPDPaymentValidityQuery: (patientId: string, options?: { skip?: boolean }) =>
-    mockGetOPDPaymentValidity(patientId, options),
+  useGetOPDPaymentValidityQuery: (args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
+    mockGetOPDPaymentValidity(args, options),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -112,7 +112,7 @@ describe('OPDPage — New Visit OPD payment validity check', () => {
       latestPaymentId: 'pay-1', latestPaymentDate: '2026-08-01T00:00:00.000Z',
       validUntil: '2026-08-16T00:00:00.000Z', validityDays: 15,
     };
-    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+    mockGetOPDPaymentValidity.mockImplementation((_args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
       ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
 
     await openModalAndSelectPatient(user);
@@ -128,12 +128,29 @@ describe('OPDPage — New Visit OPD payment validity check', () => {
       latestPaymentId: 'pay-1', latestPaymentDate: '2026-07-01T00:00:00.000Z',
       validUntil: '2026-07-16T00:00:00.000Z', validityDays: 15,
     };
-    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+    mockGetOPDPaymentValidity.mockImplementation((_args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
       ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
 
     await openModalAndSelectPatient(user);
 
     expect(await screen.findByText(/a new opd payment is required/i)).toBeInTheDocument();
+    expect(screen.queryByText(/registration type/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/amount/i)).toBeInTheDocument();
+    expect(screen.getByText(/payment mode/i)).toBeInTheDocument();
+  });
+
+  test('DIFFERENT_DOCTOR — shows a new-doctor banner and forces the Paid fields (no Free option)', async () => {
+    const user = userEvent.setup();
+    const validityData = {
+      patientId: 'PAT-1', paymentRequired: true, reason: 'DIFFERENT_DOCTOR',
+      latestPaymentId: null, latestPaymentDate: null, validUntil: null, validityDays: 15,
+    };
+    mockGetOPDPaymentValidity.mockImplementation((_args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
+      ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
+
+    await openModalAndSelectPatient(user);
+
+    expect(await screen.findByText(/does not cover the selected doctor/i)).toBeInTheDocument();
     expect(screen.queryByText(/registration type/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/amount/i)).toBeInTheDocument();
     expect(screen.getByText(/payment mode/i)).toBeInTheDocument();
@@ -145,7 +162,7 @@ describe('OPDPage — New Visit OPD payment validity check', () => {
       patientId: 'PAT-1', paymentRequired: true, reason: 'NO_PAYMENT',
       latestPaymentId: null, latestPaymentDate: null, validUntil: null, validityDays: 15,
     };
-    mockGetOPDPaymentValidity.mockImplementation((_id: string, options?: { skip?: boolean }) =>
+    mockGetOPDPaymentValidity.mockImplementation((_args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
       ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
 
     await openModalAndSelectPatient(user);
@@ -153,5 +170,82 @@ describe('OPDPage — New Visit OPD payment validity check', () => {
     expect(await screen.findByText(/registration type/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^free$/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^paid$/i })).toBeInTheDocument();
+  });
+});
+
+describe('OPDPage — New Visit OPD Payment Transaction ID field', () => {
+  const PATIENT = { patientId: 'PAT-1', fullName: 'Ravi Kumar', mobileNumber: '9876543210' };
+
+  async function openModalSelectPatientAndPay(user: ReturnType<typeof userEvent.setup>) {
+    mockSearchPatients.mockReturnValue({ data: { data: [PATIENT] }, isFetching: false });
+    const validityData = {
+      patientId: 'PAT-1', paymentRequired: true, reason: 'NO_PAYMENT',
+      latestPaymentId: null, latestPaymentDate: null, validUntil: null, validityDays: 15,
+    };
+    mockGetOPDPaymentValidity.mockImplementation((_args: { patientId: string; doctorIds?: string[] }, options?: { skip?: boolean }) =>
+      ({ data: options?.skip ? undefined : validityData, isFetching: false, refetch: jest.fn().mockResolvedValue({ data: validityData }) }));
+
+    render(<OPDPage />);
+    await user.click(screen.getByRole('button', { name: /new visit/i }));
+    await user.type(screen.getByPlaceholderText(/search patient by name or mobile/i), 'Ravi');
+    await waitFor(() => expect(screen.getByText('Ravi Kumar')).toBeInTheDocument(), { timeout: 2000 });
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /^paid$/i }));
+  }
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    jest.clearAllMocks();
+  });
+
+  test('hidden by default and for Cash — no Transaction ID field shown', async () => {
+    const user = userEvent.setup();
+    await openModalSelectPatientAndPay(user);
+
+    expect(screen.queryByLabelText(/transaction id/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^cash$/i }));
+    expect(screen.queryByLabelText(/transaction id/i)).not.toBeInTheDocument();
+  });
+
+  test('shown for UPI, marked optional', async () => {
+    const user = userEvent.setup();
+    await openModalSelectPatientAndPay(user);
+
+    await user.click(screen.getByRole('button', { name: /^upi$/i }));
+
+    const field = await screen.findByLabelText(/transaction id/i);
+    expect(field).toBeInTheDocument();
+    expect(field).toHaveAttribute('placeholder', expect.any(String));
+    expect(field).not.toBeRequired();
+    expect(screen.getByText(/transaction id \(optional\)/i)).toBeInTheDocument();
+  });
+
+  test('shown for Card, marked optional', async () => {
+    const user = userEvent.setup();
+    await openModalSelectPatientAndPay(user);
+
+    await user.click(screen.getByRole('button', { name: /^card$/i }));
+
+    const field = await screen.findByLabelText(/transaction id/i);
+    expect(field).toBeInTheDocument();
+    expect(field).not.toBeRequired();
+  });
+
+  test('switching from UPI back to Cash hides and clears the field', async () => {
+    const user = userEvent.setup();
+    await openModalSelectPatientAndPay(user);
+
+    await user.click(screen.getByRole('button', { name: /^upi$/i }));
+    const field = await screen.findByLabelText(/transaction id/i);
+    await user.type(field, 'UPI-REF-123');
+    expect(field).toHaveValue('UPI-REF-123');
+
+    await user.click(screen.getByRole('button', { name: /^cash$/i }));
+    expect(screen.queryByLabelText(/transaction id/i)).not.toBeInTheDocument();
+
+    // Switching back to UPI shows an empty field again (value was cleared, not just hidden).
+    await user.click(screen.getByRole('button', { name: /^upi$/i }));
+    expect(await screen.findByLabelText(/transaction id/i)).toHaveValue('');
   });
 });

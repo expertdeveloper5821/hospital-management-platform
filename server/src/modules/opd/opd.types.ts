@@ -39,9 +39,10 @@ export interface CompleteOPDVisitRequest {
 // patient's latest COMPLETED OPD payment + the tenant's configured
 // opdSettings.validityDays. Never derived on the frontend.
 export const OPDPaymentValidityReason = {
-  NO_PAYMENT: 'NO_PAYMENT', // patient has no prior completed OPD payment — existing manual payment flow applies
-  EXPIRED:    'EXPIRED',    // latest payment's validity window has passed — a new payment is required
-  VALID:      'VALID',      // latest payment still covers today — no new payment required
+  NO_PAYMENT:       'NO_PAYMENT',       // patient has no prior completed OPD payment at all — existing manual payment flow applies
+  EXPIRED:          'EXPIRED',          // latest payment for the requested doctor(s) has passed its validity window — a new payment is required
+  VALID:            'VALID',            // latest payment for the requested doctor(s) still covers today — no new payment required
+  DIFFERENT_DOCTOR: 'DIFFERENT_DOCTOR', // patient has a completed OPD payment, but none tied to the requested doctor(s) — a new payment is required regardless of any other doctor's validity window
 } as const;
 
 export type OPDPaymentValidityReason = typeof OPDPaymentValidityReason[keyof typeof OPDPaymentValidityReason];

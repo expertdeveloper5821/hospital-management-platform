@@ -15,6 +15,7 @@ import {
 
 import { useGetDashboardStatsQuery } from '@/store/api/dashboard.api';
 import type { RecentActivity }       from '@/store/api/dashboard.api';
+import { useGetMyProfileQuery }      from '@/store/api/user.api';
 import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { logout }        from '@/store/slices/auth.slice';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -221,7 +222,8 @@ function QuickAction({ icon: Icon, label, href, color }: {
 
 export default function DashboardPage() {
   const role         = useAppSelector((s) => s.auth.profile?.role);
-  const hospitalName = useAppSelector((s) => s.auth.branding?.displayName ?? 'Hospital');
+  const { data: myProfile } = useGetMyProfileQuery();
+  const userName     = myProfile?.name ?? '';
   const dispatch     = useAppDispatch();
 
   const [refreshArg, setRefreshArg] = useState<{ refresh?: boolean } | void>(undefined);
@@ -320,7 +322,7 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
-            {greeting()}, {hospitalName}
+            {greeting()}{userName ? `, ${userName}` : ''}
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {fmtDate(currentTime)}

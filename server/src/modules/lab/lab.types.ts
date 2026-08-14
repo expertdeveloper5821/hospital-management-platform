@@ -26,11 +26,18 @@ export const LabRequestPriority = {
 
 export type LabRequestPriority = typeof LabRequestPriority[keyof typeof LabRequestPriority];
 
+// ─── Referred By ──────────────────────────────────────────────────────────────
+// 'SELF' means the requesting patient/staff referred themselves (no doctor
+// referral); any other value is the referring doctor's userId.
+export const LAB_REFERRED_BY_SELF = 'SELF';
+const referredBySchema = z.string().min(1).max(120).trim().default(LAB_REFERRED_BY_SELF);
+
 // ─── Pathology Schemas ────────────────────────────────────────────────────────
 export const CreatePathologyRequestSchema = z.object({
-  patientId: z.string().min(1, 'patientId is required'),
-  testType:  z.string().min(1, 'testType is required').max(200).trim(),
-  notes:     z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).transform(sanitizeRichTextHtml).optional(),
+  patientId:   z.string().min(1, 'patientId is required'),
+  testType:    z.string().min(1, 'testType is required').max(200).trim(),
+  referredBy:  referredBySchema,
+  notes:       z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).transform(sanitizeRichTextHtml).optional(),
 });
 
 export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestSchema>;
@@ -39,6 +46,7 @@ export type CreatePathologyRequestInput = z.infer<typeof CreatePathologyRequestS
 export const CreateRadiologyRequestSchema = z.object({
   patientId:   z.string().min(1, 'patientId is required'),
   imagingType: z.string().min(1, 'imagingType is required').max(200).trim(),
+  referredBy:  referredBySchema,
   notes:       z.string().max(12000, 'Notes content is too large.').trim().refine(notesMaxCheck, NOTES_TOO_LONG).transform(sanitizeRichTextHtml).optional(),
 });
 
@@ -91,6 +99,8 @@ export interface PathologyRequestResponse {
   requestedBy:      string;
   requestedByName?: string;
   testType:         string;
+  referredBy:       string;
+  referredByName:   string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;
@@ -107,6 +117,8 @@ export interface RadiologyRequestResponse {
   requestedBy:      string;
   requestedByName?: string;
   imagingType:      string;
+  referredBy:       string;
+  referredByName:   string;
   status:      LabRequestStatus;
   priority:    LabRequestPriority;
   notes:       string | null;

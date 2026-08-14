@@ -6,6 +6,7 @@ import { paymentRepository }  from './payment.repository';
 import { IPayment }            from './payment.model';
 import {
   PaymentStatus,
+  PaymentReferenceType,
   CreateManualPaymentInput,
   CreateRazorpayOrderInput,
   ListPaymentsQuery,
@@ -16,6 +17,7 @@ import {
   DepartmentRevenueQuery,
   DepartmentRevenueResponse,
   DepartmentRevenueEntry,
+  DepartmentRevenueBreakdown,
 } from './payment.types';
 
 import { patientRepository }    from '../patient/patient.repository';
@@ -57,6 +59,7 @@ async function toResponse(doc: IPayment): Promise<PaymentResponse> {
     razorpayPaymentId: doc.razorpayPaymentId,
     referenceType:     (doc.referenceType as PaymentResponse['referenceType']) ?? null,
     referenceId:       doc.referenceId ?? null,
+    transactionId:     doc.transactionId ?? null,
     createdBy:         doc.createdBy,
     createdAt:         doc.createdAt.toISOString(),
     updatedAt:         doc.updatedAt.toISOString(),
@@ -137,6 +140,7 @@ export class PaymentService {
       razorpayPaymentId: null,
       referenceType: input.referenceType ?? null,
       referenceId:   input.referenceId   ?? null,
+      transactionId: input.transactionId ?? null,
       createdBy:     userId,
     });
 
@@ -147,7 +151,12 @@ export class PaymentService {
         action:     'CREATE',
         userId,
         tenantId,
-        newValue:   { patientId: input.patientId, amount: input.amount, method: input.paymentMethod },
+        newValue:   {
+          patientId:     input.patientId,
+          amount:        input.amount,
+          method:        input.paymentMethod,
+          transactionId: input.transactionId ?? null,
+        },
       });
     } catch { /* swallow — audit must not block payment */ }
 
@@ -414,13 +423,25 @@ export class PaymentService {
       paymentRepository.sumByResolvedDepartment(tenantId, query),
     ]);
 
-    const totalByDepartmentId = new Map<string, number>();
-    let otherTotal = 0;
+    const emptyBreakdown = (): DepartmentRevenueBreakdown => (
+      { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 }
+    );
+    const addToBreakdown = (bucket: DepartmentRevenueBreakdown, referenceType: string | null, amount: number) => {
+      if (referenceType === PaymentReferenceType.OPD_VISIT) bucket.opdRevenue += amount;
+      else if (referenceType === PaymentReferenceType.IPD_ADMISSION) bucket.ipdRevenue += amount;
+      else bucket.directPayment += amount;
+      bucket.total += amount;
+    };
+
+    const breakdownByDepartmentId = new Map<string, DepartmentRevenueBreakdown>();
+    const other = emptyBreakdown();
     for (const row of resolvedSums) {
       if (row.departmentId) {
-        totalByDepartmentId.set(row.departmentId, (totalByDepartmentId.get(row.departmentId) ?? 0) + row.total);
+        const bucket = breakdownByDepartmentId.get(row.departmentId) ?? emptyBreakdown();
+        addToBreakdown(bucket, row.referenceType, row.total);
+        breakdownByDepartmentId.set(row.departmentId, bucket);
       } else {
-        otherTotal += row.total;
+        addToBreakdown(other, row.referenceType, row.total);
       }
     }
 
@@ -428,18 +449,23 @@ export class PaymentService {
     const departmentEntries: DepartmentRevenueEntry[] = departments.map((d) => ({
       departmentId: d.departmentId,
       name:         d.name,
-      total:        totalByDepartmentId.get(d.departmentId) ?? 0,
+      ...(breakdownByDepartmentId.get(d.departmentId) ?? emptyBreakdown()),
     }));
 
     // Revenue resolved to a departmentId that isn't (or no longer is) an
     // active department — e.g. it was deleted after the payment was made.
-    for (const [departmentId, total] of totalByDepartmentId) {
-      if (!knownDepartmentIds.has(departmentId)) otherTotal += total;
+    for (const [departmentId, bucket] of breakdownByDepartmentId) {
+      if (!knownDepartmentIds.has(departmentId)) {
+        other.opdRevenue    += bucket.opdRevenue;
+        other.ipdRevenue    += bucket.ipdRevenue;
+        other.directPayment += bucket.directPayment;
+        other.total         += bucket.total;
+      }
     }
 
-    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + otherTotal;
+    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + other.total;
 
-    return { departments: departmentEntries, otherTotal, grandTotal };
+    return { departments: departmentEntries, other, grandTotal };
   }
 }
 

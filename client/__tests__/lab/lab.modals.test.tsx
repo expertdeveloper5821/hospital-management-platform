@@ -29,6 +29,10 @@ jest.mock('@/store/api/patient.api', () => ({
   useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
 }));
 
+jest.mock('@/store/api/user.api', () => ({
+  useListUsersQuery: () => ({ data: { data: [] }, isFetching: false }),
+}));
+
 jest.mock('@/store/hooks', () => ({
   useAppSelector: (selector: (s: unknown) => unknown) =>
     selector({ auth: { profile: { role: 'PATHOLOGIST' } } }),
@@ -47,6 +51,8 @@ const PENDING_PATHOLOGY = {
   tenantId:    'tenant-001',
   requestedBy: 'doctor-001',
   testType:    'Blood CBC',
+  referredBy:      'SELF',
+  referredByName:  'Self',
   status:      'PENDING' as const,
   priority:    'NORMAL' as const,
   notes:       null,

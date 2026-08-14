@@ -15,6 +15,7 @@ import {
   useDeleteRadiologyRequestMutation,
 } from '@/store/api/lab.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useListUsersQuery } from '@/store/api/user.api';
 import { useAppSelector } from '@/store/hooks';
 import type {
   PathologyRequestResponse,
@@ -23,6 +24,7 @@ import type {
   LabRequestPriority,
   PatientResponse,
 } from '@/store/types';
+import { LAB_REFERRED_BY_SELF } from '@/store/types';
 import { Button }                        from '@/components/ui/button';
 import { Input }                         from '@/components/ui/input';
 import { Label }                         from '@/components/ui/label';
@@ -148,10 +150,14 @@ interface NewRequestModalProps {
 }
 
 function NewRequestModal({ type, onClose }: NewRequestModalProps) {
-  const [patient,  setPatient]  = useState<PatientResponse | null>(null);
-  const [testType, setTestType] = useState('');
-  const [notes,    setNotes]    = useState('');
-  const [error,    setError]    = useState('');
+  const [patient,    setPatient]    = useState<PatientResponse | null>(null);
+  const [testType,   setTestType]   = useState('');
+  const [referredBy, setReferredBy] = useState(LAB_REFERRED_BY_SELF);
+  const [notes,      setNotes]      = useState('');
+  const [error,      setError]      = useState('');
+
+  const { data: doctorsData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
+  const doctors = doctorsData?.data ?? [];
 
   const [createPathology, { isLoading: creatingPath }] = useCreatePathologyRequestMutation();
   const [createRadiology, { isLoading: creatingRad  }] = useCreateRadiologyRequestMutation();
@@ -171,14 +177,16 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
     try {
       if (type === 'pathology') {
         await createPathology({
-          patientId: patient.patientId,
-          testType:  testType.trim(),
-          notes:     notes.trim() || undefined,
+          patientId:  patient.patientId,
+          testType:   testType.trim(),
+          referredBy,
+          notes:      notes.trim() || undefined,
         }).unwrap();
       } else {
         await createRadiology({
           patientId:   patient.patientId,
           imagingType: testType.trim(),
+          referredBy,
           notes:       notes.trim() || undefined,
         }).unwrap();
       }
@@ -212,6 +220,21 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
               onSelect={setPatient}
               onClear={() => setPatient(null)}
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="nr-referredby">Referred By</Label>
+            <select
+              id="nr-referredby"
+              value={referredBy}
+              onChange={(e) => setReferredBy(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value={LAB_REFERRED_BY_SELF}>Self</option>
+              {doctors.map((d) => (
+                <option key={d.userId} value={d.userId}>{d.name}</option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-1.5">
@@ -598,6 +621,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
             {row('Patient Name',  request.fullName ?? '—')}
             {row('Patient ID',   <span className="font-mono text-xs">{request.patientId}</span>)}
             {row('Requested By', request.requestedByName ?? '—')}
+            {row('Referred By',  <span className="block truncate" title={request.referredByName}>{request.referredByName}</span>)}
             {row('Requested At', formatDate(request.requestedAt))}
             {row('Updated At',   formatDate(request.updatedAt))}
             {row('Priority', (
@@ -800,6 +824,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                       {type === 'pathology' ? 'Test Type' : 'Imaging Type'}
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Referred By</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Requested</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Priority</th>
@@ -821,6 +846,11 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                         <td className="px-4 py-3">
                           <p className="text-sm font-medium">{r.fullName}</p>
                           <p className="font-mono text-xs text-muted-foreground">{r.patientId}</p>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs">
+                          <span className="block max-w-[10rem] truncate" title={r.referredByName}>
+                            {r.referredByName}
+                          </span>
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell text-muted-foreground text-xs">
                           {formatDate(r.requestedAt)}

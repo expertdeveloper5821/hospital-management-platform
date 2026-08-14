@@ -95,11 +95,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               >
                 <Menu className="h-5 w-5" />
               </button>
-              {!isSuperAdmin && (
+              {/* {!isSuperAdmin && (
                 <p className="hidden md:block text-sm font-medium text-foreground truncate">
                   Hi{myProfile?.name ? `, ${myProfile.name}` : ''}.
                 </p>
-              )}
+              )} */}
             </div>
             {/* Right: notification + profile */}
             <div className="flex items-center gap-2">

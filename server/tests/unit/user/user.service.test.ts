@@ -121,6 +121,53 @@ describe('UserService — example-based', () => {
     expect(mockRepo.countActiveAdmins).not.toHaveBeenCalled();
   });
 
+  // ── reactivateUser ───────────────────────────────────────────────────────────
+  test('reactivateUser sets isActive to true for an inactive user', async () => {
+    mockRepo.findById.mockResolvedValue({
+      _id: { toString: () => 'u1' },
+      role: UserRole.NURSE,
+      isActive: false,
+    } as never);
+    mockRepo.setActive.mockResolvedValue(undefined);
+
+    await service.reactivateUser('t1', 'u1', 'admin-1');
+
+    expect(mockRepo.setActive).toHaveBeenCalledWith('t1', 'u1', true);
+  });
+
+  test('reactivateUser throws NotFoundError when user does not exist', async () => {
+    mockRepo.findById.mockResolvedValue(null);
+
+    await expect(service.reactivateUser('t1', 'missing', 'admin-1')).rejects.toThrow(NotFoundError);
+    expect(mockRepo.setActive).not.toHaveBeenCalled();
+  });
+
+  test('reactivateUser throws ConflictError when the user is already active', async () => {
+    mockRepo.findById.mockResolvedValue({
+      _id: { toString: () => 'u1' },
+      role: UserRole.NURSE,
+      isActive: true,
+    } as never);
+
+    await expect(service.reactivateUser('t1', 'u1', 'admin-1')).rejects.toThrow(ConflictError);
+    expect(mockRepo.setActive).not.toHaveBeenCalled();
+  });
+
+  test('reactivateUser does not change role or department data', async () => {
+    mockRepo.findById.mockResolvedValue({
+      _id: { toString: () => 'u1' },
+      role: UserRole.DOCTOR,
+      departmentIds: ['dept-1'],
+      isActive: false,
+    } as never);
+    mockRepo.setActive.mockResolvedValue(undefined);
+
+    await service.reactivateUser('t1', 'u1', 'admin-1');
+
+    expect(mockRepo.updateRole).not.toHaveBeenCalled();
+    expect(mockRepo.setActive).toHaveBeenCalledWith('t1', 'u1', true);
+  });
+
   // ── updateUserRole ────────────────────────────────────────────────────────────
   test('updateUserRole throws NotFoundError when user does not exist', async () => {
     mockRepo.findById.mockResolvedValue(null);

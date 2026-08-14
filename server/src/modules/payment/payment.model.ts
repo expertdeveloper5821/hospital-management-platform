@@ -19,6 +19,9 @@ export interface IPayment extends Document {
   // patient has more than one payment on the same day).
   referenceType:      string | null;
   referenceId:        string | null;
+  // Optional UPI/Card reference number the payer's app/terminal shows —
+  // recorded as-is for reconciliation; never required to complete a payment.
+  transactionId:      string | null;
   createdBy:          string;
   createdAt:          Date;
   updatedAt:          Date;
@@ -39,6 +42,7 @@ const PaymentSchema = new Schema<IPayment>(
     razorpayPaymentId: { type: String, default: null },
     referenceType:     { type: String, default: null },
     referenceId:       { type: String, default: null },
+    transactionId:     { type: String, default: null },
     createdBy:         { type: String, required: true },
   },
   { timestamps: true, collection: 'payments' },
