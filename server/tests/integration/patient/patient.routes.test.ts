@@ -504,6 +504,40 @@ describe('GET /api/patients', () => {
     expect(res.status).toBe(200);
   });
 
+  // Regression guard: New Pathology/Radiology Request forms search patients
+  // through this exact endpoint (client/app/(dashboard)/lab/page.tsx).
+  test('200 — Pathologist can search patients (New Pathology Request form)', async () => {
+    const tenant = await seedTenant();
+    const pathologist = await seedUser(tenant._id.toString(), 'path@h.com', UserRole.PATHOLOGIST);
+    const token = tokenFor(pathologist._id.toString(), tenant._id.toString(), UserRole.PATHOLOGIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-PATH0001', fullName: 'Ravi Kumar', mobileNumber: '1111111111' });
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ q: 'Ravi' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+  });
+
+  test('200 — Radiologist can search patients (New Radiology Request form)', async () => {
+    const tenant = await seedTenant();
+    const radiologist = await seedUser(tenant._id.toString(), 'rad@h.com', UserRole.RADIOLOGIST);
+    const token = tokenFor(radiologist._id.toString(), tenant._id.toString(), UserRole.RADIOLOGIST);
+
+    await seedPatient(tenant._id.toString(), { patientId: 'PAT-RAD00001', fullName: 'Priya Singh', mobileNumber: '2222222222' });
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ q: 'Priya' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+  });
+
   test('200 — Receptionist can see patients created by Admin in the same tenant', async () => {
     const tenant = await seedTenant();
     const admin  = await seedUser(tenant._id.toString(), 'admin-role@h.com', UserRole.ADMIN);

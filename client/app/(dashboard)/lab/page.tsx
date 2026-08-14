@@ -927,7 +927,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
 
 type TabType = 'pathology' | 'radiology';
 
-const LAB_ALLOWED_ROLES = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE', 'PATHOLOGIST', 'RADIOLOGIST'];
+const LAB_ALLOWED_ROLES = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE', 'PATHOLOGIST', 'RADIOLOGIST', 'RECEPTIONIST'];
 
 export default function LabPage() {
   const router = useRouter();
@@ -940,7 +940,11 @@ export default function LabPage() {
     }
   }, [role, router]);
 
-  const canCreate = ['DOCTOR', 'HOSPITAL_ADMIN', 'NURSE'].includes(role ?? '');
+  // PATHOLOGIST/RADIOLOGIST may only create requests for their own request
+  // type — mirrors the backend's per-route requireRole (also enforced there).
+  const canCreatePathology = ['DOCTOR', 'HOSPITAL_ADMIN', 'NURSE', 'PATHOLOGIST', 'RECEPTIONIST'].includes(role ?? '');
+  const canCreateRadiology = ['DOCTOR', 'HOSPITAL_ADMIN', 'NURSE', 'RADIOLOGIST', 'RECEPTIONIST'].includes(role ?? '');
+  const canCreate = activeTab === 'pathology' ? canCreatePathology : canCreateRadiology;
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;

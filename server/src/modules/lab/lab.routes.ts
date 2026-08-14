@@ -43,7 +43,7 @@ const radiologyUpload = multer({
 
 router.post(
   '/pathology',
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RECEPTIONIST),
   createPathologyRequest,
 );
 
@@ -84,7 +84,7 @@ router.patch(
 
 router.post(
   '/radiology',
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST, UserRole.NURSE, UserRole.RECEPTIONIST),
   createRadiologyRequest,
 );
 

@@ -284,7 +284,7 @@ describe('POST /api/opd/visits', () => {
     expect(res.body.data.notes).toBe('<p><span style="font-size: 14px">Note text</span></p>');
   });
 
-  test('403 — Manager role cannot create visits', async () => {
+  test('201 — Manager can create a visit', async () => {
     const tenant  = await seedTenant();
     const tid     = tenant._id.toString();
     await seedPatient(tid);
@@ -296,7 +296,8 @@ describe('POST /api/opd/visits', () => {
       .set(bearer(token))
       .send(VALID_VISIT_BODY);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe(OPDVisitStatus.OPEN);
   });
 
   test('tenant isolation — patient from another tenant returns 404', async () => {
@@ -415,7 +416,7 @@ describe('POST /api/opd/visits', () => {
     expect(res.body.message).toMatch(/Past dates are not allowed for OPD visits\./);
   });
 
-  test('400 — Nurse cannot create a visit for a past date', async () => {
+  test('403 — Nurse cannot create a visit at all (view-only access to Doctor Visits)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedPatient(tid);
@@ -425,7 +426,7 @@ describe('POST /api/opd/visits', () => {
       .post('/api/opd/visits')
       .set(bearer(tokenFor(nurse._id.toString(), tid, UserRole.NURSE)))
       .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
-    expect(resNurse.status).toBe(400);
+    expect(resNurse.status).toBe(403);
   });
 
   test('201 — Hospital Admin can create a backdated visit', async () => {
@@ -972,20 +973,17 @@ describe('Nurse/Doctor scoping — mutation guards', () => {
     });
   }
 
-  // ─── Nurse ───────────────────────────────────────────────────────────────
+  // ─── Nurse (view-only — no create/edit/complete/cancel) ──────────────────
 
-  test('404 — nurse cannot update an out-of-scope visit by direct visitId', async () => {
+  test('403 — nurse cannot update a visit (view-only access to Doctor Visits)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     const nurse  = await seedUser(tid, 'nurse-upd@h.com', UserRole.NURSE);
     const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
-    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
 
     await seedPatient(tid, 'PAT-NMUT0001');
-    await seedPatient(tid, 'PAT-NMUT0002');
     await admitToWard(tid, 'PAT-NMUT0001', wardA._id.toString(), 'ADM-NMUT-A1');
-    await admitToWard(tid, 'PAT-NMUT0002', wardB._id.toString(), 'ADM-NMUT-B1');
-    await seedVisit(tid, { visitId: 'OPD-NMUT0001', patientId: 'PAT-NMUT0002' });
+    await seedVisit(tid, { visitId: 'OPD-NMUT0001', patientId: 'PAT-NMUT0001' });
 
     const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
     const res   = await request(app)
@@ -993,21 +991,18 @@ describe('Nurse/Doctor scoping — mutation guards', () => {
       .set(bearer(token))
       .send({ notes: 'Should be blocked' });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
-  test('404 — nurse cannot complete an out-of-scope visit by direct visitId', async () => {
+  test('403 — nurse cannot complete a visit (view-only access to Doctor Visits)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     const nurse  = await seedUser(tid, 'nurse-comp@h.com', UserRole.NURSE);
     const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
-    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
 
     await seedPatient(tid, 'PAT-NMUT0003');
-    await seedPatient(tid, 'PAT-NMUT0004');
     await admitToWard(tid, 'PAT-NMUT0003', wardA._id.toString(), 'ADM-NMUT-A2');
-    await admitToWard(tid, 'PAT-NMUT0004', wardB._id.toString(), 'ADM-NMUT-B2');
-    await seedVisit(tid, { visitId: 'OPD-NMUT0002', patientId: 'PAT-NMUT0004' });
+    await seedVisit(tid, { visitId: 'OPD-NMUT0002', patientId: 'PAT-NMUT0003' });
 
     const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
     const res   = await request(app)
@@ -1015,54 +1010,40 @@ describe('Nurse/Doctor scoping — mutation guards', () => {
       .set(bearer(token))
       .send({ diagnosis: 'Should be blocked' });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
-  test('404 — nurse cannot cancel an out-of-scope visit by direct visitId', async () => {
+  test('403 — nurse cannot cancel a visit (view-only access to Doctor Visits)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     const nurse  = await seedUser(tid, 'nurse-canc@h.com', UserRole.NURSE);
     const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
-    const wardB  = await WardModel.create({ name: 'Ward B', tenantId: tid });
 
     await seedPatient(tid, 'PAT-NMUT0005');
-    await seedPatient(tid, 'PAT-NMUT0006');
     await admitToWard(tid, 'PAT-NMUT0005', wardA._id.toString(), 'ADM-NMUT-A3');
-    await admitToWard(tid, 'PAT-NMUT0006', wardB._id.toString(), 'ADM-NMUT-B3');
-    await seedVisit(tid, { visitId: 'OPD-NMUT0003', patientId: 'PAT-NMUT0006' });
+    await seedVisit(tid, { visitId: 'OPD-NMUT0003', patientId: 'PAT-NMUT0005' });
 
     const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
     const res   = await request(app)
       .patch('/api/opd/visits/OPD-NMUT0003/cancel')
       .set(bearer(token));
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
-  test('200 — nurse can still update/complete/cancel a visit for a patient in their own ward', async () => {
+  test('403 — nurse cannot create a visit (view-only access to Doctor Visits)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
-    const nurse  = await seedUser(tid, 'nurse-ok@h.com', UserRole.NURSE);
-    const wardA  = await WardModel.create({ name: 'Ward A', tenantId: tid, assignedNurseIds: [nurse._id.toString()] });
-
+    const nurse  = await seedUser(tid, 'nurse-create@h.com', UserRole.NURSE);
     await seedPatient(tid, 'PAT-NMUT0007');
-    await admitToWard(tid, 'PAT-NMUT0007', wardA._id.toString(), 'ADM-NMUT-A4');
-    await seedVisit(tid, { visitId: 'OPD-NMUT0004', patientId: 'PAT-NMUT0007' });
 
     const token = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
-
-    const updateRes = await request(app)
-      .patch('/api/opd/visits/OPD-NMUT0004')
+    const res   = await request(app)
+      .post('/api/opd/visits')
       .set(bearer(token))
-      .send({ notes: 'Nurse note' });
-    expect(updateRes.status).toBe(200);
-    expect(updateRes.body.data.notes).toBe('Nurse note');
+      .send({ ...VALID_VISIT_BODY, patientId: 'PAT-NMUT0007' });
 
-    const cancelRes = await request(app)
-      .patch('/api/opd/visits/OPD-NMUT0004/cancel')
-      .set(bearer(token));
-    expect(cancelRes.status).toBe(200);
-    expect(cancelRes.body.data.status).toBe(OPDVisitStatus.CANCELLED);
+    expect(res.status).toBe(403);
   });
 
   // ─── Doctor ──────────────────────────────────────────────────────────────

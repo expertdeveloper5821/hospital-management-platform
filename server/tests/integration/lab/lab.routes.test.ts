@@ -191,6 +191,35 @@ describe('POST /api/lab/pathology', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.notes).toBe('fasting sample');
   });
+
+  test('201 — pathologist can create a pathology request', async () => {
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${pathologistToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.testType).toBe('Blood CBC');
+  });
+
+  test('201 — receptionist can create a pathology request', async () => {
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.testType).toBe('Blood CBC');
+  });
+
+  test('403 — radiologist cannot create a pathology request (own-type only)', async () => {
+    const res = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${radiologistToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+
+    expect(res.status).toBe(403);
+  });
 });
 
 describe('GET /api/lab/pathology', () => {
@@ -618,6 +647,35 @@ describe('POST /api/lab/radiology', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('PENDING');
     expect(res.body.data.imagingType).toBe('X-Ray Chest');
+  });
+
+  test('201 — radiologist can create a radiology request', async () => {
+    const res = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${radiologistToken}`)
+      .send({ patientId: 'PAT-001', imagingType: 'X-Ray Chest' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.imagingType).toBe('X-Ray Chest');
+  });
+
+  test('201 — receptionist can create a radiology request', async () => {
+    const res = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId: 'PAT-001', imagingType: 'X-Ray Chest' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.imagingType).toBe('X-Ray Chest');
+  });
+
+  test('403 — pathologist cannot create a radiology request (own-type only)', async () => {
+    const res = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${pathologistToken}`)
+      .send({ patientId: 'PAT-001', imagingType: 'X-Ray Chest' });
+
+    expect(res.status).toBe(403);
   });
 });
 

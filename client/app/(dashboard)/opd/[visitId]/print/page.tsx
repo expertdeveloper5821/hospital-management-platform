@@ -140,7 +140,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
         <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
           <Field label="Patient Name" value={patient.fullName} />
           <Field label="Patient ID"   value={patient.patientId} mono />
-          <Field label="Age / Gender" value={`${calculateAge(patient.dateOfBirth)} yrs / ${toDisplay(patient.gender)}`} />
+          <Field label="Age / Gender" value={`${calculateAge(patient.dateOfBirth)} years / ${toDisplay(patient.gender)}`} />
           <Field label="Mobile"       value={patient.mobileNumber} />
           {patient.address && <Field label="Address" value={patient.address} span />}
           {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}

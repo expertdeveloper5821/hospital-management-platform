@@ -191,7 +191,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
         <div className="flex-1 overflow-y-auto">
           {tab === 'details' && (
             <div className="p-5 space-y-1">
-              {row('Date of Birth', `${formatDate(patient.dateOfBirth)} (${calcAge(patient.dateOfBirth)} yrs)`)}
+              {row('Date of Birth', `${formatDate(patient.dateOfBirth)} (${calcAge(patient.dateOfBirth)} years)`)}
               {row('Gender',        genderLabel(patient.gender))}
               {row('Mobile',        patient.mobileNumber)}
               {row('Blood Group',   patient.bloodGroup)}
@@ -491,7 +491,7 @@ export default function PatientsPage() {
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.patientId}</td>
                       <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={p.fullName}>{p.fullName}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground">
-                        {calcAge(p.dateOfBirth)} yrs · {genderLabel(p.gender)}
+                        {calcAge(p.dateOfBirth)} years · {genderLabel(p.gender)}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{p.mobileNumber}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">

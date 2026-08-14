@@ -47,6 +47,7 @@ export class InventoryService {
       const message = `"${updated.name}" stock is low: ${updated.quantity} ${updated.unit} remaining (threshold: ${updated.lowStockThreshold})`;
       await notificationService.sendToRole(UserRole.MANAGER, tenantId, 'Low Stock Alert', message, 'INVENTORY_ITEM', itemId);
       await notificationService.sendToRole(UserRole.HOSPITAL_ADMIN, tenantId, 'Low Stock Alert', message, 'INVENTORY_ITEM', itemId);
+      await notificationService.sendToRole(UserRole.ADMIN, tenantId, 'Low Stock Alert', message, 'INVENTORY_ITEM', itemId);
     } catch { /* swallow */ }
   }
 

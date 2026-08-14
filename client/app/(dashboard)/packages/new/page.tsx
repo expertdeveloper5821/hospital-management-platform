@@ -13,7 +13,7 @@ export default function NewPackagePage() {
   const router  = useRouter();
   const profile = useAppSelector((s) => s.auth.profile);
 
-  if (profile && profile.role !== 'HOSPITAL_ADMIN' && profile.role !== 'ADMIN') {
+  if (profile && profile.role !== 'HOSPITAL_ADMIN' && profile.role !== 'ADMIN' && profile.role !== 'RECEPTIONIST') {
     router.replace('/packages');
     return null;
   }

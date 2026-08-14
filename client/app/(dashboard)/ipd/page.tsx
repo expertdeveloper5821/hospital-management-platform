@@ -25,6 +25,7 @@ import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { PatientFormModal } from '@/components/patients/patient-form-modal';
 import {
   Bed,
   PlusCircle,
@@ -34,6 +35,7 @@ import {
   Search,
   AlertTriangle,
   CheckCircle2,
+  UserPlus,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,11 +53,12 @@ const PAYMENT_VIEW_ROLES: UserRole[] = [
 // Live search typeahead — type name or mobile, pick a patient from the dropdown.
 
 interface PatientSearchProps {
-  value:    PatientResponse | null;
-  onChange: (p: PatientResponse | null) => void;
+  value:        PatientResponse | null;
+  onChange:     (p: PatientResponse | null) => void;
+  onAddPatient?: () => void;
 }
 
-function PatientSearch({ value, onChange }: PatientSearchProps) {
+function PatientSearch({ value, onChange, onAddPatient }: PatientSearchProps) {
   const [query,    setQuery]    = useState('');
   const [open,     setOpen]     = useState(false);
   const containerRef            = useRef<HTMLDivElement>(null);
@@ -105,42 +108,50 @@ function PatientSearch({ value, onChange }: PatientSearchProps) {
   }
 
   return (
-    <div ref={containerRef} className="relative">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <Input
-          placeholder="Search by name or mobile…"
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          className="pl-9"
-        />
-      </div>
-
-      {open && (query.trim().length >= 2) && (
-        <div className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto">
-          {isFetching ? (
-            <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>
-          ) : results.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No patients found.</div>
-          ) : (
-            results.map((p) => (
-              <button
-                key={p.patientId}
-                type="button"
-                className="w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left"
-                onMouseDown={(e) => e.preventDefault()} // prevent input blur before click
-                onClick={() => { onChange(p); setOpen(false); setQuery(''); }}
-              >
-                <span className="font-medium">{p.fullName}</span>
-                <span className="text-xs text-muted-foreground font-mono">
-                  {p.patientId} · {p.mobileNumber}
-                  {p.bloodGroup ? ` · ${p.bloodGroup}` : ''}
-                </span>
-              </button>
-            ))
-          )}
+    <div className="flex gap-2">
+      <div ref={containerRef} className="relative flex-1">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search by name or mobile…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            className="pl-9"
+          />
         </div>
+
+        {open && (query.trim().length >= 2) && (
+          <div className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto">
+            {isFetching ? (
+              <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>
+            ) : results.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-muted-foreground">No patients found.</div>
+            ) : (
+              results.map((p) => (
+                <button
+                  key={p.patientId}
+                  type="button"
+                  className="w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left"
+                  onMouseDown={(e) => e.preventDefault()} // prevent input blur before click
+                  onClick={() => { onChange(p); setOpen(false); setQuery(''); }}
+                >
+                  <span className="font-medium">{p.fullName}</span>
+                  <span className="text-xs text-muted-foreground font-mono">
+                    {p.patientId} · {p.mobileNumber}
+                    {p.bloodGroup ? ` · ${p.bloodGroup}` : ''}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+      {onAddPatient && (
+        <Button type="button" onClick={onAddPatient} className="shrink-0 h-10">
+          <UserPlus className="h-4 w-4 mr-1.5" />
+          Add Patient
+        </Button>
       )}
     </div>
   );
@@ -611,6 +622,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const [paymentAmount,        setPaymentAmount]        = useState('');
   const [paymentMode,          setPaymentMode]          = useState<IPDPaymentMode | ''>('');
   const [error,                setError]                = useState<string | null>(null);
+  const [showAddPatient,       setShowAddPatient]       = useState(false);
 
   const { data: bedsData }      = useListBedsQuery(wardId, { skip: !wardId });
   const { data: departmentsData } = useListDepartmentsQuery();
@@ -665,6 +677,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const selectedWard = wards.find((w) => w.wardId === wardId);
 
   return (
+    <>
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
       <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
         <div className="flex items-center justify-between p-5 border-b">
@@ -679,7 +692,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           {/* Step 1 — Patient */}
           <div className="space-y-1.5">
             <Label>Patient</Label>
-            <PatientSearch value={patient} onChange={setPatient} />
+            <PatientSearch value={patient} onChange={setPatient} onAddPatient={() => setShowAddPatient(true)} />
           </div>
 
           {/* Step 2 — Ward */}
@@ -865,6 +878,14 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
         </form>
       </div>
     </DialogOverlay>
+    {showAddPatient && (
+      <PatientFormModal
+        mode="register"
+        onClose={() => setShowAddPatient(false)}
+        onSuccess={(p) => { setPatient(p); setShowAddPatient(false); }}
+      />
+    )}
+    </>
   );
 }
 

@@ -40,6 +40,8 @@ let adminToken:     string;
 let adminRoleToken: string;
 let managerToken:   string;
 let doctorToken:    string;
+let nurseToken:     string;
+let receptionistToken: string;
 
 beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
@@ -88,6 +90,14 @@ beforeEach(async () => {
     tenantId, email: 'doctor@inv.com', name: 'Inv Doctor', passwordHash: 'x',
     role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
   });
+  const nurse = await UserModel.create({
+    tenantId, email: 'nurse@inv.com', name: 'Inv Nurse', passwordHash: 'x',
+    role: UserRole.NURSE, isActive: true, isFirstLogin: false,
+  });
+  const receptionist = await UserModel.create({
+    tenantId, email: 'receptionist@inv.com', name: 'Inv Receptionist', passwordHash: 'x',
+    role: UserRole.RECEPTIONIST, isActive: true, isFirstLogin: false,
+  });
 
   const sign = (id: string, role: UserRole) =>
     jwt.sign(
@@ -99,6 +109,8 @@ beforeEach(async () => {
   adminRoleToken = sign((adminRole._id as mongoose.Types.ObjectId).toString(), UserRole.ADMIN);
   managerToken   = sign((manager._id as mongoose.Types.ObjectId).toString(), UserRole.MANAGER);
   doctorToken    = sign((doctor._id as mongoose.Types.ObjectId).toString(), UserRole.DOCTOR);
+  nurseToken     = sign((nurse._id as mongoose.Types.ObjectId).toString(), UserRole.NURSE);
+  receptionistToken = sign((receptionist._id as mongoose.Types.ObjectId).toString(), UserRole.RECEPTIONIST);
 });
 
 // ─── Create ───────────────────────────────────────────────────────────────────
@@ -137,6 +149,24 @@ describe('POST /api/inventory', () => {
     const res = await request(app)
       .post('/api/inventory')
       .set('Authorization', `Bearer ${doctorToken}`)
+      .send(validPayload);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 403 for nurse role (cannot create/modify inventory)', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send(validPayload);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 403 for receptionist role (cannot create/modify inventory)', async () => {
+    const res = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${receptionistToken}`)
       .send(validPayload);
 
     expect(res.status).toBe(403);
@@ -245,6 +275,22 @@ describe('GET /api/inventory', () => {
     const res = await request(app)
       .get('/api/inventory')
       .set('Authorization', `Bearer ${doctorToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('nurse can read inventory (view-only) (200)', async () => {
+    const res = await request(app)
+      .get('/api/inventory')
+      .set('Authorization', `Bearer ${nurseToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('receptionist can read inventory (view-only) (200)', async () => {
+    const res = await request(app)
+      .get('/api/inventory')
+      .set('Authorization', `Bearer ${receptionistToken}`);
 
     expect(res.status).toBe(200);
   });
@@ -432,6 +478,24 @@ describe('PATCH /api/inventory/:itemId/stock', () => {
 
     expect(res.status).toBe(403);
   });
+
+  test('returns 403 for nurse (cannot modify stock)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/stock`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({ quantityChange: -5, reason: 'x' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 403 for receptionist (cannot modify stock)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/stock`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ quantityChange: -5, reason: 'x' });
+
+    expect(res.status).toBe(403);
+  });
 });
 
 // ─── Update Threshold ─────────────────────────────────────────────────────────
@@ -464,6 +528,24 @@ describe('PATCH /api/inventory/:itemId/threshold', () => {
       .send({ lowStockThreshold: -1 });
 
     expect(res.status).toBe(400);
+  });
+
+  test('returns 403 for nurse (cannot modify threshold)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/threshold`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({ lowStockThreshold: 25 });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 403 for receptionist (cannot modify threshold)', async () => {
+    const res = await request(app)
+      .patch(`/api/inventory/${itemId}/threshold`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ lowStockThreshold: 25 });
+
+    expect(res.status).toBe(403);
   });
 });
 

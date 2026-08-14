@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 
-const ALLOWED_ROLES = ['HOSPITAL_ADMIN', 'HR'];
+// Mirrors GET /api/users requireRole on the backend — full staff list is
+// restricted to admin/management roles + HR.
+const ALLOWED_ROLES = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'HR'];
 
 export default function StaffPage() {
   const router  = useRouter();
@@ -33,7 +35,7 @@ export default function StaffPage() {
 
       <div className="max-w-sm">
         <Input
-          placeholder="Search by name or email…"
+          placeholder="Search by name ,role or email…"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />

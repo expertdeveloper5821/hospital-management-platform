@@ -29,6 +29,9 @@ const READERS = [
   UserRole.MANAGER,
   UserRole.DOCTOR,
   UserRole.FINANCE_MANAGER,
+  // Needed to search/select a patient on the New Pathology/Radiology Request form.
+  UserRole.PATHOLOGIST,
+  UserRole.RADIOLOGIST,
 ];
 
 router.post('/',

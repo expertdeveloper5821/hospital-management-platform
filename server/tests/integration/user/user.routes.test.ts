@@ -250,6 +250,94 @@ describe('GET /api/users', () => {
     expect(res.status).toBe(401);
   });
 
+  // Regression guard: RECEPTIONIST must keep GET /api/users access — the OPD
+  // "New Visit" doctor picker (client/app/(dashboard)/opd/page.tsx) fetches
+  // doctors via this exact endpoint (role=DOCTOR filter), not a separate one.
+  test('200 — receptionist can fetch doctors via role=DOCTOR filter (OPD doctor picker)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get(`/api/users?role=${UserRole.DOCTOR}&isActive=true&limit=100`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].role).toBe(UserRole.DOCTOR);
+  });
+
+  // Pathologist/Radiologist need this endpoint only to populate the "Referred
+  // by doctor" dropdown on the New Pathology/Radiology Request form — never
+  // the full staff directory (that stays Staff-Management-only).
+  test('200 — pathologist can fetch doctors for the New Pathology Request form', async () => {
+    const tenant = await seedTenant();
+    const pathologist = await seedUser(tenant._id.toString(), 'path@h.com', UserRole.PATHOLOGIST);
+    const token = tokenFor(pathologist._id.toString(), tenant._id.toString(), UserRole.PATHOLOGIST);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get(`/api/users?role=${UserRole.DOCTOR}&isActive=true&limit=100`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].role).toBe(UserRole.DOCTOR);
+  });
+
+  test('200 — radiologist can fetch doctors for the New Radiology Request form', async () => {
+    const tenant = await seedTenant();
+    const radiologist = await seedUser(tenant._id.toString(), 'rad@h.com', UserRole.RADIOLOGIST);
+    const token = tokenFor(radiologist._id.toString(), tenant._id.toString(), UserRole.RADIOLOGIST);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+
+    const res = await request(app)
+      .get(`/api/users?role=${UserRole.DOCTOR}&isActive=true&limit=100`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].role).toBe(UserRole.DOCTOR);
+  });
+
+  test('200 — pathologist is hard-pinned to role=DOCTOR and cannot browse the full staff directory, even when no role filter is sent', async () => {
+    const tenant = await seedTenant();
+    const pathologist = await seedUser(tenant._id.toString(), 'path2@h.com', UserRole.PATHOLOGIST);
+    const token = tokenFor(pathologist._id.toString(), tenant._id.toString(), UserRole.PATHOLOGIST);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
+
+    const res = await request(app).get('/api/users').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    // Only the doctor + the pathologist's own account would match role=DOCTOR —
+    // nurse/HR/receptionist accounts must never be visible to this role.
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data.every((u: { role: string }) => u.role === UserRole.DOCTOR)).toBe(true);
+  });
+
+  test('200 — radiologist role filter is ignored server-side; only DOCTOR records are ever returned', async () => {
+    const tenant = await seedTenant();
+    const radiologist = await seedUser(tenant._id.toString(), 'rad2@h.com', UserRole.RADIOLOGIST);
+    const token = tokenFor(radiologist._id.toString(), tenant._id.toString(), UserRole.RADIOLOGIST);
+    await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
+
+    // Attempting to ask for HR records explicitly must still be forced to DOCTOR.
+    const res = await request(app)
+      .get(`/api/users?role=${UserRole.HR}`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].role).toBe(UserRole.DOCTOR);
+  });
+
   // ── E04-B04: filter / pagination enhancements ───────────────────────────────
 
   test('200 — search filter matches by name (case-insensitive)', async () => {

@@ -95,9 +95,9 @@ interface VisitPanelProps {
   visit:   OPDVisitResponse;
   onClose: () => void;
   onUpdate: (updated: OPDVisitResponse) => void;
-  canEdit: boolean;    // DOCTOR, NURSE, HOSPITAL_ADMIN
+  canEdit: boolean;    // DOCTOR, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
-  canCancel: boolean;  // RECEPTIONIST, NURSE, DOCTOR, HOSPITAL_ADMIN
+  canCancel: boolean;  // RECEPTIONIST, DOCTOR, HOSPITAL_ADMIN
   canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
   doctorNames: (ids: string[]) => string;
   allDoctors:  UserResponse[];
@@ -1048,10 +1048,12 @@ export default function OPDPage() {
 
   // DOCTOR is deliberately excluded — doctors may view/act on visits assigned to
   // them but must not be able to create new OPD visits (also enforced server-side).
-  const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canEdit        = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canComplete    = ['DOCTOR', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canCancel      = ['RECEPTIONIST', 'NURSE', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  // NURSE is view-only on Doctor Visits — no create/edit/complete/cancel (also
+  // enforced server-side).
+  const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
+  const canEdit        = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canComplete    = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canCancel      = ['RECEPTIONIST', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role ?? '');
 
   // Queue stats
