@@ -216,7 +216,7 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
     expect(res.status).toBe(404);
   });
 
-  test('403 — a role outside ADMISSION_READERS cannot access it (e.g. PATHOLOGIST)', async () => {
+  test('403 — a role outside DISCHARGE_SUMMARY_DOWNLOADERS cannot access it (e.g. PATHOLOGIST)', async () => {
     const tenant  = await seedTenant();
     const tid     = toId(tenant);
     const patient = await seedPatient(tid);
@@ -231,14 +231,29 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
     expect(res.status).toBe(403);
   });
 
-  test('200 — Manager and Receptionist (unscoped ADMISSION_READERS) can access it', async () => {
+  test('403 — Manager can view the admission but cannot download its discharge summary', async () => {
+    const tenant  = await seedTenant();
+    const tid     = toId(tenant);
+    const patient = await seedPatient(tid);
+    const doctor  = await seedUser(UserRole.DOCTOR, tid);
+    await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
+    const token = makeToken('manager-user', tid, UserRole.MANAGER);
+
+    const res = await request(app)
+      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('200 — Receptionist and Admin (DISCHARGE_SUMMARY_DOWNLOADERS) can access it', async () => {
     const tenant  = await seedTenant();
     const tid     = toId(tenant);
     const patient = await seedPatient(tid);
     const doctor  = await seedUser(UserRole.DOCTOR, tid);
     await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
 
-    for (const role of [UserRole.MANAGER, UserRole.RECEPTIONIST]) {
+    for (const role of [UserRole.RECEPTIONIST, UserRole.ADMIN]) {
       const token = makeToken('u-' + role, tid, role);
       const res = await request(app)
         .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
@@ -252,8 +267,9 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
     expect(res.status).toBe(401);
   });
 
-  // ─── Assignment-scoped authorization (same as GET /admissions/:admissionId) ──
-  test('200 — a doctor assigned to the admission can download the discharge summary', async () => {
+  // ─── Doctor is excluded from discharge summary downloads entirely (unlike
+  // GET /admissions/:admissionId, which doctors can still view) ───────────────
+  test('403 — a doctor assigned to the admission still cannot download the discharge summary', async () => {
     const tenant  = await seedTenant();
     const tid     = toId(tenant);
     const patient = await seedPatient(tid);
@@ -265,27 +281,7 @@ describe('GET /api/ipd/admissions/:admissionId/discharge-summary', () => {
       .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
       .set('Authorization', `Bearer ${token}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.subarray(0, 5).toString('ascii')).toBe('%PDF-');
-  });
-
-  test('404 — a doctor not assigned to the admission (nor its OPD/IPD history) is rejected', async () => {
-    const tenant       = await seedTenant();
-    const tid          = toId(tenant);
-    const patient      = await seedPatient(tid);
-    const doctor       = await seedUser(UserRole.DOCTOR, tid);
-    const otherDoctor  = await UserModel.create({
-      name: 'Other Doctor', tenantId: tid, email: 'other-doctor@dischargetest.com',
-      passwordHash: '$2a$12$hashedpwd', role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
-    });
-    await seedDischargedAdmission(tid, patient.patientId, toId(doctor));
-
-    const token = makeToken(toId(otherDoctor), tid, UserRole.DOCTOR);
-    const res = await request(app)
-      .get('/api/ipd/admissions/11111111-1111-4111-8111-111111111111/discharge-summary')
-      .set('Authorization', `Bearer ${token}`);
-
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
   test('200 — a nurse assigned to the admission\'s ward can download the discharge summary', async () => {

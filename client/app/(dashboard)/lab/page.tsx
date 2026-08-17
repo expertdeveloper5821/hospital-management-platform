@@ -150,14 +150,24 @@ interface NewRequestModalProps {
 }
 
 function NewRequestModal({ type, onClose }: NewRequestModalProps) {
+  const profile = useAppSelector((s) => s.auth.profile);
+  // A Doctor referring their own lab request has no "Self" concept — the
+  // referring doctor IS the logged-in user, so the Self option is hidden and
+  // their own name is defaulted/pinned to the top instead. Every other role
+  // that can create a request (Pathologist/Radiologist/Receptionist/
+  // Hospital Admin/Nurse) keeps the existing Self-first behavior unchanged.
+  const isDoctorSelf = profile?.role === 'DOCTOR';
+
   const [patient,    setPatient]    = useState<PatientResponse | null>(null);
   const [testType,   setTestType]   = useState('');
-  const [referredBy, setReferredBy] = useState(LAB_REFERRED_BY_SELF);
+  const [referredBy, setReferredBy] = useState(isDoctorSelf ? (profile?.userId ?? LAB_REFERRED_BY_SELF) : LAB_REFERRED_BY_SELF);
   const [notes,      setNotes]      = useState('');
   const [error,      setError]      = useState('');
 
   const { data: doctorsData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
-  const doctors = doctorsData?.data ?? [];
+  const doctors = isDoctorSelf
+    ? [...(doctorsData?.data ?? [])].sort((a, b) => (a.userId === profile?.userId ? -1 : b.userId === profile?.userId ? 1 : 0))
+    : (doctorsData?.data ?? []);
 
   const [createPathology, { isLoading: creatingPath }] = useCreatePathologyRequestMutation();
   const [createRadiology, { isLoading: creatingRad  }] = useCreateRadiologyRequestMutation();
@@ -230,7 +240,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
               onChange={(e) => setReferredBy(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value={LAB_REFERRED_BY_SELF}>Self</option>
+              {!isDoctorSelf && <option value={LAB_REFERRED_BY_SELF}>Self</option>}
               {doctors.map((d) => (
                 <option key={d.userId} value={d.userId}>{d.name}</option>
               ))}

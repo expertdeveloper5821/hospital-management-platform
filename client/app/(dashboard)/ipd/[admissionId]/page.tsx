@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { ArrowLeft, User, BedDouble, Stethoscope, Calendar, FileText, Activity } from 'lucide-react';
 import { useGetAdmissionByIdQuery } from '@/store/api/ipd.api';
-import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
+import { DownloadDischargeSummaryButton, DISCHARGE_SUMMARY_DOWNLOAD_ROLES } from '@/components/ipd/download-discharge-summary-button';
+import { useAppSelector } from '@/store/hooks';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -35,6 +36,8 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 export default function IPDAdmissionDetailPage({ params }: { params: { admissionId: string } }) {
   const { admissionId } = params;
   const { data: admission, isLoading, isError } = useGetAdmissionByIdQuery(admissionId);
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const canDownloadSummary = !!role && DISCHARGE_SUMMARY_DOWNLOAD_ROLES.includes(role);
 
   if (isLoading) {
     return (
@@ -85,7 +88,7 @@ export default function IPDAdmissionDetailPage({ params }: { params: { admission
         )}
       </div>
 
-      {admission.status === 'DISCHARGED' && (
+      {admission.status === 'DISCHARGED' && canDownloadSummary && (
         <DownloadDischargeSummaryButton admissionId={admission.admissionId} />
       )}
 

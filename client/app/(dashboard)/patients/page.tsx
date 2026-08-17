@@ -19,7 +19,7 @@ import { opdStatusLabel, opdStatusVariant } from '@/lib/opd-status';
 import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
-import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
+import { DownloadDischargeSummaryButton, DISCHARGE_SUMMARY_DOWNLOAD_ROLES } from '@/components/ipd/download-discharge-summary-button';
 import {
   Card,
   CardHeader,
@@ -74,6 +74,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
   // PATCH /api/patients/:patientId route already rejects these roles; this only
   // hides the action so they aren't led into a request that will 403.
   const canEdit = role !== UserRole.NURSE && role !== UserRole.DOCTOR;
+  const canDownloadSummary = !!role && DISCHARGE_SUMMARY_DOWNLOAD_ROLES.includes(role);
 
   const [tab,           setTab]           = useState<'details' | 'history' | 'ipd'>('details');
   const [historyPage,   setHistoryPage]   = useState(1);
@@ -201,17 +202,6 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
               {row('EC Name',       patient.emergencyContactName)}
               {row('EC Mobile',     patient.emergencyContactMobile)}
               {row('Registered',    formatDate(patient.createdAt))}
-              <div className="pt-2 border-t mt-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Registration</p>
-                {patient.registrationFee != null ? (
-                  <>
-                    {row('Fee', <span className="font-semibold">₹{patient.registrationFee.toLocaleString('en-IN')}</span>)}
-                    {row('Payment Mode', patient.registrationPaymentMethod ?? '—')}
-                  </>
-                ) : (
-                  row('Fee', <span className="text-muted-foreground">Free</span>)
-                )}
-              </div>
             </div>
           )}
 
@@ -248,7 +238,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                           <p><span className="font-medium text-foreground">Discharged:</span> {new Date(a.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                         )}
                       </div>
-                      {a.status === 'DISCHARGED' && (
+                      {a.status === 'DISCHARGED' && canDownloadSummary && (
                         <DownloadDischargeSummaryButton admissionId={a.admissionId} />
                       )}
                     </div>
@@ -289,7 +279,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
                         <div>
                           <p className="text-sm font-medium">
                             {new Date(v.visitDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                            <span className="ml-2 text-xs text-muted-foreground font-normal">Queue #{v.queueNumber}</span>
+                            {/* <span className="ml-2 text-xs text-muted-foreground font-normal">Queue #{v.queueNumber}</span> */}
                           </p>
                         </div>
                         <Badge variant={opdStatusVariant(v.status)} className="text-xs shrink-0">

@@ -4,6 +4,17 @@ import { useState } from 'react';
 import { Download } from 'lucide-react';
 import { useDownloadDischargeSummaryMutation } from '@/store/api/ipd.api';
 import { Button } from '@/components/ui/button';
+import { UserRole } from '@/store/types';
+
+// Roles permitted to download the discharge summary — mirrors the backend's
+// GET /api/ipd/admissions/:admissionId/discharge-summary requireRole list.
+// Callers must gate rendering of <DownloadDischargeSummaryButton> on this list.
+export const DISCHARGE_SUMMARY_DOWNLOAD_ROLES: UserRole[] = [
+  UserRole.NURSE,
+  UserRole.RECEPTIONIST,
+  UserRole.HOSPITAL_ADMIN,
+  UserRole.ADMIN,
+];
 
 interface DownloadDischargeSummaryButtonProps {
   admissionId: string;

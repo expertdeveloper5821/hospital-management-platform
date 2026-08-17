@@ -17,6 +17,34 @@ export interface ResolvedDepartmentRevenue {
   total:         number;
 }
 
+// ─── Department resolution sources ─────────────────────────────────────────
+// Single source of truth for "which collection carries the authoritative
+// departmentId for a payment with this referenceType". Each entry's
+// collection already stamps its own departmentId at write time from the
+// record's actual doctor/requester (OPDService.createVisit,
+// IPDService.createAdmission/updateAdmission, LabService.createPathology/
+// RadiologyRequest) — this repository only has to join to it, never
+// re-derive it. Adding a new reference-type-backed department source (e.g. a
+// future billing/procedure module) is a one-line addition here; nothing else
+// in sumByResolvedDepartment needs to change.
+//
+// Anything whose referenceType isn't listed here (REGISTRATION, or no
+// reference at all — a standalone manual/Razorpay payment) falls through to
+// the `default` branch below: the patient's own departmentId, which is null
+// for every patient registered after department-scoping moved off Patient
+// (see CLAUDE.md) — so those payments correctly land in "Other Revenue"
+// unless the patient predates that change.
+const REFERENCE_DEPARTMENT_SOURCES: ReadonlyArray<{
+  referenceType: string;
+  collection:    string; // Mongo collection name (not the Mongoose model — avoids a cross-module model import/cycle)
+  matchField:    string; // field on that collection matching payment.referenceId
+}> = [
+  { referenceType: PaymentReferenceType.OPD_VISIT,         collection: 'opd_visits',        matchField: 'visitId' },
+  { referenceType: PaymentReferenceType.IPD_ADMISSION,     collection: 'ipd_admissions',     matchField: 'admissionId' },
+  { referenceType: PaymentReferenceType.PATHOLOGY_REQUEST, collection: 'pathology_requests', matchField: 'requestId' },
+  { referenceType: PaymentReferenceType.RADIOLOGY_REQUEST, collection: 'radiology_requests', matchField: 'requestId' },
+];
+
 export class PaymentRepository {
 
   async findById(paymentId: string, tenantId: string): Promise<IPayment | null> {
@@ -176,12 +204,11 @@ export class PaymentRepository {
   }
 
   // Revenue grouped by the department each payment maps to, resolved via
-  // `referenceType`/`referenceId`:
-  //   - OPD_VISIT      → OPDVisit.departmentId (joined on visitId)
-  //   - IPD_ADMISSION  → IPDAdmission.departmentId (joined on admissionId)
-  //   - anything else  → Patient.departmentId (joined on patientId) — covers
-  //     registration-fee payments and any other manual/Razorpay payment that
-  //     carries no reference at all.
+  // `referenceType`/`referenceId` against REFERENCE_DEPARTMENT_SOURCES above
+  // (OPD_VISIT, IPD_ADMISSION, PATHOLOGY_REQUEST, RADIOLOGY_REQUEST — each
+  // joined on its own id field); anything whose referenceType isn't in that
+  // list (REGISTRATION, or no reference at all) falls back to
+  // Patient.departmentId (joined on patientId).
   // A payment resolves to `departmentId: null` whenever the linked record
   // (or the patient) has no department set — old data included — rather than
   // throwing, so the caller can bucket it as "other".
@@ -203,30 +230,24 @@ export class PaymentRepository {
       match['createdAt'] = dateFilter;
     }
 
+    // One $lookup per registered reference source, each aliased to its own
+    // referenceType so the $switch below can pick the right one — built from
+    // REFERENCE_DEPARTMENT_SOURCES instead of duplicated inline per type.
+    const referenceLookups = REFERENCE_DEPARTMENT_SOURCES.map((source) => ({
+      $lookup: {
+        from: source.collection,
+        let:  { refId: '$referenceId' },
+        pipeline: [
+          { $match: { tenantId, $expr: { $eq: [`$${source.matchField}`, '$$refId'] } } },
+          { $project: { _id: 0, departmentId: 1 } },
+        ],
+        as: `__dept_${source.referenceType}`,
+      },
+    }));
+
     const rows = await PaymentModel.aggregate([
       { $match: match },
-      {
-        $lookup: {
-          from: 'opd_visits',
-          let:  { refId: '$referenceId' },
-          pipeline: [
-            { $match: { tenantId, $expr: { $eq: ['$visitId', '$$refId'] } } },
-            { $project: { _id: 0, departmentId: 1 } },
-          ],
-          as: 'opdVisit',
-        },
-      },
-      {
-        $lookup: {
-          from: 'ipd_admissions',
-          let:  { refId: '$referenceId' },
-          pipeline: [
-            { $match: { tenantId, $expr: { $eq: ['$admissionId', '$$refId'] } } },
-            { $project: { _id: 0, departmentId: 1 } },
-          ],
-          as: 'ipdAdmission',
-        },
-      },
+      ...referenceLookups,
       {
         $lookup: {
           from: 'patients',
@@ -242,16 +263,12 @@ export class PaymentRepository {
         $addFields: {
           resolvedDepartmentId: {
             $switch: {
-              branches: [
-                {
-                  case: { $eq: ['$referenceType', PaymentReferenceType.OPD_VISIT] },
-                  then: { $ifNull: [{ $arrayElemAt: ['$opdVisit.departmentId', 0] }, null] },
-                },
-                {
-                  case: { $eq: ['$referenceType', PaymentReferenceType.IPD_ADMISSION] },
-                  then: { $ifNull: [{ $arrayElemAt: ['$ipdAdmission.departmentId', 0] }, null] },
-                },
-              ],
+              branches: REFERENCE_DEPARTMENT_SOURCES.map((source) => ({
+                case: { $eq: ['$referenceType', source.referenceType] },
+                then: { $ifNull: [{ $arrayElemAt: [`$__dept_${source.referenceType}.departmentId`, 0] }, null] },
+              })),
+              // No registered reference source matched (REGISTRATION, or no
+              // reference at all) — fall back to the patient's departmentId.
               default: { $ifNull: [{ $arrayElemAt: ['$patient.departmentId', 0] }, null] },
             },
           },

@@ -141,6 +141,28 @@ export class DepartmentService {
     });
   }
 
+  // Shared "authoritative department source" algorithm for any record that
+  // carries a doctor assignment (OPD visit, IPD admission, …): the department
+  // is the first assigned doctor's own departmentIds[0], not the patient's —
+  // patients are no longer department-scoped (see CLAUDE.md). Doctors without
+  // any department are skipped in favour of the next one, matching IPD's
+  // original admission-time resolution. Returns null when none of the given
+  // doctors resolve to a department (e.g. no doctors assigned at all).
+  //
+  // Unlike IPD's admission-time doctor check, OPD never required doctorIds to
+  // be real Doctor users (no validation on create/update) — so a malformed id
+  // must resolve to "no department" here rather than throwing a Mongoose
+  // CastError, same guard `userRepository.findNamesByIds` already applies.
+  async resolveDepartmentFromDoctorIds(tenantId: string, doctorIds: string[]): Promise<string | null> {
+    for (const doctorId of doctorIds) {
+      if (!/^[a-fA-F0-9]{24}$/.test(doctorId)) continue;
+      const doctor = await userRepository.findById(tenantId, doctorId);
+      const departmentId = doctor?.departmentIds?.[0];
+      if (departmentId) return departmentId;
+    }
+    return null;
+  }
+
   async deleteDepartment(
     tenantId:     string,
     departmentId: string,

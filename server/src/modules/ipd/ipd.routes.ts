@@ -144,13 +144,23 @@ const ADMISSION_READERS = [
   UserRole.RECEPTIONIST,
 ];
 
+// Discharge summary download — narrower than ADMISSION_READERS: only these
+// roles may download the PDF (Doctor/Manager can view the admission but not
+// download its discharge summary).
+const DISCHARGE_SUMMARY_DOWNLOADERS = [
+  UserRole.NURSE,
+  UserRole.RECEPTIONIST,
+  UserRole.HOSPITAL_ADMIN,
+  UserRole.ADMIN,
+];
+
 // GET /api/ipd/admissions/:admissionId/discharge-summary — discharge summary PDF
 // (available once the admission is DISCHARGED; generated fresh on every request,
-// never persisted — same reader roles as viewing the admission itself)
+// never persisted)
 router.get(
   '/admissions/:admissionId/discharge-summary',
   ...protect,
-  requireRole(...ADMISSION_READERS),
+  requireRole(...DISCHARGE_SUMMARY_DOWNLOADERS),
   requireFirstPasswordChange,
   getDischargeSummaryPdf,
 );

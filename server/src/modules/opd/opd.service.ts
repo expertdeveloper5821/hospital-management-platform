@@ -4,6 +4,7 @@ import { ipdService } from '../ipd/ipd.service';
 import { patientRepository } from '../patient/patient.repository';
 import { paymentRepository } from '../payment/payment.repository';
 import { PaymentReferenceType } from '../payment/payment.types';
+import { departmentService } from '../department/department.service';
 import { tenantService } from '../tenant/tenant.service';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 import { IOPDVisit } from './opd.model';
@@ -31,10 +32,11 @@ function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { f
 // Every other role is restricted to today/future dates.
 const BACKDATE_ALLOWED_ROLES: ReadonlySet<UserRole> = new Set([UserRole.HOSPITAL_ADMIN]);
 
+// "Today" is IST midnight, not server-local midnight — see toIstMidnight's
+// doc comment. A server running in UTC must reject/allow the same dates a
+// server running in IST would, for the same hospital-local calendar day.
 function isPastDate(date: Date): boolean {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return date.getTime() < today.getTime();
+  return date.getTime() < toIstMidnight(new Date()).getTime();
 }
 
 function assertNotPastDateUnlessAuthorized(date: Date, role: UserRole): void {
@@ -53,8 +55,10 @@ export class OPDService {
     const patient = await patientRepository.findByPatientId(tenantId, data.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const visitDate = data.visitDate ? new Date(data.visitDate) : new Date();
-    visitDate.setHours(0, 0, 0, 0);
+    // Normalized to IST midnight (not server-local midnight) so the stored
+    // calendar day matches the hospital-local date regardless of the server
+    // process's own OS timezone — see toIstMidnight's doc comment.
+    const visitDate = toIstMidnight(data.visitDate ? new Date(data.visitDate) : new Date());
     assertNotPastDateUnlessAuthorized(visitDate, role);
 
     const doctorIds = data.doctorIds ?? [];
@@ -68,12 +72,18 @@ export class OPDService {
     const queueNumber = (await opdRepository.countByDate(tenantId, visitDate)) + 1;
     const visitId = `OPD-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`;
 
+    // Department is resolved from the assigned doctor(s), not the patient —
+    // patients are no longer department-scoped (see CLAUDE.md), so
+    // patient.departmentId is always null for anyone registered since that
+    // change. Same "first doctor with a department wins" algorithm IPD uses.
+    const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, doctorIds);
+
     const visit = await opdRepository.save({
       visitId,
       tenantId,
       patientId:      data.patientId,
       doctorIds,
-      departmentId:   patient.departmentId ?? null,
+      departmentId,
       visitDate,
       queueNumber,
       status:         OPDVisitStatus.OPEN,
@@ -126,18 +136,27 @@ export class OPDService {
       }
     }
 
+    // Re-stamp departmentId whenever the doctor assignment changes — otherwise
+    // a visit that started with no doctor (or a different doctor's department)
+    // would keep a stale/null department after reassignment, same gap IPD's
+    // admission update already closes for assignedDoctorIds.
+    if (data.doctorIds !== undefined) {
+      previousValue.departmentId = visit.departmentId;
+      const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, data.doctorIds);
+      newValue.departmentId   = departmentId;
+      updateData.departmentId = departmentId;
+    }
+
     // visitDate needs Date conversion and may require a new queue number
     if (data.visitDate !== undefined) {
-      const newDate = new Date(data.visitDate);
-      newDate.setHours(0, 0, 0, 0);
+      const newDate = toIstMidnight(new Date(data.visitDate));
       assertNotPastDateUnlessAuthorized(newDate, role);
 
       previousValue.visitDate = visit.visitDate;
       newValue.visitDate      = newDate;
       updateData.visitDate    = newDate;
 
-      const existingDate = new Date(visit.visitDate);
-      existingDate.setHours(0, 0, 0, 0);
+      const existingDate = toIstMidnight(visit.visitDate);
       if (newDate.getTime() !== existingDate.getTime()) {
         const newQueueNumber        = (await opdRepository.countByDate(tenantId, newDate)) + 1;
         previousValue.queueNumber   = visit.queueNumber;
