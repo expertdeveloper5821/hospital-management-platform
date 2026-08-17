@@ -3,9 +3,12 @@ import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { OPDVisitStatus, ACTIVE_STATUSES } from './opd.types';
 import { ConflictError } from '../../shared/middleware/error-handler';
+import { toIstMidnight } from '../attendance/attendance.timezone';
 
 const DUPLICATE_APPOINTMENT_MESSAGE =
   'An appointment already exists for this patient with the selected doctor, date, and time slot.';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -33,14 +36,15 @@ export class OPDRepository {
     patientIds?: string[],
   ): Promise<IOPDVisit[]> {
     assertDbConnected();
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
+    // IST calendar-day bucket (not server-local midnight) — see toIstMidnight's
+    // doc comment. Keeps the query in sync with how createVisit/updateVisit
+    // now normalize and store visitDate, regardless of server OS timezone.
+    const start = toIstMidnight(date);
+    const end   = new Date(start.getTime() + MS_PER_DAY);
 
     const query: Record<string, unknown> = {
       tenantId,
-      visitDate: { $gte: start, $lte: end },
+      visitDate: { $gte: start, $lt: end },
     };
     if (doctorId)     query.doctorIds = { $in: [doctorId] };
     // Must distinguish "no restriction" (undefined) from "restricted to zero
@@ -112,15 +116,13 @@ export class OPDRepository {
     assertDbConnected();
     if (!doctorIds.length) return null;
 
-    const start = new Date(visitDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(visitDate);
-    end.setHours(23, 59, 59, 999);
+    const start = toIstMidnight(visitDate);
+    const end   = new Date(start.getTime() + MS_PER_DAY);
 
     const query: Record<string, unknown> = {
       tenantId,
       patientId,
-      visitDate: { $gte: start, $lte: end },
+      visitDate: { $gte: start, $lt: end },
       doctorIds: { $in: doctorIds },
       status:    { $ne: OPDVisitStatus.CANCELLED },
     };
@@ -193,14 +195,12 @@ export class OPDRepository {
 
   async countByDate(tenantId: string, date: Date): Promise<number> {
     assertDbConnected();
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(date);
-    end.setHours(23, 59, 59, 999);
+    const start = toIstMidnight(date);
+    const end   = new Date(start.getTime() + MS_PER_DAY);
 
     return OPDVisitModel.countDocuments({
       tenantId,
-      visitDate: { $gte: start, $lte: end },
+      visitDate: { $gte: start, $lt: end },
     });
   }
 }

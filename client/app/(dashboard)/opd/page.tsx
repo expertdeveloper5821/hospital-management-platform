@@ -53,12 +53,24 @@ import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Local (not UTC) calendar date — the hospital's IST timezone, matching the
+// browser's local clock, the same convention the Attendance page already
+// relies on. toISOString() would return the *UTC* date, which is a day
+// behind IST for the first ~5.5 hours after midnight IST.
 function todayISO() {
-  return new Date().toISOString().substring(0, 10);
+  const d = new Date();
+  const year  = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day   = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
+// Pinned to IST so the displayed date doesn't shift with the viewer's own
+// machine/browser timezone.
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
+  });
 }
 
 function formatINR(amount: number) {

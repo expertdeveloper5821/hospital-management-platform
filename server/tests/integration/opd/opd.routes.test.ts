@@ -35,6 +35,7 @@ import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { OPDVisitStatus }         from '../../../src/modules/opd/opd.types';
 import { Gender }                 from '../../../src/modules/patient/patient.types';
 import { PaymentMethod, PaymentStatus, PaymentReferenceType } from '../../../src/modules/payment/payment.types';
+import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -124,8 +125,11 @@ async function seedVisit(tenantId: string, overrides: Partial<{
   });
 }
 
+// IST calendar date — matches how the backend now resolves "today" for
+// past-date validation (toIstMidnight), so this fixture can't drift a day
+// behind/ahead depending on when in UTC the suite happens to run.
 function todayDateStr(): string {
-  return new Date().toISOString().substring(0, 10);
+  return toIstDateKey(new Date());
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -442,8 +446,7 @@ describe('POST /api/opd/visits', () => {
       .send({ ...VALID_VISIT_BODY, visitDate: '2020-01-01' });
 
     expect(res.status).toBe(201);
-    const expectedDate = new Date('2020-01-01');
-    expectedDate.setHours(0, 0, 0, 0);
+    const expectedDate = toIstMidnight(new Date('2020-01-01'));
     expect(new Date(res.body.data.visitDate).getTime()).toBe(expectedDate.getTime());
   });
 
@@ -477,6 +480,50 @@ describe('POST /api/opd/visits', () => {
       .send({ ...VALID_VISIT_BODY, visitDate: future.toISOString().substring(0, 10) });
 
     expect(res.status).toBe(201);
+  });
+
+  // ─── Department resolution (revenue mapping fix) ───────────────────────────
+  test('201 — visit departmentId is resolved from the assigned doctor, not the patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc     = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const doctor = await UserModel.create({
+      tenantId: tid, email: 'cardio-doc@h.com', name: 'Dr. Cardio', passwordHash: 'x',
+      role: UserRole.DOCTOR, isActive: true, isFirstLogin: false, departmentIds: ['dept-cardio'],
+    });
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send({ ...VALID_VISIT_BODY, doctorIds: [doctor._id.toString()] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.departmentId).toBe('dept-cardio');
+
+    const stored = await OPDVisitModel.findOne({ visitId: res.body.data.visitId });
+    expect(stored?.departmentId).toBe('dept-cardio');
+  });
+
+  test('201 — visit departmentId is null when no doctor is assigned, even if the patient has a legacy departmentId', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await PatientModel.create({
+      patientId: 'PAT-TEST0001', tenantId: tid, fullName: 'Ravi Kumar',
+      dateOfBirth: new Date('1990-05-15'), gender: Gender.MALE, mobileNumber: '9876543210',
+      address: '12 MG Road, Bengaluru', departmentId: 'dept-stale', // legacy field — must not be used
+    });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .send(VALID_VISIT_BODY);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.departmentId).toBeNull();
   });
 });
 
@@ -1164,6 +1211,60 @@ describe('PATCH /api/opd/visits/:visitId', () => {
     expect(res.body.data.notes).toBe('BP: 120/80, temp: 99F');
   });
 
+  // ─── Department re-resolution on doctor change (revenue mapping fix) ──────
+  test('200 — reassigning to a doctor in a different department updates departmentId', async () => {
+    const tenant  = await seedTenant();
+    const tid     = tenant._id.toString();
+    const cardioDoc = await UserModel.create({
+      tenantId: tid, email: 'cardio@h.com', name: 'Dr. Cardio', passwordHash: 'x',
+      role: UserRole.DOCTOR, isActive: true, isFirstLogin: false, departmentIds: ['dept-cardio'],
+    });
+    const orthoDoc = await UserModel.create({
+      tenantId: tid, email: 'ortho@h.com', name: 'Dr. Ortho', passwordHash: 'x',
+      role: UserRole.DOCTOR, isActive: true, isFirstLogin: false, departmentIds: ['dept-ortho'],
+    });
+    await OPDVisitModel.create({
+      visitId: 'OPD-REDEPT01', tenantId: tid, patientId: 'PAT-TEST0001',
+      doctorIds: [cardioDoc._id.toString()], departmentId: 'dept-cardio',
+      visitDate: new Date('2026-05-15T00:00:00.000Z'), queueNumber: 1, status: OPDVisitStatus.OPEN,
+    });
+    const token = tokenFor(cardioDoc._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-REDEPT01')
+      .set(bearer(token))
+      .send({ doctorIds: [orthoDoc._id.toString()] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.departmentId).toBe('dept-ortho');
+
+    const stored = await OPDVisitModel.findOne({ visitId: 'OPD-REDEPT01' });
+    expect(stored?.departmentId).toBe('dept-ortho');
+  });
+
+  test('200 — clearing all assigned doctors clears departmentId to null', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const cardioDoc = await UserModel.create({
+      tenantId: tid, email: 'cardio2@h.com', name: 'Dr. Cardio', passwordHash: 'x',
+      role: UserRole.DOCTOR, isActive: true, isFirstLogin: false, departmentIds: ['dept-cardio'],
+    });
+    await OPDVisitModel.create({
+      visitId: 'OPD-REDEPT02', tenantId: tid, patientId: 'PAT-TEST0001',
+      doctorIds: [cardioDoc._id.toString()], departmentId: 'dept-cardio',
+      visitDate: new Date('2026-05-15T00:00:00.000Z'), queueNumber: 1, status: OPDVisitStatus.OPEN,
+    });
+    const token = tokenFor(cardioDoc._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-REDEPT02')
+      .set(bearer(token))
+      .send({ doctorIds: [] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.departmentId).toBeNull();
+  });
+
   test('400 — notes exceed maximum length on update', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
@@ -1317,8 +1418,7 @@ describe('PATCH /api/opd/visits/:visitId', () => {
       .send({ visitDate: '2020-01-01' });
 
     expect(res.status).toBe(200);
-    const expectedDate = new Date('2020-01-01');
-    expectedDate.setHours(0, 0, 0, 0);
+    const expectedDate = toIstMidnight(new Date('2020-01-01'));
     expect(new Date(res.body.data.visitDate).getTime()).toBe(expectedDate.getTime());
   });
 });

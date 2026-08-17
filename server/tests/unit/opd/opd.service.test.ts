@@ -3,6 +3,7 @@ jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/ipd/ipd.service');
 jest.mock('../../../src/modules/payment/payment.repository');
 jest.mock('../../../src/modules/tenant/tenant.service');
+jest.mock('../../../src/modules/department/department.service');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { opdRepository }     from '../../../src/modules/opd/opd.repository';
@@ -10,16 +11,19 @@ import { patientRepository } from '../../../src/modules/patient/patient.reposito
 import { ipdService }        from '../../../src/modules/ipd/ipd.service';
 import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 import { tenantService }     from '../../../src/modules/tenant/tenant.service';
+import { departmentService } from '../../../src/modules/department/department.service';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
 import { OPDVisitStatus, OPDPaymentValidityReason } from '../../../src/modules/opd/opd.types';
 import { UserRole }          from '../../../src/shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError } from '../../../src/shared/middleware/error-handler';
+import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
 
-const mockOpdRepo     = opdRepository     as jest.Mocked<typeof opdRepository>;
-const mockPatientRepo = patientRepository as jest.Mocked<typeof patientRepository>;
-const mockIpdService  = ipdService        as jest.Mocked<typeof ipdService>;
-const mockPaymentRepo = paymentRepository as jest.Mocked<typeof paymentRepository>;
-const mockTenantSvc   = tenantService     as jest.Mocked<typeof tenantService>;
+const mockOpdRepo        = opdRepository     as jest.Mocked<typeof opdRepository>;
+const mockPatientRepo    = patientRepository as jest.Mocked<typeof patientRepository>;
+const mockIpdService     = ipdService        as jest.Mocked<typeof ipdService>;
+const mockPaymentRepo    = paymentRepository as jest.Mocked<typeof paymentRepository>;
+const mockTenantSvc      = tenantService     as jest.Mocked<typeof tenantService>;
+const mockDepartmentSvc  = departmentService as jest.Mocked<typeof departmentService>;
 
 const BASE_PATIENT = {
   patientId: 'PAT-ABCD1234',
@@ -59,6 +63,9 @@ describe('OPDService — example-based', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new OPDService();
+    // Default: no resolvable department (matches the common case of no/blank
+    // doctorIds in most fixtures below) — individual tests override this.
+    mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue(null);
   });
 
   // ── createVisit ────────────────────────────────────────────────────────────
@@ -130,12 +137,52 @@ describe('OPDService — example-based', () => {
       );
     });
 
+    // ── department resolution (revenue mapping fix) ───────────────────────────
+    test('resolves departmentId from the assigned doctor(s), not the patient', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT, departmentId: 'DEPT-STALE' } as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit({ doctorIds: ['doc-1'] }) as never);
+      mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue('DEPT-CARDIO');
+
+      await service.createVisit('t1', { ...VALID_CREATE_REQ, doctorIds: ['doc-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).toHaveBeenCalledWith('t1', ['doc-1']);
+      expect(mockOpdRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ departmentId: 'DEPT-CARDIO' }),
+      );
+    });
+
+    test('departmentId is null when no doctor is assigned', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+
+      await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).toHaveBeenCalledWith('t1', []);
+      expect(mockOpdRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ departmentId: null }),
+      );
+    });
+
+    test('departmentId is null when the assigned doctor(s) have no department', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit({ doctorIds: ['doc-1'] }) as never);
+      mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue(null);
+
+      await service.createVisit('t1', { ...VALID_CREATE_REQ, doctorIds: ['doc-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(mockOpdRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ departmentId: null }),
+      );
+    });
+
     test('defaults visitDate to today when not provided', async () => {
       mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
       mockOpdRepo.countByDate.mockResolvedValue(0);
       mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
-      const before = new Date();
-      before.setHours(0, 0, 0, 0);
+      const before = toIstMidnight(new Date());
 
       await service.createVisit('t1', { patientId: 'PAT-ABCD1234' }, 'user-1', UserRole.RECEPTIONIST);
 
@@ -183,7 +230,7 @@ describe('OPDService — example-based', () => {
       mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
       mockOpdRepo.countByDate.mockResolvedValue(0);
       mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
-      const todayStr = new Date().toISOString().substring(0, 10);
+      const todayStr = toIstDateKey(new Date());
 
       await expect(
         service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: todayStr }, 'user-1', UserRole.RECEPTIONIST),
@@ -303,6 +350,41 @@ describe('OPDService — example-based', () => {
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg).toHaveProperty('notes', 'Mild fever');
       expect(updateArg).not.toHaveProperty('diagnosis');
+    });
+
+    // ── department re-resolution on doctor change (revenue mapping fix) ──────
+    test('re-resolves departmentId when doctorIds changes', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ doctorIds: ['doc-old'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ doctorIds: ['doc-new'] }) as never);
+      mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue('DEPT-NEW');
+
+      await service.updateVisit('t1', 'OPD-TEST0001', { doctorIds: ['doc-new'] }, 'admin-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).toHaveBeenCalledWith('t1', ['doc-new']);
+      const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+      expect(updateArg.departmentId).toBe('DEPT-NEW');
+    });
+
+    test('clears departmentId to null when doctorIds is updated to an empty array', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ doctorIds: ['doc-old'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ doctorIds: [] }) as never);
+
+      await service.updateVisit('t1', 'OPD-TEST0001', { doctorIds: [] }, 'admin-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).toHaveBeenCalledWith('t1', []);
+      const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+      expect(updateArg.departmentId).toBeNull();
+    });
+
+    test('leaves departmentId untouched when doctorIds is not part of the update', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit() as never);
+
+      await service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Mild fever' }, 'doctor-1', UserRole.DOCTOR);
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).not.toHaveBeenCalled();
+      const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+      expect(updateArg).not.toHaveProperty('departmentId');
     });
 
     // ── past-date validation ──────────────────────────────────────────────────

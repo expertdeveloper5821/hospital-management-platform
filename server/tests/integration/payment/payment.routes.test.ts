@@ -47,6 +47,7 @@ import { PatientModel } from '../../../src/modules/patient/patient.model';
 import { PaymentModel } from '../../../src/modules/payment/payment.model';
 import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
+import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
 import { DepartmentModel } from '../../../src/modules/department/department.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { PaymentStatus, PaymentMethod } from '../../../src/modules/payment/payment.types';
@@ -539,6 +540,20 @@ describe('GET /api/payments/summary/by-department', () => {
     });
   }
 
+  async function seedPathologyRequest(departmentId: string | null, requestId: string) {
+    await PathologyRequestModel.create({
+      requestId, tenantId, patientId, departmentId,
+      requestedBy: 'user-1', testType: 'CBC',
+    });
+  }
+
+  async function seedRadiologyRequest(departmentId: string | null, requestId: string) {
+    await RadiologyRequestModel.create({
+      requestId, tenantId, patientId, departmentId,
+      requestedBy: 'user-1', imagingType: 'X-Ray',
+    });
+  }
+
   test('returns every active department with ₹0 when there are no payments', async () => {
     await seedDepartment('Cardiology');
     await seedDepartment('Radiology');
@@ -777,6 +792,77 @@ describe('GET /api/payments/summary/by-department', () => {
       .get('/api/payments/summary/by-department')
       .set('Authorization', `Bearer ${managerToken}`);
     expect(res2.body.data.grandTotal).toBe(600);
+  });
+
+  test('maps pathology and radiology payments to their requesting department', async () => {
+    const pathologyDeptId = await seedDepartment('Pathology');
+    const radiologyDeptId = await seedDepartment('Radiology');
+    await seedPathologyRequest(pathologyDeptId, 'PATH-DEPT001');
+    await seedRadiologyRequest(radiologyDeptId, 'RAD-DEPT001');
+
+    await PaymentModel.create([
+      { paymentId: 'p1', tenantId, patientId, amount: 350, paymentMethod: 'CASH', description: 'Pathology test', status: 'COMPLETED', referenceType: 'PATHOLOGY_REQUEST', referenceId: 'PATH-DEPT001', createdBy: 'u' },
+      { paymentId: 'p2', tenantId, patientId, amount: 650, paymentMethod: 'CARD', description: 'Radiology scan', status: 'COMPLETED', referenceType: 'RADIOLOGY_REQUEST', referenceId: 'RAD-DEPT001', createdBy: 'u' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    const byName = Object.fromEntries(
+      (res.body.data.departments as Array<{ name: string; total: number }>).map((d) => [d.name, d.total]),
+    );
+    expect(byName['Pathology']).toBe(350);
+    expect(byName['Radiology']).toBe(650);
+    expect(res.body.data.other.total).toBe(0);
+    expect(res.body.data.grandTotal).toBe(1000);
+  });
+
+  test('a pathology/radiology request with no department assigned is safely bucketed as unassigned', async () => {
+    await seedPathologyRequest(null, 'PATH-NODEPT01');
+    await PaymentModel.create({
+      paymentId: 'p1', tenantId, patientId, amount: 275, paymentMethod: 'CASH', description: 'Pathology',
+      status: 'COMPLETED', referenceType: 'PATHOLOGY_REQUEST', referenceId: 'PATH-NODEPT01', createdBy: 'u',
+    });
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.other.total).toBe(275);
+    expect(res.body.data.grandTotal).toBe(275);
+  });
+
+  test('OPD, IPD, pathology, and radiology payments to distinct departments each land in their own row, and the grand total reconciles', async () => {
+    const cardiologyId = await seedDepartment('Cardiology');
+    const orthoId       = await seedDepartment('Orthopedics');
+    const pathologyId   = await seedDepartment('Pathology');
+    const radiologyId   = await seedDepartment('Radiology');
+    await seedOpdVisit(cardiologyId, 'OPD-MULTI001');
+    await seedIpdAdmission(orthoId, 'ADM-MULTI001');
+    await seedPathologyRequest(pathologyId, 'PATH-MULTI001');
+    await seedRadiologyRequest(radiologyId, 'RAD-MULTI001');
+
+    await PaymentModel.create([
+      { paymentId: 'p1', tenantId, patientId, amount: 100, paymentMethod: 'CASH', description: 'OPD',       status: 'COMPLETED', referenceType: 'OPD_VISIT',         referenceId: 'OPD-MULTI001',  createdBy: 'u' },
+      { paymentId: 'p2', tenantId, patientId, amount: 200, paymentMethod: 'CASH', description: 'IPD',       status: 'COMPLETED', referenceType: 'IPD_ADMISSION',     referenceId: 'ADM-MULTI001',  createdBy: 'u' },
+      { paymentId: 'p3', tenantId, patientId, amount: 300, paymentMethod: 'CASH', description: 'Pathology', status: 'COMPLETED', referenceType: 'PATHOLOGY_REQUEST', referenceId: 'PATH-MULTI001', createdBy: 'u' },
+      { paymentId: 'p4', tenantId, patientId, amount: 400, paymentMethod: 'CASH', description: 'Radiology', status: 'COMPLETED', referenceType: 'RADIOLOGY_REQUEST', referenceId: 'RAD-MULTI001',  createdBy: 'u' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${managerToken}`);
+
+    expect(res.status).toBe(200);
+    const byName = Object.fromEntries(
+      (res.body.data.departments as Array<{ name: string; total: number }>).map((d) => [d.name, d.total]),
+    );
+    expect(byName).toMatchObject({ Cardiology: 100, Orthopedics: 200, Pathology: 300, Radiology: 400 });
+    expect(res.body.data.other.total).toBe(0);
+    expect(res.body.data.grandTotal).toBe(1000);
   });
 
   test('Manager, Finance Manager, and Admin can access; Receptionist and Doctor cannot', async () => {

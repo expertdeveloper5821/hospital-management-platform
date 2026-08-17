@@ -261,6 +261,13 @@ export default function DashboardPage() {
     refetch();
   }
 
+  // Pathologist/Radiologist only ever receive a single alert card, a single key-stat
+  // card, and no Revenue/Quick Actions cards (see ROLE_FIELD_ACCESS in dashboard.types.ts
+  // and the canXxx checks below) — the generic multi-card grid classNames used by every
+  // other role leave an orphaned half/one-third-empty row for them. Scoped to just these
+  // two roles so no other role's layout is touched.
+  const isLabRole = ['PATHOLOGIST', 'RADIOLOGIST'].includes(role ?? '');
+
   // Quick action permissions — match exact page-level canXxx checks in each module's page
   const canRegisterPatient = ['RECEPTIONIST', 'NURSE', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canCreateOPD       = ['RECEPTIONIST', 'NURSE', 'HOSPITAL_ADMIN', 'DOCTOR', 'ADMIN', 'MANAGER'].includes(role ?? '');
@@ -360,7 +367,10 @@ export default function DashboardPage() {
             <AlertTriangle className="h-4 w-4 text-orange-500" />
             Hospital Overview
           </h2>
-          <div className={cn('grid grid-cols-1 gap-4', alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2')}>
+          <div className={cn(
+            'grid grid-cols-1 gap-4',
+            isLabRole ? '' : (alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2'),
+          )}>
             {data?.lowStockCount !== undefined && (
               <AlertCard icon={PackageX}    label="Low Stock Items"       count={data.lowStockCount}        href="/inventory?lowStock=1"   warn />
             )}
@@ -385,7 +395,10 @@ export default function DashboardPage() {
         data?.labReportsToday,
         data?.newRegistrationsToday,
       ].some((v) => v !== undefined) && (
-        <div className={cn('grid gap-4', statCardCount > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2')}>
+        <div className={cn(
+          'grid gap-4',
+          isLabRole ? 'grid-cols-1' : (statCardCount > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2'),
+        )}>
           {data?.totalPatients !== undefined && (
             <MetricCard icon={Users}        label="Total Patients"        value={data.totalPatients}      sub="Registered" />
           )}
@@ -448,7 +461,7 @@ export default function DashboardPage() {
 
         {/* Today's Activity — data-driven; each row only when that field arrived */}
         {hasTodayActivity && (
-          <Card className={cn(hasRevenue ? 'lg:col-span-1' : 'lg:col-span-2')}>
+          <Card className={cn(isLabRole ? 'lg:col-span-3' : (hasRevenue ? 'lg:col-span-1' : 'lg:col-span-2'))}>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <Activity className="h-4 w-4 text-primary shrink-0" />

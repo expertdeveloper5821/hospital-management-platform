@@ -25,11 +25,21 @@ jest.mock('@/store/api/patient.api', () => ({
   useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
 }));
 
-let mockRole = 'DOCTOR';
+const DOCTORS = [
+  { userId: 'doc-self',  name: 'Dr. Self Referrer' },
+  { userId: 'doc-other', name: 'Dr. Other Physician' },
+];
+
+jest.mock('@/store/api/user.api', () => ({
+  useListUsersQuery: () => ({ data: { data: DOCTORS }, isFetching: false }),
+}));
+
+let mockRole   = 'DOCTOR';
+let mockUserId = 'doc-self';
 
 jest.mock('@/store/hooks', () => ({
   useAppSelector: (selector: (s: unknown) => unknown) =>
-    selector({ auth: { profile: { role: mockRole } } }),
+    selector({ auth: { profile: { role: mockRole, userId: mockUserId } } }),
   useAppDispatch: () => jest.fn(),
 }));
 
@@ -108,5 +118,78 @@ describe('LabPage — New Request role gating', () => {
     render(<LabPage />);
     await user.click(screen.getByRole('button', { name: /radiology/i }));
     expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
+  });
+});
+
+describe('LabPage — New Request "Referred By" dropdown', () => {
+  test('DOCTOR: no Self option, own name pinned to top and pre-selected', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'DOCTOR';
+    mockUserId = 'doc-self';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).not.toContain('SELF');
+    expect(options[0]).toBe('doc-self');
+    expect(select.value).toBe('doc-self');
+  });
+
+  test('PATHOLOGIST: Self option present and selected by default (unchanged)', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'PATHOLOGIST';
+    mockUserId = 'path-001';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    expect(select.value).toBe('SELF');
+    expect(select.options[0].value).toBe('SELF');
+  });
+
+  test('RECEPTIONIST: Self option present and selected by default (unchanged)', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'RECEPTIONIST';
+    mockUserId = 'recep-001';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    expect(select.value).toBe('SELF');
+  });
+
+  test('HOSPITAL_ADMIN: Self option present and selected by default (unchanged)', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'HOSPITAL_ADMIN';
+    mockUserId = 'admin-001';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    expect(select.value).toBe('SELF');
+  });
+
+  test('NURSE: Self option present and selected by default (unchanged)', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'NURSE';
+    mockUserId = 'nurse-001';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    expect(select.value).toBe('SELF');
+  });
+
+  test('RADIOLOGIST: Self option present and selected by default on Radiology tab (unchanged)', async () => {
+    const user = userEvent.setup();
+    mockRole   = 'RADIOLOGIST';
+    mockUserId = 'radio-001';
+    render(<LabPage />);
+    await user.click(screen.getByRole('button', { name: /radiology/i }));
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
+    expect(select.value).toBe('SELF');
   });
 });

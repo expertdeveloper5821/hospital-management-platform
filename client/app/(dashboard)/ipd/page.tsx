@@ -23,7 +23,7 @@ import { Label }  from '@/components/ui/label';
 import { Badge }  from '@/components/ui/badge';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
-import { DownloadDischargeSummaryButton } from '@/components/ipd/download-discharge-summary-button';
+import { DownloadDischargeSummaryButton, DISCHARGE_SUMMARY_DOWNLOAD_ROLES } from '@/components/ipd/download-discharge-summary-button';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { PatientFormModal } from '@/components/patients/patient-form-modal';
 import {
@@ -265,12 +265,13 @@ interface AdmissionPanelProps {
   onNotes:       (a: AdmissionResponse) => void;
   canProgress:   boolean;
   canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
+  canDownloadSummary: boolean; // NURSE, RECEPTIONIST, HOSPITAL_ADMIN, ADMIN — see DISCHARGE_SUMMARY_DOWNLOAD_ROLES
 }
 
 function AdmissionPanel({
   admission, onClose, onUpdate,
   canEdit, canDischarge, doctorMap,
-  onDischarge, onNotes, canProgress, canViewPayment,
+  onDischarge, onNotes, canProgress, canViewPayment, canDownloadSummary,
 }: AdmissionPanelProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [error, setError] = useState<string | null>(null);
@@ -569,7 +570,7 @@ function AdmissionPanel({
                   </Button>
                 )}
                 {canDischarge && (
-                  <Button variant="destructive" size="sm" onClick={() => { onClose(); onDischarge(admission); }}>
+                  <Button variant="destructive" className="flex-1" onClick={() => { onClose(); onDischarge(admission); }}>
                     Discharge
                   </Button>
                 )}
@@ -587,9 +588,9 @@ function AdmissionPanel({
             )}
           </div>
         )}
-        {!isAdmitted && (
+        {!isAdmitted && canDownloadSummary && (
           <div className="shrink-0 border-t p-4">
-            <DownloadDischargeSummaryButton admissionId={admission.admissionId} />
+            <DownloadDischargeSummaryButton admissionId={admission.admissionId} variant="default" />
           </div>
         )}
       </div>
@@ -621,6 +622,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [paymentAmount,        setPaymentAmount]        = useState('');
   const [paymentMode,          setPaymentMode]          = useState<IPDPaymentMode | ''>('');
+  const [transactionId,        setTransactionId]        = useState('');
   const [error,                setError]                = useState<string | null>(null);
   const [showAddPatient,       setShowAddPatient]       = useState(false);
 
@@ -666,6 +668,9 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
         description:   'IPD Admission',
         referenceType: 'IPD_ADMISSION',
         referenceId:   admission.admissionId,
+        transactionId: (paymentMode === 'UPI' || paymentMode === 'CARD') && transactionId.trim()
+          ? transactionId.trim()
+          : undefined,
       }).unwrap();
       onClose();
     } catch (err: unknown) {
@@ -845,7 +850,10 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
                   <button
                     key={value}
                     type="button"
-                    onClick={() => setPaymentMode(value)}
+                    onClick={() => {
+                      setPaymentMode(value);
+                      if (value === 'CASH') setTransactionId('');
+                    }}
                     className={[
                       'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
                       paymentMode === value
@@ -858,6 +866,19 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
                 ))}
               </div>
             </div>
+
+            {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+              <div className="space-y-1.5">
+                <Label htmlFor="na-pay-txn">Transaction ID (optional)</Label>
+                <Input
+                  id="na-pay-txn"
+                  type="text"
+                  placeholder="e.g. UPI reference / last 4 digits"
+                  value={transactionId}
+                  onChange={(e) => setTransactionId(e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
           {error && (
@@ -1073,6 +1094,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.ADMIN ||
     role === UserRole.RECEPTIONIST;
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role);
+  const canDownloadSummary = DISCHARGE_SUMMARY_DOWNLOAD_ROLES.includes(role);
 
   const admissions = data?.data ?? [];
   const total      = data?.total      ?? 0;
@@ -1341,6 +1363,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           canDischarge={canDischarge}
           canProgress={canProgress}
           canViewPayment={canViewPayment}
+          canDownloadSummary={canDownloadSummary}
           doctorMap={doctorMap}
           onDischarge={(a) => setDischargeFor(a)}
           onNotes={(a) => setNotesFor(a)}
@@ -1367,7 +1390,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                 </p>
               </div>
             </div>
-            <DownloadDischargeSummaryButton admissionId={justDischarged.admissionId} variant="default" />
+            {canDownloadSummary && (
+              <DownloadDischargeSummaryButton admissionId={justDischarged.admissionId} variant="default" />
+            )}
             <Button variant="outline" className="w-full" onClick={() => setJustDischarged(null)}>
               Close
             </Button>

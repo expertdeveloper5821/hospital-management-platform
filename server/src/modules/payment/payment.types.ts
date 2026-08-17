@@ -22,11 +22,17 @@ export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 
 // ─── PaymentReferenceType ─────────────────────────────────────────────────────
 // What this payment was collected for — lets a caller look up "the payment for
-// visit X" by exact reference instead of guessing from patientId + date.
+// visit X" by exact reference instead of guessing from patientId + date. Every
+// reference type here that carries its own departmentId (OPD visit, IPD
+// admission, pathology/radiology request) is also registered in
+// REFERENCE_DEPARTMENT_SOURCES (payment.repository.ts) so department-wise
+// revenue resolves it automatically — see that file for how to add a new one.
 export const PaymentReferenceType = {
-  OPD_VISIT:    'OPD_VISIT',
-  IPD_ADMISSION: 'IPD_ADMISSION',
-  REGISTRATION: 'REGISTRATION',
+  OPD_VISIT:          'OPD_VISIT',
+  IPD_ADMISSION:      'IPD_ADMISSION',
+  REGISTRATION:       'REGISTRATION',
+  PATHOLOGY_REQUEST:  'PATHOLOGY_REQUEST',
+  RADIOLOGY_REQUEST:  'RADIOLOGY_REQUEST',
 } as const;
 
 export type PaymentReferenceType = typeof PaymentReferenceType[keyof typeof PaymentReferenceType];
@@ -53,7 +59,13 @@ export const CreateManualPaymentSchema = z.object({
     errorMap: () => ({ message: 'paymentMethod must be CASH, CHEQUE, UPI, or CARD for manual payments' }),
   }),
   description:   z.string().min(1, 'description is required').max(500, 'description cannot exceed 500 characters').trim(),
-  referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
+  referenceType: z.enum([
+    PaymentReferenceType.OPD_VISIT,
+    PaymentReferenceType.IPD_ADMISSION,
+    PaymentReferenceType.REGISTRATION,
+    PaymentReferenceType.PATHOLOGY_REQUEST,
+    PaymentReferenceType.RADIOLOGY_REQUEST,
+  ]).optional(),
   referenceId:   z.string().min(1).optional(),
   // Optional UPI/Card reference number — never required, regardless of
   // paymentMethod; the frontend only surfaces the field for UPI/Card.
@@ -79,7 +91,13 @@ export const ListPaymentsQuerySchema = z.object({
   dateTo:        z.string().datetime({ offset: true }).optional(),
   paymentMethod: z.enum(['CASH', 'CHEQUE', 'UPI', 'CARD']).optional(),
   status:        z.enum(['PENDING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
-  referenceType: z.enum([PaymentReferenceType.OPD_VISIT, PaymentReferenceType.IPD_ADMISSION, PaymentReferenceType.REGISTRATION]).optional(),
+  referenceType: z.enum([
+    PaymentReferenceType.OPD_VISIT,
+    PaymentReferenceType.IPD_ADMISSION,
+    PaymentReferenceType.REGISTRATION,
+    PaymentReferenceType.PATHOLOGY_REQUEST,
+    PaymentReferenceType.RADIOLOGY_REQUEST,
+  ]).optional(),
   referenceId:   z.string().min(1).optional(),
   page:          z.coerce.number().int().min(1).default(1),
   limit:         z.coerce.number().int().min(1).max(100).default(20),
@@ -147,8 +165,12 @@ export interface PaymentSummaryResponse {
 }
 
 // Revenue for one bucket (a department, or the "other/unassigned" bucket),
-// split by where it was collected. `directPayment` covers registration fees
-// and any other payment not tied to an OPD visit or IPD admission.
+// split by where it was collected. `directPayment` covers registration fees,
+// pathology/radiology payments, and any other payment not tied to an OPD
+// visit or IPD admission — the *department* those still resolve to (via
+// REFERENCE_DEPARTMENT_SOURCES in payment.repository.ts) is correct even
+// though they're not broken out into their own column here; only the
+// department-vs-other split is normative, not this OPD/IPD/direct split.
 // `opdRevenue + ipdRevenue + directPayment` always equals `total`.
 export interface DepartmentRevenueBreakdown {
   opdRevenue:    number;
