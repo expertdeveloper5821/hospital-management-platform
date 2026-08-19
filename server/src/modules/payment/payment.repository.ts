@@ -57,6 +57,18 @@ export class PaymentRepository {
     return PaymentModel.findOne({ razorpayOrderId });
   }
 
+  // Used to guard against duplicate Payment creation for callers that
+  // auto-generate a payment from another record (e.g. Billing charge
+  // markPaid → referenceType CHARGE, referenceId chargeId).
+  async findByReference(
+    tenantId:      string,
+    referenceType: string,
+    referenceId:   string,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    return PaymentModel.findOne({ tenantId, referenceType, referenceId });
+  }
+
   async findByFilters(
     tenantId: string,
     query: ListPaymentsQuery,

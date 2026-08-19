@@ -4,6 +4,9 @@ import { ICharge, ChargeCategory, CHARGE_CATEGORIES } from './charges.model';
 import { patientRepository } from '../patient/patient.repository';
 import { userRepository } from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
+import { paymentService } from '../payment/payment.service';
+import { paymentRepository } from '../payment/payment.repository';
+import { PaymentReferenceType, PaymentMethod } from '../payment/payment.types';
 import { auditService }  from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import {
@@ -230,6 +233,32 @@ class ChargeService {
       previousValue: { status: 'UNPAID' },
       newValue:      { status: 'PAID', paidBy },
     });
+
+    // Auto-create the matching Payment record so this charge appears in
+    // Payments / Revenue / Department-wise Revenue (under "Other" — CHARGE is
+    // deliberately not registered in REFERENCE_DEPARTMENT_SOURCES, see
+    // payment.types.ts). Guarded against duplicates in case markPaid is ever
+    // invoked more than once for the same charge; failure to create the
+    // payment must never undo the charge's PAID status.
+    try {
+      const existingPayment = await paymentRepository.findByReference(
+        tenantId, PaymentReferenceType.CHARGE, chargeId,
+      );
+      if (!existingPayment) {
+        await paymentService.createManualPayment(
+          {
+            patientId:     updated!.patientId,
+            amount:        updated!.amount,
+            paymentMethod: PaymentMethod.CASH,
+            description:   `Billing Charge – ${updated!.description}`,
+            referenceType: PaymentReferenceType.CHARGE,
+            referenceId:   chargeId,
+          },
+          tenantId,
+          paidBy,
+        );
+      }
+    } catch { /* payment record creation failure must not undo the charge's PAID status */ }
 
     return updated!;
   }

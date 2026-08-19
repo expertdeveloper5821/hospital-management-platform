@@ -592,18 +592,18 @@ export default function DashboardPage() {
 
           {/* Recent Activities */}
           {data?.recentActivities !== undefined && (
-            <Card className={cn(hasInventory || hasBedData ? 'xl:col-span-1' : 'xl:col-span-3')}>
+            <Card className={cn('flex flex-col', hasInventory || hasBedData ? 'xl:col-span-1' : 'xl:col-span-3')}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ClipboardList className="h-4 w-4 text-primary shrink-0" />
                   <span className="min-w-0 break-words">Recent Activities</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1 flex flex-col justify-center">
                 {!hasActivities ? (
                   <p className="text-sm text-muted-foreground text-center py-8">No recent activity</p>
                 ) : (
-                  <div className="divide-y divide-border">
+                  <div className="divide-y divide-border max-h-[220px] overflow-y-auto activity-scroll">
                     {(data?.recentActivities ?? []).map((a, i) => {
                       const badge = ENTITY_BADGE[a.entityType] ?? { label: friendlyEntity(a.entityType), cls: 'bg-muted text-muted-foreground' };
                       return (
@@ -631,14 +631,14 @@ export default function DashboardPage() {
 
           {/* Inventory Overview */}
           {hasInventory && (
-            <Card>
+            <Card className="flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Package className="h-4 w-4 text-yellow-600 shrink-0" />
                   <span className="min-w-0 break-words">Inventory Overview</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1 flex flex-col justify-center">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
                     <p className="text-2xl font-bold text-blue-700">{data?.totalInventoryItems ?? 0}</p>
@@ -672,14 +672,14 @@ export default function DashboardPage() {
 
           {/* Bed Occupancy */}
           {hasBedData && (
-            <Card>
+            <Card className="flex flex-col">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
                   <BedDouble className="h-4 w-4 text-purple-600 shrink-0" />
                   <span className="min-w-0 break-words">Bed Occupancy</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="flex-1 flex flex-col justify-center">
                 <div className="flex items-center gap-4">
                   <div className="relative flex-shrink-0 w-[120px] h-[120px]">
                     <ResponsiveContainer width="100%" height="100%">

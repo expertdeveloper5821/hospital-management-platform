@@ -12,12 +12,26 @@ jest.mock('../../../src/modules/notification/notification.service', () => ({
     sendToRole:       jest.fn().mockResolvedValue(undefined),
   },
 }));
+jest.mock('../../../src/shared/services/s3.service', () => ({
+  s3Service: {
+    uploadFile:      jest.fn().mockResolvedValue('mocked-s3-key'),
+    getPresignedUrl: jest.fn().mockResolvedValue('https://s3.test/presigned-url'),
+  },
+}));
+jest.mock('../../../src/shared/services/pdf.service', () => ({
+  pdfService: {
+    generateReceipt:     jest.fn().mockResolvedValue(Buffer.from('%PDF-test-receipt')),
+    generateMedicalCard: jest.fn().mockResolvedValue(Buffer.from('%PDF-test-card')),
+  },
+}));
 
 import app               from '../../../src/app';
 import { UserModel }     from '../../../src/modules/user/user.model';
 import { TenantModel }   from '../../../src/modules/tenant/tenant.model';
 import { PatientModel }  from '../../../src/modules/patient/patient.model';
 import { ChargeModel }   from '../../../src/modules/charges/charges.model';
+import { PaymentModel }  from '../../../src/modules/payment/payment.model';
+import { PaymentStatus } from '../../../src/modules/payment/payment.types';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -151,5 +165,92 @@ describe('POST /api/charges', () => {
       .send({ patientId, category: 'CONSULTATION', description: 'Consultation fee', amount: 500 });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe('PATCH /api/charges/:chargeId/pay — auto-creates a Payment record', () => {
+  async function addUnpaidCharge(amount = 500): Promise<string> {
+    const res = await request(app)
+      .post('/api/charges')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, category: 'CONSULTATION', description: 'Consultation fee', amount });
+    return res.body.data.chargeId as string;
+  }
+
+  test('200 — marks the charge PAID and creates a matching CHARGE-referenced Payment', async () => {
+    const chargeId = await addUnpaidCharge(650);
+
+    const res = await request(app)
+      .patch(`/api/charges/${chargeId}/pay`)
+      .set('Authorization', `Bearer ${hospitalAdminToken}`)
+      .send();
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('PAID');
+    expect(res.body.data.paidBy).toBeTruthy();
+
+    const payments = await PaymentModel.find({ tenantId, referenceType: 'CHARGE', referenceId: chargeId });
+    expect(payments).toHaveLength(1);
+    expect(payments[0].amount).toBe(650);
+    expect(payments[0].patientId).toBe(patientId);
+    expect(payments[0].status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('the auto-created payment appears in GET /api/payments', async () => {
+    const chargeId = await addUnpaidCharge(300);
+
+    await request(app)
+      .patch(`/api/charges/${chargeId}/pay`)
+      .set('Authorization', `Bearer ${hospitalAdminToken}`)
+      .send();
+
+    const res = await request(app)
+      .get('/api/payments')
+      .query({ referenceType: 'CHARGE', referenceId: chargeId })
+      .set('Authorization', `Bearer ${hospitalAdminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].amount).toBe(300);
+    expect(res.body.data.data[0].referenceType).toBe('CHARGE');
+  });
+
+  test('the auto-created payment lands under "Other" in department-wise revenue', async () => {
+    const chargeId = await addUnpaidCharge(400);
+
+    await request(app)
+      .patch(`/api/charges/${chargeId}/pay`)
+      .set('Authorization', `Bearer ${hospitalAdminToken}`)
+      .send();
+
+    const res = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${hospitalAdminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.other.total).toBeGreaterThanOrEqual(400);
+    expect(res.body.data.other.directPayment).toBeGreaterThanOrEqual(400);
+    for (const dept of res.body.data.departments) {
+      expect(dept.total).toBe(0);
+    }
+  });
+
+  test('409 — marking an already-paid charge paid again does not create a duplicate Payment', async () => {
+    const chargeId = await addUnpaidCharge(200);
+
+    const first = await request(app)
+      .patch(`/api/charges/${chargeId}/pay`)
+      .set('Authorization', `Bearer ${hospitalAdminToken}`)
+      .send();
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .patch(`/api/charges/${chargeId}/pay`)
+      .set('Authorization', `Bearer ${hospitalAdminToken}`)
+      .send();
+    expect(second.status).toBe(409);
+
+    const payments = await PaymentModel.find({ tenantId, referenceType: 'CHARGE', referenceId: chargeId });
+    expect(payments).toHaveLength(1);
   });
 });
