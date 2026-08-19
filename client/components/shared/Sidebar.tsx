@@ -89,10 +89,10 @@ export function Sidebar({ onClose }: SidebarProps) {
   return (
     <aside
       data-testid="sidebar"
-      className="flex flex-col h-full w-64 bg-sidebar text-sidebar-foreground border-r shrink-0"
+      className="flex flex-col h-full w-56 bg-sidebar text-sidebar-foreground border-r shrink-0"
     >
       {/* Branding header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-sidebar-accent/40 shrink-0">
+      <div className="flex items-start gap-3 px-4 py-3 border-b border-sidebar-accent/40 shrink-0">
         {headerLogoUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -101,7 +101,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             className="h-14 w-14 rounded object-contain shrink-0"
           />
         )}
-        <span className="font-bold text-lg leading-tight break-words min-w-0 flex-1">{headerTitle}</span>
+        <span className="font-bold text-base leading-tight break-words min-w-0 flex-1">{headerTitle}</span>
         {onClose && (
           <button
             onClick={onClose}
@@ -142,7 +142,7 @@ export function Sidebar({ onClose }: SidebarProps) {
       </nav>
 
       {/* User + logout */}
-      <div className="shrink-0 border-t border-sidebar-accent/40 p-4 space-y-1">
+      <div className="shrink-0 border-t border-sidebar-accent/4 p-4 space-y-1">
         <p className="text-xs text-sidebar-foreground/50 truncate">{profile.email}</p>
         <p className="text-xs text-sidebar-foreground/50">{toTitleCase(profile.role)}</p>
         <button

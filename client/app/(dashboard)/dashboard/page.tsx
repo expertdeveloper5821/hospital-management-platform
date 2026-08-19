@@ -418,39 +418,39 @@ export default function DashboardPage() {
       )}
 
       {/* ── 4. Revenue + Today's Activity + Quick Actions ──────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1  lg:grid-cols-3 gap-7">
 
         {/* Revenue Overview — shown only when backend sends revenueToday (FINANCE roles) */}
         {hasRevenue && (
           <Card className="lg:col-span-1">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
+            <CardHeader className="px-4 pt-4 pb-2">
+              <CardTitle className="text-base flex items-center gap-1.5">
                 <IndianRupee className="h-4 w-4 text-green-600 shrink-0" />
                 <span className="min-w-0 break-words">Revenue Overview</span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 rounded-lg bg-green-50 border border-green-100">
+              <div className="flex items-center justify-between p-2 rounded-lg bg-green-50 border border-green-100">
                 <div>
                   <p className="text-xs text-muted-foreground">Revenue Today</p>
-                  <p className="text-xl font-bold text-green-700">{formatINR(data?.revenueToday ?? 0)}</p>
+                  <p className="text-lg font-bold text-green-700">{formatINR(data?.revenueToday ?? 0)}</p>
                 </div>
                 <TrendingUp className="h-6 w-6 text-green-500" />
               </div>
               {data?.revenueThisMonth !== undefined && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-blue-50 border border-blue-100">
+                <div className="flex items-center justify-between p-2 rounded-lg bg-blue-50 border border-blue-100">
                   <div>
                     <p className="text-xs text-muted-foreground">Revenue This Month</p>
-                    <p className="text-xl font-bold text-blue-700">{formatINR(data.revenueThisMonth)}</p>
+                    <p className="text-lg font-bold text-blue-700">{formatINR(data.revenueThisMonth)}</p>
                   </div>
                   <TrendingUp className="h-6 w-6 text-blue-500" />
                 </div>
               )}
               {data?.averageDailyRevenue !== undefined && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted">
+                <div className="flex items-center justify-between p-2 rounded-lg bg-muted">
                   <div>
                     <p className="text-xs text-muted-foreground">Avg Daily Revenue</p>
-                    <p className="text-xl font-bold">{formatINR(data.averageDailyRevenue)}</p>
+                    <p className="text-lg font-bold">{formatINR(data.averageDailyRevenue)}</p>
                   </div>
                   <Activity className="h-6 w-6 text-muted-foreground" />
                 </div>
@@ -503,11 +503,11 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 gap-2">
-                {canRegisterPatient  && <QuickAction icon={Users}        label="Register Patient" href="/patients"  color="bg-blue-500" />}
+                {/* {canRegisterPatient  && <QuickAction icon={Users}        label="Register Patient" href="/patients"  color="bg-blue-500" />} */}
                 {canCreateOPD        && <QuickAction icon={Stethoscope}  label="New OPD Visit"    href="/opd"       color="bg-cyan-500" />}
                 {canAdmitPatient     && <QuickAction icon={BedDouble}    label="Admit Patient"    href="/ipd"       color="bg-purple-500" />}
                 {canCreateLab        && <QuickAction icon={TestTube2}    label="Create Lab Test"  href="/lab"       color="bg-orange-500" />}
-                {canManageInventory  && <QuickAction icon={ShoppingCart} label="Add Inventory"    href="/inventory" color="bg-yellow-500" />}
+                {/* {canManageInventory  && <QuickAction icon={ShoppingCart} label="Add Inventory"    href="/inventory" color="bg-yellow-500" />} */}
                 {canCollectPayment   && <QuickAction icon={Wallet}       label="Collect Payment"  href="/payments"  color="bg-green-500" />}
               </div>
             </CardContent>
@@ -542,7 +542,7 @@ export default function DashboardPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                       <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip contentStyle={{ fontSize: 12 }} />
+                      <Tooltip contentStyle={{ fontSize: 12 }} formatter={(value) => [`${value}`, 'Total OPD']} />
                       <Area type="monotone" dataKey="value" stroke="#3b82f6" fill="url(#opdGrad)" strokeWidth={2} dot={false} />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -574,7 +574,8 @@ export default function DashboardPage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                       <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={{ fontSize: 12 }} formatter={(v) => formatINR(Number(v))} />
+                      
+                      <Tooltip contentStyle={{ fontSize: 12 }}  formatter={(value) => [`₹${value}`, 'Total Payment']} />
                       <Area type="monotone" dataKey="value" stroke="#10b981" fill="url(#revGrad)" strokeWidth={2} dot={false} />
                     </AreaChart>
                   </ResponsiveContainer>
