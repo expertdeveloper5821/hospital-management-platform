@@ -85,7 +85,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
 
         <div className="flex flex-col flex-1 overflow-hidden min-w-0 print:block print:overflow-visible print:w-full">
-          <header className="flex items-center justify-between h-16 px-4 sm:px-6 border-b bg-background shrink-0 print:hidden">
+          <header className="flex items-center justify-between h-12 px-4 sm:px-6 border-b bg-background shrink-0 print:hidden">
             {/* Left: hamburger (mobile) + greeting (desktop) */}
             <div className="flex items-center gap-3 min-w-0">
               <button
