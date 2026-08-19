@@ -178,6 +178,12 @@ export interface PaymentSummaryResponse {
 // REFERENCE_DEPARTMENT_SOURCES in payment.repository.ts) is correct even
 // though they're not broken out into their own column here; only the
 // department-vs-other split is normative, not this OPD/IPD/direct split.
+// split by where it was collected. `directPayment` covers registration fees,
+// pathology/radiology payments, and any other payment not tied to an OPD
+// visit or IPD admission — the *department* those still resolve to (via
+// REFERENCE_DEPARTMENT_SOURCES in payment.repository.ts) is correct even
+// though they're not broken out into their own column here; only the
+// department-vs-other split is normative, not this OPD/IPD/direct split.
 // `opdRevenue + ipdRevenue + directPayment` always equals `total`.
 export interface DepartmentRevenueBreakdown {
   opdRevenue:    number;
