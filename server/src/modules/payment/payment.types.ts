@@ -27,12 +27,17 @@ export type PaymentStatus = typeof PaymentStatus[keyof typeof PaymentStatus];
 // admission, pathology/radiology request) is also registered in
 // REFERENCE_DEPARTMENT_SOURCES (payment.repository.ts) so department-wise
 // revenue resolves it automatically — see that file for how to add a new one.
+// CHARGE (Billing → Charges "Mark Paid") is deliberately NOT registered there:
+// it has no department of its own, so it falls back to Patient.departmentId
+// (null for any patient registered after department-scoping moved off
+// Patient — see CLAUDE.md) and lands in "Other Revenue", same as REGISTRATION.
 export const PaymentReferenceType = {
   OPD_VISIT:          'OPD_VISIT',
   IPD_ADMISSION:      'IPD_ADMISSION',
   REGISTRATION:       'REGISTRATION',
   PATHOLOGY_REQUEST:  'PATHOLOGY_REQUEST',
   RADIOLOGY_REQUEST:  'RADIOLOGY_REQUEST',
+  CHARGE:             'CHARGE',
 } as const;
 
 export type PaymentReferenceType = typeof PaymentReferenceType[keyof typeof PaymentReferenceType];
@@ -65,6 +70,7 @@ export const CreateManualPaymentSchema = z.object({
     PaymentReferenceType.REGISTRATION,
     PaymentReferenceType.PATHOLOGY_REQUEST,
     PaymentReferenceType.RADIOLOGY_REQUEST,
+    PaymentReferenceType.CHARGE,
   ]).optional(),
   referenceId:   z.string().min(1).optional(),
   // Optional UPI/Card reference number — never required, regardless of
@@ -97,6 +103,7 @@ export const ListPaymentsQuerySchema = z.object({
     PaymentReferenceType.REGISTRATION,
     PaymentReferenceType.PATHOLOGY_REQUEST,
     PaymentReferenceType.RADIOLOGY_REQUEST,
+    PaymentReferenceType.CHARGE,
   ]).optional(),
   referenceId:   z.string().min(1).optional(),
   page:          z.coerce.number().int().min(1).default(1),
@@ -165,6 +172,12 @@ export interface PaymentSummaryResponse {
 }
 
 // Revenue for one bucket (a department, or the "other/unassigned" bucket),
+// split by where it was collected. `directPayment` covers registration fees,
+// pathology/radiology payments, and any other payment not tied to an OPD
+// visit or IPD admission — the *department* those still resolve to (via
+// REFERENCE_DEPARTMENT_SOURCES in payment.repository.ts) is correct even
+// though they're not broken out into their own column here; only the
+// department-vs-other split is normative, not this OPD/IPD/direct split.
 // split by where it was collected. `directPayment` covers registration fees,
 // pathology/radiology payments, and any other payment not tied to an OPD
 // visit or IPD admission — the *department* those still resolve to (via

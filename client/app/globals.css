@@ -121,6 +121,28 @@
   background-color: hsl(var(--sidebar-accent-foreground) / 0.3);
 }
 
+/* ─── Dashboard "Recent Activities" scrollbar ─────────────────────────────── */
+/* Thin, subtle light-grey/white scrollbar for the activity list's internal
+   scroll area, matching the light card theme instead of the default browser
+   scrollbar. Scoped to that list only. */
+.activity-scroll {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: hsl(var(--border)) transparent; /* Firefox */
+}
+.activity-scroll::-webkit-scrollbar {
+  width: 6px; /* Chrome/Edge/Safari */
+}
+.activity-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.activity-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+}
+.activity-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.4);
+}
+
 /* ─── Themed time inputs ───────────────────────────────────────────────────── */
 /* Hides the browser's built-in clock glyph on <input type="time"> (WebKit/Blink
    only — Firefox and Safari never render one) while keeping that region fully
