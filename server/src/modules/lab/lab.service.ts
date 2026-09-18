@@ -29,6 +29,17 @@ const REPORT_URL_EXPIRY_SECONDS = 3600;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// `notes` is encrypted at rest on the request itself (see lab.model.ts). Audit
+// log entries are stored in plain form and rendered in the Audit UI, so the
+// note's value must never carry into one — the trail records *that* it changed,
+// not what it changed to/from. Applied to both previousValue and newValue.
+const REDACTED_AUDIT_MARKER = '[redacted]';
+
+function redactNotes(values: Record<string, unknown>): Record<string, unknown> {
+  if (values.notes === undefined || values.notes === null) return values;
+  return { ...values, notes: REDACTED_AUDIT_MARKER };
+}
+
 async function resolveReportUrl(s3Key: string | null): Promise<string | null> {
   if (!s3Key) return null;
   return s3Service.getPresignedUrl(s3Key, REPORT_URL_EXPIRY_SECONDS);
@@ -467,8 +478,8 @@ export class LabService {
         action:        'UPDATE',
         userId,
         tenantId,
-        previousValue,
-        newValue:      updatePayload as Record<string, unknown>,
+        previousValue: redactNotes(previousValue),
+        newValue:      redactNotes(updatePayload as Record<string, unknown>),
       });
     } catch { /* swallow */ }
 
@@ -547,8 +558,8 @@ export class LabService {
         action:        'UPDATE',
         userId,
         tenantId,
-        previousValue,
-        newValue:      updatePayload as Record<string, unknown>,
+        previousValue: redactNotes(previousValue),
+        newValue:      redactNotes(updatePayload as Record<string, unknown>),
       });
     } catch { /* swallow */ }
 

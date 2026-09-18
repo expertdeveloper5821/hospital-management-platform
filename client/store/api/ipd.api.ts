@@ -11,6 +11,7 @@ import type {
   CreateAdmissionRequest,
   AddProgressNoteRequest,
   ListAdmissionsQuery,
+  IPDVitals,
 } from '../types';
 
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
@@ -104,6 +105,11 @@ export const ipdApi = baseApi.injectEndpoints({
       assignedDoctorId?: string;
       wardId?:           string;
       bedId?:            string;
+      // Partial — only the sub-fields present are merged onto the
+      // admission's existing vitals server-side (see
+      // IPDService.updateAdmission); omitting a sub-field leaves it
+      // untouched, sending `null` explicitly clears it.
+      vitals?:           Partial<IPDVitals>;
     }>({
       query: ({ admissionId, ...body }) => {
         if (!admissionId) throw new Error('admissionId is required');

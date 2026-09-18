@@ -49,6 +49,13 @@ class DashboardRepository {
     return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED' });
   }
 
+  // Admissions still ADMITTED whose admissionDate falls within [start, end] —
+  // backs the Hospital Overview Today/This Month "Active IPD" cards (unlike
+  // countActiveIpd above, a live, date-unscoped total used elsewhere).
+  async countActiveIpdBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+    return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED', admissionDate: { $gte: start, $lte: end } });
+  }
+
   async bedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
     const [total, occupied] = await Promise.all([
       BedModel.countDocuments({ tenantId }),
@@ -62,6 +69,21 @@ class DashboardRepository {
     const [pathology, radiology] = await Promise.all([
       PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
       RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true } }),
+    ]);
+    return { pathology, radiology };
+  }
+
+  // Pending lab requests CREATED within [start, end) — backs the Hospital Overview
+  // Today/This Month "Pending Lab Reports" cards (unlike countPendingLabRequests
+  // above, which is a live, date-unscoped total used elsewhere).
+  async countPendingLabRequestsBetween(
+    tenantId: string,
+    start:    Date,
+    end:      Date,
+  ): Promise<{ pathology: number; radiology: number }> {
+    const [pathology, radiology] = await Promise.all([
+      PathologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, createdAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
+      RadiologyRequestModel.countDocuments({ tenantId, status: LabRequestStatus.PENDING, createdAt: { $gte: start, $lte: end }, isDeleted: { $ne: true } }),
     ]);
     return { pathology, radiology };
   }
@@ -99,6 +121,15 @@ class DashboardRepository {
     return PaymentModel.countDocuments({ tenantId, status: PaymentStatus.PENDING });
   }
 
+  // Pending payments CREATED within [start, end) — backs the Hospital Overview
+  // Today/This Month "Pending Payments" cards (countPendingPayments above is the
+  // live, date-unscoped total used elsewhere).
+  async countPendingPaymentsBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+    return PaymentModel.countDocuments({
+      tenantId, status: PaymentStatus.PENDING, createdAt: { $gte: start, $lte: end },
+    });
+  }
+
   async paymentsGroupedByDay(
     tenantId: string,
     since:    Date,
@@ -125,6 +156,25 @@ class DashboardRepository {
     return result[0]?.total ?? 0;
   }
 
+  // Items currently low-stock (quantity < threshold, threshold > 0) that most
+  // recently crossed INTO low-stock within [start, end) — backs the Hospital
+  // Overview Today/This Month "Low Stock Items" cards. countLowStock above is
+  // the live, date-unscoped total used by the Inventory Overview widget.
+  async countLowStockFlaggedBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+    const result = await InventoryItemModel.aggregate([
+      {
+        $match: {
+          tenantId,
+          isDeleted: { $ne: true },
+          lowStockSince: { $gte: start, $lte: end },
+          $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
+        },
+      },
+      { $count: 'total' },
+    ]);
+    return result[0]?.total ?? 0;
+  }
+
   async countOutOfStock(tenantId: string): Promise<number> {
     return InventoryItemModel.countDocuments({ tenantId, isDeleted: { $ne: true }, quantity: 0 });
   }
@@ -136,6 +186,13 @@ class DashboardRepository {
   // ── Staff ─────────────────────────────────────────────────────────────────
   async countActiveStaff(tenantId: string): Promise<number> {
     return UserModel.countDocuments({ tenantId, isActive: true });
+  }
+
+  // Active staff whose account was created within [start, end] — backs the
+  // Hospital Overview Today/This Month "Active Staff" cards (unlike
+  // countActiveStaff above, a live, date-unscoped headcount used elsewhere).
+  async countActiveStaffBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+    return UserModel.countDocuments({ tenantId, isActive: true, createdAt: { $gte: start, $lte: end } });
   }
 
   // ── Doctor-scoped (Doctor dashboard) ─────────────────────────────────────
@@ -150,6 +207,14 @@ class DashboardRepository {
 
   async countActiveIpdForDoctor(tenantId: string, doctorId: string): Promise<number> {
     return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED', assignedDoctorIds: doctorId });
+  }
+
+  async countActiveIpdForDoctorBetween(
+    tenantId: string, doctorId: string, start: Date, end: Date,
+  ): Promise<number> {
+    return IPDAdmissionModel.countDocuments({
+      tenantId, status: 'ADMITTED', assignedDoctorIds: doctorId, admissionDate: { $gte: start, $lte: end },
+    });
   }
 
   // Distinct patients this doctor has treated — via an OPD visit assigned to
@@ -168,6 +233,20 @@ class DashboardRepository {
   ): Promise<{ pathology: number; radiology: number }> {
     const filter = {
       tenantId, status: LabRequestStatus.PENDING, isDeleted: { $ne: true },
+      $or: [{ requestedBy: doctorId }, { patientId: { $in: patientIds } }],
+    };
+    const [pathology, radiology] = await Promise.all([
+      PathologyRequestModel.countDocuments(filter),
+      RadiologyRequestModel.countDocuments(filter),
+    ]);
+    return { pathology, radiology };
+  }
+
+  async countPendingLabRequestsForDoctorBetween(
+    tenantId: string, doctorId: string, patientIds: string[], start: Date, end: Date,
+  ): Promise<{ pathology: number; radiology: number }> {
+    const filter = {
+      tenantId, status: LabRequestStatus.PENDING, createdAt: { $gte: start, $lte: end }, isDeleted: { $ne: true },
       $or: [{ requestedBy: doctorId }, { patientId: { $in: patientIds } }],
     };
     const [pathology, radiology] = await Promise.all([

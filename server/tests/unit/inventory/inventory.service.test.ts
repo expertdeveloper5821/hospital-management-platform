@@ -67,6 +67,30 @@ describe('InventoryService — createItem', () => {
     expect(result.isLowStock).toBe(true);
   });
 
+  test('stamps lowStockSince on the created doc when it starts out already low', async () => {
+    mockRepo.save = jest.fn().mockResolvedValue(makeItem({ quantity: 5, lowStockThreshold: 20 }));
+
+    await service.createItem(
+      { name: 'Saline Solution', category: 'Fluids', unit: 'bags', quantity: 5, lowStockThreshold: 20 },
+      TENANT,
+      ADMIN,
+    );
+
+    expect(mockRepo.save).toHaveBeenCalledWith(expect.objectContaining({ lowStockSince: expect.any(Date) }));
+  });
+
+  test('leaves lowStockSince null on the created doc when it starts out above threshold', async () => {
+    mockRepo.save = jest.fn().mockResolvedValue(makeItem({ quantity: 100, lowStockThreshold: 20 }));
+
+    await service.createItem(
+      { name: 'Paracetamol 500mg', category: 'Medication', unit: 'tablets', quantity: 100, lowStockThreshold: 20 },
+      TENANT,
+      ADMIN,
+    );
+
+    expect(mockRepo.save).toHaveBeenCalledWith(expect.objectContaining({ lowStockSince: null }));
+  });
+
   test('sends low-stock notification when created already below threshold', async () => {
     mockRepo.save = jest.fn().mockResolvedValue(
       makeItem({ quantity: 5, lowStockThreshold: 20 }),
@@ -202,6 +226,32 @@ describe('InventoryService — updateStock', () => {
     expect(mockNotifSvc.sendToRole).toHaveBeenCalledTimes(3);
   });
 
+  test('stamps lowStockSince when stock crosses into low-stock', async () => {
+    const before = makeItem({ quantity: 21, lowStockThreshold: 20 });
+    const after  = makeItem({ quantity: 19, lowStockThreshold: 20 });
+
+    mockRepo.findById       = jest.fn().mockResolvedValue(before);
+    mockRepo.updateStock    = jest.fn().mockResolvedValue(after);
+    mockRepo.setLowStockSince = jest.fn().mockResolvedValue(after);
+
+    await service.updateStock('item-001', TENANT, ADMIN, { quantityChange: -2, reason: 'dispense' });
+
+    expect(mockRepo.setLowStockSince).toHaveBeenCalledWith('item-001', TENANT, expect.any(Date));
+  });
+
+  test('clears lowStockSince when a restock crosses back above threshold', async () => {
+    const before = makeItem({ quantity: 5, lowStockThreshold: 20 });
+    const after  = makeItem({ quantity: 25, lowStockThreshold: 20 });
+
+    mockRepo.findById       = jest.fn().mockResolvedValue(before);
+    mockRepo.updateStock    = jest.fn().mockResolvedValue(after);
+    mockRepo.setLowStockSince = jest.fn().mockResolvedValue(after);
+
+    await service.updateStock('item-001', TENANT, ADMIN, { quantityChange: 20, reason: 'restock' });
+
+    expect(mockRepo.setLowStockSince).toHaveBeenCalledWith('item-001', TENANT, null);
+  });
+
   test('does NOT send notification when stock was already below threshold', async () => {
     // Before: already at 15 (< threshold 20); after: 13 — already low, no crossing event
     const before = makeItem({ quantity: 15, lowStockThreshold: 20 });
@@ -213,6 +263,8 @@ describe('InventoryService — updateStock', () => {
     await service.updateStock('item-001', TENANT, ADMIN, { quantityChange: -2, reason: 'dispense' });
 
     expect(mockNotifSvc.sendToRole).not.toHaveBeenCalled();
+    // No crossing (already low before and after) — the flag date must not be touched.
+    expect(mockRepo.setLowStockSince).not.toHaveBeenCalled();
   });
 
   test('does NOT send notification when threshold is zero', async () => {
@@ -261,6 +313,20 @@ describe('InventoryService — updateThreshold', () => {
 
     expect(result.lowStockThreshold).toBe(30);
     expect(mockRepo.updateThreshold).toHaveBeenCalledWith('item-001', TENANT, 30);
+  });
+
+  test('stamps lowStockSince when raising the threshold newly crosses into low-stock', async () => {
+    // Before: qty=25, threshold=20 (not low); after: qty=25, threshold=30 (now low)
+    const before = makeItem({ quantity: 25, lowStockThreshold: 20 });
+    const after  = makeItem({ quantity: 25, lowStockThreshold: 30 });
+
+    mockRepo.findById         = jest.fn().mockResolvedValue(before);
+    mockRepo.updateThreshold  = jest.fn().mockResolvedValue(after);
+    mockRepo.setLowStockSince = jest.fn().mockResolvedValue(after);
+
+    await service.updateThreshold('item-001', TENANT, ADMIN, { lowStockThreshold: 30 });
+
+    expect(mockRepo.setLowStockSince).toHaveBeenCalledWith('item-001', TENANT, expect.any(Date));
   });
 
   test('throws NotFoundError for unknown item', async () => {

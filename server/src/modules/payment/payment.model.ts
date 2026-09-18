@@ -1,5 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { PaymentMethod, PaymentStatus } from './payment.types';
+import { encryptedFieldsPlugin, wrapModelBulkWrite } from '../../shared/utils/encrypted-fields.plugin';
+import { EncryptionKeyPurpose } from '../../shared/utils/field-encryption';
 
 export interface IPayment extends Document {
   paymentId:          string;
@@ -55,4 +57,30 @@ PaymentSchema.index({ tenantId: 1, createdAt: 1 });
 PaymentSchema.index({ tenantId: 1, referenceType: 1, referenceId: 1 });
 PaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
 
+// ─── Sensitive free-text / reference encryption at rest (AES-256-GCM) ────────
+// `description` (free text — may embed visit/procedure/charge context) and
+// `transactionId` (external UPI/Card reference number) are encrypted
+// transparently at the model layer via the shared plugin. Every write path
+// (save, create/insertMany, updateOne/updateMany, findOneAndUpdate, replaceOne,
+// findOneAndReplace, $setOnInsert upserts, and Model.bulkWrite) persists
+// ciphertext; every read path returns plaintext, so the service, controller,
+// PDF generators and the frontend are unchanged. Legacy plaintext rows are
+// passed through untouched on read.
+//
+// Safe because neither field is used in any filter, sort, search, index,
+// aggregation, or `$lookup` join — verified across payment.repository.ts,
+// dashboard.repository.ts, the discharge-summary billing section and the
+// frontend. Every other Payment field (amount, status, paymentMethod,
+// createdAt, referenceType, referenceId, patientId, razorpayOrderId) is a
+// query/aggregation key and stays plaintext.
+const ENCRYPTED_PAYMENT_FIELDS = {
+  fields:  ['description', 'transactionId'],
+  purpose: EncryptionKeyPurpose.PAYMENT,
+};
+PaymentSchema.plugin(encryptedFieldsPlugin, ENCRYPTED_PAYMENT_FIELDS);
+
 export const PaymentModel = mongoose.model<IPayment>('Payment', PaymentSchema);
+
+// Model.bulkWrite() runs no query middleware — wrap it so bulk operations
+// cannot write plaintext either.
+wrapModelBulkWrite(PaymentModel, ENCRYPTED_PAYMENT_FIELDS);

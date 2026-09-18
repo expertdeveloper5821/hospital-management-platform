@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { ipdService } from './ipd.service';
 import { buildDischargeSummaryPdf } from './discharge-summary.pdf';
-import { ValidationError } from '../../shared/middleware/error-handler';
+import { ValidationError, ForbiddenError } from '../../shared/middleware/error-handler';
 import {
   CreateAdmissionSchema,
   AddProgressNoteSchema,
@@ -128,13 +128,43 @@ export async function listAdmissions(
   }
 }
 
+// IPD Vitals — recorded only via the Admission Edit form, never at admission
+// creation or discharge. Every sub-field is independently optional and
+// nullable so a caller can send just the one reading they took, or
+// explicitly clear a previously-recorded value with `null` —
+// IPDService.updateAdmission merges whatever arrives here onto the
+// admission's existing vitals rather than replacing the whole group.
+// Ranges mirror OPDController's vitalsSchema exactly (opd.controller.ts).
+const ipdBloodPressureSchema = z.string()
+  .trim()
+  .regex(/^\d{2,3}\/\d{2,3}$/, 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.')
+  .nullable()
+  .optional();
+
+const ipdVitalsSchema = z.object({
+  weight:          z.number().min(0.5, 'Weight must be between 0.5 and 500 kg.').max(500, 'Weight must be between 0.5 and 500 kg.').nullable().optional(),
+  height:          z.number().min(20, 'Height must be between 20 and 300 cm.').max(300, 'Height must be between 20 and 300 cm.').nullable().optional(),
+  bloodPressure:   ipdBloodPressureSchema,
+  sugar:           z.number().min(10, 'Sugar must be between 10 and 1000 mg/dL.').max(1000, 'Sugar must be between 10 and 1000 mg/dL.').nullable().optional(),
+  bodyTemperature: z.number().min(80, 'Body temperature must be between 80 and 115 °F.').max(115, 'Body temperature must be between 80 and 115 °F.').nullable().optional(),
+}).optional();
+
 const updateAdmissionSchema = z.object({
   assignedDoctorIds: z.array(z.string().min(1)).optional(),
   wardId:            z.string().min(1).optional(),
   bedId:             z.string().min(1).optional(),
-}).refine((d) => d.assignedDoctorIds || d.wardId || d.bedId, {
+  vitals:            ipdVitalsSchema,
+}).refine((d) => d.assignedDoctorIds || d.wardId || d.bedId || d.vitals, {
   message: 'Provide at least one field to update',
 });
+
+// Vitals are otherwise gated purely by this field-level check — the route's
+// role list (RECEPTIONIST, DOCTOR, NURSE, ADMIN, HOSPITAL_ADMIN) is broader
+// than who may touch vitals specifically: only Doctor, Nurse and Hospital
+// Admin may add/update vitals, mirroring OPD's clinical-role restriction.
+const VITALS_EDITABLE_ROLES: ReadonlySet<UserRole> = new Set([
+  UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN,
+]);
 
 export async function updateAdmission(
   req: Request,
@@ -150,6 +180,10 @@ export async function updateAdmission(
 
     const body = updateAdmissionSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    if (body.data.vitals !== undefined && !VITALS_EDITABLE_ROLES.has(req.user!.role)) {
+      throw new ForbiddenError('Only Doctors, Nurses, and Hospital Admin can update vitals.');
+    }
 
     const tenantId = req.user!.tenantId as string;
     const result   = await ipdService.updateAdmission(

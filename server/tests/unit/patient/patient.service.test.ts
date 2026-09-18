@@ -3,7 +3,11 @@ jest.mock('../../../src/modules/tenant/tenant.repository');
 jest.mock('../../../src/modules/ipd/ipd.repository');
 jest.mock('../../../src/modules/ipd/ipd.service');
 jest.mock('../../../src/shared/services/audit.service');
-jest.mock('../../../src/modules/patient/medical-card.pdf');
+// Keep the real maskAadhaar (used for audit redaction) but stub the PDF builder.
+jest.mock('../../../src/modules/patient/medical-card.pdf', () => ({
+  ...jest.requireActual('../../../src/modules/patient/medical-card.pdf'),
+  buildMedicalCardPdf: jest.fn(),
+}));
 jest.mock('../../../src/shared/services/s3.service');
 
 import * as fc from 'fast-check';
@@ -202,6 +206,58 @@ describe('PatientService — example-based', () => {
           newValue:      expect.objectContaining({ fullName: 'Updated Name' }),
         }),
       );
+    });
+
+    test('redacts aadhaarNumber in audit log to a masked value, never plaintext', async () => {
+      const auditService = jest.requireMock('../../../src/shared/services/audit.service').auditService as jest.Mocked<{ log: jest.Mock }>;
+      mockRepo.findByPatientId.mockResolvedValue({ ...BASE_PATIENT, aadhaarNumber: '123456789012' } as never);
+      mockRepo.update.mockResolvedValue({ ...BASE_PATIENT, aadhaarNumber: '999988887777' } as never);
+
+      await service.updatePatient('t1', 'PAT-ABCD1234', { aadhaarNumber: '999988887777' }, 'actor');
+
+      // The plaintext must never reach the repository.update() audit values.
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        't1', 'PAT-ABCD1234',
+        expect.objectContaining({ aadhaarNumber: '999988887777' }),
+      );
+
+      const [entry] = auditService.log.mock.calls[0] as [{ previousValue: Record<string, unknown>; newValue: Record<string, unknown> }];
+      expect(entry.previousValue.aadhaarNumber).toBe('XXXX-XXXX-9012');
+      expect(entry.newValue.aadhaarNumber).toBe('XXXX-XXXX-7777');
+      expect(JSON.stringify(entry)).not.toContain('123456789012');
+      expect(JSON.stringify(entry)).not.toContain('999988887777');
+    });
+
+    test('redacts emergency contact fields in audit log, never plaintext', async () => {
+      const auditService = jest.requireMock('../../../src/shared/services/audit.service').auditService as jest.Mocked<{ log: jest.Mock }>;
+      mockRepo.findByPatientId.mockResolvedValue({
+        ...BASE_PATIENT, emergencyContactName: 'Old Kin', emergencyContactMobile: '9000000001',
+      } as never);
+      mockRepo.update.mockResolvedValue({
+        ...BASE_PATIENT, emergencyContactName: 'New Kin', emergencyContactMobile: '9000000002',
+      } as never);
+
+      await service.updatePatient(
+        't1', 'PAT-ABCD1234',
+        { emergencyContactName: 'New Kin', emergencyContactMobile: '9000000002' },
+        'actor',
+      );
+
+      // Plaintext still reaches the repository (and thus the encrypted-at-rest column).
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        't1', 'PAT-ABCD1234',
+        expect.objectContaining({ emergencyContactName: 'New Kin', emergencyContactMobile: '9000000002' }),
+      );
+
+      const [entry] = auditService.log.mock.calls[0] as [{ previousValue: Record<string, unknown>; newValue: Record<string, unknown> }];
+      expect(entry.previousValue.emergencyContactName).toBe('[redacted]');
+      expect(entry.previousValue.emergencyContactMobile).toBe('[redacted]');
+      expect(entry.newValue.emergencyContactName).toBe('[redacted]');
+      expect(entry.newValue.emergencyContactMobile).toBe('[redacted]');
+      expect(JSON.stringify(entry)).not.toContain('Old Kin');
+      expect(JSON.stringify(entry)).not.toContain('New Kin');
+      expect(JSON.stringify(entry)).not.toContain('9000000001');
+      expect(JSON.stringify(entry)).not.toContain('9000000002');
     });
 
     test('throws NotFoundError when update returns null (race condition)', async () => {

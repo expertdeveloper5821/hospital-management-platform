@@ -87,6 +87,19 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
         {visit.notes && (
           <DetailRow icon={<FileText className="h-4 w-4" />} label="Notes" value={<RichTextDisplay value={visit.notes} />} />
         )}
+        {(() => {
+          const v = visit.vitals;
+          const parts = [
+            v?.weight          != null ? `Weight: ${v.weight} kg`         : null,
+            v?.height          != null ? `Height: ${v.height} cm`         : null,
+            v?.bloodPressure         ? `BP: ${v.bloodPressure} mmHg`      : null,
+            v?.sugar           != null ? `Sugar: ${v.sugar} mg/dL`        : null,
+            v?.bodyTemperature != null ? `Temp: ${v.bodyTemperature} °F` : null,
+          ].filter(Boolean);
+          return parts.length > 0
+            ? <DetailRow icon={<Activity className="h-4 w-4" />} label="Vitals" value={parts.join(' · ')} />
+            : null;
+        })()}
       </div>
 
       <p className="text-xs text-muted-foreground">Created on {formatDate(visit.createdAt)}</p>

@@ -47,6 +47,19 @@ export interface AppConfig {
     cacheTtlSeconds:   number;
     pollIntervalSeconds: number;
   };
+  security: {
+    // Base64-encoded 32-byte AES-256-GCM key used to encrypt Patient.aadhaarNumber
+    // at rest. Loaded from env only — never stored in source or the database.
+    aadhaarEncryptionKey: string;
+    // Base64-encoded 32-byte AES-256-GCM key used to encrypt clinical free-text
+    // at rest (OPDVisit.diagnosis / .prescription). Same rules: env only, never
+    // in source, never in the database, never sent to the frontend.
+    medicalDataEncryptionKey: string;
+    // Base64-encoded 32-byte AES-256-GCM key used to encrypt payment free-text /
+    // reference numbers at rest (Payment.description / .transactionId). Same
+    // rules: env only, never in source/DB, never sent to the frontend.
+    paymentDataEncryptionKey: string;
+  };
 }
 
 function parseEnvList(value?: string): string[] {
@@ -125,6 +138,23 @@ const config: AppConfig = {
   dashboard: {
     cacheTtlSeconds:    parseInt(process.env.DASHBOARD_CACHE_TTL_SECONDS    ?? '60', 10),
     pollIntervalSeconds: parseInt(process.env.DASHBOARD_POLL_INTERVAL_SECONDS ?? '60', 10),
+  },
+  security: {
+    aadhaarEncryptionKey: process.env.AADHAAR_ENCRYPTION_KEY!,
+    // Falls back to AADHAAR_ENCRYPTION_KEY so existing deployments keep
+    // starting (and keep decrypting) without an ops change the moment this
+    // feature ships. Set a dedicated MEDICAL_DATA_ENCRYPTION_KEY — separate
+    // keys per data domain is the intended configuration; the fallback is a
+    // migration convenience, not the target state. Rotating away from the
+    // fallback later requires re-encrypting existing rows (see
+    // scripts/encrypt-medical-fields.ts).
+    medicalDataEncryptionKey:
+      process.env.MEDICAL_DATA_ENCRYPTION_KEY || process.env.AADHAAR_ENCRYPTION_KEY!,
+    // Same fallback rationale as medicalDataEncryptionKey — set a dedicated
+    // PAYMENT_DATA_ENCRYPTION_KEY; rotating off the fallback later requires
+    // re-encrypting existing rows (see scripts/encrypt-payment-fields.ts).
+    paymentDataEncryptionKey:
+      process.env.PAYMENT_DATA_ENCRYPTION_KEY || process.env.AADHAAR_ENCRYPTION_KEY!,
   },
 };
 

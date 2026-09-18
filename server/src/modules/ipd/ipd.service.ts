@@ -18,6 +18,7 @@ import {
   ProgressNoteResponse,
   DischargeSummaryData,
   DischargeSummaryBilling,
+  IPDVitals,
 } from './ipd.types';
 
 import { patientRepository }    from '../patient/patient.repository';
@@ -38,7 +39,32 @@ import {
 import { PatientModel } from '../patient/patient.model';
 
 
+// Shape a partial (or missing) vitals update/read always merges onto — keeps
+// "no vitals recorded yet" and "some vitals cleared" both resolving to the
+// same fully-shaped object rather than undefined sub-fields. Mirrors OPD's
+// DEFAULT_VITALS (opd.service.ts).
+const DEFAULT_VITALS: IPDVitals = {
+  weight:          null,
+  height:          null,
+  bloodPressure:   null,
+  sugar:           null,
+  bodyTemperature: null,
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// vitals are encrypted at rest (see ipd.model.ts's ENCRYPTED_IPD_FIELDS).
+// Audit log entries are stored in plain form and rendered in the Audit UI, so
+// the object must never carry its values into one — the trail records only
+// *that* vitals changed. Mirrors OPDService's redactClinicalFields; returns
+// the input unchanged when it carries no `vitals` key so callers can pass it
+// unconditionally.
+const REDACTED_MARKER = '[redacted]';
+
+function redactVitals(values: Record<string, unknown>): Record<string, unknown> {
+  if (values.vitals === undefined) return values;
+  return { ...values, vitals: REDACTED_MARKER };
+}
 
 async function resolvePatientIdsBySearch(tenantId: string, search: string): Promise<string[]> {
   const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -217,6 +243,17 @@ async function toResponse(
     progressNotes:     staffNameMap
       ? mapProgressNotes(doc.progressNotes, staffNameMap)
       : await resolveProgressNoteStaffNames(tenantId, doc.progressNotes),
+    // Explicit shape (not a spread of doc.vitals) so a Mongoose subdocument
+    // never leaks its own internal keys into the API response, and a legacy
+    // admission read via .lean() (missing the field entirely) still answers
+    // with nulls rather than undefined — same reasoning as OPDVisit's toResponse.
+    vitals: {
+      weight:          doc.vitals?.weight          ?? null,
+      height:          doc.vitals?.height          ?? null,
+      bloodPressure:   doc.vitals?.bloodPressure   ?? null,
+      sugar:           doc.vitals?.sugar           ?? null,
+      bodyTemperature: doc.vitals?.bodyTemperature ?? null,
+    },
   };
 }
 
@@ -345,6 +382,7 @@ export class IPDService {
       assignedDoctorIds?: string[];
       wardId?:            string;
       bedId?:             string;
+      vitals?:            Partial<IPDVitals>;
     },
     userId: string,
   ): Promise<AdmissionResponse> {
@@ -412,6 +450,31 @@ export class IPDService {
       fields.wardName  = ward.name;
     }
 
+    // ── Vitals ──────────────────────────────────────────────────────────────
+    // Merge onto the admission's existing readings rather than replacing the
+    // whole sub-document — input.vitals only carries the sub-fields the
+    // caller actually sent, so recording just one reading (e.g. weight)
+    // never wipes out the others already on file. Mirrors
+    // OPDService.updateVisit's vitals merge exactly. Role is not re-checked
+    // here — the controller's VITALS_EDITABLE_ROLES gate is the sole check
+    // on who may send this field.
+    if (input.vitals !== undefined) {
+      // admission.vitals is a Mongoose subdocument, not a plain object — its
+      // schema-defined fields are prototype getters, not own enumerable
+      // properties, so `{ ...admission.vitals }` would silently pick up
+      // Mongoose's internal bookkeeping instead of the actual values.
+      const existingVitals: IPDVitals = {
+        weight:          admission.vitals?.weight          ?? DEFAULT_VITALS.weight,
+        height:          admission.vitals?.height          ?? DEFAULT_VITALS.height,
+        bloodPressure:   admission.vitals?.bloodPressure   ?? DEFAULT_VITALS.bloodPressure,
+        sugar:           admission.vitals?.sugar           ?? DEFAULT_VITALS.sugar,
+        bodyTemperature: admission.vitals?.bodyTemperature ?? DEFAULT_VITALS.bodyTemperature,
+      };
+      const mergedVitals: IPDVitals = { ...existingVitals, ...input.vitals };
+      prevValue.vitals = existingVitals;
+      fields.vitals     = mergedVitals;
+    }
+
     if (Object.keys(fields).length === 0) {
       // Nothing changed — return current state
       const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
@@ -428,8 +491,8 @@ export class IPDService {
         action:        'UPDATE',
         userId,
         tenantId,
-        previousValue: prevValue,
-        newValue:      fields as Record<string, unknown>,
+        previousValue: redactVitals(prevValue),
+        newValue:      redactVitals(fields as Record<string, unknown>),
       });
     } catch { /* swallow */ }
 
@@ -652,7 +715,7 @@ export class IPDService {
       patient: {
         patientId:        patient.patientId,
         fullName:         patient.fullName,
-        age:              calculateAge(patient.dateOfBirth),
+        age:              calculateAge(new Date(patient.dateOfBirth)),
         gender:           patient.gender,
         mobileNumber:     patient.mobileNumber,
         address:          patient.address || null,

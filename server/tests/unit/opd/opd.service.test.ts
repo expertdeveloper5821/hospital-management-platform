@@ -1,17 +1,21 @@
 jest.mock('../../../src/modules/opd/opd.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/ipd/ipd.service');
+jest.mock('../../../src/modules/ipd/ipd.repository');
 jest.mock('../../../src/modules/payment/payment.repository');
 jest.mock('../../../src/modules/tenant/tenant.service');
 jest.mock('../../../src/modules/department/department.service');
+jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { opdRepository }     from '../../../src/modules/opd/opd.repository';
 import { patientRepository } from '../../../src/modules/patient/patient.repository';
 import { ipdService }        from '../../../src/modules/ipd/ipd.service';
+import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
 import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 import { tenantService }     from '../../../src/modules/tenant/tenant.service';
 import { departmentService } from '../../../src/modules/department/department.service';
+import { userRepository }    from '../../../src/modules/user/user.repository';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
 import { OPDVisitStatus, OPDPaymentValidityReason } from '../../../src/modules/opd/opd.types';
 import { UserRole }          from '../../../src/shared/types/common.types';
@@ -21,9 +25,11 @@ import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/att
 const mockOpdRepo        = opdRepository     as jest.Mocked<typeof opdRepository>;
 const mockPatientRepo    = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockIpdService     = ipdService        as jest.Mocked<typeof ipdService>;
+const mockIpdRepo        = ipdRepository     as jest.Mocked<typeof ipdRepository>;
 const mockPaymentRepo    = paymentRepository as jest.Mocked<typeof paymentRepository>;
 const mockTenantSvc      = tenantService     as jest.Mocked<typeof tenantService>;
 const mockDepartmentSvc  = departmentService as jest.Mocked<typeof departmentService>;
+const mockUserRepo       = userRepository    as jest.Mocked<typeof userRepository>;
 
 const BASE_PATIENT = {
   patientId: 'PAT-ABCD1234',
@@ -35,12 +41,14 @@ function makeVisit(overrides: Partial<{
   visitId:   string;
   status:    OPDVisitStatus;
   doctorIds: string[];
+  nurseIds:  string[];
 }> = {}) {
   return {
     visitId:        overrides.visitId  ?? 'OPD-TEST0001',
     tenantId:       't1',
     patientId:      'PAT-ABCD1234',
     doctorIds:      overrides.doctorIds ?? [],
+    nurseIds:       overrides.nurseIds  ?? [],
     visitDate:      new Date('2026-05-15T00:00:00.000Z'),
     queueNumber:    1,
     status:         overrides.status   ?? OPDVisitStatus.OPEN,
@@ -249,6 +257,127 @@ describe('OPDService — example-based', () => {
         service.createVisit('t1', { ...VALID_CREATE_REQ, visitDate: futureStr }, 'user-1', UserRole.RECEPTIONIST),
       ).resolves.toBeDefined();
     });
+
+    // ── Assign Nurse (doctor-wise, multi-nurse OPD nurse assignment) ─────────
+    describe('nurse assignment', () => {
+      const NURSE_1 = { _id: 'nurse-1', tenantId: 't1', role: UserRole.NURSE, isActive: true, name: 'Nurse XYZ' };
+      const NURSE_2 = { _id: 'nurse-2', tenantId: 't1', role: UserRole.NURSE, isActive: true, name: 'Nurse PQR' };
+
+      function mockNurse(id: string) {
+        mockUserRepo.findById.mockImplementation(async (_tid, uid) =>
+          (uid === 'nurse-1' ? NURSE_1 : uid === 'nurse-2' ? NURSE_2 : null) as never);
+      }
+
+      test('nurse assignment is optional — visit creates fine with no nurseIds', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockOpdRepo.countByDate.mockResolvedValue(0);
+        mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+
+        await service.createVisit('t1', VALID_CREATE_REQ, 'user-1', UserRole.HOSPITAL_ADMIN);
+
+        expect(mockOpdRepo.save).toHaveBeenCalledWith(expect.objectContaining({ nurseIds: [] }));
+        expect(mockOpdRepo.addNurseAssignments).not.toHaveBeenCalled();
+        expect(mockUserRepo.findById).not.toHaveBeenCalled();
+      });
+
+      test('multiple valid nurseIds — all stored on the visit and added to the first doctor\'s mapping', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockOpdRepo.countByDate.mockResolvedValue(0);
+        mockOpdRepo.save.mockResolvedValue(makeVisit({ doctorIds: ['doc-1', 'doc-2'] }) as never);
+        mockNurse('nurse-1');
+        mockIpdRepo.findWardIdsByNurse.mockResolvedValue([]);
+
+        await service.createVisit(
+          't1',
+          { ...VALID_CREATE_REQ, doctorIds: ['doc-1', 'doc-2'], nurseIds: ['nurse-1', 'nurse-2'] },
+          'user-1', UserRole.HOSPITAL_ADMIN,
+        );
+
+        expect(mockOpdRepo.save).toHaveBeenCalledWith(expect.objectContaining({ nurseIds: ['nurse-1', 'nurse-2'] }));
+        expect(mockOpdRepo.addNurseAssignments).toHaveBeenCalledWith('t1', 'doc-1', ['nurse-1', 'nurse-2']);
+      });
+
+      test('duplicate nurseIds in the request are de-duplicated', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockOpdRepo.countByDate.mockResolvedValue(0);
+        mockOpdRepo.save.mockResolvedValue(makeVisit({ doctorIds: ['doc-1'] }) as never);
+        mockNurse('nurse-1');
+        mockIpdRepo.findWardIdsByNurse.mockResolvedValue([]);
+
+        await service.createVisit(
+          't1',
+          { ...VALID_CREATE_REQ, doctorIds: ['doc-1'], nurseIds: ['nurse-1', 'nurse-1'] },
+          'user-1', UserRole.HOSPITAL_ADMIN,
+        );
+
+        expect(mockOpdRepo.save).toHaveBeenCalledWith(expect.objectContaining({ nurseIds: ['nurse-1'] }));
+        expect(mockOpdRepo.addNurseAssignments).toHaveBeenCalledWith('t1', 'doc-1', ['nurse-1']);
+      });
+
+      test('nurseIds given but no doctor assigned — visit stores the nurses, no mapping is added', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockOpdRepo.countByDate.mockResolvedValue(0);
+        mockOpdRepo.save.mockResolvedValue(makeVisit() as never);
+        mockNurse('nurse-1');
+        mockIpdRepo.findWardIdsByNurse.mockResolvedValue([]);
+
+        await service.createVisit('t1', { ...VALID_CREATE_REQ, nurseIds: ['nurse-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN);
+
+        expect(mockOpdRepo.save).toHaveBeenCalledWith(expect.objectContaining({ nurseIds: ['nurse-1'] }));
+        expect(mockOpdRepo.addNurseAssignments).not.toHaveBeenCalled();
+      });
+
+      test('rejects when any nurseId does not resolve to a user', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockUserRepo.findById.mockResolvedValue(null);
+
+        await expect(
+          service.createVisit('t1', { ...VALID_CREATE_REQ, nurseIds: ['ghost'] }, 'user-1', UserRole.HOSPITAL_ADMIN),
+        ).rejects.toThrow(ValidationError);
+        expect(mockOpdRepo.save).not.toHaveBeenCalled();
+      });
+
+      test('rejects when any nurseId belongs to a non-NURSE user', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockUserRepo.findById.mockResolvedValue({ ...NURSE_1, role: UserRole.DOCTOR } as never);
+
+        await expect(
+          service.createVisit('t1', { ...VALID_CREATE_REQ, nurseIds: ['nurse-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN),
+        ).rejects.toThrow(ValidationError);
+      });
+
+      test('rejects an inactive nurse', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockUserRepo.findById.mockResolvedValue({ ...NURSE_1, isActive: false } as never);
+
+        await expect(
+          service.createVisit('t1', { ...VALID_CREATE_REQ, nurseIds: ['nurse-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN),
+        ).rejects.toThrow(ValidationError);
+      });
+
+      test('rejects a nurse currently assigned to an IPD ward', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockUserRepo.findById.mockResolvedValue(NURSE_1 as never);
+        mockIpdRepo.findWardIdsByNurse.mockResolvedValue(['ward-1']);
+
+        await expect(
+          service.createVisit('t1', { ...VALID_CREATE_REQ, doctorIds: ['doc-1'], nurseIds: ['nurse-1'] }, 'user-1', UserRole.HOSPITAL_ADMIN),
+        ).rejects.toThrow(ConflictError);
+        expect(mockOpdRepo.save).not.toHaveBeenCalled();
+        expect(mockOpdRepo.addNurseAssignments).not.toHaveBeenCalled();
+      });
+
+      test('rejects the whole request when one nurse in a multi-nurse selection is invalid', async () => {
+        mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+        mockNurse('nurse-1'); // 'nurse-1'/'nurse-2' both resolve to valid nurses; 'ghost' resolves to null.
+        mockIpdRepo.findWardIdsByNurse.mockResolvedValue([]);
+
+        await expect(
+          service.createVisit('t1', { ...VALID_CREATE_REQ, doctorIds: ['doc-1'], nurseIds: ['nurse-1', 'nurse-2', 'ghost'] }, 'user-1', UserRole.HOSPITAL_ADMIN),
+        ).rejects.toThrow(ValidationError);
+        expect(mockOpdRepo.save).not.toHaveBeenCalled();
+      });
+    });
   });
 
   // ── updateVisit ────────────────────────────────────────────────────────────
@@ -293,6 +422,57 @@ describe('OPDService — example-based', () => {
       await expect(
         service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Should fail' }, 'doctor-1', UserRole.DOCTOR),
       ).rejects.toThrow(ConflictError);
+
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    // ── Nurse notes-only edit (assigned-to-visit ownership check) ────────────
+    test('a nurse assigned to the visit (nurseIds) can update notes', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Vitals checked' }, 'nurse-1', UserRole.NURSE),
+      ).resolves.toBeDefined();
+
+      expect(mockOpdRepo.update).toHaveBeenCalledWith(
+        't1', 'OPD-TEST0001',
+        expect.objectContaining({ notes: 'Vitals checked' }),
+        undefined,
+      );
+    });
+
+    test('throws NotFoundError when a nurse not listed in the visit\'s nurseIds tries to update it', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Should be blocked' }, 'nurse-2', UserRole.NURSE),
+      ).rejects.toThrow(NotFoundError);
+
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    // scopedPatientIds is ward-only (see resolveNursePatientIds); a nurse
+    // with no ward assignment at all — an empty scopedPatientIds — must
+    // still be able to edit a visit she's directly named on via nurseIds.
+    test('a directly-assigned nurse with an empty (ward-only) scopedPatientIds can still update notes', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Vitals checked' }, 'nurse-1', UserRole.NURSE, []),
+      ).resolves.toBeDefined();
+    });
+
+    // Being directly assigned to a *different* visit for the same patient
+    // (patientId-based historical relationship) must never grant access to
+    // this one — only this visit's own nurseIds counts.
+    test('a nurse assigned to another visit for the same patient cannot update this one', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-2'] }) as never);
+
+      await expect(
+        service.updateVisit('t1', 'OPD-TEST0001', { notes: 'Should be blocked' }, 'nurse-1', UserRole.NURSE, []),
+      ).rejects.toThrow(NotFoundError);
 
       expect(mockOpdRepo.update).not.toHaveBeenCalled();
     });
@@ -409,6 +589,75 @@ describe('OPDService — example-based', () => {
       await expect(
         service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2020-01-01' }, 'admin-1', UserRole.HOSPITAL_ADMIN),
       ).resolves.toBeDefined();
+    });
+  });
+
+  // ── startConsultation (nurse direct-assignment guard) ────────────────────────
+  describe('startConsultation', () => {
+    test('a nurse directly assigned to the visit (nurseIds) can start it', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(
+        makeVisit({ nurseIds: ['nurse-1'], status: OPDVisitStatus.IN_PROGRESS }) as never,
+      );
+
+      const result = await service.startConsultation('t1', 'OPD-TEST0001', 'nurse-1', UserRole.NURSE);
+
+      expect(result.status).toBe(OPDVisitStatus.IN_PROGRESS);
+    });
+
+    test('throws NotFoundError when a nurse not listed in the visit\'s nurseIds tries to start it', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+
+      await expect(
+        service.startConsultation('t1', 'OPD-TEST0001', 'nurse-2', UserRole.NURSE),
+      ).rejects.toThrow(NotFoundError);
+
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    // scopedPatientIds is ward-only (see resolveNursePatientIds); a nurse
+    // with no ward assignment but a direct nurseIds match must still pass.
+    test('a directly-assigned nurse with an empty (ward-only) scopedPatientIds still starts it', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: ['nurse-1'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(
+        makeVisit({ nurseIds: ['nurse-1'], status: OPDVisitStatus.IN_PROGRESS }) as never,
+      );
+
+      await expect(
+        service.startConsultation('t1', 'OPD-TEST0001', 'nurse-1', UserRole.NURSE, []),
+      ).resolves.toBeDefined();
+    });
+
+    // scopedPatientIds allows ward-based access even without a direct
+    // nurseIds match — but that's not enough to start a visit, mirroring
+    // updateVisit's "view via ward, edit only if directly assigned" split.
+    test('a ward-scoped but not directly-assigned nurse cannot start the visit', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ nurseIds: [] }) as never);
+
+      await expect(
+        service.startConsultation('t1', 'OPD-TEST0001', 'nurse-1', UserRole.NURSE, ['PAT-ABCD1234']),
+      ).rejects.toThrow(NotFoundError);
+
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    test('a Doctor can start a visit unaffected by the nurse-only direct-assignment guard', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
+      mockOpdRepo.update.mockResolvedValue(
+        makeVisit({ status: OPDVisitStatus.IN_PROGRESS }) as never,
+      );
+
+      const result = await service.startConsultation('t1', 'OPD-TEST0001', 'doctor-1', UserRole.DOCTOR);
+
+      expect(result.status).toBe(OPDVisitStatus.IN_PROGRESS);
+    });
+
+    test('throws NotFoundError when visit does not exist', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(null);
+
+      await expect(
+        service.startConsultation('t1', 'OPD-MISSING', 'doctor-1', UserRole.DOCTOR),
+      ).rejects.toThrow(NotFoundError);
     });
   });
 
@@ -529,6 +778,21 @@ describe('OPDService — example-based', () => {
         expect.any(Date),
         'doc-99',
         undefined,
+        undefined,
+      );
+    });
+
+    test('passes patientIds (ward scope) and nurseId (direct assignment) filters to repository', async () => {
+      mockOpdRepo.findByDate.mockResolvedValue([]);
+
+      await service.getQueue('t1', '2026-05-15', undefined, undefined, ['PAT-1'], 'nurse-1');
+
+      expect(mockOpdRepo.findByDate).toHaveBeenCalledWith(
+        't1',
+        expect.any(Date),
+        undefined,
+        ['PAT-1'],
+        'nurse-1',
       );
     });
 
@@ -618,13 +882,35 @@ describe('OPDService — example-based', () => {
 
   // ── Role-based access scope resolution ───────────────────────────────────────
   describe('resolveNursePatientIds', () => {
-    test('delegates to IPDService.resolveNursePatientIds', async () => {
+    // Ward-based (IPDService) patients only — direct per-visit assignment
+    // (a visit's own nurseIds) is deliberately NOT folded into this
+    // patient-level set (see the doc comment on the method). It's enforced
+    // separately, at the visit/query level, so a nurse assigned to one visit
+    // for a patient never gains visibility into that patient's other,
+    // unrelated visits. See opd.routes.test.ts's "Nurse OPD visibility —
+    // direct visit assignment" suite for the end-to-end behavior.
+    test('delegates to IPDService for ward-based patient scope', async () => {
       mockIpdService.resolveNursePatientIds.mockResolvedValue(['PAT-00001']);
 
       const result = await service.resolveNursePatientIds('t1', 'nurse-1', UserRole.NURSE);
 
       expect(result).toEqual(['PAT-00001']);
       expect(mockIpdService.resolveNursePatientIds).toHaveBeenCalledWith('t1', 'nurse-1', UserRole.NURSE);
+    });
+
+    test('a nurse with no ward sees an empty list, not undefined', async () => {
+      mockIpdService.resolveNursePatientIds.mockResolvedValue([]);
+
+      const result = await service.resolveNursePatientIds('t1', 'nurse-1', UserRole.NURSE);
+
+      expect(result).toEqual([]);
+    });
+
+    test('returns undefined for any other role, without querying IPDService', async () => {
+      const result = await service.resolveNursePatientIds('t1', 'admin-1', UserRole.HOSPITAL_ADMIN);
+
+      expect(result).toBeUndefined();
+      expect(mockIpdService.resolveNursePatientIds).not.toHaveBeenCalled();
     });
   });
 
@@ -857,6 +1143,92 @@ describe('OPDService — example-based', () => {
         expect(mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType).not.toHaveBeenCalled();
         expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
       });
+    });
+  });
+
+  // ── getAvailableOpdNurses ──────────────────────────────────────────────────
+  describe('getAvailableOpdNurses', () => {
+    test('excludes nurses currently on any ward roster', async () => {
+      mockUserRepo.findAll.mockResolvedValue({
+        data: [
+          { _id: 'nurse-1', name: 'Nurse XYZ', email: 'xyz@h.com' },
+          { _id: 'nurse-2', name: 'Nurse PQR', email: 'pqr@h.com' },
+        ],
+        total: 2, page: 1, limit: 500, totalPages: 1,
+      } as never);
+      mockIpdRepo.findAssignedNurseIds.mockResolvedValue(['nurse-2']);
+
+      const result = await service.getAvailableOpdNurses('t1');
+
+      expect(result).toEqual([{ userId: 'nurse-1', name: 'Nurse XYZ', email: 'xyz@h.com' }]);
+      expect(mockUserRepo.findAll).toHaveBeenCalledWith(
+        't1', { role: UserRole.NURSE, isActive: true }, 1, 500,
+      );
+    });
+
+    test('returns an empty list when every nurse is on IPD duty', async () => {
+      mockUserRepo.findAll.mockResolvedValue({
+        data: [{ _id: 'nurse-1', name: 'Nurse XYZ', email: 'xyz@h.com' }],
+        total: 1, page: 1, limit: 500, totalPages: 1,
+      } as never);
+      mockIpdRepo.findAssignedNurseIds.mockResolvedValue(['nurse-1']);
+
+      const result = await service.getAvailableOpdNurses('t1');
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  // ── getDoctorNurseAssignments ──────────────────────────────────────────────
+  describe('getDoctorNurseAssignments', () => {
+    test('returns an empty nurses list when the doctor has no existing mapping', async () => {
+      mockOpdRepo.findNurseAssignmentsByDoctor.mockResolvedValue([]);
+
+      const result = await service.getDoctorNurseAssignments('t1', 'doc-1');
+
+      expect(result).toEqual({ doctorId: 'doc-1', nurses: [] });
+      expect(mockUserRepo.findNamesByIds).not.toHaveBeenCalled();
+    });
+
+    test('returns every mapped nurse, each with isAvailable=true when not on any ward', async () => {
+      mockOpdRepo.findNurseAssignmentsByDoctor.mockResolvedValue([
+        { tenantId: 't1', doctorId: 'doc-1', nurseId: 'nurse-1' },
+        { tenantId: 't1', doctorId: 'doc-1', nurseId: 'nurse-2' },
+      ] as never);
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map([
+        ['nurse-1', 'Nurse XYZ'],
+        ['nurse-2', 'Nurse PQR'],
+      ]));
+      mockIpdRepo.findAssignedNurseIds.mockResolvedValue([]);
+
+      const result = await service.getDoctorNurseAssignments('t1', 'doc-1');
+
+      expect(result).toEqual({
+        doctorId: 'doc-1',
+        nurses: [
+          { nurseId: 'nurse-1', nurseName: 'Nurse XYZ', isAvailable: true },
+          { nurseId: 'nurse-2', nurseName: 'Nurse PQR', isAvailable: true },
+        ],
+      });
+    });
+
+    test('flags isAvailable=false per-nurse for whichever mapped nurse is now on an IPD ward', async () => {
+      mockOpdRepo.findNurseAssignmentsByDoctor.mockResolvedValue([
+        { tenantId: 't1', doctorId: 'doc-1', nurseId: 'nurse-1' },
+        { tenantId: 't1', doctorId: 'doc-1', nurseId: 'nurse-2' },
+      ] as never);
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map([
+        ['nurse-1', 'Nurse XYZ'],
+        ['nurse-2', 'Nurse PQR'],
+      ]));
+      mockIpdRepo.findAssignedNurseIds.mockResolvedValue(['nurse-2']);
+
+      const result = await service.getDoctorNurseAssignments('t1', 'doc-1');
+
+      expect(result.nurses).toEqual([
+        { nurseId: 'nurse-1', nurseName: 'Nurse XYZ', isAvailable: true },
+        { nurseId: 'nurse-2', nurseName: 'Nurse PQR', isAvailable: false },
+      ]);
     });
   });
 });

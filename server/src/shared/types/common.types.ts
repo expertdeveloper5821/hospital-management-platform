@@ -78,6 +78,7 @@ export const AuditEntityType = {
   DEPARTMENT:         'DEPARTMENT',
   NOTIFICATION:       'NOTIFICATION',
   ATTENDANCE:         'ATTENDANCE',
+  OPD_NURSE_ASSIGNMENT: 'OPD_NURSE_ASSIGNMENT',
 } as const;
 
 export type AuditEntityType = typeof AuditEntityType[keyof typeof AuditEntityType];

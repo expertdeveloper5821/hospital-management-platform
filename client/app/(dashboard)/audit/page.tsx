@@ -44,8 +44,8 @@ const ACTION_COLORS: Record<string, string> = {
   CREATE:         'bg-green-100 text-green-800 ring-green-600/20',
   UPDATE:         'bg-blue-100 text-blue-800 ring-blue-600/20',
   DELETE:         'bg-red-100 text-red-800 ring-red-600/20',
-  LOGIN:          'bg-slate-100 text-slate-700 ring-slate-600/20',
-  LOGOUT:         'bg-slate-100 text-slate-700 ring-slate-600/20',
+  LOGIN:          'bg-[#EDE9FE] text-[#6D28D9] ring-[#C4B5FD]',
+  LOGOUT:         'bg-[#F1F5F9] text-[#475569] ring-[#CBD5E1]',
   LOCKOUT:        'bg-orange-100 text-orange-800 ring-orange-600/20',
   PASSWORD_RESET: 'bg-amber-100 text-amber-800 ring-amber-600/20',
 };

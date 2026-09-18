@@ -8,6 +8,11 @@ export interface IInventoryItem extends Document {
   unit:              string;
   quantity:          number;
   lowStockThreshold: number;
+  // Timestamp of the most recent moment this item crossed INTO low-stock
+  // (quantity < lowStockThreshold, threshold > 0). Cleared back to null once
+  // restocked above the threshold. Backs the dashboard's "Low Stock Items"
+  // Today/This Month cards — see InventoryService.notifyLowStockIfCrossed.
+  lowStockSince:     Date | null;
   description:       string | null;
   isDeleted:         boolean;
   deletedAt:         Date | null;
@@ -24,6 +29,7 @@ const inventoryItemSchema = new Schema<IInventoryItem>(
     unit:              { type: String, required: true, trim: true, maxlength: 50 },
     quantity:          { type: Number, required: true, min: 0, default: 0 },
     lowStockThreshold: { type: Number, required: true, min: 0, default: 0 },
+    lowStockSince:     { type: Date, default: null },
     description:       { type: String, default: null, trim: true, maxlength: 1000 },
     isDeleted:         { type: Boolean, default: false },
     deletedAt:         { type: Date, default: null },
@@ -37,6 +43,7 @@ const inventoryItemSchema = new Schema<IInventoryItem>(
 // tenantId first on all compound indexes (NFR-01)
 inventoryItemSchema.index({ tenantId: 1, category: 1 });
 inventoryItemSchema.index({ tenantId: 1, name: 1 });
+inventoryItemSchema.index({ tenantId: 1, lowStockSince: 1 });
 
 export const InventoryItemModel = mongoose.model<IInventoryItem>(
   'InventoryItem',

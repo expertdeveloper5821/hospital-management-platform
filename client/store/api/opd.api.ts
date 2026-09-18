@@ -7,6 +7,8 @@ import type {
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
   OPDPaymentValidityResponse,
+  DoctorNurseAssignmentsResponse,
+  AvailableOpdNurseResponse,
 } from '../types';
 
 export const opdApi = baseApi.injectEndpoints({
@@ -97,6 +99,25 @@ export const opdApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<OPDPaymentValidityResponse>) => raw.data,
       providesTags: ['OPD', 'Payment'],
     }),
+
+    // GET /api/opd/nurses/available — nurses eligible for OPD duty (excludes
+    // anyone currently on an IPD ward roster). Tagged with 'User' so creating a
+    // nurse via the Users page (createUser invalidates 'User') refreshes this
+    // list without a manual re-fetch.
+    getAvailableOpdNurses: build.query<AvailableOpdNurseResponse[], void>({
+      query: () => '/api/opd/nurses/available',
+      transformResponse: (raw: ApiSuccess<AvailableOpdNurseResponse[]>) => raw.data,
+      providesTags: ['OPD', 'User'],
+    }),
+
+    // GET /api/opd/doctors/:doctorId/nurse-assignment — every nurse currently
+    // mapped to the doctor for OPD duty. Consulted by the New OPD Visit form
+    // whenever the selected doctor changes.
+    getDoctorNurseAssignments: build.query<DoctorNurseAssignmentsResponse, string>({
+      query: (doctorId) => `/api/opd/doctors/${doctorId}/nurse-assignment`,
+      transformResponse: (raw: ApiSuccess<DoctorNurseAssignmentsResponse>) => raw.data,
+      providesTags: ['OPD'],
+    }),
   }),
 });
 
@@ -110,4 +131,6 @@ export const {
   useCancelOPDVisitMutation,
   useGetOPDPatientHistoryQuery,
   useGetOPDPaymentValidityQuery,
+  useGetAvailableOpdNursesQuery,
+  useGetDoctorNurseAssignmentsQuery,
 } = opdApi;

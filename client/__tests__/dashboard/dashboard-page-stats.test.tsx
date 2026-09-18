@@ -82,7 +82,8 @@ describe('DashboardPage — Admissions Today removed for every role', () => {
     render(<DashboardPage />);
 
     expect(screen.queryByText('Admissions Today')).not.toBeInTheDocument();
-    // Sanity check: the rest of the Key Stats Strip still renders normally.
+    // Sanity check: the rest of the Hospital Overview metric cards (formerly
+    // the standalone Key Stats Strip) still render normally.
     expect(screen.getByText('Total Patients')).toBeInTheDocument();
     expect(screen.getByText('Lab Reports Today')).toBeInTheDocument();
     expect(screen.getAllByText('New Registrations').length).toBeGreaterThan(0);
@@ -152,23 +153,25 @@ describe('DashboardPage — Doctor dashboard shows only doctor-scoped data', () 
       totalPatients: 7,      // doctor-scoped, not hospital-wide
       todayOpdCount: 3,      // doctor-scoped
       activeIpdCount: 2,     // doctor-scoped
+      activeIpdCountToday: 2,
       pendingLabCount: 4,
+      pendingLabCountToday: 4,
       labReportsToday: 1,
       recentActivities: [],
     });
 
     render(<DashboardPage />);
 
-    // Total Patients + Active IPD render in the Key Stats Strip.
-    expect(screen.getByText('Total Patients')).toBeInTheDocument();
-    expect(screen.getByText('7')).toBeInTheDocument();
+    // Active IPD renders in the Hospital Overview metric cards (DOCTOR has no
+    // registration-date-scoped field, so it never sees the "Total Patients"
+    // card — that card is gated on newRegistrationsToday, which DOCTOR lacks).
     expect(screen.getByText('Active IPD')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
     // Today's OPD Visits surfaces via the "Today's Appointments" alert and
     // the "OPD Visits" row in Today's Activity.
     expect(screen.getByText("Today's Appointments")).toBeInTheDocument();
     expect(screen.getByText('OPD Visits')).toBeInTheDocument();
-    // Pending Lab Reports (Critical Alerts) + Lab Reports Today (Key Stats Strip).
+    // Pending Lab Reports (Hospital Overview alert) + Lab Reports Today (Hospital Overview metric card).
     expect(screen.getByText('Pending Lab Reports')).toBeInTheDocument();
     expect(screen.getByText('Lab Reports Today')).toBeInTheDocument();
   });
@@ -179,7 +182,9 @@ describe('DashboardPage — Doctor dashboard shows only doctor-scoped data', () 
       totalPatients: 7,
       todayOpdCount: 3,
       activeIpdCount: 2,
+      activeIpdCountToday: 2,
       pendingLabCount: 4,
+      pendingLabCountToday: 4,
       labReportsToday: 1,
       recentActivities: [],
     });
@@ -193,5 +198,109 @@ describe('DashboardPage — Doctor dashboard shows only doctor-scoped data', () 
     expect(screen.queryByText('Bed Occupancy')).not.toBeInTheDocument();
     expect(screen.queryByText('OPD Trend')).not.toBeInTheDocument();
     expect(screen.queryByText('New Registrations')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage — Hospital Overview splits into Today and This Month sections', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRole = 'HOSPITAL_ADMIN';
+  });
+
+  test('renders both section headings, each with its own date-scoped counts', () => {
+    mockStats({
+      lastUpdated: NOW,
+      lowStockCountToday: 1,
+      lowStockCountThisMonth: 5,
+      pendingLabCountToday: 2,
+      pendingLabCountThisMonth: 9,
+      pendingPaymentsCountToday: 3,
+      pendingPaymentsCountThisMonth: 11,
+      todayOpdCount: 15,
+      opdCountThisMonth: 200,
+      recentActivities: [],
+    });
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText('Hospital Overview — Today')).toBeInTheDocument();
+    expect(screen.getByText('Hospital Overview — This Month')).toBeInTheDocument();
+
+    // "Low Stock Items" / "Pending Lab Reports" / "Pending Payments" labels are
+    // shared by both sections — each count renders once, under its own label.
+    expect(screen.getAllByText('Low Stock Items')).toHaveLength(2);
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+
+    expect(screen.getAllByText('Pending Lab Reports')).toHaveLength(2);
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+
+    expect(screen.getAllByText('Pending Payments')).toHaveLength(2);
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('11')).toBeInTheDocument();
+
+    // The appointments card's label is section-specific, so it stays unique per section.
+    // "15" also appears in the unrelated Today's Activity "OPD Visits" row (same
+    // todayOpdCount value), so assert presence rather than a single match.
+    expect(screen.getByText("Today's Appointments")).toBeInTheDocument();
+    expect(screen.getAllByText('15').length).toBeGreaterThan(0);
+    expect(screen.getByText("This Month's Appointments")).toBeInTheDocument();
+    expect(screen.getByText('200')).toBeInTheDocument();
+  });
+
+  test('a section with no data-scoped fields for its range is omitted entirely', () => {
+    mockStats({
+      lastUpdated: NOW,
+      todayOpdCount: 4, // only the Today counterpart is present
+      recentActivities: [],
+    });
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText('Hospital Overview — Today')).toBeInTheDocument();
+    expect(screen.queryByText('Hospital Overview — This Month')).not.toBeInTheDocument();
+  });
+
+  test('the 5 metric cards (formerly the Key Stats Strip) render in both sections with their own date-scoped values', () => {
+    mockStats({
+      lastUpdated: NOW,
+      newRegistrationsToday: 4,
+      newRegistrationsThisMonth: 60,
+      activeIpdCountToday: 2,
+      activeIpdCountThisMonth: 18,
+      totalActiveStaffToday: 1,
+      totalActiveStaffThisMonth: 5,
+      labReportsToday: 3,
+      labReportsThisMonth: 40,
+      recentActivities: [],
+    });
+
+    render(<DashboardPage />);
+
+    // "Total Patients" and "New Registrations" share the same underlying
+    // value in each section (both registration-date-scoped). "New
+    // Registrations" also appears a third time in the unrelated Today's
+    // Activity row, so assert "at least" rather than an exact count there.
+    expect(screen.getAllByText('Total Patients')).toHaveLength(2);
+    expect(screen.getAllByText('New Registrations').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('4').length).toBeGreaterThanOrEqual(2);   // Today: Total Patients + New Registrations
+    expect(screen.getAllByText('60').length).toBeGreaterThanOrEqual(2); // This Month: Total Patients + New Registrations
+
+    expect(screen.getAllByText('Active IPD')).toHaveLength(2);
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('18')).toBeInTheDocument();
+
+    expect(screen.getAllByText('Active Staff')).toHaveLength(2);
+    expect(screen.getByText('Joined today')).toBeInTheDocument();
+    expect(screen.getByText('Joined this month')).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('5')).toBeInTheDocument();
+
+    // "Lab Reports Today" keeps its literal label in the Today section; the
+    // This Month section renames it so "Today" never appears under that heading.
+    expect(screen.getByText('Lab Reports Today')).toBeInTheDocument();
+    expect(screen.getByText('Lab Reports This Month')).toBeInTheDocument();
+    expect(screen.getByText('40')).toBeInTheDocument();
   });
 });

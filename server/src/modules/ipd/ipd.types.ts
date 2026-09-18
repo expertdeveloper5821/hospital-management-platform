@@ -55,6 +55,22 @@ export const AddProgressNoteSchema = z.object({
 
 export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
 
+// ─── IPD Vitals ──────────────────────────────────────────────────────────────
+// Recorded from the IPD Admission View → Edit form only (not at admission
+// creation, not on discharge) — mirrors OPD's vitals contract (see
+// opd.types.ts's OPDVitals) field-for-field. Every field is independently
+// optional/nullable, and any field can be cleared back to null. Units are
+// fixed: weight in kg, height in cm, blood pressure as a
+// "<systolic>/<diastolic>" string in mmHg, sugar in mg/dL, body temperature
+// in °F.
+export interface IPDVitals {
+  weight:          number | null;
+  height:          number | null;
+  bloodPressure:   string | null;
+  sugar:           number | null;
+  bodyTemperature: number | null;
+}
+
 export const ListAdmissionsQuerySchema = z.object({
   wardId: z.string().min(1).optional(),
   status: z.enum(['ADMITTED', 'DISCHARGED']).optional().default('ADMITTED'),
@@ -80,6 +96,7 @@ export interface AdmissionResponse {
   admissionDate:     string;
   dischargeDate:     string | null;
   progressNotes:     ProgressNoteResponse[];
+  vitals:            IPDVitals;
 }
 
 // Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)

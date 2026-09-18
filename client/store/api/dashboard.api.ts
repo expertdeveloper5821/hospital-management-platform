@@ -44,6 +44,31 @@ export interface DashboardStats {
   outOfStockCount?:     number;
   totalInventoryItems?: number;
 
+  // Hospital Overview — This Month counterpart of todayOpdCount (Today reuses
+  // that field, already date-scoped to today). Today/This Month counterparts
+  // of pendingLabCount / pendingPaymentsCount / lowStockCount above — those
+  // base fields stay live, date-unscoped totals used elsewhere on this page.
+  opdCountThisMonth?:             number;
+  pendingLabCountToday?:          number;
+  pendingLabCountThisMonth?:      number;
+  pendingPaymentsCountToday?:     number;
+  pendingPaymentsCountThisMonth?: number;
+  lowStockCountToday?:            number;
+  lowStockCountThisMonth?:        number;
+
+  // Hospital Overview — Today/This Month counterparts of the "Total Patients
+  // Registered"/"Active IPD"/"Active Staff"/"Lab Reports"/"New Registrations"
+  // metric cards (formerly the standalone Key Stats Strip, now folded in
+  // here). "Total Patients Registered" and "New Registrations" share the
+  // very same registration-date-scoped values — newRegistrationsToday above
+  // for Today, newRegistrationsThisMonth for This Month.
+  newRegistrationsThisMonth?: number;
+  activeIpdCountToday?:       number;
+  activeIpdCountThisMonth?:   number;
+  totalActiveStaffToday?:     number;
+  totalActiveStaffThisMonth?: number;
+  labReportsThisMonth?:       number;
+
   // Staff / Beds
   totalActiveStaff?: number;
   totalBeds?:        number;

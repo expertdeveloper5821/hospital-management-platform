@@ -97,6 +97,23 @@ export class InventoryRepository {
     );
   }
 
+  // Sets/clears the low-stock-crossing timestamp. Called only when the item's
+  // low-stock boundary actually changed (see InventoryService) — a separate
+  // write from the field that triggered the crossing, so it never races with
+  // the atomic $inc in updateStock.
+  async setLowStockSince(
+    itemId:        string,
+    tenantId:      string,
+    lowStockSince: Date | null,
+  ): Promise<IInventoryItem | null> {
+    assertDbConnected();
+    return InventoryItemModel.findOneAndUpdate(
+      { itemId, tenantId, ...NOT_DELETED },
+      { $set: { lowStockSince } },
+      { new: true },
+    );
+  }
+
   async softDelete(itemId: string, tenantId: string): Promise<IInventoryItem | null> {
     assertDbConnected();
     return InventoryItemModel.findOneAndUpdate(

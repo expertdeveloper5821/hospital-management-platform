@@ -112,14 +112,45 @@ async function getTodayOpdCount(tenantId: string, doctorId?: string): Promise<nu
     : dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
 }
 
+// OPD visits this calendar month — This Month counterpart of getTodayOpdCount,
+// backing the "Today's Appointments" → "This Month's Appointments" card pair
+// in the Hospital Overview section.
+async function getOpdCountThisMonth(tenantId: string, doctorId?: string): Promise<number> {
+  const { start, end } = monthRange();
+  return doctorId !== undefined
+    ? dashboardRepository.countOpdVisitsForDoctorBetween(tenantId, doctorId, start, end)
+    : dashboardRepository.countOpdVisitsBetween(tenantId, start, end);
+}
+
 async function getActiveIpdCount(tenantId: string, doctorId?: string): Promise<number> {
   return doctorId !== undefined
     ? dashboardRepository.countActiveIpdForDoctor(tenantId, doctorId)
     : dashboardRepository.countActiveIpd(tenantId);
 }
 
+// Admissions still active (ADMITTED) that were admitted within a given range —
+// backs the Hospital Overview Today/This Month "Active IPD" cards. Unlike
+// getActiveIpdCount above (a live, date-unscoped total used elsewhere), this
+// is always called with an explicit range.
+async function getActiveIpdCountBetween(
+  tenantId: string, start: Date, end: Date, doctorId?: string,
+): Promise<number> {
+  return doctorId !== undefined
+    ? dashboardRepository.countActiveIpdForDoctorBetween(tenantId, doctorId, start, end)
+    : dashboardRepository.countActiveIpdBetween(tenantId, start, end);
+}
+
 async function getNewRegistrationsToday(tenantId: string): Promise<number> {
   const { start, end } = todayRange();
+  return dashboardRepository.countPatientsCreatedBetween(tenantId, start, end);
+}
+
+// This Month counterpart of getNewRegistrationsToday — also backs the
+// Hospital Overview "Total Patients Registered" card in the This Month
+// section (the Today section reuses getNewRegistrationsToday for that card
+// too, since both cards share the same registration-date scoping).
+async function getNewRegistrationsThisMonth(tenantId: string): Promise<number> {
+  const { start, end } = monthRange();
   return dashboardRepository.countPatientsCreatedBetween(tenantId, start, end);
 }
 
@@ -133,8 +164,37 @@ async function getPendingLabCount(tenantId: string, doctorId?: string): Promise<
   return pathology + radiology;
 }
 
+// Pending lab requests CREATED within a given range — backs the Hospital
+// Overview Today/This Month "Pending Lab Reports" cards. Unlike
+// getPendingLabCount above (a live, date-unscoped total used elsewhere), this
+// is always called with an explicit range.
+async function getPendingLabCountBetween(
+  tenantId: string, start: Date, end: Date, doctorId?: string,
+): Promise<number> {
+  if (doctorId !== undefined) {
+    const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
+    const { pathology, radiology } = await dashboardRepository.countPendingLabRequestsForDoctorBetween(tenantId, doctorId, patientIds, start, end);
+    return pathology + radiology;
+  }
+  const { pathology, radiology } = await dashboardRepository.countPendingLabRequestsBetween(tenantId, start, end);
+  return pathology + radiology;
+}
+
 async function getLabReportsToday(tenantId: string, doctorId?: string): Promise<number> {
   const { start, end } = todayRange();
+  if (doctorId !== undefined) {
+    const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
+    const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsForDoctorBetween(tenantId, doctorId, patientIds, start, end);
+    return pathology + radiology;
+  }
+  const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsBetween(tenantId, start, end);
+  return pathology + radiology;
+}
+
+// This Month counterpart of getLabReportsToday — backs the Hospital Overview
+// "Lab Reports This Month" card.
+async function getLabReportsThisMonth(tenantId: string, doctorId?: string): Promise<number> {
+  const { start, end } = monthRange();
   if (doctorId !== undefined) {
     const patientIds = await dashboardRepository.findPatientIdsForDoctor(tenantId, doctorId);
     const { pathology, radiology } = await dashboardRepository.countCompletedLabRequestsForDoctorBetween(tenantId, doctorId, patientIds, start, end);
@@ -166,8 +226,21 @@ async function getPendingPaymentsCount(tenantId: string): Promise<number> {
   return dashboardRepository.countPendingPayments(tenantId);
 }
 
+// Pending payments CREATED within a given range — backs the Hospital Overview
+// Today/This Month "Pending Payments" cards.
+async function getPendingPaymentsCountBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+  return dashboardRepository.countPendingPaymentsBetween(tenantId, start, end);
+}
+
 async function getLowStockCount(tenantId: string): Promise<number> {
   return dashboardRepository.countLowStock(tenantId);
+}
+
+// Items still low-stock that most recently crossed into low-stock within a
+// given range — backs the Hospital Overview Today/This Month "Low Stock
+// Items" cards.
+async function getLowStockCountBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+  return dashboardRepository.countLowStockFlaggedBetween(tenantId, start, end);
 }
 
 async function getOutOfStockCount(tenantId: string): Promise<number> {
@@ -180,6 +253,12 @@ async function getTotalInventoryItems(tenantId: string): Promise<number> {
 
 async function getTotalActiveStaff(tenantId: string): Promise<number> {
   return dashboardRepository.countActiveStaff(tenantId);
+}
+
+// Active staff who joined within a given range — backs the Hospital Overview
+// Today/This Month "Active Staff" cards.
+async function getTotalActiveStaffBetween(tenantId: string, start: Date, end: Date): Promise<number> {
+  return dashboardRepository.countActiveStaffBetween(tenantId, start, end);
 }
 
 async function getBedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
@@ -280,6 +359,10 @@ export class DashboardService {
     const permittedFields = ROLE_FIELD_ACCESS[role] ?? [];
     const needs = (field: string): boolean => (permittedFields as string[]).includes(field);
 
+    // Shared ranges for the Hospital Overview Today/This Month card pairs below.
+    const { start: todayStart, end: todayEnd } = todayRange();
+    const { start: monthStart, end: monthEnd } = monthRange();
+
     const TIMEOUT_MS = 10_000;
     const withTimeout = <T>(p: Promise<T>): Promise<T> =>
       Promise.race([
@@ -307,6 +390,19 @@ export class DashboardService {
       monthlyOpdTrend,
       monthlyRevenueTrend,
       recentActivities,
+      opdCountThisMonth,
+      pendingLabCountToday,
+      pendingLabCountThisMonth,
+      pendingPaymentsCountToday,
+      pendingPaymentsCountThisMonth,
+      lowStockCountToday,
+      lowStockCountThisMonth,
+      newRegistrationsThisMonth,
+      activeIpdCountToday,
+      activeIpdCountThisMonth,
+      totalActiveStaffToday,
+      totalActiveStaffThisMonth,
+      labReportsThisMonth,
     ] = await withTimeout(Promise.all([
       needs('totalPatients')         ? getTotalPatients(tenantId, doctorId) : Promise.resolve(undefined),
       needs('todayOpdCount')         ? getTodayOpdCount(tenantId, doctorId) : Promise.resolve(undefined),
@@ -327,6 +423,20 @@ export class DashboardService {
       needs('monthlyOpdTrend')       ? getMonthlyOpdTrend(tenantId)       : Promise.resolve(undefined),
       needs('monthlyRevenueTrend')   ? getMonthlyRevenueTrend(tenantId)   : Promise.resolve(undefined),
       needs('recentActivities')      ? getRecentActivities(tenantId, activityUserId) : Promise.resolve(undefined),
+      // ── Hospital Overview — This Month / Today counterparts ──────────────
+      needs('opdCountThisMonth')             ? getOpdCountThisMonth(tenantId, doctorId) : Promise.resolve(undefined),
+      needs('pendingLabCountToday')          ? getPendingLabCountBetween(tenantId, todayStart, todayEnd, doctorId) : Promise.resolve(undefined),
+      needs('pendingLabCountThisMonth')      ? getPendingLabCountBetween(tenantId, monthStart, monthEnd, doctorId) : Promise.resolve(undefined),
+      needs('pendingPaymentsCountToday')     ? getPendingPaymentsCountBetween(tenantId, todayStart, todayEnd) : Promise.resolve(undefined),
+      needs('pendingPaymentsCountThisMonth') ? getPendingPaymentsCountBetween(tenantId, monthStart, monthEnd) : Promise.resolve(undefined),
+      needs('lowStockCountToday')            ? getLowStockCountBetween(tenantId, todayStart, todayEnd) : Promise.resolve(undefined),
+      needs('lowStockCountThisMonth')        ? getLowStockCountBetween(tenantId, monthStart, monthEnd) : Promise.resolve(undefined),
+      needs('newRegistrationsThisMonth')     ? getNewRegistrationsThisMonth(tenantId) : Promise.resolve(undefined),
+      needs('activeIpdCountToday')           ? getActiveIpdCountBetween(tenantId, todayStart, todayEnd, doctorId) : Promise.resolve(undefined),
+      needs('activeIpdCountThisMonth')       ? getActiveIpdCountBetween(tenantId, monthStart, monthEnd, doctorId) : Promise.resolve(undefined),
+      needs('totalActiveStaffToday')         ? getTotalActiveStaffBetween(tenantId, todayStart, todayEnd) : Promise.resolve(undefined),
+      needs('totalActiveStaffThisMonth')     ? getTotalActiveStaffBetween(tenantId, monthStart, monthEnd) : Promise.resolve(undefined),
+      needs('labReportsThisMonth')           ? getLabReportsThisMonth(tenantId, doctorId) : Promise.resolve(undefined),
     ]));
 
     const stats: DashboardStats = { lastUpdated: new Date().toISOString() };
@@ -350,6 +460,19 @@ export class DashboardService {
     if (needs('monthlyOpdTrend')       && monthlyOpdTrend       !== undefined) stats.monthlyOpdTrend       = monthlyOpdTrend as TrendPoint[];
     if (needs('monthlyRevenueTrend')   && monthlyRevenueTrend   !== undefined) stats.monthlyRevenueTrend   = monthlyRevenueTrend as RevenueTrendPoint[];
     if (needs('recentActivities')      && recentActivities      !== undefined) stats.recentActivities      = recentActivities as RecentActivity[];
+    if (needs('opdCountThisMonth')             && opdCountThisMonth             !== undefined) stats.opdCountThisMonth             = opdCountThisMonth as number;
+    if (needs('pendingLabCountToday')          && pendingLabCountToday          !== undefined) stats.pendingLabCountToday          = pendingLabCountToday as number;
+    if (needs('pendingLabCountThisMonth')      && pendingLabCountThisMonth      !== undefined) stats.pendingLabCountThisMonth      = pendingLabCountThisMonth as number;
+    if (needs('pendingPaymentsCountToday')     && pendingPaymentsCountToday     !== undefined) stats.pendingPaymentsCountToday     = pendingPaymentsCountToday as number;
+    if (needs('pendingPaymentsCountThisMonth') && pendingPaymentsCountThisMonth !== undefined) stats.pendingPaymentsCountThisMonth = pendingPaymentsCountThisMonth as number;
+    if (needs('lowStockCountToday')            && lowStockCountToday            !== undefined) stats.lowStockCountToday            = lowStockCountToday as number;
+    if (needs('lowStockCountThisMonth')        && lowStockCountThisMonth        !== undefined) stats.lowStockCountThisMonth        = lowStockCountThisMonth as number;
+    if (needs('newRegistrationsThisMonth')     && newRegistrationsThisMonth     !== undefined) stats.newRegistrationsThisMonth     = newRegistrationsThisMonth as number;
+    if (needs('activeIpdCountToday')           && activeIpdCountToday           !== undefined) stats.activeIpdCountToday           = activeIpdCountToday as number;
+    if (needs('activeIpdCountThisMonth')       && activeIpdCountThisMonth       !== undefined) stats.activeIpdCountThisMonth       = activeIpdCountThisMonth as number;
+    if (needs('totalActiveStaffToday')         && totalActiveStaffToday         !== undefined) stats.totalActiveStaffToday         = totalActiveStaffToday as number;
+    if (needs('totalActiveStaffThisMonth')     && totalActiveStaffThisMonth     !== undefined) stats.totalActiveStaffThisMonth     = totalActiveStaffThisMonth as number;
+    if (needs('labReportsThisMonth')           && labReportsThisMonth           !== undefined) stats.labReportsThisMonth           = labReportsThisMonth as number;
 
     setInCache(tenantId, role, activityScope, stats);
     return stats;

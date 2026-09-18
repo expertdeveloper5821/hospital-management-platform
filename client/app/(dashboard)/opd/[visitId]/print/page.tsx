@@ -9,6 +9,7 @@ import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
+import { RichTextDisplay } from '@/components/ui/rich-text-display';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -34,6 +35,41 @@ function Field({ label, value, span, mono }: { label: string; value: string; spa
     <div className={span ? 'col-span-2' : undefined}>
       <span className="text-gray-500">{label}: </span>
       <span className={mono ? 'font-mono' : 'font-medium text-gray-900'}>{value}</span>
+    </div>
+  );
+}
+
+// One labelled Vitals line in the left-side box — value on top of a ruled
+// line so a reading the app never collected can still be filled in by hand
+// on the printed sheet, exactly like the blank box this section replaced.
+function VitalRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mt-2 first:mt-0">
+      <p className="text-[9px] text-gray-500 leading-tight">{label}</p>
+      <p className="min-h-[3.2mm] border-b border-gray-300 text-[11px] font-medium text-gray-900 leading-tight">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+// A labelled clinical block on the right — renders the saved value when
+// present, or a blank ruled line (same "fill in by hand" affordance as
+// Vitals) when the visit doesn't have one yet.
+function ClinicalField({
+  label, value, minHeight, children,
+}: { label: string; value?: string | null; minHeight: string; children?: React.ReactNode }) {
+  return (
+    <div className="mt-3 first:mt-0">
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">{label}</p>
+      {children ?? (
+        <p
+          className="whitespace-pre-wrap text-[11px] text-gray-900 border-b border-gray-300"
+          style={{ minHeight }}
+        >
+          {value ?? ''}
+        </p>
+      )}
     </div>
   );
 }
@@ -154,10 +190,34 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
 
         <div className="mt-3 border-b border-gray-300" />
 
-        {/* Blank writing area — intentionally empty; no labels, headings or
-            placeholders. The doctor writes diagnosis/prescription/advice by
-            hand on the printed sheet. Do not add content here. */}
-        <div className="mt-4 border border-gray-300 rounded-sm" style={{ minHeight: '150mm' }} />
+        {/* Vitals (left) + Diagnosis/Prescription/Notes (right) — replaces
+            the previous blank writing box. `visit` comes straight from
+            useGetOPDVisitByIdQuery, which the OPD Edit/Complete mutations
+            invalidate (see opd.api.ts's 'OPD' tag), so this always paints
+            whatever was most recently saved, on every load of this page. A
+            vital never recorded renders as a blank ruled line rather than a
+            placeholder, so the printed sheet can still be filled in by hand
+            for exactly the readings the app never collected. */}
+        <div className="mt-4 flex gap-4 items-start break-inside-avoid">
+          <div className="w-[42mm] shrink-0 border border-gray-300 rounded-sm p-2.5" style={{ minHeight: '150mm' }}>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Vitals</p>
+            <VitalRow label="Weight (kg)"           value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
+            <VitalRow label="Height (cm)"            value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
+            <VitalRow label="Blood Pressure (mmHg)"  value={visit.vitals?.bloodPressure   ?? ''} />
+            <VitalRow label="Sugar (mg/dL)"          value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
+            <VitalRow label="Body Temperature (°F)"  value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
+          </div>
+
+          <div className="flex-1 border border-gray-300 rounded-sm p-2.5" style={{ minHeight: '150mm' }}>
+            <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
+            <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
+            <ClinicalField label="Notes" minHeight="40mm">
+              <div className="min-h-[40mm] border-b border-gray-300">
+                <RichTextDisplay value={visit.notes} fallback="" className="text-[11px]" />
+              </div>
+            </ClinicalField>
+          </div>
+        </div>
 
         {/* Signature */}
         <div className="mt-6 flex justify-end break-inside-avoid">

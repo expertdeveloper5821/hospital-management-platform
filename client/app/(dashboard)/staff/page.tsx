@@ -30,7 +30,7 @@ export default function StaffPage() {
   const canSeeIdCard = profile?.role === 'HOSPITAL_ADMIN' || profile?.role === 'HR';
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-5 pt-2 pb-5 space-y-4">
       <h1 className="text-2xl font-bold">Staff</h1>
 
       <div className="max-w-sm">

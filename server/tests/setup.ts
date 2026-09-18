@@ -25,3 +25,9 @@ process.env.FRONTEND_URL            = 'http://localhost:3001';
 process.env.RAZORPAY_KEY_ID         = 'rzp_test_key_id';
 process.env.RAZORPAY_KEY_SECRET     = 'rzp_test_key_secret';
 process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp_test_webhook_secret_32chars!';
+// 32-byte AES-256-GCM keys, base64-encoded (test-only — never used outside tests).
+// Deliberately distinct from each other, so a test can't pass by accidentally
+// decrypting one domain's data with the other domain's key.
+process.env.AADHAAR_ENCRYPTION_KEY      = 'dGVzdC1hYWRoYWFyLWVuY3J5cHRpb24ta2V5LTMyYiE=';
+process.env.MEDICAL_DATA_ENCRYPTION_KEY = 'dGVzdC1tZWRpY2FsLWVuY3J5cHRpb24ta2V5LTMyYiE=';
+process.env.PAYMENT_DATA_ENCRYPTION_KEY = 'dGVzdC1wYXltZW50LWVuY3J5cHRpb24ta2V5LTMyYiE=';

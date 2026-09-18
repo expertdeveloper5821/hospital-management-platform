@@ -4,7 +4,7 @@ import { IPatient } from './patient.model';
 import { tenantRepository } from '../tenant/tenant.repository';
 import { ipdRepository } from '../ipd/ipd.repository';
 import { ipdService } from '../ipd/ipd.service';
-import { buildMedicalCardPdf } from './medical-card.pdf';
+import { buildMedicalCardPdf, maskAadhaar } from './medical-card.pdf';
 import { s3Service }   from '../../shared/services/s3.service';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
@@ -45,7 +45,7 @@ export class PatientService {
       patientId,
       tenantId,
       fullName:                  data.fullName,
-      dateOfBirth:               new Date(data.dateOfBirth),
+      dateOfBirth:               new Date(data.dateOfBirth).toISOString(),
       gender:                    data.gender,
       mobileNumber:              data.mobileNumber,
       address:                   data.address,
@@ -97,18 +97,37 @@ export class PatientService {
       'departmentId',
     ] as const;
 
+    // Encrypted-at-rest PII (see patient.model.ts). The audit trail is stored
+    // and rendered in plaintext, so it records only that these fields changed —
+    // never their values. Aadhaar keeps its existing last-4 masking.
+    const REDACTED_PII_FIELDS = new Set<string>([
+      'address', 'addressLine1', 'addressLine2', 'city', 'state', 'country', 'pincode',
+      'bloodGroup', 'emergencyContactName', 'emergencyContactMobile',
+    ]);
+    const REDACTED_MARKER = '[redacted]';
+
     for (const key of fields) {
       if (data[key] !== undefined) {
-        previousValue[key] = (patient as unknown as Record<string, unknown>)[key];
-        newValue[key]      = data[key];
+        if (key === 'aadhaarNumber') {
+          // Never persist plaintext Aadhaar in the audit trail — mask it the
+          // same way the medical card PDF does (last 4 digits only).
+          previousValue[key] = patient.aadhaarNumber ? maskAadhaar(patient.aadhaarNumber) : null;
+          newValue[key]      = data.aadhaarNumber    ? maskAadhaar(data.aadhaarNumber)    : null;
+        } else if (REDACTED_PII_FIELDS.has(key)) {
+          previousValue[key] = (patient as unknown as Record<string, unknown>)[key] != null ? REDACTED_MARKER : null;
+          newValue[key]      = data[key] != null ? REDACTED_MARKER : null;
+        } else {
+          previousValue[key] = (patient as unknown as Record<string, unknown>)[key];
+          newValue[key]      = data[key];
+        }
         (updateData as Record<string, unknown>)[key] = data[key];
       }
     }
 
     if (data.dateOfBirth !== undefined) {
-      previousValue.dateOfBirth = patient.dateOfBirth;
-      newValue.dateOfBirth      = new Date(data.dateOfBirth);
-      updateData.dateOfBirth    = new Date(data.dateOfBirth);
+      previousValue.dateOfBirth = REDACTED_MARKER;
+      newValue.dateOfBirth      = REDACTED_MARKER;
+      updateData.dateOfBirth    = new Date(data.dateOfBirth).toISOString();
     }
 
     const updated = await patientRepository.update(tenantId, patientId, updateData);
