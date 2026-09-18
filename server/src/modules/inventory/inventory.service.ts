@@ -51,11 +51,28 @@ export class InventoryService {
     } catch { /* swallow */ }
   }
 
+  // Persists the low-stock-crossing timestamp whenever the boundary actually
+  // changed: stamps "now" the moment an item newly drops below its threshold,
+  // clears it back to null once restocked above it. No-op (returns `updated`
+  // unchanged) when the low-stock status didn't change on this write.
+  private async syncLowStockSince(
+    wasLowStock:   boolean,
+    isNowLowStock: boolean,
+    updated:       IInventoryItem,
+    itemId:        string,
+    tenantId:      string,
+  ): Promise<IInventoryItem> {
+    if (wasLowStock === isNowLowStock) return updated;
+    const synced = await inventoryRepository.setLowStockSince(itemId, tenantId, isNowLowStock ? new Date() : null);
+    return synced ?? updated;
+  }
+
   async createItem(
     input:    CreateInventoryItemInput,
     tenantId: string,
     userId:   string,
   ): Promise<InventoryItemResponse> {
+    const isLowAtCreation = input.lowStockThreshold > 0 && input.quantity < input.lowStockThreshold;
     const doc = await inventoryRepository.save({
       itemId:            uuidv4(),
       tenantId,
@@ -64,6 +81,7 @@ export class InventoryService {
       unit:              input.unit,
       quantity:          input.quantity,
       lowStockThreshold: input.lowStockThreshold,
+      lowStockSince:     isLowAtCreation ? new Date() : null,
       description:       input.description ?? null,
     });
 
@@ -71,7 +89,7 @@ export class InventoryService {
     // no "previous" state to cross from, so notify directly off the current one.
     await this.notifyLowStockIfCrossed(
       false,
-      doc.lowStockThreshold > 0 && doc.quantity < doc.lowStockThreshold,
+      isLowAtCreation,
       doc,
       doc.itemId,
       tenantId,
@@ -108,17 +126,15 @@ export class InventoryService {
       );
     }
 
-    const updated = await inventoryRepository.updateStock(itemId, tenantId, input.quantityChange);
+    let updated = await inventoryRepository.updateStock(itemId, tenantId, input.quantityChange);
     if (!updated) throw new NotFoundError('Inventory item not found');
 
+    const wasLowStock   = current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold;
+    const isNowLowStock = updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold;
+
     // Send low-stock notification when stock drops to or below the threshold
-    await this.notifyLowStockIfCrossed(
-      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
-      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
-      updated,
-      itemId,
-      tenantId,
-    );
+    await this.notifyLowStockIfCrossed(wasLowStock, isNowLowStock, updated, itemId, tenantId);
+    updated = await this.syncLowStockSince(wasLowStock, isNowLowStock, updated, itemId, tenantId);
 
     try {
       await auditService.log({
@@ -144,22 +160,20 @@ export class InventoryService {
     const current = await inventoryRepository.findById(itemId, tenantId);
     if (!current) throw new NotFoundError('Inventory item not found');
 
-    const updated = await inventoryRepository.updateThreshold(
+    let updated = await inventoryRepository.updateThreshold(
       itemId,
       tenantId,
       input.lowStockThreshold,
     );
     if (!updated) throw new NotFoundError('Inventory item not found');
 
+    const wasLowStock   = current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold;
+    const isNowLowStock = updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold;
+
     // Raising the threshold (or lowering stock elsewhere) can newly cross the
     // low-stock boundary — this endpoint previously never checked for that.
-    await this.notifyLowStockIfCrossed(
-      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
-      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
-      updated,
-      itemId,
-      tenantId,
-    );
+    await this.notifyLowStockIfCrossed(wasLowStock, isNowLowStock, updated, itemId, tenantId);
+    updated = await this.syncLowStockSince(wasLowStock, isNowLowStock, updated, itemId, tenantId);
 
     try {
       await auditService.log({
@@ -185,17 +199,15 @@ export class InventoryService {
     const current = await inventoryRepository.findById(itemId, tenantId);
     if (!current) throw new NotFoundError('Inventory item not found');
 
-    const updated = await inventoryRepository.updateMetadata(itemId, tenantId, input);
+    let updated = await inventoryRepository.updateMetadata(itemId, tenantId, input);
     if (!updated) throw new NotFoundError('Inventory item not found');
 
+    const wasLowStock   = current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold;
+    const isNowLowStock = updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold;
+
     // Trigger low-stock notification when raising threshold causes item to cross the boundary
-    await this.notifyLowStockIfCrossed(
-      current.lowStockThreshold > 0 && current.quantity < current.lowStockThreshold,
-      updated.lowStockThreshold > 0 && updated.quantity < updated.lowStockThreshold,
-      updated,
-      itemId,
-      tenantId,
-    );
+    await this.notifyLowStockIfCrossed(wasLowStock, isNowLowStock, updated, itemId, tenantId);
+    updated = await this.syncLowStockSince(wasLowStock, isNowLowStock, updated, itemId, tenantId);
 
     try {
       await auditService.log({

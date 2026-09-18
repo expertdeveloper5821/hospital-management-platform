@@ -376,6 +376,124 @@ describe('POST /api/payments/manual', () => {
   });
 });
 
+// ─── Payment field encryption at rest (description, transactionId) ───────────
+// Every storage assertion reads the raw driver collection, bypassing the
+// model's encrypt/decrypt middleware, so a regression that stops encrypting
+// can't hide behind the transparent read path.
+describe('Payment field encryption at rest — description / transactionId', () => {
+  const ENVELOPE = /^enc:v1:/;
+
+  async function rawPayment(paymentId: string): Promise<Record<string, unknown>> {
+    const doc = await mongoose.connection.collection('payments').findOne({ paymentId });
+    expect(doc).not.toBeNull();
+    return doc as Record<string, unknown>;
+  }
+
+  test('POST /api/payments/manual stores ciphertext, never the plaintext', async () => {
+    const res = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({
+        patientId, amount: 750, paymentMethod: 'UPI',
+        description: 'OPD Consultation – lumbar spine review',
+        transactionId: 'UPI-REF-SECRET-4242',
+      });
+
+    expect(res.status).toBe(201);
+    // API still answers in plaintext for the authorized caller.
+    expect(res.body.data.description).toBe('OPD Consultation – lumbar spine review');
+    expect(res.body.data.transactionId).toBe('UPI-REF-SECRET-4242');
+
+    const stored = await rawPayment(res.body.data.paymentId);
+    expect(stored.description).toMatch(ENVELOPE);
+    expect(stored.transactionId).toMatch(ENVELOPE);
+    const blob = JSON.stringify(stored);
+    expect(blob).not.toContain('lumbar spine review');
+    expect(blob).not.toContain('UPI-REF-SECRET-4242');
+    // Untouched fields stay plaintext.
+    expect(stored.amount).toBe(750);
+    expect(stored.paymentMethod).toBe('UPI');
+    expect(stored.status).toBe('COMPLETED');
+  });
+
+  test('GET /api/payments decrypts description/transactionId for every read path', async () => {
+    const create = await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({
+        patientId, amount: 300, paymentMethod: 'CARD',
+        description: 'Radiology – chest X-ray', transactionId: 'CARD-AUTH-9911',
+        referenceType: 'OPD_VISIT', referenceId: 'OPD-ENCLIST01',
+      });
+    expect(create.status).toBe(201);
+    expect((await rawPayment(create.body.data.paymentId)).description).toMatch(ENVELOPE);
+
+    // list (find + lean) path
+    const list = await request(app)
+      .get('/api/payments')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+    expect(list.status).toBe(200);
+    const row = list.body.data.data.find(
+      (p: { paymentId: string }) => p.paymentId === create.body.data.paymentId,
+    );
+    expect(row.description).toBe('Radiology – chest X-ray');
+    expect(row.transactionId).toBe('CARD-AUTH-9911');
+
+    // exact-reference filter still matches (referenceId is NOT encrypted)
+    const byRef = await request(app)
+      .get('/api/payments?referenceType=OPD_VISIT&referenceId=OPD-ENCLIST01')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+    expect(byRef.body.data.data).toHaveLength(1);
+    expect(byRef.body.data.data[0].description).toBe('Radiology – chest X-ray');
+  });
+
+  test('audit log records that a transactionId was supplied, never its value', async () => {
+    const { auditService } = jest.requireMock<{ auditService: { log: jest.Mock } }>(
+      '../../../src/shared/services/audit.service',
+    );
+    auditService.log.mockClear();
+
+    await request(app)
+      .post('/api/payments/manual')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .send({
+        patientId, amount: 120, paymentMethod: 'UPI',
+        description: 'Confidential note in description', transactionId: 'UPI-CONF-7777',
+      });
+
+    const logged = JSON.stringify(auditService.log.mock.calls);
+    expect(logged).not.toContain('UPI-CONF-7777');
+    expect(logged).toContain('transactionId'); // the key is still there
+  });
+
+  test('method / status / date filters and department revenue are unaffected', async () => {
+    await request(app).post('/api/payments/manual').set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 200, paymentMethod: 'CASH', description: 'Enc A', transactionId: 'T-A' });
+    await request(app).post('/api/payments/manual').set('Authorization', `Bearer ${receptionistToken}`)
+      .send({ patientId, amount: 400, paymentMethod: 'UPI', description: 'Enc B' });
+
+    const cashOnly = await request(app)
+      .get('/api/payments?paymentMethod=CASH&status=COMPLETED')
+      .set('Authorization', `Bearer ${financeToken}`);
+    expect(cashOnly.status).toBe(200);
+    expect(cashOnly.body.data.data.every((p: { paymentMethod: string }) => p.paymentMethod === 'CASH')).toBe(true);
+
+    const summary = await request(app)
+      .get('/api/payments/summary')
+      .set('Authorization', `Bearer ${financeToken}`);
+    expect(summary.status).toBe(200);
+    expect(summary.body.data.CASH).toBe(200);
+    expect(summary.body.data.UPI).toBe(400);
+    expect(summary.body.data.total).toBe(600);
+
+    const byDept = await request(app)
+      .get('/api/payments/summary/by-department')
+      .set('Authorization', `Bearer ${financeToken}`);
+    expect(byDept.status).toBe(200);
+    expect(byDept.body.data.grandTotal).toBe(600);
+  });
+});
+
 // ─── U5-C-06: Razorpay order creation ────────────────────────────────────────
 
 describe('POST /api/payments/razorpay-order', () => {

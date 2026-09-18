@@ -186,12 +186,27 @@ export interface PatientSearchResult {
  
 export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
  
+// OPD Vitals — recorded via the OPD View → Edit form only (see
+// server opd.types.ts's OPDVitals for the field/unit contract): weight in kg,
+// height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
+// sugar in mg/dL, body temperature in °F. Every field is independently
+// nullable — a visit with nothing recorded yet still reports the full shape
+// with every value null, never an undefined/missing field.
+export interface OPDVitals {
+  weight:          number | null;
+  height:          number | null;
+  bloodPressure:   string | null;
+  sugar:           number | null;
+  bodyTemperature: number | null;
+}
+
 export interface OPDVisitResponse {
   visitId:        string;
   tenantId:       string;
   patientId:      string;
   fullName?:      string | null;
   doctorIds:      string[];
+  nurseIds:       string[];
   departmentId:   string | null;
   visitDate:      string;
   queueNumber:    number;
@@ -199,15 +214,41 @@ export interface OPDVisitResponse {
   diagnosis:      string | null;
   prescription:   string | null;
   notes:          string | null;
+  vitals:         OPDVitals;
   createdAt:      string;
   updatedAt:      string;
 }
- 
+
 export interface CreateOPDVisitRequest {
   patientId:      string;
   doctorIds?:     string[];
+  nurseIds?:      string[]; // optional OPD nurse assignment(s)
   visitDate?:     string; // YYYY-MM-DD
   notes?:         string;
+}
+
+// One nurse already mapped to a doctor for OPD duty — see server
+// opd.types.ts's AssignedOpdNurse for the authoritative shape/semantics.
+export interface AssignedOpdNurse {
+  nurseId:     string;
+  nurseName:   string | null;
+  isAvailable: boolean;
+}
+
+// All nurses currently mapped to a doctor for OPD duty (a doctor can have
+// more than one) — see server opd.types.ts's DoctorNurseAssignmentsResponse.
+export interface DoctorNurseAssignmentsResponse {
+  doctorId: string;
+  nurses:   AssignedOpdNurse[];
+}
+
+// GET /api/opd/nurses/available — deliberately slimmer than UserResponse;
+// the endpoint never returns role/departmentIds/etc, only what the Assign
+// Nurse dropdown needs.
+export interface AvailableOpdNurseResponse {
+  userId: string;
+  name:   string;
+  email:  string;
 }
 
 export interface UpdateOPDVisitRequest {
@@ -216,6 +257,10 @@ export interface UpdateOPDVisitRequest {
   diagnosis?:      string;
   prescription?:   string;
   notes?:          string;
+  // Partial — only the sub-fields present are merged onto the visit's
+  // existing vitals server-side (see OPDService.updateVisit); omitting a
+  // sub-field leaves it untouched, sending `null` explicitly clears it.
+  vitals?:         Partial<OPDVitals>;
 }
  
 export interface CompleteOPDVisitRequest {
@@ -369,7 +414,22 @@ export interface ProgressNote {
   timestamp: string;
   staffName: string | null;
 }
- 
+
+// IPD Vitals — recorded via the IPD Admission View → Edit form only (see
+// server ipd.types.ts's IPDVitals for the field/unit contract): weight in kg,
+// height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
+// sugar in mg/dL, body temperature in °F. Every field is independently
+// nullable — an admission with nothing recorded yet still reports the full
+// shape with every value null, never an undefined/missing field. Mirrors
+// OPDVitals field-for-field.
+export interface IPDVitals {
+  weight:          number | null;
+  height:          number | null;
+  bloodPressure:   string | null;
+  sugar:           number | null;
+  bodyTemperature: number | null;
+}
+
 export interface AdmissionResponse {
   admissionId:      string;
   patientId:        string;
@@ -384,6 +444,7 @@ export interface AdmissionResponse {
   admissionDate:    string;
   dischargeDate:    string | null;
   progressNotes:    ProgressNote[];
+  vitals:           IPDVitals;
 }
  
 export interface WardOccupancySummary {

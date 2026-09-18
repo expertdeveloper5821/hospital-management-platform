@@ -121,7 +121,7 @@ export async function buildMedicalCardPdf(
       doc.fillColor(NAVY).fontSize(5.8).font('Helvetica-Bold')
         .text('DOB:', IX, iy, { width: 22, lineBreak: false });
       doc.fillColor(NAVY).fontSize(5.8).font('Helvetica')
-        .text(patient.dateOfBirth.toISOString().slice(0, 10), IX + 23, iy, { width: 60, lineBreak: false });
+        .text(new Date(patient.dateOfBirth).toISOString().slice(0, 10), IX + 23, iy, { width: 60, lineBreak: false });
       iy += 9;
 
       doc.fillColor(NAVY).fontSize(5.8).font('Helvetica-Bold')
@@ -212,7 +212,7 @@ export async function buildMedicalCardPdf(
       };
 
       let y1 = 57;
-      lfield('Date of Birth:', patient.dateOfBirth.toISOString().slice(0, 10), y1); y1 += 10;
+      lfield('Date of Birth:', new Date(patient.dateOfBirth).toISOString().slice(0, 10), y1); y1 += 10;
       lfield('Gender:',        patient.gender,        y1); y1 += 10;
       lfield('Mobile:',        patient.mobileNumber,  y1); y1 += 10;
       if (patient.bloodGroup)    { lfield('Blood Group:', patient.bloodGroup,                y1); y1 += 10; }

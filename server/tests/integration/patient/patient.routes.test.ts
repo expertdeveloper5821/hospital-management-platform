@@ -755,6 +755,278 @@ describe('PATCH /api/patients/:patientId', () => {
   });
 });
 
+// ─── Aadhaar encryption at rest ─────────────────────────────────────────────────
+describe('Aadhaar encryption at rest', () => {
+  test('MongoDB stores an encrypted Aadhaar value, never the plaintext 12-digit number', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-enc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, aadhaarNumber: '123456789012' });
+
+    expect(res.status).toBe(201);
+    // API response still exposes the plaintext to an authorized caller.
+    expect(res.body.data.aadhaarNumber).toBe('123456789012');
+
+    // Bypass Mongoose (and its decrypt hooks) to inspect exactly what was persisted.
+    const rawDoc = await PatientModel.collection.findOne({ patientId: res.body.data.patientId });
+    expect(rawDoc?.aadhaarNumber).toBeDefined();
+    expect(rawDoc?.aadhaarNumber).not.toBe('123456789012');
+    expect(rawDoc?.aadhaarNumber as string).toMatch(/^enc:v1:/);
+    expect(rawDoc?.aadhaarNumber as string).not.toContain('123456789012');
+  });
+
+  test('GET /api/patients/:patientId decrypts Aadhaar back to the original 12 digits', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-enc2@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const create = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, aadhaarNumber: '567812349876' });
+
+    const res = await request(app)
+      .get(`/api/patients/${create.body.data.patientId}`)
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aadhaarNumber).toBe('567812349876');
+  });
+
+  test('updating Aadhaar re-encrypts the new value at rest and returns the new plaintext', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-enc3@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const create = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, aadhaarNumber: '111122223333' });
+
+    const res = await request(app)
+      .patch(`/api/patients/${create.body.data.patientId}`)
+      .set(bearer(token))
+      .send({ aadhaarNumber: '444455556666' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.aadhaarNumber).toBe('444455556666');
+
+    const rawDoc = await PatientModel.collection.findOne({ patientId: create.body.data.patientId });
+    expect(rawDoc?.aadhaarNumber as string).toMatch(/^enc:v1:/);
+    expect(rawDoc?.aadhaarNumber as string).not.toContain('444455556666');
+    expect(rawDoc?.aadhaarNumber as string).not.toContain('111122223333');
+  });
+
+  test('GET /api/patients (search) also returns decrypted Aadhaar, not ciphertext', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-enc4@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, mobileNumber: '9988776655', aadhaarNumber: '135792468013' });
+
+    const res = await request(app)
+      .get('/api/patients')
+      .query({ q: '9988776655' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    const match = res.body.data.data.find((p: { mobileNumber: string }) => p.mobileNumber === '9988776655');
+    expect(match?.aadhaarNumber).toBe('135792468013');
+  });
+});
+
+// ─── PII encryption at rest — dateOfBirth + bloodGroup + address components ────
+describe('Patient PII encryption at rest (dateOfBirth, bloodGroup, address block)', () => {
+  const ENVELOPE = /^enc:v1:/;
+  const PII_BODY = {
+    ...VALID_PATIENT_BODY,
+    dateOfBirth:  '1988-11-02',
+    bloodGroup:   'AB+',
+    emergencyContactName:   'Mycroft Holmes',
+    emergencyContactMobile: '9812345678',
+    address:      '221B Baker Street',
+    addressLine1: 'Flat 3',
+    addressLine2: 'Marylebone',
+    city:         'Bengaluru',
+    state:        'Karnataka',
+    country:      'India',
+    pincode:      '560001',
+  };
+  const PII_FIELDS = [
+    'address', 'addressLine1', 'addressLine2', 'city', 'state', 'country', 'pincode', 'bloodGroup',
+    'emergencyContactName', 'emergencyContactMobile',
+  ] as const;
+
+  async function raw(patientId: string): Promise<Record<string, unknown>> {
+    const doc = await PatientModel.collection.findOne({ patientId });
+    if (!doc) throw new Error(`raw patient ${patientId} not found`);
+    return doc as Record<string, unknown>;
+  }
+
+  test('create stores every PII field as ciphertext, never the plaintext', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-pii1@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app).post('/api/patients').set(bearer(token)).send(PII_BODY);
+    expect(res.status).toBe(201);
+
+    const stored = await raw(res.body.data.patientId);
+    for (const f of PII_FIELDS) {
+      expect(stored[f]).toMatch(ENVELOPE);
+    }
+    expect(stored.dateOfBirth).toMatch(ENVELOPE);
+
+    const blob = JSON.stringify(stored);
+    expect(blob).not.toContain('Baker Street');
+    expect(blob).not.toContain('Marylebone');
+    expect(blob).not.toContain('560001');
+    expect(blob).not.toContain('1988-11-02');
+    expect(blob).not.toContain('"AB+"');
+    expect(blob).not.toContain('Mycroft Holmes');
+    expect(blob).not.toContain('9812345678');
+  });
+
+  test('GET decrypts every PII field back to plaintext; dateOfBirth keeps its ISO shape', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-pii2@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const create = await request(app).post('/api/patients').set(bearer(token)).send(PII_BODY);
+    const res    = await request(app).get(`/api/patients/${create.body.data.patientId}`).set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.address).toBe('221B Baker Street');
+    expect(res.body.data.addressLine1).toBe('Flat 3');
+    expect(res.body.data.city).toBe('Bengaluru');
+    expect(res.body.data.pincode).toBe('560001');
+    expect(res.body.data.bloodGroup).toBe('AB+');
+    expect(res.body.data.emergencyContactName).toBe('Mycroft Holmes');
+    expect(res.body.data.emergencyContactMobile).toBe('9812345678');
+    // Byte-identical to the pre-encryption Date-serialised response.
+    expect(res.body.data.dateOfBirth).toBe('1988-11-02T00:00:00.000Z');
+    // …and unchanged from what create returned.
+    expect(res.body.data.dateOfBirth).toBe(create.body.data.dateOfBirth);
+  });
+
+  test('update re-encrypts changed PII at rest and returns the new plaintext (findOne + search paths)', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-pii3@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const create = await request(app).post('/api/patients')
+      .set(bearer(token)).send({ ...PII_BODY, mobileNumber: '9001002003' });
+    const pid = create.body.data.patientId;
+
+    const patch = await request(app).patch(`/api/patients/${pid}`).set(bearer(token)).send({
+      address:     'New Cross Road',
+      city:        'Mumbai',
+      pincode:     '400001',
+      bloodGroup:  'O-',
+      dateOfBirth: '1990-01-15',
+    });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.address).toBe('New Cross Road');
+    expect(patch.body.data.bloodGroup).toBe('O-');
+    expect(patch.body.data.dateOfBirth).toBe('1990-01-15T00:00:00.000Z');
+
+    const stored = await raw(pid);
+    expect(stored.address).toMatch(ENVELOPE);
+    expect(stored.city).toMatch(ENVELOPE);
+    expect(stored.bloodGroup).toMatch(ENVELOPE);
+    expect(stored.dateOfBirth).toMatch(ENVELOPE);
+    expect(JSON.stringify(stored)).not.toContain('New Cross Road');
+    expect(JSON.stringify(stored)).not.toContain('400001');
+    expect(JSON.stringify(stored)).not.toContain('"O-"');
+
+    // lean() search read path also decrypts
+    const search = await request(app).get('/api/patients').query({ q: '9001002003' }).set(bearer(token));
+    const match  = search.body.data.data.find((p: { mobileNumber: string }) => p.mobileNumber === '9001002003');
+    expect(match?.address).toBe('New Cross Road');
+    expect(match?.bloodGroup).toBe('O-');
+    expect(match?.dateOfBirth).toBe('1990-01-15T00:00:00.000Z');
+  });
+
+  test('legacy plaintext rows (incl. dateOfBirth as a BSON Date) stay readable', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc     = await seedUser(tid, 'rc-pii4@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    // Raw insert — plaintext strings + a real Date, exactly like a pre-encryption row.
+    await mongoose.connection.collection('patients').insertOne({
+      patientId:    'PAT-LEGACY01',
+      tenantId:     tid,
+      fullName:     'Legacy Person',
+      dateOfBirth:  new Date('1975-06-30T00:00:00.000Z'),
+      gender:       Gender.MALE,
+      mobileNumber: '9000000000',
+      bloodGroup:   'B+',
+      address:      'Old Town Road',
+      city:         'Legacy City',
+      pincode:      '111111',
+      isDeleted:    false,
+      createdAt:    new Date(),
+      updatedAt:    new Date(),
+    });
+
+    const res = await request(app).get('/api/patients/PAT-LEGACY01').set(bearer(token));
+    expect(res.status).toBe(200);
+    expect(res.body.data.address).toBe('Old Town Road');
+    expect(res.body.data.city).toBe('Legacy City');
+    expect(res.body.data.bloodGroup).toBe('B+');
+    // Legacy BSON Date is normalised to the same ISO string the encrypted path returns.
+    expect(res.body.data.dateOfBirth).toBe('1975-06-30T00:00:00.000Z');
+
+    // Next write encrypts it in place without corrupting the value.
+    const patch = await request(app).patch('/api/patients/PAT-LEGACY01').set(bearer(token)).send({ city: 'New City' });
+    expect(patch.status).toBe(200);
+    const stored = await mongoose.connection.collection('patients').findOne({ patientId: 'PAT-LEGACY01' });
+    expect(stored?.city as string).toMatch(ENVELOPE);
+    expect(res.body.data.dateOfBirth).toBe('1975-06-30T00:00:00.000Z');
+  });
+
+  test('audit log redacts PII values on update (only records that they changed)', async () => {
+    const { auditService } = jest.requireMock<{ auditService: { log: jest.Mock } }>(
+      '../../../src/shared/services/audit.service',
+    );
+    auditService.log.mockClear();
+
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc-pii5@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const create = await request(app).post('/api/patients').set(bearer(token)).send(PII_BODY);
+    await request(app).patch(`/api/patients/${create.body.data.patientId}`).set(bearer(token)).send({
+      address:     'Secret Lane 9',
+      pincode:     '999888',
+      bloodGroup:  'AB-',
+      dateOfBirth: '2000-02-29',
+      emergencyContactName:   'Irene Adler',
+      emergencyContactMobile: '9700000123',
+    });
+
+    const logged = JSON.stringify(auditService.log.mock.calls);
+    expect(logged).not.toContain('Secret Lane 9');
+    expect(logged).not.toContain('999888');
+    expect(logged).not.toContain('2000-02-29');
+    expect(logged).not.toContain('"AB-"');
+    expect(logged).not.toContain('Irene Adler');
+    expect(logged).not.toContain('9700000123');
+    expect(logged).toContain('address');
+    expect(logged).toContain('dateOfBirth');
+    expect(logged).toContain('bloodGroup');
+    expect(logged).toContain('emergencyContactName');
+  });
+});
+
 // ─── GET /api/patients/:patientId/medical-card ─────────────────────────────────
 describe('GET /api/patients/:patientId/medical-card', () => {
   test('200 — returns PDF buffer with correct content-type', async () => {

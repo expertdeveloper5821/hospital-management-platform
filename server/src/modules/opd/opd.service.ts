@@ -1,11 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
 import { ipdService } from '../ipd/ipd.service';
+import { ipdRepository } from '../ipd/ipd.repository';
 import { patientRepository } from '../patient/patient.repository';
 import { paymentRepository } from '../payment/payment.repository';
 import { PaymentReferenceType } from '../payment/payment.types';
 import { departmentService } from '../department/department.service';
 import { tenantService } from '../tenant/tenant.service';
+import { userRepository } from '../user/user.repository';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
@@ -20,9 +22,43 @@ import {
   OPDVisitResponse,
   OPDPaymentValidityResponse,
   OPDPaymentValidityReason,
+  AvailableOpdNurseResponse,
+  DoctorNurseAssignmentsResponse,
+  OPDVitals,
 } from './opd.types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Shape a partial (or missing) vitals update/read always merges onto — keeps
+// "no vitals recorded yet" and "some vitals cleared" both resolving to the
+// same fully-shaped object rather than undefined sub-fields.
+const DEFAULT_VITALS: OPDVitals = {
+  weight:          null,
+  height:          null,
+  bloodPressure:   null,
+  sugar:           null,
+  bodyTemperature: null,
+};
+
+// Clinical free-text — and vitals, as of the objectFields encryption — is
+// encrypted at rest on the visit itself (see opd.model.ts). Audit log entries
+// are stored in plain form and rendered in the Audit UI, so these fields must
+// never carry their value into one — the trail records *that* the field
+// changed, not what it changed to/from. Applied to both previousValue and
+// newValue. `vitals` is an object, not a scalar, but redactClinicalFields
+// below replaces it wholesale with the same marker regardless of shape.
+const REDACTED_AUDIT_FIELDS = ['diagnosis', 'prescription', 'notes', 'vitals'] as const;
+const REDACTED_MARKER = '[redacted]';
+
+function redactClinicalFields(values: Record<string, unknown>): Record<string, unknown> {
+  const redacted = { ...values };
+  for (const field of REDACTED_AUDIT_FIELDS) {
+    if (redacted[field] !== undefined && redacted[field] !== null) {
+      redacted[field] = REDACTED_MARKER;
+    }
+  }
+  return redacted;
+}
 
 function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { fullName?: string } {
   return Object.assign(visit, { fullName });
@@ -78,11 +114,26 @@ export class OPDService {
     // change. Same "first doctor with a department wins" algorithm IPD uses.
     const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, doctorIds);
 
+    // Nurse assignment is optional and can name more than one nurse for the
+    // same visit. Omitting it (or submitting an empty list) leaves any
+    // existing doctor→nurse mapping(s) untouched — doctor assignment and
+    // nurse assignment are independent. Each id given is validated fresh here
+    // rather than trusted from whatever the dropdown showed, closing the race
+    // window between the nurse list loading and this request landing.
+    // Deduplicated so the same nurse selected twice can't produce duplicate
+    // mapping-upsert calls or a misleading nurseIds array on the visit.
+    const requestedNurseIds = [...new Set(data.nurseIds ?? [])];
+    const nurseIds: string[] = [];
+    for (const id of requestedNurseIds) {
+      nurseIds.push(await this.assertNurseAvailableForOpd(tenantId, id));
+    }
+
     const visit = await opdRepository.save({
       visitId,
       tenantId,
       patientId:      data.patientId,
       doctorIds,
+      nurseIds,
       departmentId,
       visitDate,
       queueNumber,
@@ -92,16 +143,50 @@ export class OPDService {
       prescription:   null,
     });
 
+    // Doctor-wise default OPD nurses — keyed to the first assigned doctor,
+    // same "first doctor wins" convention resolveDepartmentFromDoctorIds
+    // uses. Adds each nurse to that doctor's mapping (a doctor can have more
+    // than one); the underlying upsert is per-pair and idempotent, so this
+    // never creates a duplicate/conflicting mapping row.
+    if (nurseIds.length > 0 && doctorIds.length > 0) {
+      const doctorId = doctorIds[0];
+      await opdRepository.addNurseAssignments(tenantId, doctorId, nurseIds);
+      await auditService.log({
+        entityType: AuditEntityType.OPD_NURSE_ASSIGNMENT,
+        entityId:   doctorId,
+        action:     'UPDATE',
+        userId:     createdBy,
+        tenantId,
+        newValue:   { doctorId, nurseIds },
+      });
+    }
+
     await auditService.log({
       entityType: AuditEntityType.OPD_VISIT,
       entityId:   visitId,
       action:     'CREATE',
       userId:     createdBy,
       tenantId,
-      newValue:   { visitId, patientId: data.patientId, status: OPDVisitStatus.OPEN },
+      newValue:   { visitId, patientId: data.patientId, status: OPDVisitStatus.OPEN, nurseIds },
     });
 
     return withFullName(visit, patient.fullName);
+  }
+
+  // Validates a candidate OPD nurse and returns their id — throws otherwise.
+  private async assertNurseAvailableForOpd(tenantId: string, nurseId: string): Promise<string> {
+    const nurse = await userRepository.findById(tenantId, nurseId);
+    if (!nurse || nurse.role !== UserRole.NURSE) {
+      throw new ValidationError('Selected nurse was not found.');
+    }
+    if (!nurse.isActive) {
+      throw new ValidationError('Selected nurse is not active.');
+    }
+    const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, nurseId);
+    if (wardIds.length > 0) {
+      throw new ConflictError('This nurse is currently assigned to an IPD ward and is not available for OPD.');
+    }
+    return nurseId;
   }
 
   async updateVisit(
@@ -114,7 +199,25 @@ export class OPDService {
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
-    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+
+    // A Nurse's direct assignment (this exact visit's own nurseIds) is a
+    // visit-level grant, checked against the visit itself — never derived
+    // from scopedPatientIds, which is ward-only patient-level scope (see
+    // resolveNursePatientIds). It must also satisfy the general scope check
+    // below, since a nurse directly assigned to this visit and nobody else's
+    // ward business is still allowed through.
+    const isDirectNurseAssignment = role === UserRole.NURSE && (visit.nurseIds ?? []).includes(updatedBy);
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId) && !isDirectNurseAssignment) {
+      throw new NotFoundError('OPD visit not found');
+    }
+
+    // A Nurse may only edit (notes-only, enforced by the controller) a visit
+    // she is personally listed on — narrower than the general ward/direct
+    // patient-scoping above, which also covers patients she can merely *view*
+    // via ward duty. Not being on this specific visit's nurseIds is treated
+    // the same as "not found", matching the obfuscation convention the
+    // doctor/nurse scoping checks already use elsewhere in this method.
+    if (role === UserRole.NURSE && !isDirectNurseAssignment) {
       throw new NotFoundError('OPD visit not found');
     }
 
@@ -134,6 +237,32 @@ export class OPDService {
         newValue[key]      = (data as Record<string, unknown>)[key];
         (updateData as Record<string, unknown>)[key] = (data as Record<string, unknown>)[key];
       }
+    }
+
+    // Vitals merge onto the visit's existing readings rather than replacing
+    // the whole sub-document — data.vitals only carries the sub-fields the
+    // caller actually sent (see UpdateOPDVisitRequest.vitals), so recording
+    // just one reading (e.g. weight) never wipes out the others already on
+    // file. Role is not re-checked here: the route/controller already limit
+    // this endpoint to DOCTOR/HOSPITAL_ADMIN/NURSE, and NURSE_EDITABLE_FIELDS
+    // in the controller is the sole gate on which of those roles may touch it.
+    if (data.vitals !== undefined) {
+      // visit.vitals is a Mongoose subdocument, not a plain object — its
+      // schema-defined fields are prototype getters, not own enumerable
+      // properties, so `{ ...visit.vitals }` silently picks up Mongoose's
+      // internal bookkeeping ($__parent, _doc, …) instead of the actual
+      // values. Read each field explicitly instead of spreading it.
+      const existingVitals: OPDVitals = {
+        weight:          visit.vitals?.weight          ?? null,
+        height:          visit.vitals?.height          ?? null,
+        bloodPressure:   visit.vitals?.bloodPressure   ?? null,
+        sugar:           visit.vitals?.sugar           ?? null,
+        bodyTemperature: visit.vitals?.bodyTemperature ?? null,
+      };
+      const mergedVitals: OPDVitals = { ...existingVitals, ...data.vitals };
+      previousValue.vitals = existingVitals;
+      newValue.vitals      = mergedVitals;
+      updateData.vitals    = mergedVitals;
     }
 
     // Re-stamp departmentId whenever the doctor assignment changes — otherwise
@@ -180,7 +309,13 @@ export class OPDService {
       }
     }
 
-    const updated = await opdRepository.update(tenantId, visitId, updateData, scopedPatientIds);
+    // The repository-level filter must not re-apply scopedPatientIds when
+    // access was actually granted via direct nurseIds assignment — for a
+    // ward-less nurse scopedPatientIds is `[]`, and an `$in: []` filter would
+    // match no document even though the visit-level check above already
+    // authorized this exact visit.
+    const updateFilterPatientIds = isDirectNurseAssignment ? undefined : scopedPatientIds;
+    const updated = await opdRepository.update(tenantId, visitId, updateData, updateFilterPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     await auditService.log({
@@ -189,8 +324,8 @@ export class OPDService {
       action:     'UPDATE',
       userId:     updatedBy,
       tenantId,
-      previousValue,
-      newValue,
+      previousValue: redactClinicalFields(previousValue),
+      newValue:      redactClinicalFields(newValue),
     });
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
@@ -204,11 +339,22 @@ export class OPDService {
     tenantId:          string,
     visitId:           string,
     startedBy:         string,
+    role:              UserRole,
     scopedPatientIds?: string[],
   ): Promise<IOPDVisit & { fullName?: string }> {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
-    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId)) {
+
+    // Same direct-assignment-vs-ward-scope split as updateVisit — a nurse
+    // (the only non-doctor/admin role that can reach this action) must be
+    // personally listed on this exact visit's nurseIds to start it; merely
+    // having the patient in scope via ward duty, or via a different visit for
+    // the same patient, is not enough.
+    const isDirectNurseAssignment = role === UserRole.NURSE && (visit.nurseIds ?? []).includes(startedBy);
+    if (scopedPatientIds && !scopedPatientIds.includes(visit.patientId) && !isDirectNurseAssignment) {
+      throw new NotFoundError('OPD visit not found');
+    }
+    if (role === UserRole.NURSE && !isDirectNurseAssignment) {
       throw new NotFoundError('OPD visit not found');
     }
 
@@ -219,9 +365,15 @@ export class OPDService {
       throw new ConflictError('This consultation has already started.');
     }
 
+    // Same reasoning as updateVisit: don't re-apply scopedPatientIds at the
+    // repository filter level when access was granted via direct nurseIds
+    // assignment — for a ward-less nurse it's `[]`, and `$in: []` would match
+    // no document even though the visit-level check above already
+    // authorized this exact visit.
+    const updateFilterPatientIds = isDirectNurseAssignment ? undefined : scopedPatientIds;
     const updated = await opdRepository.update(tenantId, visitId, {
       status: OPDVisitStatus.IN_PROGRESS,
-    } as Partial<IOPDVisit>, scopedPatientIds);
+    } as Partial<IOPDVisit>, updateFilterPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     await auditService.log({
@@ -285,7 +437,9 @@ export class OPDService {
       userId:        completedBy,
       tenantId,
       previousValue: { status: visit.status },
-      newValue:      { status: OPDVisitStatus.COMPLETED, diagnosis: data.diagnosis },
+      // The diagnosis itself is deliberately not recorded here — only the fact
+      // that one was supplied. See redactClinicalFields.
+      newValue:      { status: OPDVisitStatus.COMPLETED, diagnosis: REDACTED_MARKER },
     });
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
@@ -333,6 +487,7 @@ export class OPDService {
     doctorId?:   string,
     search?:     string,
     patientIds?: string[],
+    nurseId?:    string,
   ): Promise<(IOPDVisit & { fullName?: string })[]> {
     const visitDate = date ? new Date(date) : new Date();
 
@@ -342,7 +497,7 @@ export class OPDService {
       await this.expireStaleVisits(tenantId);
     } catch { /* non-blocking — the queue read is the caller's actual request */ }
 
-    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds);
+    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds, nurseId);
 
     const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
@@ -393,14 +548,68 @@ export class OPDService {
         patientId:      visit.patientId,
         fullName:       patient.fullName,
         doctorIds:      visit.doctorIds,
+        nurseIds:       visit.nurseIds ?? [],
         visitDate:      visit.visitDate,
         queueNumber:    visit.queueNumber,
         status:         visit.status,
         diagnosis:      visit.diagnosis,
         prescription:   visit.prescription,
         notes:          visit.notes,
+        // findByPatient reads via .lean() for its search path, which
+        // bypasses Mongoose's schema-default hydration — a legacy row saved
+        // before vitals existed would otherwise come back with `vitals`
+        // missing entirely instead of the fully-shaped null object every
+        // other read path guarantees.
+        vitals:         visit.vitals ?? DEFAULT_VITALS,
         createdAt:      visit.createdAt,
         updatedAt:      visit.updatedAt,
+      })),
+    };
+  }
+
+  // ─── OPD Nurse Assignment ───────────────────────────────────────────────────
+
+  // Nurses eligible for OPD duty: active NURSE-role users in this tenant who
+  // are not currently on any ward's roster (Ward.assignedNurseIds is the
+  // source of truth for "on IPD duty" — see ipdRepository.findAssignedNurseIds).
+  async getAvailableOpdNurses(tenantId: string): Promise<AvailableOpdNurseResponse[]> {
+    const [{ data: nurses }, wardAssignedIds] = await Promise.all([
+      userRepository.findAll(tenantId, { role: UserRole.NURSE, isActive: true }, 1, 500),
+      ipdRepository.findAssignedNurseIds(tenantId),
+    ]);
+    const onWardDuty = new Set(wardAssignedIds);
+    return nurses
+      .filter((n) => !onWardDuty.has((n as { _id: { toString(): string } })._id.toString()))
+      .map((n) => ({
+        userId: (n as { _id: { toString(): string } })._id.toString(),
+        name:   n.name,
+        email:  n.email,
+      }));
+  }
+
+  // Every nurse currently mapped to this doctor for OPD duty (a doctor can
+  // have more than one), each flagged with whether they're still
+  // available — false when they've since been picked up for IPD ward duty,
+  // so the frontend can flag the suggestion rather than silently reuse it.
+  async getDoctorNurseAssignments(tenantId: string, doctorId: string): Promise<DoctorNurseAssignmentsResponse> {
+    const assignments = await opdRepository.findNurseAssignmentsByDoctor(tenantId, doctorId);
+    if (!assignments.length) {
+      return { doctorId, nurses: [] };
+    }
+
+    const nurseIds = assignments.map((a) => a.nurseId);
+    const [nameMap, wardAssignedIds] = await Promise.all([
+      userRepository.findNamesByIds(tenantId, nurseIds),
+      ipdRepository.findAssignedNurseIds(tenantId),
+    ]);
+    const onWardDuty = new Set(wardAssignedIds);
+
+    return {
+      doctorId,
+      nurses: assignments.map((a) => ({
+        nurseId:     a.nurseId,
+        nurseName:   nameMap.get(a.nurseId) ?? null,
+        isAvailable: !onWardDuty.has(a.nurseId),
       })),
     };
   }
@@ -486,17 +695,29 @@ export class OPDService {
   }
 
   // ─── Role-based access scope resolution ─────────────────────────────────────
-  // Delegates to IPDService's canonical implementation — nurse ward
-  // assignment and doctor-patient assignment are IPD/OPD admission data that
-  // IPDService already owns, so the logic isn't duplicated here.
 
-  // A Nurse only sees OPD visits for patients currently admitted (active IPD
-  // admission) in their assigned ward(s). Returns undefined for any other role.
+  // A Nurse sees OPD visits/patients whose patient is currently admitted
+  // (active IPD admission) in their assigned ward(s) — IPDService's canonical
+  // ward-scoping. This is patient-level by design: a ward nurse sees every
+  // visit for a patient currently in her care, regardless of that visit's own
+  // nurseIds.
+  //
+  // Direct per-visit assignment (this exact visit lists the nurse in its own
+  // nurseIds) is a *separate*, visit-level grant — deliberately NOT folded
+  // into this patient-level set. It's enforced at the query/record level
+  // instead (see OPDRepository.findByDate's nurseId param, the per-visit
+  // nurseIds check in updateVisit/startConsultation below, and the getVisit
+  // controller). Merging it in here would let being assigned to one visit for
+  // a patient leak visibility into that patient's other, unrelated visits —
+  // exactly the bug this split avoids.
+  //
+  // Returns undefined for any other role.
   async resolveNursePatientIds(
     tenantId: string,
     userId:   string,
     role:     UserRole,
   ): Promise<string[] | undefined> {
+    if (role !== UserRole.NURSE) return undefined;
     return ipdService.resolveNursePatientIds(tenantId, userId, role);
   }
 

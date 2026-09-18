@@ -17,7 +17,16 @@
     "seed:patients": "ts-node scripts/seed-patients.ts",
     "seed:all": "npm run seed:super-admin && npm run seed:tenants && npm run seed:hospital-roles && npm run seed:patients",
     "migrate:charge-status": "ts-node scripts/migrate-charge-status.ts",
-    "backfill:opd-department": "ts-node scripts/backfill-opd-department.ts"
+    "backfill:opd-department": "ts-node scripts/backfill-opd-department.ts",
+    "backfill:low-stock-since": "ts-node scripts/backfill-low-stock-since.ts",
+    "migrate:encrypt-medical-fields": "ts-node scripts/encrypt-medical-fields.ts",
+    "migrate:encrypt-patient-pii": "ts-node scripts/encrypt-patient-pii.ts",
+    "migrate:encrypt-payment-fields": "ts-node scripts/encrypt-payment-fields.ts",
+    "migrate:encrypt-lab-notes": "ts-node scripts/encrypt-lab-notes.ts",
+    "migrate:encrypt-charge-fields": "ts-node scripts/encrypt-charge-fields.ts",
+    "migrate:encrypt-ipd-progress-notes": "ts-node scripts/encrypt-ipd-progress-notes.ts",
+    "migrate:encrypt-opd-vitals": "ts-node scripts/encrypt-opd-vitals.ts",
+    "migrate:encrypt-ipd-vitals": "ts-node scripts/encrypt-ipd-vitals.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.575.0",

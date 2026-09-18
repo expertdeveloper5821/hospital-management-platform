@@ -25,6 +25,11 @@ import { TenantModel }  from '../../../src/modules/tenant/tenant.model';
 import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
+import { PaymentModel }      from '../../../src/modules/payment/payment.model';
+import { PaymentMethod, PaymentStatus } from '../../../src/modules/payment/payment.types';
+import { InventoryItemModel } from '../../../src/modules/inventory/inventory.model';
+import { PatientModel }      from '../../../src/modules/patient/patient.model';
+import { Gender }            from '../../../src/modules/patient/patient.types';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { clearDashboardCache } from '../../../src/modules/dashboard/dashboard.service';
 
@@ -159,6 +164,21 @@ describe('GET /api/dashboard/stats — role-scoped field filtering', () => {
     expect(data).toHaveProperty('monthlyOpdTrend');
     expect(data).toHaveProperty('monthlyRevenueTrend');
     expect(data).not.toHaveProperty('admissionsToday'); // removed for every role
+    // Hospital Overview — This Month / Today counterparts (Today reuses todayOpdCount above).
+    expect(data).toHaveProperty('opdCountThisMonth');
+    expect(data).toHaveProperty('pendingLabCountToday');
+    expect(data).toHaveProperty('pendingLabCountThisMonth');
+    expect(data).toHaveProperty('pendingPaymentsCountToday');
+    expect(data).toHaveProperty('pendingPaymentsCountThisMonth');
+    expect(data).toHaveProperty('lowStockCountToday');
+    expect(data).toHaveProperty('lowStockCountThisMonth');
+    // Former Key Stats Strip metrics, now folded into Hospital Overview.
+    expect(data).toHaveProperty('newRegistrationsThisMonth');
+    expect(data).toHaveProperty('activeIpdCountToday');
+    expect(data).toHaveProperty('activeIpdCountThisMonth');
+    expect(data).toHaveProperty('totalActiveStaffToday');
+    expect(data).toHaveProperty('totalActiveStaffThisMonth');
+    expect(data).toHaveProperty('labReportsThisMonth');
   });
 
   test('RECEPTIONIST response excludes revenue, IPD, lab, staff fields', async () => {
@@ -179,6 +199,22 @@ describe('GET /api/dashboard/stats — role-scoped field filtering', () => {
     expect(data).not.toHaveProperty('monthlyOpdTrend');
     expect(data).not.toHaveProperty('monthlyRevenueTrend');
     expect(data).not.toHaveProperty('admissionsToday'); // removed for every role
+    // RECEPTIONIST sees the OPD/payments This-Month/Today counterparts (mirrors
+    // todayOpdCount/pendingPaymentsCount above) but not the lab/inventory ones.
+    expect(data).toHaveProperty('opdCountThisMonth');
+    expect(data).toHaveProperty('pendingPaymentsCountToday');
+    expect(data).toHaveProperty('pendingPaymentsCountThisMonth');
+    expect(data).not.toHaveProperty('pendingLabCountToday');
+    expect(data).not.toHaveProperty('pendingLabCountThisMonth');
+    expect(data).not.toHaveProperty('lowStockCountToday');
+    expect(data).not.toHaveProperty('lowStockCountThisMonth');
+    // RECEPTIONIST sees the "Total Patients Registered"/"New Registrations"
+    // This Month counterpart (mirrors newRegistrationsToday) but no
+    // IPD/staff/lab This-Month counterparts.
+    expect(data).toHaveProperty('newRegistrationsThisMonth');
+    expect(data).not.toHaveProperty('activeIpdCountToday');
+    expect(data).not.toHaveProperty('totalActiveStaffToday');
+    expect(data).not.toHaveProperty('labReportsThisMonth');
   });
 
   test('NURSE response includes patients, OPD, IPD but not revenue or staff', async () => {
@@ -194,6 +230,13 @@ describe('GET /api/dashboard/stats — role-scoped field filtering', () => {
     expect(data).not.toHaveProperty('pendingLabCount');
     expect(data).not.toHaveProperty('revenueToday');
     expect(data).not.toHaveProperty('admissionsToday'); // removed for every role
+    // NURSE sees the Active IPD This-Month/Today counterpart (mirrors
+    // activeIpdCount above) but no lab/staff/registration This-Month ones.
+    expect(data).toHaveProperty('activeIpdCountToday');
+    expect(data).toHaveProperty('activeIpdCountThisMonth');
+    expect(data).not.toHaveProperty('labReportsThisMonth');
+    expect(data).not.toHaveProperty('totalActiveStaffToday');
+    expect(data).not.toHaveProperty('newRegistrationsThisMonth');
   });
 
   test('DOCTOR response includes only doctor-scoped clinical fields — no hospital-wide beds/trend/staff/revenue/inventory', async () => {
@@ -217,6 +260,20 @@ describe('GET /api/dashboard/stats — role-scoped field filtering', () => {
     expect(data).not.toHaveProperty('lowStockCount');
     expect(data).not.toHaveProperty('totalInventoryItems');
     expect(data).not.toHaveProperty('admissionsToday'); // removed for every role
+    // DOCTOR sees the OPD/lab This-Month/Today counterparts (mirrors
+    // todayOpdCount/pendingLabCount above) but no payments/inventory ones.
+    expect(data).toHaveProperty('opdCountThisMonth');
+    expect(data).toHaveProperty('pendingLabCountToday');
+    expect(data).toHaveProperty('pendingLabCountThisMonth');
+    expect(data).not.toHaveProperty('pendingPaymentsCountToday');
+    expect(data).not.toHaveProperty('lowStockCountToday');
+    // DOCTOR also sees Active IPD/Lab Reports This-Month counterparts but no
+    // staff/registration ones (mirrors activeIpdCount/labReportsToday above).
+    expect(data).toHaveProperty('activeIpdCountToday');
+    expect(data).toHaveProperty('activeIpdCountThisMonth');
+    expect(data).toHaveProperty('labReportsThisMonth');
+    expect(data).not.toHaveProperty('totalActiveStaffToday');
+    expect(data).not.toHaveProperty('newRegistrationsThisMonth');
   });
 
   test('STAFF response has only lastUpdated (no stat fields)', async () => {
@@ -323,6 +380,179 @@ describe('GET /api/dashboard/stats — Doctor dashboard data is scoped by doctor
     expect(data.activeIpdCount).toBe(0);
     expect(data.pendingLabCount).toBe(0);
     expect(data.labReportsToday).toBe(0);
+  });
+});
+
+// ─── Hospital Overview: Today vs This Month scoping ───────────────────────────
+
+describe('GET /api/dashboard/stats — Hospital Overview Today vs This Month counterparts', () => {
+  const now = new Date();
+  // A date earlier in the current calendar month but not today, used to prove
+  // "This Month" totals include days before today while "Today" totals don't.
+  // (Falls back to "today" itself on the 1st of the month, when no such date
+  // exists — an acceptably rare, non-flaky edge case.)
+  const earlierThisMonth = new Date(now.getFullYear(), now.getMonth(), 1, 9, 0, 0);
+
+  test('pendingLabCountToday counts only requests created today; pendingLabCountThisMonth also counts earlier-this-month ones', async () => {
+    await PathologyRequestModel.create([
+      { requestId: 'path-today', tenantId, patientId: 'PAT-1', requestedBy: 'doc-1', testType: 'CBC', status: 'PENDING', priority: 'NORMAL', requestedAt: now, createdAt: now },
+      { requestId: 'path-earlier', tenantId, patientId: 'PAT-2', requestedBy: 'doc-1', testType: 'CBC', status: 'PENDING', priority: 'NORMAL', requestedAt: earlierThisMonth, createdAt: earlierThisMonth },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.pendingLabCountToday).toBe(1);
+    expect(data.pendingLabCountThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+  });
+
+  test('pendingPaymentsCountToday/ThisMonth scope by createdAt the same way', async () => {
+    await PaymentModel.create([
+      { paymentId: 'pay-today',   tenantId, patientId: 'PAT-1', amount: 100, paymentMethod: PaymentMethod.CASH, description: 'A', status: PaymentStatus.PENDING, createdBy: 'u', createdAt: now },
+      { paymentId: 'pay-earlier', tenantId, patientId: 'PAT-2', amount: 200, paymentMethod: PaymentMethod.CASH, description: 'B', status: PaymentStatus.PENDING, createdBy: 'u', createdAt: earlierThisMonth },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.pendingPaymentsCountToday).toBe(1);
+    expect(data.pendingPaymentsCountThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+  });
+
+  test('opdCountThisMonth includes visits from earlier this month, not just today (unlike todayOpdCount)', async () => {
+    await OPDVisitModel.create([
+      { visitId: 'v-today',   tenantId, patientId: 'PAT-1', visitDate: now,             queueNumber: 1, status: 'OPEN' },
+      { visitId: 'v-earlier', tenantId, patientId: 'PAT-2', visitDate: earlierThisMonth, queueNumber: 2, status: 'OPEN' },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.todayOpdCount).toBe(1);
+    expect(data.opdCountThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+  });
+
+  test('lowStockCountToday/ThisMonth only counts items still low-stock, scoped by when they were flagged (lowStockSince)', async () => {
+    await InventoryItemModel.create([
+      // Flagged today, still low — counted in both.
+      { itemId: 'item-flagged-today', tenantId, name: 'Gloves', category: 'PPE', unit: 'boxes', quantity: 2, lowStockThreshold: 10, lowStockSince: now },
+      // Flagged earlier this month, still low — counted only in This Month.
+      { itemId: 'item-flagged-earlier', tenantId, name: 'Masks', category: 'PPE', unit: 'boxes', quantity: 3, lowStockThreshold: 10, lowStockSince: earlierThisMonth },
+      // Flagged today but since restocked above threshold — counted in neither.
+      { itemId: 'item-restocked', tenantId, name: 'Syringes', category: 'Medical Supplies', unit: 'units', quantity: 50, lowStockThreshold: 10, lowStockSince: null },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.lowStockCountToday).toBe(1);
+    expect(data.lowStockCountThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+    // The live, date-unscoped total (used by the Inventory Overview widget) still
+    // counts both currently-low items regardless of when they were flagged.
+    expect(data.lowStockCount).toBe(2);
+  });
+
+  test('activeIpdCountToday/ThisMonth only counts admissions still ADMITTED, scoped by admissionDate', async () => {
+    await IPDAdmissionModel.create([
+      // Admitted today, still admitted — counted in both.
+      { admissionId: 'adm-today', tenantId, patientId: 'PAT-1', wardId: 'w1', bedId: 'b1', bedNumber: '1', wardName: 'General', status: 'ADMITTED', admissionDate: now },
+      // Admitted earlier this month, still admitted — counted only in This Month.
+      { admissionId: 'adm-earlier', tenantId, patientId: 'PAT-2', wardId: 'w1', bedId: 'b2', bedNumber: '2', wardName: 'General', status: 'ADMITTED', admissionDate: earlierThisMonth },
+      // Admitted today but already discharged — counted in neither.
+      { admissionId: 'adm-discharged', tenantId, patientId: 'PAT-3', wardId: 'w1', bedId: 'b3', bedNumber: '3', wardName: 'General', status: 'DISCHARGED', admissionDate: now },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.activeIpdCountToday).toBe(1);
+    expect(data.activeIpdCountThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+    // The live, date-unscoped total still counts every currently-admitted patient.
+    expect(data.activeIpdCount).toBe(2);
+  });
+
+  test("activeIpdCountToday/ThisMonth for a DOCTOR only counts that doctor's own admissions", async () => {
+    const DOCTOR_ID = 'doc-ipd-scope';
+    await IPDAdmissionModel.create([
+      { admissionId: 'adm-mine', tenantId, patientId: 'PAT-1', wardId: 'w1', bedId: 'b1', bedNumber: '1', wardName: 'General', status: 'ADMITTED', admissionDate: now, assignedDoctorIds: [DOCTOR_ID] },
+      { admissionId: 'adm-other', tenantId, patientId: 'PAT-2', wardId: 'w1', bedId: 'b2', bedNumber: '2', wardName: 'General', status: 'ADMITTED', admissionDate: now, assignedDoctorIds: ['some-other-doctor'] },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.DOCTOR, DOCTOR_ID)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.activeIpdCountToday).toBe(1);
+  });
+
+  test('totalActiveStaffToday/ThisMonth only counts active staff, scoped by account creation date', async () => {
+    await UserModel.create([
+      { tenantId, email: 'staff-today@dashtest.com',   name: 'Staff Today',   passwordHash: 'x', role: UserRole.NURSE, isActive: true,  isFirstLogin: false, createdAt: now },
+      { tenantId, email: 'staff-earlier@dashtest.com', name: 'Staff Earlier', passwordHash: 'x', role: UserRole.NURSE, isActive: true,  isFirstLogin: false, createdAt: earlierThisMonth },
+      { tenantId, email: 'staff-inactive@dashtest.com', name: 'Staff Inactive', passwordHash: 'x', role: UserRole.NURSE, isActive: false, isFirstLogin: false, createdAt: now },
+    ]);
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    // +1 for the pre-existing admin user created in beforeEach (created "now").
+    expect(data.totalActiveStaffToday).toBe(2);
+    expect(data.totalActiveStaffThisMonth).toBe(now.getDate() > 1 ? 3 : 2);
+  });
+
+  test('newRegistrationsThisMonth and labReportsThisMonth accumulate from the 1st through today', async () => {
+    await PatientModel.create([
+      {
+        patientId: 'pat-today', tenantId, fullName: 'Today Patient', dateOfBirth: new Date('1990-01-01'),
+        gender: Gender.MALE, mobileNumber: '9000000001', address: 'Test Address', createdAt: now,
+      },
+      {
+        patientId: 'pat-earlier', tenantId, fullName: 'Earlier Patient', dateOfBirth: new Date('1990-01-01'),
+        gender: Gender.FEMALE, mobileNumber: '9000000002', address: 'Test Address', createdAt: earlierThisMonth,
+      },
+    ]);
+    await PathologyRequestModel.create([
+      { requestId: 'path-completed-today',   tenantId, patientId: 'PAT-1', requestedBy: 'doc-1', testType: 'CBC', status: 'COMPLETED', priority: 'NORMAL', requestedAt: now },
+      { requestId: 'path-completed-earlier', tenantId, patientId: 'PAT-2', requestedBy: 'doc-1', testType: 'CBC', status: 'COMPLETED', priority: 'NORMAL', requestedAt: earlierThisMonth },
+    ]);
+    // Mongoose's timestamps plugin always refreshes `updatedAt` to "now" on
+    // save (unlike `createdAt`, which it leaves alone when already set) — so
+    // backdating the second request's `updatedAt` needs the raw driver,
+    // bypassing that plugin entirely.
+    await PathologyRequestModel.collection.updateOne(
+      { requestId: 'path-completed-earlier' },
+      { $set: { updatedAt: earlierThisMonth } },
+    );
+
+    const res = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${makeToken(UserRole.ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+    expect(data.newRegistrationsToday).toBe(1);
+    expect(data.newRegistrationsThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
+    expect(data.labReportsToday).toBe(1);
+    expect(data.labReportsThisMonth).toBe(now.getDate() > 1 ? 2 : 1);
   });
 });
 

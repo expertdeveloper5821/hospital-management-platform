@@ -291,7 +291,7 @@ function DoctorsCell({ names }: { names: string[] }) {
   }, [open]);
 
   if (names.length === 0) {
-    return <span className="text-muted-foreground italic">—</span>;
+    return <span className="text-muted-foreground italic">No doctors assigned</span>;
   }
 
   const visible  = names.slice(0, DOCTOR_CHIP_LIMIT);
@@ -388,7 +388,7 @@ export default function DepartmentsPage() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 pt-0 px-6 pb-16">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">

@@ -16,7 +16,7 @@ import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector }       from '@/store/hooks';
 import { UserRole }             from '@/store/types';
-import type { AdmissionResponse, WardResponse, PatientResponse, UserResponse } from '@/store/types';
+import type { AdmissionResponse, WardResponse, PatientResponse, UserResponse, IPDVitals } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input }  from '@/components/ui/input';
 import { Label }  from '@/components/ui/label';
@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   UserPlus,
+  Printer,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -48,6 +49,90 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 const PAYMENT_VIEW_ROLES: UserRole[] = [
   UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST,
 ];
+
+// ─── Vitals (IPD Admission Edit form) ────────────────────────────────────────
+// Mirrors OPD's Vitals form (client/app/(dashboard)/opd/page.tsx) and
+// IPDService.updateAdmission's merge contract on the backend field-for-field:
+// weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>" mmHg),
+// sugar (mg/dL), body temperature (°F). Kept as controlled-input strings here
+// (empty string = not entered) and converted to number|null only on submit —
+// see parseVitalsInputs.
+interface VitalsInputState {
+  weight:          string;
+  height:          string;
+  bloodPressure:   string;
+  sugar:           string;
+  bodyTemperature: string;
+}
+
+const EMPTY_VITALS_INPUTS: VitalsInputState = {
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+};
+
+function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
+  if (!vitals) return EMPTY_VITALS_INPUTS;
+  return {
+    weight:          vitals.weight          != null ? String(vitals.weight)          : '',
+    height:          vitals.height          != null ? String(vitals.height)          : '',
+    bloodPressure:   vitals.bloodPressure   ?? '',
+    sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
+    bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+  };
+}
+
+const IPD_BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
+
+// Converts the controlled-input strings into the partial vitals payload the
+// PATCH endpoint expects — an empty field becomes `null` (explicitly clears
+// that reading server-side, never leaves it untouched), matching the same
+// ranges the backend's vitals schema validates. Returns an error message
+// instead of a payload the moment any one field fails.
+function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<IPDVitals> } | { error: string } {
+  const vitals: Partial<IPDVitals> = {};
+
+  const wt = inputs.weight.trim();
+  if (wt === '') vitals.weight = null;
+  else {
+    const n = Number(wt);
+    if (isNaN(n) || n < 0.5 || n > 500) return { error: 'Weight must be between 0.5 and 500 kg.' };
+    vitals.weight = n;
+  }
+
+  const ht = inputs.height.trim();
+  if (ht === '') vitals.height = null;
+  else {
+    const n = Number(ht);
+    if (isNaN(n) || n < 20 || n > 300) return { error: 'Height must be between 20 and 300 cm.' };
+    vitals.height = n;
+  }
+
+  const bp = inputs.bloodPressure.trim();
+  if (bp === '') vitals.bloodPressure = null;
+  else {
+    if (!IPD_BLOOD_PRESSURE_PATTERN.test(bp)) {
+      return { error: 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.' };
+    }
+    vitals.bloodPressure = bp;
+  }
+
+  const sg = inputs.sugar.trim();
+  if (sg === '') vitals.sugar = null;
+  else {
+    const n = Number(sg);
+    if (isNaN(n) || n < 10 || n > 1000) return { error: 'Sugar must be between 10 and 1000 mg/dL.' };
+    vitals.sugar = n;
+  }
+
+  const temp = inputs.bodyTemperature.trim();
+  if (temp === '') vitals.bodyTemperature = null;
+  else {
+    const n = Number(temp);
+    if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
+    vitals.bodyTemperature = n;
+  }
+
+  return { vitals };
+}
 
 // ─── PatientSearch ────────────────────────────────────────────────────────────
 // Live search typeahead — type name or mobile, pick a patient from the dropdown.
@@ -259,6 +344,7 @@ interface AdmissionPanelProps {
   onClose:       () => void;
   onUpdate:      (a: AdmissionResponse) => void;
   canEdit:       boolean;
+  canEditVitals: boolean; // DOCTOR, NURSE, HOSPITAL_ADMIN only — narrower than canEdit
   canDischarge:  boolean;
   doctorMap:     Record<string, string>;
   onDischarge:   (a: AdmissionResponse) => void;
@@ -270,7 +356,7 @@ interface AdmissionPanelProps {
 
 function AdmissionPanel({
   admission, onClose, onUpdate,
-  canEdit, canDischarge, doctorMap,
+  canEdit, canEditVitals, canDischarge, doctorMap,
   onDischarge, onNotes, canProgress, canViewPayment, canDownloadSummary,
 }: AdmissionPanelProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
@@ -292,6 +378,9 @@ function AdmissionPanel({
   const [editAddDoctorId, setEditAddDoctorId] = useState('');
   const [wardId,  setWardId]  = useState(admission.wardId);
   const [bedId,   setBedId]   = useState(admission.bedId);
+  // Vitals — editable by Doctor, Nurse and Hospital Admin only (canEditVitals);
+  // read-only for Receptionist/Admin even though they can edit ward/bed/doctors.
+  const [vitalsForm, setVitalsForm] = useState<VitalsInputState>(vitalsToInputs(admission.vitals));
 
   const { data: departmentsData } = useListDepartmentsQuery();
   const { data: doctorsPage }     = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
@@ -316,6 +405,7 @@ function AdmissionPanel({
     setEditAddDoctorId('');
     setWardId(admission.wardId);
     setBedId(admission.bedId);
+    setVitalsForm(vitalsToInputs(admission.vitals));
     setError(null);
     setMode('edit');
   }
@@ -330,13 +420,25 @@ function AdmissionPanel({
       return;
     }
 
-    const body: { assignedDoctorIds?: string[]; wardId?: string; bedId?: string } = {};
+    const body: { assignedDoctorIds?: string[]; wardId?: string; bedId?: string; vitals?: Partial<IPDVitals> } = {};
     if (editDoctors.length > 0)              body.assignedDoctorIds = editDoctors.map((d) => d.userId);
     if (wardId !== admission.wardId)         body.wardId            = wardId;
     // Only include bedId when it's a non-empty, valid value different from current
     if (bedId && bedId !== admission.bedId)  body.bedId             = bedId;
 
-    if (!body.assignedDoctorIds && !body.wardId && !body.bedId) {
+    // Vitals merge server-side (see IPDService.updateAdmission), so it's safe
+    // to always include the current form state rather than diffing it first —
+    // matches OPD's VisitPanel convention.
+    if (canEditVitals) {
+      const vitalsResult = parseVitalsInputs(vitalsForm);
+      if ('error' in vitalsResult) {
+        setError(vitalsResult.error);
+        return;
+      }
+      body.vitals = vitalsResult.vitals;
+    }
+
+    if (!body.assignedDoctorIds && !body.wardId && !body.bedId && !body.vitals) {
       setMode('view');
       return;
     }
@@ -412,6 +514,14 @@ function AdmissionPanel({
                   {admission.progressNotes.length} note{admission.progressNotes.length !== 1 ? 's' : ''}
                 </button>
               ))}
+              <div className="mt-3 pt-3 border-t space-y-0">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
+                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
+                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
+                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
+                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
+                {row('Body Temperature', admission.vitals?.bodyTemperature != null ? `${admission.vitals.bodyTemperature} °F` : null)}
+              </div>
               {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
               {canViewPayment && (
                 <div className="mt-3 pt-3 border-t space-y-0">
@@ -466,14 +576,14 @@ function AdmissionPanel({
                   <select
                     value={editAddDoctorId}
                     onChange={(e) => setEditAddDoctorId(e.target.value)}
-                    className="flex-1 h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   >
                     <option value="">— Add doctor —</option>
                     {doctorList.filter((d) => !editDoctors.some((x) => x.userId === d.userId)).map((d) => (
                       <option key={d.userId} value={d.userId}>{d.name}</option>
                     ))}
                   </select>
-                  <button
+                  <Button
                     type="button"
                     disabled={!editAddDoctorId}
                     onClick={() => {
@@ -483,10 +593,11 @@ function AdmissionPanel({
                         setEditAddDoctorId('');
                       }
                     }}
-                    className="shrink-0 rounded-md border border-input bg-background px-3 py-1 text-sm hover:bg-muted disabled:opacity-50"
+                    className="shrink-0 h-10"
                   >
-                    Add
-                  </button>
+                    <Plus className="h-4 w-4 mr-1.5" />
+                    Add Doctor
+                  </Button>
                 </div>
                 {admission.assignedDoctorIds?.length > 0 && (
                   <p className="text-xs text-muted-foreground">
@@ -550,6 +661,56 @@ function AdmissionPanel({
                   </>
                 )}
               </div>
+
+              {/* Vitals — Doctor, Nurse and Hospital Admin only; Receptionist/Admin
+                  can edit ward/bed/doctors above but not vitals (canEditVitals). */}
+              {canEditVitals && (
+                <div className="space-y-3 pt-2 border-t">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-weight">Weight (kg)</Label>
+                      <Input
+                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+                        value={vitalsForm.weight}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-height">Height (cm)</Label>
+                      <Input
+                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+                        value={vitalsForm.height}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-bp">Blood Pressure (mmHg)</Label>
+                      <Input
+                        id="ap-bp" type="text" placeholder="e.g. 120/80"
+                        value={vitalsForm.bloodPressure}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, bloodPressure: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-sugar">Sugar (mg/dL)</Label>
+                      <Input
+                        id="ap-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
+                        value={vitalsForm.sugar}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, sugar: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-temp">Body Temperature (°F)</Label>
+                      <Input
+                        id="ap-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
+                        value={vitalsForm.bodyTemperature}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -569,6 +730,14 @@ function AdmissionPanel({
                     Edit
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => window.open(`/ipd/${admission.admissionId}/print`, '_blank', 'noopener,noreferrer')}
+                >
+                  <Printer className="h-4 w-4 mr-1.5" />
+                  Print
+                </Button>
                 {canDischarge && (
                   <Button variant="destructive" className="flex-1" onClick={() => { onClose(); onDischarge(admission); }}>
                     Discharge
@@ -588,9 +757,19 @@ function AdmissionPanel({
             )}
           </div>
         )}
-        {!isAdmitted && canDownloadSummary && (
-          <div className="shrink-0 border-t p-4">
-            <DownloadDischargeSummaryButton admissionId={admission.admissionId} variant="default" />
+        {!isAdmitted && (
+          <div className="shrink-0 border-t p-4 space-y-2">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => window.open(`/ipd/${admission.admissionId}/print`, '_blank', 'noopener,noreferrer')}
+            >
+              <Printer className="h-4 w-4 mr-1.5" />
+              Print
+            </Button>
+            {canDownloadSummary && (
+              <DownloadDischargeSummaryButton admissionId={admission.admissionId} variant="default" />
+            )}
           </div>
         )}
       </div>
@@ -1087,6 +1266,12 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
+  // Narrower than canEdit — mirrors the backend's VITALS_EDITABLE_ROLES gate
+  // (ipd.controller.ts): Receptionist/Admin can edit ward/bed/doctors but not vitals.
+  const canEditVitals =
+    role === UserRole.DOCTOR ||
+    role === UserRole.NURSE ||
+    role === UserRole.HOSPITAL_ADMIN;
   const canDischarge =
     role === UserRole.DOCTOR ||
     role === UserRole.NURSE ||
@@ -1225,6 +1410,15 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                     <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setViewFor(a)}>
                       View
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => window.open(`/ipd/${a.admissionId}/print`, '_blank', 'noopener,noreferrer')}
+                    >
+                      <Printer className="h-3 w-3 mr-1" />
+                      Print
+                    </Button>
                     {canDischarge && a.status === 'ADMITTED' && (
                       <Button
                         size="sm"
@@ -1316,6 +1510,15 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                           >
                             View
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => window.open(`/ipd/${a.admissionId}/print`, '_blank', 'noopener,noreferrer')}
+                          >
+                            <Printer className="h-3 w-3 mr-1" />
+                            Print
+                          </Button>
                           {canDischarge && a.status === 'ADMITTED' && (
                             <Button
                               size="sm"
@@ -1360,6 +1563,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           onClose={() => setViewFor(null)}
           onUpdate={(updated) => setViewFor(updated)}
           canEdit={canEdit}
+          canEditVitals={canEditVitals}
           canDischarge={canDischarge}
           canProgress={canProgress}
           canViewPayment={canViewPayment}

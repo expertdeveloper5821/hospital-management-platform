@@ -182,6 +182,67 @@ function AlertCard({
   );
 }
 
+// One entry in a Hospital Overview section's alert-card grid (Today or This Month).
+interface AlertCardSpec {
+  icon:  React.ElementType;
+  label: string;
+  count: number;
+  href:  string;
+  warn?: boolean;
+}
+
+// One entry in a Hospital Overview section's metric-card grid (formerly the
+// standalone Key Stats Strip, now folded in here — see MetricCard below).
+interface MetricCardSpec {
+  icon:  React.ElementType;
+  label: string;
+  value: string | number;
+  sub?:  string;
+}
+
+// Renders one "Hospital Overview — <Today | This Month>" block: the same
+// heading + alert-card grid as before, plus the metric-card grid (formerly
+// the standalone Key Stats Strip) stacked directly below it — parameterized
+// by title and card lists so both time-scoped sections stay pixel-identical
+// to each other.
+function HospitalOverviewSection({
+  title, alertCards, metricCards, isLabRole,
+}: {
+  title: string; alertCards: AlertCardSpec[]; metricCards: MetricCardSpec[]; isLabRole: boolean;
+}) {
+  if (alertCards.length === 0 && metricCards.length === 0) return null;
+  return (
+    <div>
+      <h2 className="text-base font-semibold mb-3 flex items-center gap-2 text-foreground">
+        <AlertTriangle className="h-4 w-4 text-orange-500" />
+        {title}
+      </h2>
+      <div className="space-y-4">
+        {alertCards.length > 0 && (
+          <div className={cn(
+            'grid grid-cols-1 gap-4',
+            isLabRole ? '' : (alertCards.length > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2'),
+          )}>
+            {alertCards.map((c) => (
+              <AlertCard key={c.label} icon={c.icon} label={c.label} count={c.count} href={c.href} warn={c.warn} />
+            ))}
+          </div>
+        )}
+        {metricCards.length > 0 && (
+          <div className={cn(
+            'grid gap-4',
+            isLabRole ? 'grid-cols-1' : (metricCards.length > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2'),
+          )}>
+            {metricCards.map((m) => (
+              <MetricCard key={m.label} icon={m.icon} label={m.label} value={m.value} sub={m.sub} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({
   icon: Icon, label, value, sub, color,
 }: {
@@ -283,15 +344,49 @@ export default function DashboardPage() {
   const hasInventory      = data?.totalInventoryItems !== undefined;
   const hasRevenue        = data?.revenueToday !== undefined;
   const hasActivities     = (data?.recentActivities?.length ?? 0) > 0;
-  const alertCardCount = [
-    data?.lowStockCount, data?.pendingLabCount, data?.pendingPaymentsCount, data?.todayOpdCount,
-  ].filter((v) => v !== undefined).length;
-  const hasCriticalAlerts = alertCardCount > 0;
+  // Hospital Overview — Today / This Month: same 4 card types, each section
+  // filtered to its own date range. Today reuses the existing todayOpdCount
+  // field (already date-scoped to today); the other three Today values, and
+  // every This Month value, come from the dedicated *Today/*ThisMonth fields
+  // (see dashboard.api.ts) so the live, date-unscoped lowStockCount/
+  // pendingLabCount/pendingPaymentsCount fields used elsewhere on this page
+  // are untouched.
+  const todayOverviewCards: AlertCardSpec[] = ([
+    data?.lowStockCountToday        !== undefined && { icon: PackageX,     label: 'Low Stock Items',       count: data.lowStockCountToday,        href: '/inventory?lowStock=1',    warn: true },
+    data?.pendingLabCountToday      !== undefined && { icon: FlaskConical, label: 'Pending Lab Reports',   count: data.pendingLabCountToday,      href: '/lab?status=PENDING',      warn: true },
+    data?.pendingPaymentsCountToday !== undefined && { icon: CreditCard,   label: 'Pending Payments',      count: data.pendingPaymentsCountToday, href: '/payments?status=PENDING', warn: true },
+    data?.todayOpdCount             !== undefined && { icon: CalendarDays, label: "Today's Appointments",  count: data.todayOpdCount,             href: '/opd' },
+  ] as (AlertCardSpec | false)[]).filter((c): c is AlertCardSpec => c !== false);
 
-  const statCardCount = [
-    data?.totalPatients, data?.activeIpdCount, data?.totalActiveStaff,
-    data?.labReportsToday, data?.newRegistrationsToday,
-  ].filter((v) => v !== undefined).length;
+  const monthOverviewCards: AlertCardSpec[] = ([
+    data?.lowStockCountThisMonth        !== undefined && { icon: PackageX,     label: 'Low Stock Items',           count: data.lowStockCountThisMonth,        href: '/inventory?lowStock=1',    warn: true },
+    data?.pendingLabCountThisMonth      !== undefined && { icon: FlaskConical, label: 'Pending Lab Reports',       count: data.pendingLabCountThisMonth,      href: '/lab?status=PENDING',      warn: true },
+    data?.pendingPaymentsCountThisMonth !== undefined && { icon: CreditCard,   label: 'Pending Payments',          count: data.pendingPaymentsCountThisMonth, href: '/payments?status=PENDING', warn: true },
+    data?.opdCountThisMonth             !== undefined && { icon: CalendarDays, label: "This Month's Appointments", count: data.opdCountThisMonth,             href: '/opd' },
+  ] as (AlertCardSpec | false)[]).filter((c): c is AlertCardSpec => c !== false);
+
+  // Hospital Overview metric cards — formerly the standalone Key Stats Strip,
+  // now folded into the same two time-scoped sections as the alert cards
+  // above. "Total Patients" and "New Registrations" intentionally share the
+  // same registration-date-scoped value (see dashboard.api.ts); Today reuses
+  // the existing todayOpdCount-style fields (newRegistrationsToday,
+  // labReportsToday, already date-scoped to today) while every other value
+  // comes from the dedicated *Today/*ThisMonth fields.
+  const todayMetricCards: MetricCardSpec[] = ([
+    data?.newRegistrationsToday !== undefined && { icon: Users,     label: 'Total Patients',      value: data.newRegistrationsToday, sub: 'Registered' },
+    data?.activeIpdCountToday   !== undefined && { icon: BedDouble, label: 'Active IPD',           value: data.activeIpdCountToday,   sub: 'Admitted patients' },
+    data?.totalActiveStaffToday !== undefined && { icon: UserCheck, label: 'Active Staff',         value: data.totalActiveStaffToday, sub: 'Joined today' },
+    data?.labReportsToday       !== undefined && { icon: TestTube2, label: 'Lab Reports Today',    value: data.labReportsToday,       sub: 'Completed' },
+    data?.newRegistrationsToday !== undefined && { icon: Users,     label: 'New Registrations',    value: data.newRegistrationsToday, sub: 'Today' },
+  ] as (MetricCardSpec | false)[]).filter((c): c is MetricCardSpec => c !== false);
+
+  const monthMetricCards: MetricCardSpec[] = ([
+    data?.newRegistrationsThisMonth !== undefined && { icon: Users,     label: 'Total Patients',      value: data.newRegistrationsThisMonth, sub: 'Registered' },
+    data?.activeIpdCountThisMonth   !== undefined && { icon: BedDouble, label: 'Active IPD',           value: data.activeIpdCountThisMonth,   sub: 'Admitted patients' },
+    data?.totalActiveStaffThisMonth !== undefined && { icon: UserCheck, label: 'Active Staff',         value: data.totalActiveStaffThisMonth, sub: 'Joined this month' },
+    data?.labReportsThisMonth       !== undefined && { icon: TestTube2, label: 'Lab Reports This Month', value: data.labReportsThisMonth,     sub: 'Completed' },
+    data?.newRegistrationsThisMonth !== undefined && { icon: Users,     label: 'New Registrations',    value: data.newRegistrationsThisMonth, sub: 'This Month' },
+  ] as (MetricCardSpec | false)[]).filter((c): c is MetricCardSpec => c !== false);
 
   const hasTodayActivity  = [
     data?.newRegistrationsToday, data?.todayOpdCount,
@@ -360,62 +455,24 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── 2. Critical Alerts — data-driven; backend sends only what this role can see ── */}
-      {hasCriticalAlerts && (
-        <div>
-          <h2 className="text-base font-semibold mb-3 flex items-center gap-2 text-foreground">
-            <AlertTriangle className="h-4 w-4 text-orange-500" />
-            Hospital Overview
-          </h2>
-          <div className={cn(
-            'grid grid-cols-1 gap-4',
-            isLabRole ? '' : (alertCardCount > 2 ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2'),
-          )}>
-            {data?.lowStockCount !== undefined && (
-              <AlertCard icon={PackageX}    label="Low Stock Items"       count={data.lowStockCount}        href="/inventory?lowStock=1"   warn />
-            )}
-            {data?.pendingLabCount !== undefined && (
-              <AlertCard icon={FlaskConical} label="Pending Lab Reports"  count={data.pendingLabCount}      href="/lab?status=PENDING"     warn />
-            )}
-            {data?.pendingPaymentsCount !== undefined && (
-              <AlertCard icon={CreditCard}  label="Pending Payments"      count={data.pendingPaymentsCount} href="/payments?status=PENDING" warn />
-            )}
-            {data?.todayOpdCount !== undefined && (
-              <AlertCard icon={CalendarDays} label="Today's Appointments" count={data.todayOpdCount}        href="/opd" />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── 3. Key Stats Strip — data-driven ───────────────────────────────── */}
-      {[
-        data?.totalPatients,
-        data?.activeIpdCount,
-        data?.totalActiveStaff,
-        data?.labReportsToday,
-        data?.newRegistrationsToday,
-      ].some((v) => v !== undefined) && (
-        <div className={cn(
-          'grid gap-4',
-          isLabRole ? 'grid-cols-1' : (statCardCount > 2 ? 'grid-cols-2 xl:grid-cols-4' : 'grid-cols-2'),
-        )}>
-          {data?.totalPatients !== undefined && (
-            <MetricCard icon={Users}        label="Total Patients"        value={data.totalPatients}      sub="Registered" />
-          )}
-          {data?.activeIpdCount !== undefined && (
-            <MetricCard icon={BedDouble}    label="Active IPD"            value={data.activeIpdCount}     sub="Admitted patients" />
-          )}
-          {data?.totalActiveStaff !== undefined && (
-            <MetricCard icon={UserCheck}    label="Active Staff"          value={data.totalActiveStaff}   sub="Working today" />
-          )}
-          {data?.labReportsToday !== undefined && (
-            <MetricCard icon={TestTube2}    label="Lab Reports Today"     value={data.labReportsToday}    sub="Completed" />
-          )}
-          {data?.newRegistrationsToday !== undefined && (
-            <MetricCard icon={Users}        label="New Registrations"     value={data.newRegistrationsToday} sub="Today" />
-          )}
-        </div>
-      )}
+      {/* ── 2. Hospital Overview — Today, then This Month, stacked vertically. ──
+             Same alert cards + metric cards (formerly the standalone Key
+             Stats Strip, now folded in here)/icons/colors/View actions/
+             spacing/responsive layout as each other; each section's counts
+             are independently date-scoped (backend sends only the fields
+             this role can see). ── */}
+      <HospitalOverviewSection
+        title="Hospital Overview — Today"
+        alertCards={todayOverviewCards}
+        metricCards={todayMetricCards}
+        isLabRole={isLabRole}
+      />
+      <HospitalOverviewSection
+        title="Hospital Overview — This Month"
+        alertCards={monthOverviewCards}
+        metricCards={monthMetricCards}
+        isLabRole={isLabRole}
+      />
 
       {/* ── 4. Revenue + Today's Activity + Quick Actions ──────────────────── */}
       <div className="grid grid-cols-1  lg:grid-cols-3 gap-7">

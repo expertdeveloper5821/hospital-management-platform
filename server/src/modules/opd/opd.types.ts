@@ -29,8 +29,25 @@ export const ACTIVE_STATUSES: readonly OPDVisitStatus[] = [
 export interface CreateOPDVisitRequest {
   patientId:      string;
   doctorIds?:     string[];
+  nurseIds?:      string[]; // optional OPD nurse assignment(s) — see OPDService.createVisit
   visitDate?:     string; // YYYY-MM-DD, defaults to today
   notes?:         string;
+}
+
+// ─── OPD Vitals ──────────────────────────────────────────────────────────────
+// Recorded from the OPD View → Edit form only (not at visit creation, not on
+// Complete). Every field is independently optional/nullable — a doctor/nurse
+// may record only some of them, and any field can be cleared back to null.
+// Units are fixed (see OPDService.updateVisit's DEFAULT_VITALS and the
+// frontend's field labels): weight in kg, height in cm, blood pressure as a
+// "<systolic>/<diastolic>" string in mmHg, sugar in mg/dL, body temperature
+// in °F.
+export interface OPDVitals {
+  weight:          number | null;
+  height:          number | null;
+  bloodPressure:   string | null;
+  sugar:           number | null;
+  bodyTemperature: number | null;
 }
 
 export interface UpdateOPDVisitRequest {
@@ -39,6 +56,10 @@ export interface UpdateOPDVisitRequest {
   diagnosis?:      string;
   prescription?:   string;
   notes?:          string;
+  // Partial by design — OPDService.updateVisit merges only the sub-fields
+  // present here onto the visit's existing vitals, so recording just one
+  // reading never wipes out the others.
+  vitals?:         Partial<OPDVitals>;
 }
 
 export interface CompleteOPDVisitRequest {
@@ -77,12 +98,38 @@ export interface OPDVisitResponse {
   patientId:      string;
   fullName?:      string;
   doctorIds:      string[];
+  nurseIds:       string[];
   visitDate:      Date;
   queueNumber:    number;
   status:         OPDVisitStatus;
   diagnosis:      string | null;
   prescription:   string | null;
   notes:          string | null;
+  vitals:         OPDVitals;
   createdAt:      Date;
   updatedAt:      Date;
+}
+
+// ─── OPD Nurse Assignment ───────────────────────────────────────────────────
+
+export interface AvailableOpdNurseResponse {
+  userId: string;
+  name:   string;
+  email:  string;
+}
+
+// One nurse already mapped to a doctor for OPD duty. isAvailable is false
+// when that nurse has since been assigned to an IPD ward — the frontend uses
+// it to flag the suggestion as stale rather than letting it be silently reused.
+export interface AssignedOpdNurse {
+  nurseId:     string;
+  nurseName:   string | null;
+  isAvailable: boolean;
+}
+
+// All nurses currently mapped to a doctor for OPD duty (a doctor can have
+// more than one). Empty `nurses` means the doctor has no existing mapping.
+export interface DoctorNurseAssignmentsResponse {
+  doctorId: string;
+  nurses:   AssignedOpdNurse[];
 }

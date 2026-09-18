@@ -1,9 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, User, BedDouble, Stethoscope, Calendar, FileText, Activity } from 'lucide-react';
+import { ArrowLeft, User, BedDouble, Stethoscope, Calendar, FileText, Activity, Printer } from 'lucide-react';
 import { useGetAdmissionByIdQuery } from '@/store/api/ipd.api';
 import { DownloadDischargeSummaryButton, DISCHARGE_SUMMARY_DOWNLOAD_ROLES } from '@/components/ipd/download-discharge-summary-button';
+import { Button } from '@/components/ui/button';
 import { useAppSelector } from '@/store/hooks';
 
 function formatDate(iso: string): string {
@@ -73,9 +74,19 @@ export default function IPDAdmissionDetailPage({ params }: { params: { admission
           <h1 className="text-xl font-semibold">{admission.fullName || 'IPD Admission'}</h1>
           <p className="text-sm text-muted-foreground font-mono">{admission.admissionId}</p>
         </div>
-        <span className={`shrink-0 inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[admission.status] ?? 'bg-muted text-muted-foreground'}`}>
-          {admission.status}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLORS[admission.status] ?? 'bg-muted text-muted-foreground'}`}>
+            {admission.status}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.open(`/ipd/${admission.admissionId}/print`, '_blank', 'noopener,noreferrer')}
+          >
+            <Printer className="h-4 w-4 mr-1.5" />
+            Print
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-xl border bg-card divide-y">

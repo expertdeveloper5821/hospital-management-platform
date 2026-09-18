@@ -9,6 +9,8 @@ import {
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
   useGetOPDPaymentValidityQuery,
+  useGetAvailableOpdNursesQuery,
+  useGetDoctorNurseAssignmentsQuery,
 } from '@/store/api/opd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
@@ -20,6 +22,7 @@ import { PatientFormModal } from '@/components/patients/patient-form-modal';
 import type {
   OPDVisitResponse,
   OPDVisitStatus,
+  OPDVitals,
   CreateOPDVisitRequest,
   UpdateOPDVisitRequest,
   CompleteOPDVisitRequest,
@@ -92,6 +95,89 @@ function opdErrorMessage(err: any, fallback: string): string {
 
 const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW']);
 
+// ─── Vitals (OPD Edit form) ─────────────────────────────────────────────────
+// Mirrors OPDService.updateVisit's DEFAULT_VITALS/merge contract on the
+// backend: weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>"
+// mmHg), sugar (mg/dL), body temperature (°F). Kept as controlled-input
+// strings here (empty string = not entered) and converted to number|null only
+// on submit — see parseVitalsInputs.
+interface VitalsInputState {
+  weight:          string;
+  height:          string;
+  bloodPressure:   string;
+  sugar:           string;
+  bodyTemperature: string;
+}
+
+const EMPTY_VITALS_INPUTS: VitalsInputState = {
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+};
+
+function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
+  if (!vitals) return EMPTY_VITALS_INPUTS;
+  return {
+    weight:          vitals.weight          != null ? String(vitals.weight)          : '',
+    height:          vitals.height          != null ? String(vitals.height)          : '',
+    bloodPressure:   vitals.bloodPressure   ?? '',
+    sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
+    bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+  };
+}
+
+const BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
+
+// Converts the controlled-input strings into the partial vitals payload the
+// PATCH endpoint expects — an empty field becomes `null` (explicitly clears
+// that reading server-side, never leaves it untouched), matching the same
+// ranges OPDController's vitalsSchema validates. Returns an error message
+// instead of a payload the moment any one field fails.
+function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<OPDVitals> } | { error: string } {
+  const vitals: Partial<OPDVitals> = {};
+
+  const num = inputs.weight.trim();
+  if (num === '') vitals.weight = null;
+  else {
+    const n = Number(num);
+    if (isNaN(n) || n < 0.5 || n > 500) return { error: 'Weight must be between 0.5 and 500 kg.' };
+    vitals.weight = n;
+  }
+
+  const ht = inputs.height.trim();
+  if (ht === '') vitals.height = null;
+  else {
+    const n = Number(ht);
+    if (isNaN(n) || n < 20 || n > 300) return { error: 'Height must be between 20 and 300 cm.' };
+    vitals.height = n;
+  }
+
+  const bp = inputs.bloodPressure.trim();
+  if (bp === '') vitals.bloodPressure = null;
+  else {
+    if (!BLOOD_PRESSURE_PATTERN.test(bp)) {
+      return { error: 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.' };
+    }
+    vitals.bloodPressure = bp;
+  }
+
+  const sg = inputs.sugar.trim();
+  if (sg === '') vitals.sugar = null;
+  else {
+    const n = Number(sg);
+    if (isNaN(n) || n < 10 || n > 1000) return { error: 'Sugar must be between 10 and 1000 mg/dL.' };
+    vitals.sugar = n;
+  }
+
+  const temp = inputs.bodyTemperature.trim();
+  if (temp === '') vitals.bodyTemperature = null;
+  else {
+    const n = Number(temp);
+    if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
+    vitals.bodyTemperature = n;
+  }
+
+  return { vitals };
+}
+
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
 
 interface VisitPanelProps {
@@ -104,6 +190,7 @@ interface VisitPanelProps {
   canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
   doctorNames: (ids: string[]) => string;
   allDoctors:  UserResponse[];
+  nurseNames:  (ids: string[]) => string;
 }
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -113,8 +200,18 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 // Roles permitted to view payment details, matching the backend's GET /api/payments requireRole list.
 const PAYMENT_VIEW_ROLES = ['MANAGER', 'FINANCE_MANAGER', 'HOSPITAL_ADMIN', 'RECEPTIONIST'];
 
-function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canViewPayment, doctorNames, allDoctors }: VisitPanelProps) {
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canViewPayment, doctorNames, allDoctors, nurseNames }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
+
+  // A Nurse's Edit access is separate from `canEdit` (DOCTOR/HOSPITAL_ADMIN
+  // only) — notes-only, and only for a visit she's personally listed on via
+  // nurseIds (ward-based view access alone doesn't qualify). Mirrors the
+  // server-side check in OPDService.updateVisit; this is UI convenience
+  // only — the backend enforces both the assignment and the field
+  // restriction independently of what this component renders.
+  const role   = useAppSelector((s) => s.auth.profile?.role);
+  const userId = useAppSelector((s) => s.auth.profile?.userId);
+  const nurseNotesOnly = role === 'NURSE' && (visit.nurseIds ?? []).includes(userId ?? '');
 
   // Look up the payment linked directly to this visit (referenceId) rather than
   // guessing from patientId + calendar date — a patient can have other payments
@@ -146,6 +243,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     prescription:   visit.prescription   ?? '',
     notes:          visit.notes          ?? '',
   });
+  // Vitals — editable by Doctor, Nurse and Hospital Admin alike (the only
+  // roles that can even reach Edit mode; see canEdit/nurseNotesOnly), unlike
+  // diagnosis/prescription which stay read-only for a Nurse.
+  const [vitalsForm, setVitalsForm] = useState<VitalsInputState>(vitalsToInputs(visit.vitals));
   const [completeForm, setCompleteForm] = useState<CompleteOPDVisitRequest>({
     diagnosis:    visit.diagnosis    ?? '',
     prescription: visit.prescription ?? '',
@@ -189,15 +290,33 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       setError('Prescription cannot exceed 5000 characters.');
       return;
     }
+    // Vitals are editable by both the full edit form and the Nurse's
+    // notes-only form (see the Vitals section rendered in each below), so
+    // validate/include them regardless of which form is active.
+    const vitalsResult = parseVitalsInputs(vitalsForm);
+    if ('error' in vitalsResult) {
+      setError(vitalsResult.error);
+      return;
+    }
     updatingRef.current = true;
     try {
-      // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them
-      const body: UpdateOPDVisitRequest = {
-        doctorIds:    editDoctorIds,
-        ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
-        ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
-        ...(form.notes        != null   ? { notes: form.notes }                          : {}),
-      };
+      // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them.
+      // A notes-only nurse edit must send *only* notes/vitals — the backend
+      // rejects the request outright if any other field is present (see
+      // NURSE_EDITABLE_FIELDS in opd.controller.ts), so doctorIds/diagnosis/
+      // prescription are deliberately omitted here rather than resent unchanged.
+      const body: UpdateOPDVisitRequest = nurseNotesOnly
+        ? {
+            ...(form.notes != null ? { notes: form.notes } : {}),
+            vitals: vitalsResult.vitals,
+          }
+        : {
+            doctorIds:    editDoctorIds,
+            ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
+            ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
+            ...(form.notes        != null   ? { notes: form.notes }                          : {}),
+            vitals: vitalsResult.vitals,
+          };
       const updated = await updateVisit({ visitId: visit.visitId, ...body }).unwrap();
       onUpdate(updated);
       setMode('view');
@@ -231,6 +350,34 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     }
   }
 
+  // `form`/`completeForm` are only seeded from `visit` once, at whichever
+  // render first created that state — they don't auto-resync when the
+  // `visit` prop is later replaced with a fresher object (e.g. right after
+  // Edit is saved via onUpdate, without the panel unmounting). Re-seeding
+  // both from the current `visit` on the way into Edit/Complete mode is what
+  // guarantees each flow always pre-fills with the latest persisted
+  // Diagnosis/Prescription/Notes instead of whatever snapshot happened to be
+  // sitting in state — including a diagnosis just saved via Edit but never
+  // reflected into `completeForm`.
+  function openEdit() {
+    setForm({
+      diagnosis:    visit.diagnosis    ?? '',
+      prescription: visit.prescription ?? '',
+      notes:        visit.notes        ?? '',
+    });
+    setVitalsForm(vitalsToInputs(visit.vitals));
+    setMode('edit');
+  }
+
+  function openComplete() {
+    setCompleteForm({
+      diagnosis:    visit.diagnosis    ?? '',
+      prescription: visit.prescription ?? '',
+      notes:        visit.notes        ?? '',
+    });
+    setMode('complete');
+  }
+
   async function handleCancelConfirm() {
     setError('');
     try {
@@ -247,6 +394,58 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     <div className="py-2 border-b last:border-0 grid grid-cols-5 gap-2">
       <span className="col-span-2 text-sm text-muted-foreground">{label}</span>
       <span className="col-span-3 text-sm font-medium break-words">{val ?? '—'}</span>
+    </div>
+  );
+
+  // Shared by both edit forms below (full and Nurse notes-only) — Doctor,
+  // Nurse and Hospital Admin can all record vitals, unlike diagnosis/
+  // prescription which stay read-only for a Nurse. Only one of the two forms
+  // is ever mounted at a time, so the shared `ep-*` input ids never collide.
+  const vitalsFields = (
+    <div className="space-y-3 pt-2 border-t">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-weight">Weight (kg)</Label>
+          <Input
+            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+            value={vitalsForm.weight}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-height">Height (cm)</Label>
+          <Input
+            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+            value={vitalsForm.height}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-bp">Blood Pressure (mmHg)</Label>
+          <Input
+            id="ep-bp" type="text" placeholder="e.g. 120/80"
+            value={vitalsForm.bloodPressure}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, bloodPressure: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-sugar">Sugar (mg/dL)</Label>
+          <Input
+            id="ep-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
+            value={vitalsForm.sugar}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, sugar: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-temp">Body Temperature (°F)</Label>
+          <Input
+            id="ep-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
+            value={vitalsForm.bodyTemperature}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+          />
+        </div>
+      </div>
     </div>
   );
 
@@ -281,11 +480,20 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {mode === 'view' && (
             <div>
               {f('Doctor(s)',        doctorNames(visit.doctorIds ?? []))}
+              {f('Nurse(s)',         nurseNames(visit.nurseIds ?? []))}
               {f('Diagnosis',       visit.diagnosis)}
               {f('Prescription',    visit.prescription ? (
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
               {f('Notes',           <RichTextDisplay value={visit.notes} />)}
+              <div className="mt-3 pt-3 border-t space-y-0">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
+                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
+                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
+                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
+                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
+                {f('Body Temperature', visit.vitals?.bodyTemperature != null ? `${visit.vitals.bodyTemperature} °F` : null)}
+              </div>
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
               {canViewPayment && (
                 <div className="mt-3 pt-3 border-t space-y-0">
@@ -303,9 +511,45 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             </div>
           )}
 
-          {/* Edit mode */}
-          {mode === 'edit' && (
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4">
+          {/* Edit mode — Nurse gets a reduced, notes-only form: everything
+              else (patient, department, doctors, nurses, diagnosis,
+              prescription, status, payment) is shown read-only, matching the
+              view mode's rows, and is never part of the submitted body
+              (see handleUpdate) nor accepted by the backend if it were. */}
+          {mode === 'edit' && nurseNotesOnly && (
+            // noValidate: the Vitals number inputs' min/max are UX hints only
+            // — without this, a browser/jsdom blocks the submit event
+            // entirely on an out-of-range value before handleUpdate ever
+            // runs, showing a native tooltip instead of our own styled error
+            // banner (the same one every other validation error uses).
+            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+              <p className="text-xs text-muted-foreground">Only the notes and vitals fields can be edited.</p>
+              {f('Doctor(s)',     doctorNames(visit.doctorIds ?? []))}
+              {f('Nurse(s)',      nurseNames(visit.nurseIds ?? []))}
+              {f('Diagnosis',    visit.diagnosis)}
+              {f('Prescription', visit.prescription ? (
+                <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
+              ) : null)}
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-notes">Notes</Label>
+                <RichTextEditor
+                  id="ep-notes"
+                  rows={2}
+                  value={form.notes ?? ''}
+                  onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
+                  maxLength={2000}
+                />
+              </div>
+              {vitalsFields}
+            </form>
+          )}
+          {mode === 'edit' && !nurseNotesOnly && (
+            // noValidate: the Vitals number inputs' min/max are UX hints only
+            // — without this, a browser/jsdom blocks the submit event
+            // entirely on an out-of-range value before handleUpdate ever
+            // runs, showing a native tooltip instead of our own styled error
+            // banner (the same one every other validation error uses).
+            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               <div className="space-y-1.5">
                 <Label htmlFor="ep-dept">Department</Label>
                 <select
@@ -397,6 +641,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   maxLength={2000}
                 />
               </div>
+              {vitalsFields}
             </form>
           )}
 
@@ -452,11 +697,11 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               // Wraps to a second row rather than crushing four buttons into
               // the 448px panel when the visit is still waiting.
               <div className="flex flex-wrap items-stretch gap-3">
-                {canEdit && (
+                {(canEdit || nurseNotesOnly) && (
                   <Button
                     variant="outline"
                     className="min-w-[120px] flex-1 h-10 rounded-lg border-slate-300 bg-white font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
-                    onClick={() => setMode('edit')}
+                    onClick={openEdit}
                   >
                     Edit Visit
                   </Button>
@@ -476,7 +721,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   <Button
                     variant="success"
                     className="min-w-[120px] flex-1 h-10 rounded-lg border border-emerald-600 bg-emerald-600 font-medium text-white transition-colors hover:border-emerald-700 hover:bg-emerald-700"
-                    onClick={() => setMode('complete')}
+                    onClick={openComplete}
                   >
                     <CheckCircle className="h-4 w-4 mr-2" />
                     Complete
@@ -563,6 +808,8 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [selectedDoctorIds,    setSelectedDoctorIds]    = useState<string[]>([]);
   const [addDoctorId,          setAddDoctorId]          = useState('');
+  const [selectedNurseIds,     setSelectedNurseIds]     = useState<string[]>([]);
+  const [addNurseId,           setAddNurseId]           = useState('');
   const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId' | 'doctorIds'>>({
     visitDate: todayISO(),
     notes:     '',
@@ -645,6 +892,32 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
 
+  // Assign Nurse — doctor-wise, multi-nurse: nurse pool + the primary (first)
+  // selected doctor's existing OPD nurse assignments, if any. Nurse selection
+  // is optional and keyed to the first doctor picked, mirroring the same
+  // "first doctor wins" convention the backend uses to resolve department.
+  const { data: availableNursesData } = useGetAvailableOpdNursesQuery();
+  const availableNurses = availableNursesData ?? [];
+  const primaryDoctorId = selectedDoctorIds[0] ?? '';
+  const { data: nurseAssignments } = useGetDoctorNurseAssignmentsQuery(primaryDoctorId, { skip: !primaryDoctorId });
+  const assignedNurses = nurseAssignments?.nurses ?? [];
+
+  // Re-sync the nurse suggestions whenever the primary doctor changes: clear
+  // first so stale suggestions from the previous doctor never linger while
+  // the new lookup is in flight, then pre-fill with every one of the doctor's
+  // existing assignments once they resolve (only the ones still available).
+  useEffect(() => {
+    setSelectedNurseIds([]);
+  }, [primaryDoctorId]);
+
+  useEffect(() => {
+    if (!nurseAssignments) return;
+    const availableAssignedIds = nurseAssignments.nurses.filter((n) => n.isAvailable).map((n) => n.nurseId);
+    if (availableAssignedIds.length) {
+      setSelectedNurseIds((prev) => [...new Set([...prev, ...availableAssignedIds])]);
+    }
+  }, [nurseAssignments]);
+
   const [createVisit,         { isLoading: creatingVisit }]   = useCreateOPDVisitMutation();
   const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
   const isLoading = creatingVisit || creatingPayment;
@@ -658,49 +931,56 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (isLoading || submittingRef.current) return;
-    setError('');
-    if (!selectedPatient) { setError('Please select a patient.'); return; }
-    if (!canBackdate && form.visitDate && form.visitDate < todayISO()) {
-      setError('Past dates are not allowed for OPD visits.');
-      return;
-    }
-
-    // Re-check payment validity right before submitting — the backend is the
-    // final authority, and this form may have sat open long enough for a
-    // previously-fetched validity window to have lapsed since it was checked.
-    let validity = paymentValidity;
-    try {
-      const fresh = await refetchPaymentValidity();
-      if (fresh.data) validity = fresh.data;
-    } catch {
-      // Network hiccup on the re-check — fall back to the last known result
-      // (or the manual toggle, if none was ever loaded) rather than blocking submission.
-    }
-
-    const paymentCovered = validity?.reason === 'VALID';        // still within validity for this doctor — never charge
-    const paymentForced  = validity?.reason === 'EXPIRED'        // validity lapsed for this doctor — payment mandatory
-      || validity?.reason === 'DIFFERENT_DOCTOR';                // visiting a doctor never paid for — payment mandatory
-    const effectiveRegType: 'free' | 'paid' = paymentCovered ? 'free' : paymentForced ? 'paid' : regType;
-
-    let amount = 0;
-    let mode: OPDPaymentMode | undefined;
-    if (effectiveRegType === 'paid') {
-      amount = parseFloat(paymentAmount);
-      if (!paymentAmount || isNaN(amount) || amount <= 0) {
-        setError('Payment amount is required and must be greater than zero.');
-        return;
-      }
-      if (!paymentMode) { setError('Payment mode is required.'); return; }
-      mode = paymentMode;
-    }
-
+    // Armed synchronously, before any `await` — a second click/Enter firing
+    // while this submission is still mid-flight (e.g. during the payment
+    // validity re-check below) must see the lock immediately, not only once
+    // the createVisit call itself has started. Everything through to the end
+    // of the function now runs inside this try, so every early `return`
+    // below still releases the lock via `finally`, same as before.
     submittingRef.current = true;
     try {
+      setError('');
+      if (!selectedPatient) { setError('Please select a patient.'); return; }
+      if (!canBackdate && form.visitDate && form.visitDate < todayISO()) {
+        setError('Past dates are not allowed for OPD visits.');
+        return;
+      }
+
+      // Re-check payment validity right before submitting — the backend is the
+      // final authority, and this form may have sat open long enough for a
+      // previously-fetched validity window to have lapsed since it was checked.
+      let validity = paymentValidity;
+      try {
+        const fresh = await refetchPaymentValidity();
+        if (fresh.data) validity = fresh.data;
+      } catch {
+        // Network hiccup on the re-check — fall back to the last known result
+        // (or the manual toggle, if none was ever loaded) rather than blocking submission.
+      }
+
+      const paymentCovered = validity?.reason === 'VALID';        // still within validity for this doctor — never charge
+      const paymentForced  = validity?.reason === 'EXPIRED'        // validity lapsed for this doctor — payment mandatory
+        || validity?.reason === 'DIFFERENT_DOCTOR';                // visiting a doctor never paid for — payment mandatory
+      const effectiveRegType: 'free' | 'paid' = paymentCovered ? 'free' : paymentForced ? 'paid' : regType;
+
+      let amount = 0;
+      let mode: OPDPaymentMode | undefined;
+      if (effectiveRegType === 'paid') {
+        amount = parseFloat(paymentAmount);
+        if (!paymentAmount || isNaN(amount) || amount <= 0) {
+          setError('Payment amount is required and must be greater than zero.');
+          return;
+        }
+        if (!paymentMode) { setError('Payment mode is required.'); return; }
+        mode = paymentMode;
+      }
+
       let visit: OPDVisitResponse;
       try {
         const body: CreateOPDVisitRequest = {
           patientId:      selectedPatient.patientId,
           doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
+          nurseIds:       selectedNurseIds.length ? selectedNurseIds : undefined,
           visitDate:      form.visitDate || undefined,
           notes:          form.notes    || undefined,
         };
@@ -890,6 +1170,69 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             </div>
           </div>
 
+          {/* Nurse — doctor-wise, optional, multi-select (same chip pattern as
+              Assign Doctors). Keyed off the first assigned doctor, same
+              convention the department resolution already uses. */}
+          <div className="space-y-1.5">
+            <Label>Assign Nurse (Optional)</Label>
+            {primaryDoctorId && assignedNurses.filter((n) => n.isAvailable).length > 0 && (
+              <p className="rounded-md bg-success/10 px-3 py-2 text-xs text-success">
+                ✓ Already assigned nurse{assignedNurses.filter((n) => n.isAvailable).length > 1 ? 's' : ''}: {assignedNurses.filter((n) => n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')}
+              </p>
+            )}
+            {primaryDoctorId && assignedNurses.filter((n) => !n.isAvailable).length > 0 && (
+              <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
+                {assignedNurses.filter((n) => !n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')} {assignedNurses.filter((n) => !n.isAvailable).length > 1 ? 'are' : 'is'} currently on IPD ward duty — select another nurse.
+              </p>
+            )}
+            {selectedNurseIds.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {selectedNurseIds.map((id) => {
+                  const n = availableNurses.find((u) => u.userId === id);
+                  const label = n?.name ?? assignedNurses.find((a) => a.nurseId === id)?.nurseName ?? id;
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                      <span className="truncate min-w-0" title={label}>{label}</span>
+                      <button type="button" onClick={() => setSelectedNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).length === 0 && selectedNurseIds.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No available nurses</p>
+            ) : (
+              <div className="flex gap-2">
+                <select
+                  value={addNurseId}
+                  onChange={(e) => setAddNurseId(e.target.value)}
+                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— Add nurse —</option>
+                  {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).map((n) => (
+                    <option key={n.userId} value={n.userId}>{n.name}</option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  disabled={!addNurseId}
+                  onClick={() => {
+                    if (addNurseId && !selectedNurseIds.includes(addNurseId)) {
+                      setSelectedNurseIds((prev) => [...prev, addNurseId]);
+                      setAddNurseId('');
+                    }
+                  }}
+                  className="shrink-0 h-10"
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Add Nurse
+                </Button>
+              </div>
+            )}
+          </div>
+
           {/* Notes */}
           <div className="space-y-1.5">
             <Label htmlFor="nv-notes">Notes (optional)</Label>
@@ -1073,6 +1416,19 @@ export default function OPDPage() {
       return d ? d.name : id;
     }).join(', ');
   }, [doctors]);
+
+  // Name resolution for the OPD View/Visit Details panel's Nurse(s) row —
+  // same pattern as doctorNames above.
+  const { data: nurseUsersData } = useListUsersQuery({ role: 'NURSE', isActive: true, limit: 100 });
+  const nurses = nurseUsersData?.data ?? [];
+
+  const nurseNames = useCallback((ids: string[]) => {
+    if (!ids?.length) return 'Unassigned';
+    return ids.map((id) => {
+      const n = nurses.find((u) => u.userId === id);
+      return n ? n.name : id;
+    }).join(', ');
+  }, [nurses]);
 
   const visits = queue ?? [];
 
@@ -1277,6 +1633,7 @@ export default function OPDPage() {
           canViewPayment={canViewPayment}
           doctorNames={doctorNames}
           allDoctors={doctors}
+          nurseNames={nurseNames}
         />
       )}
 

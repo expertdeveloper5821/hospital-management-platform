@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { IPDAdmissionModel, IIPDAdmission } from './ipd.model';
-import { ProgressNote, ListAdmissionsQuery, StatusUpdate } from './ipd.types';
+import { ProgressNote, ListAdmissionsQuery, StatusUpdate, IPDVitals } from './ipd.types';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { WardModel, IWard } from './ward.model';
@@ -119,6 +119,7 @@ export class IPDRepository {
       wardName:          string;
       bedId:             string;
       bedNumber:         string;
+      vitals:            IPDVitals;
     }>,
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();
@@ -191,6 +192,15 @@ export class IPDRepository {
       .select('_id')
       .lean();
     return wards.map((w) => (w._id as mongoose.Types.ObjectId).toString());
+  }
+
+  // Every nurse id currently on any ward's roster, tenant-wide — the
+  // authoritative "on IPD duty" set used to exclude those nurses from the OPD
+  // nurse-assignment pool (a nurse can't be simultaneously offered for OPD
+  // while on active IPD ward duty).
+  async findAssignedNurseIds(tenantId: string): Promise<string[]> {
+    assertDbConnected();
+    return WardModel.distinct('assignedNurseIds', { tenantId });
   }
 
   // Patients currently admitted (ADMITTED status) in the given ward(s) — used to

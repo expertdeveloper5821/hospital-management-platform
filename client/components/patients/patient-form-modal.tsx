@@ -22,6 +22,8 @@ export const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-',
 const MOBILE_RE   = /^\d{10}$/;
 const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
 const AADHAAR_RE  = /^\d{12}$/;
+// Emergency contact name: letters and spaces only — no digits or special characters.
+const ALPHA_SPACE_RE = /^[a-zA-Z\s]+$/;
 
 export function genderLabel(g: Gender) {
   return g.charAt(0) + g.slice(1).toLowerCase();
@@ -32,6 +34,11 @@ function sanitizeMobile(value: string) {
   let digits = value.replace(/\D/g, '');
   if (digits.length > 10 && digits.startsWith('91')) digits = digits.slice(2);
   return digits.slice(0, 10);
+}
+
+// Keep letters and spaces only — used for the emergency contact name field.
+function sanitizeAlphaSpace(value: string) {
+  return value.replace(/[^a-zA-Z\s]/g, '');
 }
 
 // Compose the structured address fields into the single `address` string that the
@@ -121,6 +128,8 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
 
   if (form.emergencyContactName && form.emergencyContactName.trim().length < 2) {
     errors.emergencyContactName = 'Name must be at least 2 characters.';
+  } else if (form.emergencyContactName && !ALPHA_SPACE_RE.test(form.emergencyContactName.trim())) {
+    errors.emergencyContactName = 'Name can only contain letters and spaces.';
   }
 
   if (form.emergencyContactMobile && !MOBILE_RE.test(form.emergencyContactMobile)) {
@@ -485,7 +494,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                 <Input
                   id="ecName"
                   value={form.emergencyContactName ?? ''}
-                  onChange={(e) => set('emergencyContactName', e.target.value)}
+                  onChange={(e) => set('emergencyContactName', sanitizeAlphaSpace(e.target.value))}
                   onBlur={() => touch('emergencyContactName')}
                   placeholder="Contact name"
                   aria-invalid={!!fe('emergencyContactName')}

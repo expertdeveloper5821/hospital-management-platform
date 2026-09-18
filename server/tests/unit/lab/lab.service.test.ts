@@ -331,6 +331,27 @@ describe('LabService — editPathologyRequest', () => {
       expect.objectContaining({ action: 'UPDATE', entityId: 'req-path-001' }),
     );
   });
+
+  test('redacts notes in the audit log — value never reaches the trail', async () => {
+    const doc     = makePathologyDoc({ notes: 'Old confidential note' });
+    const updated = makePathologyDoc({ notes: 'New confidential note' });
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+    mockLabRepo.updatePathology   = jest.fn().mockResolvedValue(updated);
+
+    await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { notes: 'New confidential note' });
+
+    // Plaintext still reaches the repository (encrypted-at-rest column).
+    expect(mockLabRepo.updatePathology).toHaveBeenCalledWith(
+      'req-path-001', TENANT,
+      expect.objectContaining({ notes: 'New confidential note' }),
+      undefined,
+    );
+
+    const [entry] = mockAuditSvc.log.mock.calls[0] as [{ previousValue: Record<string, unknown>; newValue: Record<string, unknown> }];
+    expect(entry.previousValue.notes).toBe('[redacted]');
+    expect(entry.newValue.notes).toBe('[redacted]');
+    expect(JSON.stringify(entry)).not.toContain('confidential note');
+  });
 });
 
 // ─── deletePathologyRequest ───────────────────────────────────────────────────
@@ -479,6 +500,26 @@ describe('LabService — editRadiologyRequest', () => {
     expect(mockAuditSvc.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'UPDATE', entityId: 'req-radio-001' }),
     );
+  });
+
+  test('redacts notes in the audit log — value never reaches the trail', async () => {
+    const doc     = makeRadiologyDoc({ notes: 'Old confidential note' });
+    const updated = makeRadiologyDoc({ notes: 'New confidential note' });
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(doc);
+    mockLabRepo.updateRadiology   = jest.fn().mockResolvedValue(updated);
+
+    await service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { notes: 'New confidential note' });
+
+    expect(mockLabRepo.updateRadiology).toHaveBeenCalledWith(
+      'req-radio-001', TENANT,
+      expect.objectContaining({ notes: 'New confidential note' }),
+      undefined,
+    );
+
+    const [entry] = mockAuditSvc.log.mock.calls[0] as [{ previousValue: Record<string, unknown>; newValue: Record<string, unknown> }];
+    expect(entry.previousValue.notes).toBe('[redacted]');
+    expect(entry.newValue.notes).toBe('[redacted]');
+    expect(JSON.stringify(entry)).not.toContain('confidential note');
   });
 });
 

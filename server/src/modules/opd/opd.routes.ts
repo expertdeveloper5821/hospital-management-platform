@@ -14,6 +14,8 @@ import {
   cancelVisit,
   getPatientHistory,
   getPaymentValidity,
+  getAvailableNurses,
+  getDoctorNurseAssignments,
 } from './opd.controller';
 
 const router  = Router();
@@ -69,9 +71,12 @@ router.get('/visits/:visitId',
   getVisit,
 );
 
+// NURSE is included here (unlike elsewhere in this file) but strictly
+// notes-only and only for a visit she's personally assigned to — both
+// enforced in the controller/service, not just by this role gate.
 router.patch('/visits/:visitId',
   ...protect,
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   updateVisit,
 );
 
@@ -87,6 +92,20 @@ router.get('/patients/:patientId/payment-validity',
   ...protect,
   requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
   getPaymentValidity,
+);
+
+// Assign Nurse (New OPD Visit form) — same role set as visit creation, since
+// only those roles ever need the nurse dropdown / assignment lookup.
+router.get('/nurses/available',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  getAvailableNurses,
+);
+
+router.get('/doctors/:doctorId/nurse-assignment',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  getDoctorNurseAssignments,
 );
 
 export default router;

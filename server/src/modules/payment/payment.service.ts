@@ -155,7 +155,10 @@ export class PaymentService {
           patientId:     input.patientId,
           amount:        input.amount,
           method:        input.paymentMethod,
-          transactionId: input.transactionId ?? null,
+          // transactionId is encrypted at rest (see payment.model.ts) — the
+          // audit trail is stored/rendered in plaintext, so it records only
+          // that one was supplied, never its value.
+          transactionId: input.transactionId ? '[redacted]' : null,
         },
       });
     } catch { /* swallow — audit must not block payment */ }
