@@ -4,6 +4,8 @@ import { useState, useRef } from 'react';
 import {
   useGetBrandingQuery,
   useUpdateBrandingMutation,
+  useUploadParchaTemplateMutation,
+  useRemoveParchaTemplateMutation,
   useGetOpdSettingsQuery,
   useUpdateOpdSettingsMutation,
 } from '@/store/api/tenant.api';
@@ -211,7 +213,204 @@ export default function BrandingPage() {
         </div>
       </form>
 
+      <ParchaTemplateSection tenantId={tenantId} />
       <OpdSettingsSection tenantId={tenantId} />
+    </div>
+  );
+}
+
+// ─── Prescription Slip / Parcha Template ───────────────────────────────────────
+// Hospital-configurable: an optional full A4-page background used instead of
+// the app's default OPD/IPD parcha header (see BrandingConfig.parchaTemplateUrl
+// and the OPD/IPD print pages, which skip their own header block whenever this
+// is set — the uploaded template must already carry the hospital name, logo,
+// address, etc.).
+
+function ParchaTemplateSection({ tenantId }: { tenantId?: string }) {
+  const dispatch = useAppDispatch();
+  const { data: branding, isLoading } = useGetBrandingQuery(tenantId ?? '', { skip: !tenantId });
+  const [uploadTemplate, { isLoading: uploading }] = useUploadParchaTemplateMutation();
+  const [removeTemplate, { isLoading: removing }] = useRemoveParchaTemplateMutation();
+
+  const [templateFile,    setTemplateFile]    = useState<File | null>(null);
+  const [templatePreview, setTemplatePreview] = useState<string | null>(null);
+  // Tracked alongside templatePreview (rather than re-derived from templateFile,
+  // which is cleared right after a successful upload) so the preview keeps
+  // rendering as a PDF even once the upload has completed.
+  const [templateIsPdf,   setTemplateIsPdf]   = useState(false);
+  const [error,           setError]           = useState<string | null>(null);
+  const [success,         setSuccess]         = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  if (!tenantId) return null;
+
+  function clearSelection(input: HTMLInputElement) {
+    input.value = '';
+    setTemplateFile(null);
+    setTemplatePreview(null);
+    setTemplateIsPdf(false);
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf';
+    if (file.type !== 'image/png' && file.type !== 'image/jpeg' && !isPdf) {
+      setError('Unsupported file type. Please upload a PNG, JPG, or PDF file.');
+      clearSelection(e.target);
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Template must be 5 MB or smaller.');
+      clearSelection(e.target);
+      return;
+    }
+    setTemplateFile(file);
+    setTemplatePreview(URL.createObjectURL(file));
+    setTemplateIsPdf(isPdf);
+    setError(null);
+  }
+
+  async function handleUpload() {
+    if (!templateFile || !tenantId) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      await uploadTemplate({ tenantId, template: templateFile }).unwrap();
+      dispatch(setBranding({
+        logoUrl:            branding?.logoUrl ?? null,
+        displayName:        branding?.displayName ?? '',
+        primaryColor:       branding?.primaryColor ?? '#1A73E8',
+        addressLine:        branding?.addressLine,
+        city:               branding?.city,
+        state:              branding?.state,
+        pincode:            branding?.pincode,
+        contactEmail:       branding?.contactEmail,
+        parchaTemplateUrl:  templatePreview,
+      }));
+      setTemplateFile(null);
+      setSuccess('Parcha template uploaded successfully.');
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to upload parcha template.');
+    }
+  }
+
+  async function handleRemove() {
+    if (!tenantId) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      await removeTemplate(tenantId).unwrap();
+      dispatch(setBranding({
+        logoUrl:            branding?.logoUrl ?? null,
+        displayName:        branding?.displayName ?? '',
+        primaryColor:       branding?.primaryColor ?? '#1A73E8',
+        addressLine:        branding?.addressLine,
+        city:               branding?.city,
+        state:              branding?.state,
+        pincode:            branding?.pincode,
+        contactEmail:       branding?.contactEmail,
+        parchaTemplateUrl:  null,
+      }));
+      setTemplatePreview(null);
+      setTemplateIsPdf(false);
+      setSuccess('Parcha template removed — default format restored.');
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to remove parcha template.');
+    }
+  }
+
+  const currentTemplate = templatePreview ?? branding?.parchaTemplateUrl ?? null;
+  // A freshly-picked file's type is known directly (templateIsPdf); an
+  // already-uploaded template only has its presigned URL, which still keeps
+  // the original ".pdf"/".png"/".jpg" extension in its path ahead of the
+  // query string.
+  const currentIsPdf = templatePreview
+    ? templateIsPdf
+    : /\.pdf(\?|$)/i.test(branding?.parchaTemplateUrl ?? '');
+
+  return (
+    <div className="space-y-6 max-w-lg pt-2 border-t">
+      <div className="pt-6">
+        <h2 className="text-lg font-semibold tracking-tight">Prescription Slip</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Upload your hospital  prescription slip format
+        </p>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            {currentTemplate ? (
+              currentIsPdf ? (
+                <iframe
+                  src={`${currentTemplate}#toolbar=0&navpanes=0&scrollbar=0`}
+                  title="Parcha template PDF preview"
+                  className="h-40 aspect-[210/297] rounded-lg border bg-muted shrink-0"
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={currentTemplate}
+                  alt="Parcha template preview"
+                  className="h-40 aspect-[210/297] rounded-lg object-cover border bg-muted shrink-0"
+                />
+              )
+            ) : (
+              <div className="h-40 aspect-[210/297] rounded-lg border bg-muted flex items-center justify-center text-muted-foreground text-[10px] text-center px-1.5 shrink-0">
+                No template — default format
+              </div>
+            )}
+            <div className="space-y-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading || removing}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                {templateFile ? 'Change File' : 'Choose File'}
+              </Button>
+              {templateFile && (
+                <p className="text-xs text-muted-foreground">{templateFile.name}</p>
+              )}
+              <p className="text-xs text-muted-foreground">PNG, JPG, PDF — max 5 MB</p>
+            </div>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,application/pdf"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+          )}
+          {success && (
+            <p className="text-sm text-green-700 bg-green-50 rounded-md px-3 py-2">{success}</p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            {branding?.parchaTemplateUrl && !templateFile && (
+              <Button type="button" variant="outline" onClick={handleRemove} disabled={removing || uploading}>
+                {removing ? 'Removing…' : 'Remove Template'}
+              </Button>
+            )}
+            {templateFile && (
+              <Button type="button" onClick={handleUpload} disabled={uploading}>
+                {uploading ? 'Uploading…' : 'Upload Template'}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -362,7 +362,7 @@ export default function DashboardPage() {
     data?.lowStockCountThisMonth        !== undefined && { icon: PackageX,     label: 'Low Stock Items',           count: data.lowStockCountThisMonth,        href: '/inventory?lowStock=1',    warn: true },
     data?.pendingLabCountThisMonth      !== undefined && { icon: FlaskConical, label: 'Pending Lab Reports',       count: data.pendingLabCountThisMonth,      href: '/lab?status=PENDING',      warn: true },
     data?.pendingPaymentsCountThisMonth !== undefined && { icon: CreditCard,   label: 'Pending Payments',          count: data.pendingPaymentsCountThisMonth, href: '/payments?status=PENDING', warn: true },
-    data?.opdCountThisMonth             !== undefined && { icon: CalendarDays, label: "This Month's Appointments", count: data.opdCountThisMonth,             href: '/opd' },
+    data?.opdCountThisMonth             !== undefined && { icon: CalendarDays, label: "Month's Appointments", count: data.opdCountThisMonth,             href: '/opd' },
   ] as (AlertCardSpec | false)[]).filter((c): c is AlertCardSpec => c !== false);
 
   // Hospital Overview metric cards — formerly the standalone Key Stats Strip,

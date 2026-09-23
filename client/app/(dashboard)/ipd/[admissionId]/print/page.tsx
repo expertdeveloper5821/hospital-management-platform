@@ -160,6 +160,17 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
     .filter(Boolean)
     .join(', ');
 
+  // A hospital-supplied parcha template already carries the hospital name,
+  // logo, address, etc. as a full-page background — skip the app's own
+  // header block on top of it, and reserve extra top space for it instead of
+  // the default header's own vertical footprint. Only an image template can
+  // be rendered this way (a plain <img>, so it always prints without relying
+  // on the browser's "background graphics" print option) — a PDF template
+  // (also accepted for upload, see the Branding page) falls back to the
+  // default header here rather than showing a broken image with no header.
+  // Mirrors the OPD parcha.
+  const hasTemplate = !!branding?.parchaTemplateUrl && !/\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
+
   return (
     <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
       {/* Screen-only toolbar */}
@@ -174,21 +185,39 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
       </div>
 
       {/* A4 sheet — the only thing meant to reach the printer */}
-      <div className="parcha-sheet px-[16mm] py-[14mm] text-[12px] leading-snug">
-        {/* Hospital header */}
-        <div className="flex items-start gap-4">
-          {branding?.logoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
-          )}
-          <div className="flex-1 min-w-0 text-center">
-            <h1 className="text-xl font-bold tracking-tight">{hospitalName}</h1>
-            {hospitalAddress && <p className="text-[11px] text-gray-600 mt-0.5">{hospitalAddress}</p>}
-            {branding?.contactEmail && <p className="text-[11px] text-gray-600">{branding.contactEmail}</p>}
-          </div>
-          {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
-        </div>
-        <div className="mt-3 border-b-2 border-gray-800" />
+      <div
+        className={`parcha-sheet relative px-[16mm] ${hasTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
+      >
+        {hasTemplate && (
+          // Real <img>, not a CSS background — prints reliably without the
+          // browser's "background graphics" print option being enabled.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={branding!.parchaTemplateUrl!}
+            alt=""
+            aria-hidden="true"
+            className="absolute top-0 left-0 w-[210mm] h-[297mm] object-cover z-0"
+          />
+        )}
+        <div className="relative z-10">
+        {!hasTemplate && (
+          <>
+            {/* Hospital header */}
+            <div className="flex items-start gap-4">
+              {branding?.logoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
+              )}
+              <div className="flex-1 min-w-0 text-center">
+                <h1 className="text-xl font-bold tracking-tight">{hospitalName}</h1>
+                {hospitalAddress && <p className="text-[11px] text-gray-600 mt-0.5">{hospitalAddress}</p>}
+                {branding?.contactEmail && <p className="text-[11px] text-gray-600">{branding.contactEmail}</p>}
+              </div>
+              {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
+            </div>
+            <div className="mt-3 border-b-2 border-gray-800" />
+          </>
+        )}
 
         {/* Patient + Admission details */}
         <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
@@ -248,6 +277,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
         {/* Footer */}
         <div className="mt-6 pt-2 border-t border-gray-200 text-center text-[10px] text-gray-500">
           Generated on {formatDateTime(new Date().toISOString())}
+        </div>
         </div>
       </div>
     </div>
