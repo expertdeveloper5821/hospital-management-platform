@@ -6,10 +6,10 @@
  * Run after `feature/u3-bed-registry` is merged into `unit/3-ipd`.
  */
 
-import { MongoMemoryServer } from 'mongodb-memory-server';
-import mongoose              from 'mongoose';
-import request               from 'supertest';
-import jwt                   from 'jsonwebtoken';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import mongoose               from 'mongoose';
+import request                from 'supertest';
+import jwt                    from 'jsonwebtoken';
 
 jest.mock('../../../src/shared/services/audit.service', () => ({
   auditService: { log: jest.fn().mockResolvedValue(undefined) },
@@ -37,12 +37,16 @@ import { AdmissionStatus } from '../../../src/modules/ipd/ipd.types';
 
 const JWT_SECRET = process.env['JWT_SECRET']!;
 
-let mongod: MongoMemoryServer;
+let mongod: MongoMemoryReplSet;
 
+// A single-node replica set (not a plain MongoMemoryServer) — createAdmission
+// now uses a session/transaction (see ipd.repository.ts's
+// createAdmissionWithBedOccupancy), which MongoDB only supports against a
+// replica set or sharded cluster, never a standalone mongod.
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongod.getUri());
-});
+}, 60000);
 
 afterAll(async () => {
   await mongoose.disconnect();
@@ -211,6 +215,159 @@ describe('POST /api/ipd/admissions', () => {
   test('returns 401 when no token provided', async () => {
     const res = await request(app).post('/api/ipd/admissions').send({});
     expect(res.status).toBe(401);
+  });
+
+  test('DB-level race safety: two concurrent creates for the same bed — only one succeeds (201), the other gets 409', async () => {
+    const tenant   = await seedTenant();
+    const patientA = await seedPatient(toId(tenant));
+    const patientB = await PatientModel.create({
+      patientId: 'PAT-INT00002', tenantId: toId(tenant), fullName: 'Second Patient',
+      dateOfBirth: new Date('1990-01-01'), gender: 'FEMALE', mobileNumber: '9000000002', address: 'Addr',
+    });
+    const ward   = await seedWard(toId(tenant));
+    const bed    = await seedBed(toId(ward), toId(tenant));
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const token  = makeToken('recept-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const makeRequest = (patientId: string) => request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId, wardId: toId(ward), bedId: toId(bed), assignedDoctorIds: [toId(doctor)] });
+
+    // Both requests pass the service's own pre-check (findActiveAdmissionByBed
+    // sees the bed as free for either, since neither has committed yet) —
+    // the uniq_active_admission_per_bed index is what must break the tie.
+    const [resA, resB] = await Promise.all([
+      makeRequest(patientA.patientId),
+      makeRequest(patientB.patientId),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([201, 409]);
+
+    const admitted = await IPDAdmissionModel.find({ tenantId: toId(tenant), bedId: toId(bed), status: AdmissionStatus.ADMITTED });
+    expect(admitted).toHaveLength(1);
+  });
+
+  test('DB-level race safety: two concurrent creates for the same patient (different beds) — only one succeeds', async () => {
+    const tenant  = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bedA    = await seedBed(toId(ward), toId(tenant));
+    const bedB    = await BedModel.create({ wardId: toId(ward), bedNumber: 'G-02', isOccupied: false, tenantId: toId(tenant) });
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const token   = makeToken('recept-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const makeRequest = (bedId: string) => request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: patient.patientId, wardId: toId(ward), bedId, assignedDoctorIds: [toId(doctor)] });
+
+    const [resA, resB] = await Promise.all([makeRequest(toId(bedA)), makeRequest(toId(bedB))]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([201, 409]);
+
+    const admitted = await IPDAdmissionModel.find({ tenantId: toId(tenant), patientId: patient.patientId, status: AdmissionStatus.ADMITTED });
+    expect(admitted).toHaveLength(1);
+  });
+
+  test('Idempotency-Key replay: retrying the same create does not create a second admission', async () => {
+    const tenant  = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const token   = makeToken('recept-001', toId(tenant), UserRole.RECEPTIONIST);
+    const idempotencyKey = 'temp-client-op-ipd-001';
+
+    const body = { patientId: patient.patientId, wardId: toId(ward), bedId: toId(bed), assignedDoctorIds: [toId(doctor)] };
+
+    const first = await request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+
+    // Replayed, not re-executed — the exact same stored response comes back.
+    expect(second.status).toBe(201);
+    expect(second.body.data.admissionId).toBe(first.body.data.admissionId);
+
+    const admitted = await IPDAdmissionModel.find({ tenantId: toId(tenant), patientId: patient.patientId });
+    expect(admitted).toHaveLength(1);
+  });
+});
+
+describe('POST /api/ipd/wards', () => {
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second ward', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    const token  = jwt.sign(
+      { userId: toId(admin), tenantId: toId(tenant), role: UserRole.HOSPITAL_ADMIN, email: 'x@x.com', isFirstLogin: false },
+      JWT_SECRET,
+    );
+    const idempotencyKey = 'temp-client-op-ward-001';
+    const body = { name: 'General Ward', floor: '2' };
+
+    const first = await request(app)
+      .post('/api/ipd/wards')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/ipd/wards')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+
+    expect(second.status).toBe(201);
+    expect(second.body.data.wardId).toBe(first.body.data.wardId);
+
+    const wards = await WardModel.find({ tenantId: toId(tenant), name: 'General Ward' });
+    expect(wards).toHaveLength(1);
+  });
+});
+
+describe('POST /api/ipd/wards/:wardId/beds', () => {
+  test('Idempotency-Key replay: retrying the same offline-queued single-bed create does not create a second bed (offline Add Bed support)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    const ward   = await seedWard(toId(tenant));
+    const token  = jwt.sign(
+      { userId: toId(admin), tenantId: toId(tenant), role: UserRole.HOSPITAL_ADMIN, email: 'x@x.com', isFirstLogin: false },
+      JWT_SECRET,
+    );
+    const idempotencyKey = 'temp-client-op-bed-001';
+    const body = { bedNumbers: ['101'] };
+
+    const first = await request(app)
+      .post(`/api/ipd/wards/${toId(ward)}/beds`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+    expect(first.status).toBe(201);
+    expect(first.body.data).toHaveLength(1);
+
+    const second = await request(app)
+      .post(`/api/ipd/wards/${toId(ward)}/beds`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+
+    expect(second.status).toBe(201);
+    expect(second.body.data[0].bedId).toBe(first.body.data[0].bedId);
+
+    const beds = await BedModel.find({ tenantId: toId(tenant), wardId: toId(ward), bedNumber: '101' });
+    expect(beds).toHaveLength(1);
   });
 });
 
@@ -609,7 +766,10 @@ describe('Doctor patient-assignment scoping', () => {
       patientId:         opts.patientId,
       wardId:            'ward-1',
       wardName:          'General Ward',
-      bedId:             'bed-1',
+      // Unique per admission (not a fixed 'bed-1') — this test's own history
+      // test seeds two ADMITTED admissions in the same tenant, which would
+      // otherwise collide with the uniq_active_admission_per_bed index.
+      bedId:             `bed-${opts.admissionId}`,
       bedNumber:         'B-01',
       assignedDoctorIds: opts.assignedDoctorIds,
       status:            AdmissionStatus.ADMITTED,

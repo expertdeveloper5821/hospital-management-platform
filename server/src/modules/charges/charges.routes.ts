@@ -3,6 +3,7 @@ import { authenticateJWT }            from '../../shared/middleware/authenticate
 import { scopeTenant }                from '../../shared/middleware/scope-tenant';
 import { requireRole }                from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }           from '../../shared/middleware/idempotency';
 import { UserRole }                   from '../../shared/types/common.types';
 import { addCharge, cancelCharge, markChargePaid, listCharges } from './charges.controller';
 
@@ -21,6 +22,7 @@ router.post('/',
     UserRole.FINANCE_MANAGER,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('charges.add'),
   addCharge,
 );
 

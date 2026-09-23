@@ -44,20 +44,69 @@ const DEFAULT_VITALS: OPDVitals = {
 // encrypted at rest on the visit itself (see opd.model.ts). Audit log entries
 // are stored in plain form and rendered in the Audit UI, so these fields must
 // never carry their value into one — the trail records *that* the field
-// changed, not what it changed to/from. Applied to both previousValue and
-// newValue. `vitals` is an object, not a scalar, but redactClinicalFields
-// below replaces it wholesale with the same marker regardless of shape.
+// changed (and, for a clear, that it was explicitly emptied), never what it
+// changed to/from. Applied to both previousValue and newValue. `vitals` is an
+// object, not a scalar, but is redacted wholesale with the same markers
+// regardless of shape — matching the existing "whole object, not per
+// sub-field" granularity IPDService's own vitals redaction also uses.
 const REDACTED_AUDIT_FIELDS = ['diagnosis', 'prescription', 'notes', 'vitals'] as const;
 const REDACTED_MARKER = '[redacted]';
+// Distinguishes an explicit clear (a field that had content and was emptied
+// by this exact change) from an ordinary set/update, without ever recording
+// the clinical text itself.
+const CLEARED_MARKER = '[cleared]';
 
-function redactClinicalFields(values: Record<string, unknown>): Record<string, unknown> {
-  const redacted = { ...values };
-  for (const field of REDACTED_AUDIT_FIELDS) {
-    if (redacted[field] !== undefined && redacted[field] !== null) {
-      redacted[field] = REDACTED_MARKER;
-    }
+// True when a clinical field's value carries no content — an empty/whitespace
+// string, null/undefined, or (vitals) every sub-field null/undefined.
+function isEmptyClinicalValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim().length === 0;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return Object.values(value as Record<string, unknown>).every((v) => v === null || v === undefined);
   }
-  return redacted;
+  return false;
+}
+
+// True when two values for the same field are equivalent — used to decide
+// whether a resent field actually changed and thus belongs in the audit
+// diff at all. Strings treat null/undefined/'' as the same "empty" value
+// (so re-saving an already-empty field is never misreported as a fresh
+// clear); string arrays (doctorIds) compare order-independently.
+function isSameFieldValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((v, i) => v === sortedB[i]);
+  }
+  if (typeof a === 'string' || typeof b === 'string' || a == null || b == null) {
+    const normalize = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    return normalize(a) === normalize(b);
+  }
+  return a === b;
+}
+
+// Redacts a clinical-field audit diff, distinguishing a genuine clear from an
+// ordinary set/update, still never recording the actual clinical text. Only
+// meant to be called with a (previousValue, newValue) pair whose clinical
+// keys were already filtered down to fields that actually changed (see
+// updateVisit/completeVisit) — every REDACTED_AUDIT_FIELDS key present in
+// newValue is therefore treated as a real change: CLEARED_MARKER when the
+// new value is empty (and the old one, by construction, was not), otherwise
+// REDACTED_MARKER on both sides for a set/update.
+function redactClinicalDiff(
+  previousValue: Record<string, unknown>,
+  newValue:      Record<string, unknown>,
+): { previousValue: Record<string, unknown>; newValue: Record<string, unknown> } {
+  const redactedPrevious = { ...previousValue };
+  const redactedNew      = { ...newValue };
+  for (const field of REDACTED_AUDIT_FIELDS) {
+    if (!(field in newValue)) continue;
+    const previousHadContent = field in previousValue && !isEmptyClinicalValue(previousValue[field]);
+    redactedPrevious[field] = previousHadContent ? REDACTED_MARKER : null;
+    redactedNew[field]      = isEmptyClinicalValue(newValue[field]) ? CLEARED_MARKER : REDACTED_MARKER;
+  }
+  return { previousValue: redactedPrevious, newValue: redactedNew };
 }
 
 function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { fullName?: string } {
@@ -233,9 +282,19 @@ export class OPDService {
       ['doctorIds', 'diagnosis', 'prescription', 'notes'];
     for (const key of fields) {
       if ((data as Record<string, unknown>)[key] !== undefined) {
-        previousValue[key] = (visit as unknown as Record<string, unknown>)[key];
-        newValue[key]      = (data as Record<string, unknown>)[key];
-        (updateData as Record<string, unknown>)[key] = (data as Record<string, unknown>)[key];
+        const oldVal = (visit as unknown as Record<string, unknown>)[key];
+        const newVal = (data as Record<string, unknown>)[key];
+        (updateData as Record<string, unknown>)[key] = newVal;
+        // Only record (and thus audit) a field that actually changed. The
+        // Edit form resends diagnosis/prescription/notes on every save
+        // regardless of whether the user touched them (so an intentional
+        // clear is distinguishable from "field simply wasn't included" — see
+        // opd/page.tsx's handleUpdate); without this check every single edit
+        // would audit-log those untouched fields as a no-op "update".
+        if (!isSameFieldValue(oldVal, newVal)) {
+          previousValue[key] = oldVal;
+          newValue[key]      = newVal;
+        }
       }
     }
 
@@ -260,18 +319,36 @@ export class OPDService {
         bodyTemperature: visit.vitals?.bodyTemperature ?? null,
       };
       const mergedVitals: OPDVitals = { ...existingVitals, ...data.vitals };
-      previousValue.vitals = existingVitals;
-      newValue.vitals      = mergedVitals;
-      updateData.vitals    = mergedVitals;
+      updateData.vitals = mergedVitals;
+      // Same "only audit what actually changed" rule as the fields loop
+      // above — vitals are merged (not replaced) so an edit that only
+      // touches, say, weight would otherwise misreport every other reading
+      // as having "changed" too.
+      if (
+        existingVitals.weight          !== mergedVitals.weight          ||
+        existingVitals.height          !== mergedVitals.height          ||
+        existingVitals.bloodPressure   !== mergedVitals.bloodPressure   ||
+        existingVitals.sugar           !== mergedVitals.sugar           ||
+        existingVitals.bodyTemperature !== mergedVitals.bodyTemperature
+      ) {
+        previousValue.vitals = existingVitals;
+        newValue.vitals      = mergedVitals;
+      }
     }
 
-    // Re-stamp departmentId whenever the doctor assignment changes — otherwise
-    // a visit that started with no doctor (or a different doctor's department)
-    // would keep a stale/null department after reassignment, same gap IPD's
-    // admission update already closes for assignedDoctorIds.
-    if (data.doctorIds !== undefined) {
+    // Re-stamp departmentId whenever the doctor assignment actually changes —
+    // otherwise a visit that started with no doctor (or a different doctor's
+    // department) would keep a stale/null department after reassignment, same
+    // gap IPD's admission update already closes for assignedDoctorIds. Gated
+    // on a real change (not just "doctorIds was present in the request") so
+    // resending the same assignment unchanged — which the Edit form's
+    // diagnosis/prescription/notes/vitals-only saves never do, but a direct
+    // API caller might — doesn't re-run the department lookup/duplicate
+    // check below or log a no-op departmentId "change" to the audit trail.
+    const doctorIdsChanged = data.doctorIds !== undefined && !isSameFieldValue(visit.doctorIds, data.doctorIds);
+    if (doctorIdsChanged) {
       previousValue.departmentId = visit.departmentId;
-      const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, data.doctorIds);
+      const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, data.doctorIds!);
       newValue.departmentId   = departmentId;
       updateData.departmentId = departmentId;
     }
@@ -295,8 +372,8 @@ export class OPDService {
     }
 
     // Re-run the duplicate-appointment guard whenever the doctor assignment or
-    // date is changing — an edit can create the same clash a create can.
-    if (data.doctorIds !== undefined || data.visitDate !== undefined) {
+    // date is actually changing — an edit can create the same clash a create can.
+    if (doctorIdsChanged || data.visitDate !== undefined) {
       const effectiveDoctorIds = data.doctorIds ?? visit.doctorIds;
       const effectiveDate      = (updateData.visitDate as Date | undefined) ?? visit.visitDate;
       const duplicate = await opdRepository.findActiveDuplicate(
@@ -318,15 +395,25 @@ export class OPDService {
     const updated = await opdRepository.update(tenantId, visitId, updateData, updateFilterPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
-    await auditService.log({
-      entityType: AuditEntityType.OPD_VISIT,
-      entityId:   visitId,
-      action:     'UPDATE',
-      userId:     updatedBy,
-      tenantId,
-      previousValue: redactClinicalFields(previousValue),
-      newValue:      redactClinicalFields(newValue),
-    });
+    // Skip the audit write entirely for a genuine no-op save (edit opened
+    // and saved with nothing actually changed) — every field above is only
+    // added to previousValue/newValue when it differs from the visit's prior
+    // value, so both are empty here iff nothing did. `userId` is always
+    // `updatedBy`, derived server-side from the authenticated session (see
+    // the controller, which passes `req.user!.userId` — never anything from
+    // the request body), so the actor can never be spoofed via the payload.
+    if (Object.keys(previousValue).length > 0 || Object.keys(newValue).length > 0) {
+      const { previousValue: auditPrevious, newValue: auditNew } = redactClinicalDiff(previousValue, newValue);
+      await auditService.log({
+        entityType: AuditEntityType.OPD_VISIT,
+        entityId:   visitId,
+        action:     'UPDATE',
+        userId:     updatedBy,
+        tenantId,
+        previousValue: auditPrevious,
+        newValue:      auditNew,
+      });
+    }
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
     return withFullName(updated, patient?.fullName);
@@ -424,22 +511,42 @@ export class OPDService {
       status:    OPDVisitStatus.COMPLETED,
       diagnosis: data.diagnosis,
     } as Partial<IOPDVisit>;
-    if (data.prescription !== undefined) updateData.prescription = data.prescription;
-    if (data.notes        !== undefined) updateData.notes        = data.notes;
+
+    // diagnosis is mandatory to complete a visit (completeVisitSchema enforces
+    // non-empty), so this is always a genuine set/finalize — recorded
+    // unconditionally, unlike prescription/notes below. The clinical text
+    // itself is never recorded — only the fact that one was supplied. See
+    // redactClinicalDiff.
+    const previousValue: Record<string, unknown> = { status: visit.status, diagnosis: visit.diagnosis };
+    const newValue:      Record<string, unknown> = { status: OPDVisitStatus.COMPLETED, diagnosis: data.diagnosis };
+
+    if (data.prescription !== undefined) {
+      updateData.prescription = data.prescription;
+      if (!isSameFieldValue(visit.prescription, data.prescription)) {
+        previousValue.prescription = visit.prescription;
+        newValue.prescription      = data.prescription;
+      }
+    }
+    if (data.notes !== undefined) {
+      updateData.notes = data.notes;
+      if (!isSameFieldValue(visit.notes, data.notes)) {
+        previousValue.notes = visit.notes;
+        newValue.notes      = data.notes;
+      }
+    }
 
     const updated = await opdRepository.update(tenantId, visitId, updateData, scopedPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
 
+    const { previousValue: auditPrevious, newValue: auditNew } = redactClinicalDiff(previousValue, newValue);
     await auditService.log({
       entityType:    AuditEntityType.OPD_VISIT,
       entityId:      visitId,
       action:        'UPDATE',
       userId:        completedBy,
       tenantId,
-      previousValue: { status: visit.status },
-      // The diagnosis itself is deliberately not recorded here — only the fact
-      // that one was supplied. See redactClinicalFields.
-      newValue:      { status: OPDVisitStatus.COMPLETED, diagnosis: REDACTED_MARKER },
+      previousValue: auditPrevious,
+      newValue:      auditNew,
     });
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);

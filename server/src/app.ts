@@ -87,6 +87,7 @@ const corsOptions: cors.CorsOptions = {
     'Content-Type',
     'Authorization',
     'X-Correlation-ID',
+    'Idempotency-Key',
   ],
 };
 

@@ -145,6 +145,30 @@ describe('POST /api/inventory', () => {
     expect(res.status).toBe(201);
   });
 
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second item', async () => {
+    const idempotencyKey = 'temp-client-op-inv-001';
+
+    const first = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(validPayload);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/inventory')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(validPayload);
+
+    // Replayed, not re-executed — the exact same stored response comes back.
+    expect(second.status).toBe(201);
+    expect(second.body.data.itemId).toBe(first.body.data.itemId);
+
+    const items = await InventoryItemModel.find({ tenantId, name: validPayload.name });
+    expect(items).toHaveLength(1);
+  });
+
   test('returns 403 for doctor role', async () => {
     const res = await request(app)
       .post('/api/inventory')

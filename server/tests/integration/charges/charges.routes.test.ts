@@ -109,6 +109,33 @@ describe('POST /api/charges', () => {
     expect(res.body.data.testTypeName).toBeNull();
   });
 
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second charge', async () => {
+    const idempotencyKey = 'temp-client-op-charge-001';
+    const body = { patientId, category: 'CONSULTATION', description: 'Consultation fee', amount: 500 };
+
+    const first = await request(app)
+      .post('/api/charges')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/charges')
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(body);
+
+    expect(second.status).toBe(201);
+    expect(second.body.data.chargeId).toBe(first.body.data.chargeId);
+
+    // description is an encrypted-at-rest field (see CLAUDE.md "Field-Level
+    // Encryption") — querying it directly by plaintext would never match, so
+    // this filters by the plaintext fields instead (patientId/category).
+    const charges = await ChargeModel.find({ patientId, category: 'CONSULTATION' });
+    expect(charges).toHaveLength(1);
+  });
+
   test('400 — LAB_TEST charge without testTypeId/testTypeName is rejected', async () => {
     const res = await request(app)
       .post('/api/charges')

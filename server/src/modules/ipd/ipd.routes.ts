@@ -3,6 +3,7 @@ import { authenticateJWT }            from '../../shared/middleware/authenticate
 import { scopeTenant }                from '../../shared/middleware/scope-tenant';
 import { requireRole }                from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }           from '../../shared/middleware/idempotency';
 import { UserRole }                   from '../../shared/types/common.types';
 import {
   createAdmission,
@@ -37,6 +38,7 @@ router.post(
     UserRole.NURSE,
      ...ADMIN_ROLES),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.admission.create'),
   createAdmission,
 );
 
@@ -84,6 +86,7 @@ router.patch(
     UserRole.HOSPITAL_ADMIN,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.admission.update'),
   updateAdmission,
 );
 
@@ -93,6 +96,7 @@ router.post(
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.NURSE),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.progressNote.add'),
   addProgressNote,
 );
 
@@ -182,6 +186,7 @@ router.post('/wards',
   UserRole.MANAGER,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.ward.create'),
   createWard,
 );
 
@@ -208,6 +213,7 @@ router.post('/wards/:wardId/beds',
     UserRole.MANAGER,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.bed.add'),
   addBeds,
 );
 

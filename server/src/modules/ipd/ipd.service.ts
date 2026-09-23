@@ -315,37 +315,29 @@ export class IPDService {
       }
     }
 
-    // [7] Create admission — denormalize ward.name and bed.bedNumber at write time
-    const admission = await ipdRepository.save({
-      admissionId:       uuidv4(),
-      patientId:         input.patientId,
-      wardId:            input.wardId,
-      bedId:             input.bedId,
-      bedNumber:         bed.bedNumber,
-      wardName:          ward.name,
-      assignedDoctorIds: assignedDoctorIds,
-      departmentId:      doctorDepartmentId,
-      status:           AdmissionStatus.ADMITTED,
-      admissionDate:    new Date(),
-      dischargeDate:    null,
-      progressNotes:    [],
-      tenantId,
-    });
-
-    // [8] Mark bed as occupied (advisory cache; conflict arbiter is IPD collection)
-    try {
-      await ipdRepository.updateBedOccupancy(tenantId, input.bedId, true, admission.admissionId);
-    } catch (err) {
-      console.error('CRITICAL: Admission saved but bed flag update failed', {
-        admissionId: admission.admissionId,
-        bedId:       input.bedId,
-        error:       (err as Error).message,
-      });
-      throw new AppError(
-        'Admission created but bed status could not be updated. Please contact support.',
-        500,
-      );
-    }
+    // [7]+[8] Create the admission and occupy the bed atomically. The
+    // partial unique indexes on IPDAdmission (ipd.model.ts) are the final
+    // race-condition arbiter under concurrent or offline-replayed creates —
+    // steps [1b]/[5] above are a fast, friendly pre-check only; a
+    // duplicate-key hit here is mapped to a 409 by the repository.
+    const admission = await ipdRepository.createAdmissionWithBedOccupancy(
+      {
+        admissionId:       uuidv4(),
+        patientId:         input.patientId,
+        wardId:            input.wardId,
+        bedId:             input.bedId,
+        bedNumber:         bed.bedNumber,
+        wardName:          ward.name,
+        assignedDoctorIds: assignedDoctorIds,
+        departmentId:      doctorDepartmentId,
+        status:           AdmissionStatus.ADMITTED,
+        admissionDate:    new Date(),
+        dischargeDate:    null,
+        progressNotes:    [],
+        tenantId,
+      },
+      input.bedId,
+    );
 
     // [9] Audit log (non-blocking)
     try {

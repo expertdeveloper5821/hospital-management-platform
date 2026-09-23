@@ -64,7 +64,7 @@ function rawNotes(stored: Record<string, unknown>): Array<Record<string, unknown
 
 // Every stored `note` is ciphertext, no plaintext PHI leaked anywhere in the
 // document, and the sibling scalars are still plaintext.
-function assertNotesCiphertext(stored: Record<string, unknown>): void {
+function assertNotesCiphertext(stored: Record<string, unknown>, expectedPatientId = 'PAT-IPDTRACE1'): void {
   const notes = rawNotes(stored);
   expect(notes.length).toBeGreaterThan(0);
   for (const n of notes) {
@@ -76,7 +76,7 @@ function assertNotesCiphertext(stored: Record<string, unknown>): void {
   expect(blob).not.toContain('HIV-positive');
   expect(blob).not.toContain('confidential psychiatric');
   expect(stored.tenantId).toBe(TENANT);
-  expect(stored.patientId).toBe('PAT-IPDTRACE1');
+  expect(stored.patientId).toBe(expectedPatientId);
 }
 
 describe('IPDAdmission progressNotes[].note encryption — full write-path trace (raw MongoDB)', () => {
@@ -178,11 +178,11 @@ describe('IPDAdmission progressNotes[].note encryption — full write-path trace
           update: { $push: { progressNotes: note('n1', '<p>bulkwrite push secret</p>') } },
         },
       },
-      { insertOne: { document: makeAdmission('adm-009', [note('n1')]) } },
+      { insertOne: { document: { ...makeAdmission('adm-009', [note('n1')]), bedId: 'bed-2', patientId: 'PAT-IPDTRACE2' } } },
     ]);
     expect(rawNotes(await raw('adm-008'))[0]!.note).toMatch(ENVELOPE);
     expect(JSON.stringify(await raw('adm-008'))).not.toContain('bulkwrite push secret');
-    assertNotesCiphertext(await raw('adm-009'));
+    assertNotesCiphertext(await raw('adm-009'), 'PAT-IPDTRACE2');
   });
 
   test('save path: pushing a note onto a hydrated doc then save() encrypts it', async () => {
@@ -300,7 +300,9 @@ describe('encrypt-ipd-progress-notes migration script', () => {
   });
 
   test('leaves a model-encrypted admission untouched and still encrypts a legacy one', async () => {
-    await IPDAdmissionModel.create(makeAdmission('mig-004', [note('n1')]));
+    await IPDAdmissionModel.create({
+      ...makeAdmission('mig-004', [note('n1')]), bedId: 'bed-mig-004', patientId: 'PAT-IPDTRACE-MIG4',
+    });
     await insertLegacy('mig-005', [note('n1')]);
 
     const n = await migrateIpdProgressNotes(col());

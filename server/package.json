@@ -26,7 +26,8 @@
     "migrate:encrypt-charge-fields": "ts-node scripts/encrypt-charge-fields.ts",
     "migrate:encrypt-ipd-progress-notes": "ts-node scripts/encrypt-ipd-progress-notes.ts",
     "migrate:encrypt-opd-vitals": "ts-node scripts/encrypt-opd-vitals.ts",
-    "migrate:encrypt-ipd-vitals": "ts-node scripts/encrypt-ipd-vitals.ts"
+    "migrate:encrypt-ipd-vitals": "ts-node scripts/encrypt-ipd-vitals.ts",
+    "migrate:ipd-active-admission-indexes": "ts-node scripts/migrate-ipd-add-active-admission-indexes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.575.0",

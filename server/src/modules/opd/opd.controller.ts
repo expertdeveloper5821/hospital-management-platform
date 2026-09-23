@@ -50,7 +50,12 @@ const vitalsSchema = z.object({
 const updateVisitSchema = z.object({
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  diagnosis:      z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
+  // No `.min(1)` here (unlike completeVisitSchema below, where a diagnosis is
+  // mandatory to finalize a visit) — an OPEN/IN_PROGRESS visit's diagnosis
+  // may be intentionally cleared via Edit (e.g. to redo it), and an empty
+  // string is how the frontend signals that explicit clear rather than "no
+  // change" (see opd/page.tsx's handleUpdate, which always sends this field).
+  diagnosis:      z.string().max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
   prescription:   z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
   notes:          notesSchema,
   vitals:         vitalsSchema,

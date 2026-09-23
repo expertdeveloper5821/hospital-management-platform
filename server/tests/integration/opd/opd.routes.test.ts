@@ -255,6 +255,36 @@ describe('POST /api/opd/visits', () => {
     expect(res.status).toBe(401);
   });
 
+  test('Idempotency-Key replay: retrying the same create does not create a second visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const idempotencyKey = 'temp-client-op-opd-001';
+
+    const first = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .set('Idempotency-Key', idempotencyKey)
+      .send(VALID_VISIT_BODY);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/opd/visits')
+      .set(bearer(token))
+      .set('Idempotency-Key', idempotencyKey)
+      .send(VALID_VISIT_BODY);
+
+    // Replayed, not re-executed — same stored response, same visitId/queueNumber.
+    expect(second.status).toBe(201);
+    expect(second.body.data.visitId).toBe(first.body.data.visitId);
+    expect(second.body.data.queueNumber).toBe(first.body.data.queueNumber);
+
+    const count = await OPDVisitModel.countDocuments({ tenantId: tid });
+    expect(count).toBe(1);
+  });
+
   test('201 — notes with leading/trailing whitespace are trimmed', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();

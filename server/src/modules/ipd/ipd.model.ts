@@ -113,6 +113,27 @@ ipdAdmissionSchema.index({ tenantId: 1, bedId: 1, status: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, patientId: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, departmentId: 1, status: 1 });
 
+// Race-safety backstops (offline-sync support): a partial unique index
+// enforces "at most one ADMITTED admission per bed" / "...per patient"
+// atomically at the storage layer, closing the check-then-act gap in
+// IPDService.createAdmission's pre-checks (steps [1b]/[5] there are a fast,
+// friendly error only — these indexes are the final arbiter under
+// concurrent or offline-replayed creates). Additive alongside the
+// non-unique indexes above, which remain useful for status != ADMITTED
+// queries the partial index doesn't cover. See ipd.repository.ts's
+// createAdmissionWithBedOccupancy() for how the resulting E11000 is mapped
+// to a 409. New deployments pick these up via Mongoose's dev-time
+// autoIndex; production (autoIndex disabled) needs
+// `npm run migrate:ipd-active-admission-indexes`.
+ipdAdmissionSchema.index(
+  { tenantId: 1, bedId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'ADMITTED' }, name: 'uniq_active_admission_per_bed' },
+);
+ipdAdmissionSchema.index(
+  { tenantId: 1, patientId: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: 'ADMITTED' }, name: 'uniq_active_admission_per_patient' },
+);
+
 // ─── Progress-note / vitals encryption at rest (AES-256-GCM) ─────────────────
 // Each progressNotes[] element's `note` is sanitized rich-text clinical
 // free-text. It is encrypted transparently at the model layer via the shared

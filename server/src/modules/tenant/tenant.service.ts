@@ -20,6 +20,7 @@ import { DEFAULT_OPD_VALIDITY_DAYS } from './tenant.constants';
 
 const INVITE_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
 const MAX_LOGO_BYTES   = 2 * 1024 * 1024;       // 2 MB
+const MAX_PARCHA_TEMPLATE_BYTES = 5 * 1024 * 1024; // 5 MB — full A4 page, larger budget than the logo
 
 export class TenantService {
   async createTenant(data: CreateTenantRequest, superAdminId: string): Promise<ITenant> {
@@ -197,6 +198,9 @@ export class TenantService {
     if (branding.logoUrl) {
       branding.logoUrl = await s3Service.getPresignedUrl(branding.logoUrl, 86400);
     }
+    if (branding.parchaTemplateUrl) {
+      branding.parchaTemplateUrl = await s3Service.getPresignedUrl(branding.parchaTemplateUrl, 86400);
+    }
     return {
       ...branding,
       addressLine:  tenant.onboardingDocuments.addressLine,
@@ -246,6 +250,59 @@ export class TenantService {
       tenantId,
       previousValue: { branding: tenant.branding, ...(syncedName !== undefined && { name: tenant.name }) },
       newValue:      { branding: update, ...(syncedName !== undefined && { name: syncedName }) },
+    });
+  }
+
+  // ─── Parcha template (Hospital Admin configurable) ─────────────────────────
+  // A hospital-supplied full-page background used instead of the app's default
+  // OPD/IPD parcha header — see BrandingConfig.parchaTemplateUrl.
+
+  async uploadParchaTemplate(tenantId: string, buffer: Buffer, mimeType: string, adminId: string): Promise<void> {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Tenant not found');
+    if (buffer.length > MAX_PARCHA_TEMPLATE_BYTES) {
+      throw new ValidationError('Parcha template file must not exceed 5 MB');
+    }
+
+    const ext = mimeType === 'image/png' ? 'png' : mimeType === 'application/pdf' ? 'pdf' : 'jpg';
+    const key = `tenants/${tenantId}/parcha-template/template.${ext}`;
+    const previousKey = tenant.branding.parchaTemplateUrl ?? null;
+
+    await s3Service.uploadFile(key, buffer, mimeType);
+    if (previousKey && previousKey !== key) {
+      await s3Service.deleteFile(previousKey).catch(() => { /* best-effort */ });
+    }
+    await tenantRepository.updateParchaTemplate(tenantId, key);
+
+    await auditService.log({
+      entityType:    AuditEntityType.TENANT,
+      entityId:      tenantId,
+      action:        'UPDATE',
+      userId:        adminId,
+      tenantId,
+      previousValue: { parchaTemplateUrl: previousKey },
+      newValue:      { parchaTemplateUrl: key },
+    });
+  }
+
+  async removeParchaTemplate(tenantId: string, adminId: string): Promise<void> {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Tenant not found');
+
+    const previousKey = tenant.branding.parchaTemplateUrl ?? null;
+    if (!previousKey) return;
+
+    await s3Service.deleteFile(previousKey).catch(() => { /* best-effort */ });
+    await tenantRepository.updateParchaTemplate(tenantId, null);
+
+    await auditService.log({
+      entityType:    AuditEntityType.TENANT,
+      entityId:      tenantId,
+      action:        'UPDATE',
+      userId:        adminId,
+      tenantId,
+      previousValue: { parchaTemplateUrl: previousKey },
+      newValue:      { parchaTemplateUrl: null },
     });
   }
 
