@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
-import { useGetAdmissionByIdQuery } from '@/store/api/ipd.api';
+import { useGetAdmissionByIdQuery, useGetIPDParchaPdfMutation } from '@/store/api/ipd.api';
 import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListUsersQuery } from '@/store/api/user.api';
@@ -47,12 +47,14 @@ function Field({ label, value, span, mono }: { label: string; value: string; spa
   );
 }
 
-// One labelled Vitals line in the left-side box — value on top of a ruled
+// One labelled Vitals line in the left-side column — value on top of a ruled
 // line so a reading the app never collected can still be filled in by hand
-// on the printed sheet. Mirrors the OPD parcha's VitalRow exactly.
+// on the printed sheet. Mirrors the OPD parcha's VitalRow exactly. Spacing
+// between rows comes from the parent's `space-y-*` (see the Vitals column
+// below), not a per-row margin.
 function VitalRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mt-2 first:mt-0">
+    <div>
       <p className="text-[9px] text-gray-500 leading-tight">{label}</p>
       <p className="min-h-[3.2mm] border-b border-gray-300 text-[11px] font-medium text-gray-900 leading-tight">
         {value}
@@ -99,6 +101,14 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
   const { admissionId } = params;
   const branding = useAppSelector((s) => s.auth.branding);
 
+  // A PDF template is rendered server-side (the uploaded PDF page merged
+  // with this admission's data — see server/src/shared/services/parcha-
+  // template.service.ts) and previewed/printed via an <iframe>, not the HTML
+  // layout below. An image template keeps using the existing <img>-
+  // background overlay; no template falls through to the default HTML
+  // header/layout. Mirrors the OPD parcha print page.
+  const hasPdfTemplate = !!branding?.parchaTemplateUrl && /\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
+
   const { data: admission, isLoading: admissionLoading, isError: admissionError } = useGetAdmissionByIdQuery(admissionId);
   const { data: patient, isLoading: patientLoading, isError: patientError } = useGetPatientByIdQuery(
     admission?.patientId ?? '',
@@ -110,19 +120,56 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
 
   const ready = !admissionLoading && !patientLoading && !!admission && !!patient;
   const printedRef = useRef(false);
+  const pdfPrintedRef = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [fetchParchaPdf] = useGetIPDParchaPdfMutation();
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  // true once the merged-PDF fetch has failed (404 = no PDF template
+  // actually available server-side despite the URL looking like one, or a
+  // network/render error) — falls back to the default HTML layout rather
+  // than leaving the page stuck on "Preparing…".
+  const [pdfError, setPdfError] = useState(false);
+
+  useEffect(() => {
+    if (!hasPdfTemplate || !ready || pdfUrl || pdfError) return;
+    let cancelled = false;
+    fetchParchaPdf(admissionId).then((result) => {
+      if (cancelled) return;
+      if ('data' in result && result.data) {
+        setPdfUrl(result.data);
+      } else {
+        setPdfError(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [hasPdfTemplate, ready, pdfUrl, pdfError, fetchParchaPdf, admissionId]);
+
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  const showPdfTemplate = hasPdfTemplate && !pdfError;
 
   // Auto-open the browser print dialog once the sheet has real data painted
   // — mirrors clicking "Print" so the IPD list's action truly "opens the
   // printable sheet" without a redundant extra click. The manual button
   // below remains as a fallback/re-print. Same 300ms settle delay as OPD's
-  // print page.
+  // print page. Skipped for a PDF template — that path prints via the
+  // iframe's own onLoad below instead.
   useEffect(() => {
-    if (ready && !printedRef.current) {
+    if (ready && !showPdfTemplate && !printedRef.current) {
       printedRef.current = true;
       const t = setTimeout(() => window.print(), 300);
       return () => clearTimeout(t);
     }
-  }, [ready]);
+  }, [ready, showPdfTemplate]);
+
+  function handlePrintClick() {
+    if (showPdfTemplate) {
+      iframeRef.current?.contentWindow?.print();
+    } else {
+      window.print();
+    }
+  }
 
   if (admissionLoading || patientLoading) {
     return (
@@ -160,16 +207,48 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
     .filter(Boolean)
     .join(', ');
 
-  // A hospital-supplied parcha template already carries the hospital name,
-  // logo, address, etc. as a full-page background — skip the app's own
+  // A hospital-supplied image parcha template already carries the hospital
+  // name, logo, address, etc. as a full-page background — skip the app's own
   // header block on top of it, and reserve extra top space for it instead of
-  // the default header's own vertical footprint. Only an image template can
-  // be rendered this way (a plain <img>, so it always prints without relying
-  // on the browser's "background graphics" print option) — a PDF template
-  // (also accepted for upload, see the Branding page) falls back to the
-  // default header here rather than showing a broken image with no header.
+  // the default header's own vertical footprint. A PDF template is handled
+  // entirely above (showPdfTemplate) and never reaches this HTML layout.
   // Mirrors the OPD parcha.
-  const hasTemplate = !!branding?.parchaTemplateUrl && !/\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
+  const hasImageTemplate = !!branding?.parchaTemplateUrl && !hasPdfTemplate;
+
+  if (showPdfTemplate) {
+    return (
+      <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
+        <div className="max-w-[210mm] mx-auto mb-4 flex items-center justify-between px-2 print:hidden">
+          <Link href="/ipd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Back to IPD
+          </Link>
+          <Button size="sm" onClick={handlePrintClick} disabled={!pdfUrl}>
+            <Printer className="h-4 w-4 mr-2" />
+            Print
+          </Button>
+        </div>
+
+        {pdfUrl ? (
+          <iframe
+            ref={iframeRef}
+            src={pdfUrl}
+            title="IPD Admission Sheet"
+            className="parcha-sheet block mx-auto border-0 bg-white w-[210mm] h-[297mm] print:w-full print:h-screen"
+            onLoad={() => {
+              if (!pdfPrintedRef.current) {
+                pdfPrintedRef.current = true;
+                setTimeout(() => iframeRef.current?.contentWindow?.print(), 300);
+              }
+            }}
+          />
+        ) : (
+          <div className="max-w-3xl mx-auto py-12 text-center text-sm text-muted-foreground print:hidden">
+            Preparing printable slip…
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
@@ -178,7 +257,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
         <Link href="/ipd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" /> Back to IPD
         </Link>
-        <Button size="sm" onClick={() => window.print()}>
+        <Button size="sm" onClick={handlePrintClick}>
           <Printer className="h-4 w-4 mr-2" />
           Print
         </Button>
@@ -186,9 +265,9 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
 
       {/* A4 sheet — the only thing meant to reach the printer */}
       <div
-        className={`parcha-sheet relative px-[16mm] ${hasTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
+        className={`parcha-sheet relative px-[16mm] ${hasImageTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
       >
-        {hasTemplate && (
+        {hasImageTemplate && (
           // Real <img>, not a CSS background — prints reliably without the
           // browser's "background graphics" print option being enabled.
           // eslint-disable-next-line @next/next/no-img-element
@@ -200,7 +279,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
           />
         )}
         <div className="relative z-10">
-        {!hasTemplate && (
+        {!hasImageTemplate && (
           <>
             {/* Hospital header */}
             <div className="flex items-start gap-4">
@@ -247,17 +326,27 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
             recorded renders as a blank ruled line rather than a placeholder,
             so the printed sheet can still be filled in by hand for exactly
             the readings the app never collected — same convention as OPD. */}
-        <div className="mt-4 flex gap-4 items-start">
-          <div className="w-[42mm] shrink-0 border border-gray-300 rounded-sm p-2.5 break-inside-avoid" style={{ minHeight: '80mm' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Vitals</p>
-            <VitalRow label="Weight (kg)"           value={admission.vitals?.weight          != null ? String(admission.vitals.weight)          : ''} />
-            <VitalRow label="Height (cm)"            value={admission.vitals?.height          != null ? String(admission.vitals.height)          : ''} />
-            <VitalRow label="Blood Pressure (mmHg)"  value={admission.vitals?.bloodPressure   ?? ''} />
-            <VitalRow label="Sugar (mg/dL)"          value={admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : ''} />
-            <VitalRow label="Body Temperature (°F)"  value={admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : ''} />
+        {/* No box borders — a single vertical divider (border-r on the
+            Vitals column) separates the two columns instead. `items-stretch`
+            (the flex default) makes both columns match the taller side's
+            height, so the divider always runs from the top of this section
+            to the bottom of the Progress Notes column, whatever that height
+            ends up being. */}
+        <div className="mt-4 flex">
+          {/* Vitals stays compact/top-aligned — only the divider (not the
+              row spacing) extends down to match the Progress Notes column. */}
+          <div className="w-[42mm] shrink-0 pr-3 border-r border-gray-300 break-inside-avoid">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Vitals</p>
+            <div className="space-y-1.5">
+              <VitalRow label="Weight" value={admission.vitals?.weight          != null ? String(admission.vitals.weight)          : ''} />
+              <VitalRow label="Height" value={admission.vitals?.height          != null ? String(admission.vitals.height)          : ''} />
+              <VitalRow label="BP"     value={admission.vitals?.bloodPressure   ?? ''} />
+              <VitalRow label="Sugar"  value={admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : ''} />
+              <VitalRow label="Temp"   value={admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : ''} />
+            </div>
           </div>
 
-          <div className="flex-1 border border-gray-300 rounded-sm p-2.5" style={{ minHeight: '80mm' }}>
+          <div className="flex-1 pl-4" style={{ minHeight: '80mm' }}>
             <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Progress Notes</p>
             {sortedNotes.length === 0 ? (
               <p className="text-[11px] text-gray-400 italic">No progress notes recorded.</p>

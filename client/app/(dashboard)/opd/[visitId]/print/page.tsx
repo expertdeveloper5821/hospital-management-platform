@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
-import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
+import { useGetOPDVisitByIdQuery, useGetOPDParchaPdfMutation } from '@/store/api/opd.api';
 import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListUsersQuery } from '@/store/api/user.api';
@@ -39,12 +39,14 @@ function Field({ label, value, span, mono }: { label: string; value: string; spa
   );
 }
 
-// One labelled Vitals line in the left-side box — value on top of a ruled
+// One labelled Vitals line in the left-side column — value on top of a ruled
 // line so a reading the app never collected can still be filled in by hand
 // on the printed sheet, exactly like the blank box this section replaced.
+// Spacing between rows comes from the parent's `space-y-*` (see the Vitals
+// column below), not a per-row margin.
 function VitalRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mt-2 first:mt-0">
+    <div>
       <p className="text-[9px] text-gray-500 leading-tight">{label}</p>
       <p className="min-h-[3.2mm] border-b border-gray-300 text-[11px] font-medium text-gray-900 leading-tight">
         {value}
@@ -86,6 +88,13 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   const { visitId } = params;
   const branding = useAppSelector((s) => s.auth.branding);
 
+  // A PDF template is rendered server-side (the uploaded PDF page merged
+  // with this visit's data — see server/src/shared/services/parcha-template
+  // .service.ts) and previewed/printed via an <iframe>, not the HTML layout
+  // below. An image template keeps using the existing <img>-background
+  // overlay; no template falls through to the default HTML header/layout.
+  const hasPdfTemplate = !!branding?.parchaTemplateUrl && /\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
+
   const { data: visit, isLoading: visitLoading, isError: visitError } = useGetOPDVisitByIdQuery(visitId);
   const { data: patient, isLoading: patientLoading, isError: patientError } = useGetPatientByIdQuery(
     visit?.patientId ?? '',
@@ -97,18 +106,55 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
 
   const ready = !visitLoading && !patientLoading && !!visit && !!patient;
   const printedRef = useRef(false);
+  const pdfPrintedRef = useRef(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [fetchParchaPdf] = useGetOPDParchaPdfMutation();
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  // true once the merged-PDF fetch has failed (404 = no PDF template
+  // actually available server-side despite the URL looking like one, or a
+  // network/render error) — falls back to the default HTML layout rather
+  // than leaving the page stuck on "Preparing…".
+  const [pdfError, setPdfError] = useState(false);
+
+  useEffect(() => {
+    if (!hasPdfTemplate || !ready || pdfUrl || pdfError) return;
+    let cancelled = false;
+    fetchParchaPdf(visitId).then((result) => {
+      if (cancelled) return;
+      if ('data' in result && result.data) {
+        setPdfUrl(result.data);
+      } else {
+        setPdfError(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [hasPdfTemplate, ready, pdfUrl, pdfError, fetchParchaPdf, visitId]);
+
+  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
+
+  const showPdfTemplate = hasPdfTemplate && !pdfError;
 
   // Auto-open the browser print dialog once the parcha has real data painted
   // — mirrors clicking "Print" so the OPD list's action truly "opens the
   // printable parcha" without a redundant extra click. The manual button
-  // below remains as a fallback/re-print.
+  // below remains as a fallback/re-print. Skipped for a PDF template — that
+  // path prints via the iframe's own onLoad below instead.
   useEffect(() => {
-    if (ready && !printedRef.current) {
+    if (ready && !showPdfTemplate && !printedRef.current) {
       printedRef.current = true;
       const t = setTimeout(() => window.print(), 300);
       return () => clearTimeout(t);
     }
-  }, [ready]);
+  }, [ready, showPdfTemplate]);
+
+  function handlePrintClick() {
+    if (showPdfTemplate) {
+      iframeRef.current?.contentWindow?.print();
+    } else {
+      window.print();
+    }
+  }
 
   if (visitLoading || patientLoading) {
     return (
@@ -142,15 +188,47 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
     .filter(Boolean)
     .join(', ');
 
-  // A hospital-supplied parcha template already carries the hospital name,
-  // logo, address, etc. as a full-page background — skip the app's own
+  // A hospital-supplied image parcha template already carries the hospital
+  // name, logo, address, etc. as a full-page background — skip the app's own
   // header block on top of it, and reserve extra top space for it instead of
-  // the default header's own vertical footprint. Only an image template can
-  // be rendered this way (a plain <img>, so it always prints without relying
-  // on the browser's "background graphics" print option) — a PDF template
-  // (also accepted for upload, see the Branding page) falls back to the
-  // default header here rather than showing a broken image with no header.
-  const hasTemplate = !!branding?.parchaTemplateUrl && !/\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
+  // the default header's own vertical footprint. A PDF template is handled
+  // entirely above (showPdfTemplate) and never reaches this HTML layout.
+  const hasImageTemplate = !!branding?.parchaTemplateUrl && !hasPdfTemplate;
+
+  if (showPdfTemplate) {
+    return (
+      <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
+        <div className="max-w-[210mm] mx-auto mb-4 flex items-center justify-between px-2 print:hidden">
+          <Link href="/opd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Back to OPD
+          </Link>
+          <Button size="sm" onClick={handlePrintClick} disabled={!pdfUrl}>
+            <Printer className="h-4 w-4 mr-2" />
+            Print
+          </Button>
+        </div>
+
+        {pdfUrl ? (
+          <iframe
+            ref={iframeRef}
+            src={pdfUrl}
+            title="OPD Parcha"
+            className="parcha-sheet block mx-auto border-0 bg-white w-[210mm] h-[297mm] print:w-full print:h-screen"
+            onLoad={() => {
+              if (!pdfPrintedRef.current) {
+                pdfPrintedRef.current = true;
+                setTimeout(() => iframeRef.current?.contentWindow?.print(), 300);
+              }
+            }}
+          />
+        ) : (
+          <div className="max-w-3xl mx-auto py-12 text-center text-sm text-muted-foreground print:hidden">
+            Preparing printable slip…
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
@@ -159,7 +237,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
         <Link href="/opd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="h-4 w-4" /> Back to OPD
         </Link>
-        <Button size="sm" onClick={() => window.print()}>
+        <Button size="sm" onClick={handlePrintClick}>
           <Printer className="h-4 w-4 mr-2" />
           Print
         </Button>
@@ -167,9 +245,9 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
 
       {/* A4 sheet — the only thing meant to reach the printer */}
       <div
-        className={`parcha-sheet relative px-[16mm] ${hasTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
+        className={`parcha-sheet relative px-[16mm] ${hasImageTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
       >
-        {hasTemplate && (
+        {hasImageTemplate && (
           // Real <img>, not a CSS background — prints reliably without the
           // browser's "background graphics" print option being enabled.
           // eslint-disable-next-line @next/next/no-img-element
@@ -181,7 +259,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
           />
         )}
         <div className="relative z-10">
-        {!hasTemplate && (
+        {!hasImageTemplate && (
           <>
             {/* Hospital header */}
             <div className="flex items-start gap-4">
@@ -226,17 +304,27 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             vital never recorded renders as a blank ruled line rather than a
             placeholder, so the printed sheet can still be filled in by hand
             for exactly the readings the app never collected. */}
-        <div className="mt-4 flex gap-4 items-start break-inside-avoid">
-          <div className="w-[42mm] shrink-0 border border-gray-300 rounded-sm p-2.5" style={{ minHeight: '150mm' }}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Vitals</p>
-            <VitalRow label="Weight (kg)"           value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
-            <VitalRow label="Height (cm)"            value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
-            <VitalRow label="Blood Pressure (mmHg)"  value={visit.vitals?.bloodPressure   ?? ''} />
-            <VitalRow label="Sugar (mg/dL)"          value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
-            <VitalRow label="Body Temperature (°F)"  value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
+        {/* No box borders — a single vertical divider (border-r on the
+            Vitals column) separates the two columns instead. `items-stretch`
+            (the flex default) makes both columns match the taller side's
+            height, so the divider always runs from the top of this section
+            to the bottom of the clinical column, whatever that height ends
+            up being. */}
+        <div className="mt-4 flex break-inside-avoid">
+          {/* Vitals stays compact/top-aligned — only the divider (not the
+              row spacing) extends down to match the clinical column. */}
+          <div className="w-[42mm] shrink-0 pr-3 border-r border-gray-300">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Vitals</p>
+            <div className="space-y-1.5">
+              <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
+              <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
+              <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
+              <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
+              <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
+            </div>
           </div>
 
-          <div className="flex-1 border border-gray-300 rounded-sm p-2.5" style={{ minHeight: '150mm' }}>
+          <div className="flex-1 pl-4" style={{ minHeight: '150mm' }}>
             <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
             <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
             <ClinicalField label="Notes" minHeight="40mm">

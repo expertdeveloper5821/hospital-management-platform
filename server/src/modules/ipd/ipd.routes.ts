@@ -13,6 +13,7 @@ import {
   addProgressNote,
   dischargePatient,
   getDischargeSummaryPdf,
+  getParchaPdf,
   getPatientIPDHistory,
   getBedOccupancySummary,
   createWard,
@@ -72,6 +73,23 @@ router.get(
   ),
   requireFirstPasswordChange,
   getAdmissionById,
+);
+
+// GET /api/ipd/admissions/:admissionId/parcha-pdf — merged PDF parcha
+// (uploaded PDF template + this admission's dynamic data). Same readers as
+// the admission itself.
+router.get(
+  '/admissions/:admissionId/parcha-pdf',
+  ...protect,
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.DOCTOR,
+    UserRole.NURSE,
+    UserRole.MANAGER,
+    ...ADMIN_ROLES,
+  ),
+  requireFirstPasswordChange,
+  getParchaPdf,
 );
 
 // PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse)

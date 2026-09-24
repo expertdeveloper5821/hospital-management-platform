@@ -37,6 +37,8 @@ import {
   NotFoundError,
 } from '../../shared/middleware/error-handler';
 import { PatientModel } from '../patient/patient.model';
+import { stripRichTextTags } from '../../shared/utils/validation';
+import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
 
 
 // Shape a partial (or missing) vitals update/read always merges onto — keeps
@@ -137,6 +139,77 @@ function calculateAge(dob: Date): number {
   const m = today.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
   return Math.max(0, age);
+}
+
+// ─── Parcha PDF template overlay ────────────────────────────────────────────
+// Mirrors the IPD print page's (client/app/(dashboard)/ipd/[admissionId]/
+// print/page.tsx) field selection exactly, so a PDF template shows the same
+// information the default/image layouts do — assembled server-side since a
+// PDF template is merged with the admission's data on the server (see
+// IPDService.getParchaPdfContext) rather than composited client-side.
+function toDisplayCase(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function formatParchaDate(date: Date): string {
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatParchaDateTime(date: Date): string {
+  return date.toLocaleString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function buildIpdParchaOverlay(
+  admission:      IIPDAdmission,
+  patient:        { fullName: string; patientId: string; dateOfBirth: string; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null },
+  departmentName: string | null,
+  doctorNames:    string,
+  staffNameMap:   Map<string, string>,
+): ParchaOverlayInput {
+  const fieldRows: ParchaOverlayInput['fieldRows'] = [
+    { label: 'Patient Name', value: patient.fullName },
+    { label: 'Patient ID',   value: patient.patientId },
+    { label: 'Age / Gender', value: `${calculateAge(new Date(patient.dateOfBirth))} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Mobile',       value: patient.mobileNumber },
+  ];
+  if (patient.address)    fieldRows.push({ label: 'Address',     value: patient.address });
+  if (patient.bloodGroup) fieldRows.push({ label: 'Blood Group', value: patient.bloodGroup });
+  fieldRows.push({ label: 'Admission ID', value: admission.admissionId });
+  fieldRows.push({ label: 'Status',       value: toDisplayCase(admission.status) });
+  fieldRows.push({ label: 'Ward / Bed',   value: `${admission.wardName} / Bed ${admission.bedNumber}` });
+  if (departmentName) fieldRows.push({ label: 'Department', value: departmentName });
+  if (doctorNames)     fieldRows.push({ label: 'Doctor(s)',  value: doctorNames });
+  fieldRows.push({ label: 'Admission Date', value: formatParchaDate(admission.admissionDate) });
+  if (admission.dischargeDate) fieldRows.push({ label: 'Discharge Date', value: formatParchaDate(admission.dischargeDate) });
+
+  const vitals: ParchaOverlayInput['vitals'] = [
+    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
+    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
+    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
+    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
+    { label: 'Temp',   value: admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : '' },
+  ];
+
+  const sortedNotes = [...admission.progressNotes].sort(
+    (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+  );
+  const notesText = sortedNotes.length === 0
+    ? 'No progress notes recorded.'
+    : sortedNotes.map((n) => {
+        const author = staffNameMap.get(n.doctorId) ?? 'Staff';
+        return `${formatParchaDateTime(n.timestamp)} — ${author}\n${stripRichTextTags(n.note)}`;
+      }).join('\n\n');
+
+  return {
+    fieldRows,
+    vitals,
+    bodySections: [
+      { heading: 'Progress Notes', text: notesText, weight: 1 },
+    ],
+    footerText: `Generated on ${formatParchaDateTime(new Date())}`,
+  };
 }
 
 // ─── Discharge summary — best-effort "who did this" lookups ─────────────────
@@ -365,6 +438,50 @@ export class IPDService {
     assertAdmissionInScope(admission, nurseWardIds, doctorPatientIds);
     const patient = await patientRepository.findByPatientId(tenantId, admission.patientId);
     return toResponse(admission, tenantId, patient?.fullName ?? null);
+  }
+
+  // Assembles everything IPDController.getParchaPdf needs to render a PDF
+  // parcha template: the raw template bytes (fetched from S3) plus the
+  // admission's data already shaped into ParchaOverlayInput. Returns null
+  // when the tenant has no PDF template configured (no template at all, or
+  // an image template — those keep using the existing client-side <img>
+  // overlay/default layout, not this endpoint) so the controller can respond
+  // 404 and the print page can fall back cleanly. Generated fresh on every
+  // request, never persisted — mirrors getDischargeSummaryData.
+  async getParchaPdfContext(
+    admissionId:       string,
+    tenantId:          string,
+    nurseWardIds?:     string[],
+    doctorPatientIds?: string[],
+  ): Promise<{ templateBytes: Buffer; overlay: ParchaOverlayInput } | null> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+    assertAdmissionInScope(admission, nurseWardIds, doctorPatientIds);
+
+    const tenant = await tenantRepository.findById(tenantId);
+    const templateKey = tenant?.branding.parchaTemplateUrl ?? null;
+    if (!templateKey || !/\.pdf$/i.test(templateKey)) return null;
+
+    const [patient, templateBytes] = await Promise.all([
+      patientRepository.findByPatientId(tenantId, admission.patientId),
+      s3Service.getFile(templateKey),
+    ]);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const departmentName = admission.departmentId
+      ? (await departmentRepository.findById(tenantId, admission.departmentId))?.name ?? null
+      : null;
+    const doctorNameMap = await userRepository.findNamesByIds(tenantId, admission.assignedDoctorIds ?? []);
+    const doctorNames = (admission.assignedDoctorIds ?? [])
+      .map((id) => doctorNameMap.get(id))
+      .filter((n): n is string => !!n)
+      .join(', ');
+
+    const noteAuthorIds = [...new Set(admission.progressNotes.map((n) => n.doctorId))];
+    const staffNameMap = await userRepository.findNamesByIds(tenantId, noteAuthorIds);
+
+    const overlay = buildIpdParchaOverlay(admission, patient, departmentName, doctorNames, staffNameMap);
+    return { templateBytes, overlay };
   }
 
   async updateAdmission(

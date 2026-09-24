@@ -1,4 +1,6 @@
 import { baseApi } from './base.api';
+import { type FetchBaseQueryError } from '@reduxjs/toolkit/query';
+import type { RootState } from '../index';
 import type {
   ApiSuccess,
   OPDVisitResponse,
@@ -10,6 +12,8 @@ import type {
   DoctorNurseAssignmentsResponse,
   AvailableOpdNurseResponse,
 } from '../types';
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
 
 export const opdApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -118,6 +122,34 @@ export const opdApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<DoctorNurseAssignmentsResponse>) => raw.data,
       providesTags: ['OPD'],
     }),
+
+    // GET /api/opd/visits/:visitId/parcha-pdf — the uploaded PDF parcha
+    // template merged with this visit's data, server-side. Only meaningful
+    // when the hospital's parcha template is a PDF (branding.parchaTemplateUrl
+    // ends in .pdf); responds 404 otherwise, which the print page treats as
+    // "fall back to the existing image/default layout". Returns a blob object
+    // URL for an <iframe>, not JSON — same queryFn pattern as
+    // downloadDischargeSummary (ipd.api.ts).
+    getOPDParchaPdf: build.mutation<string, string>({
+      queryFn: async (visitId, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        try {
+          const res = await fetch(`${BASE_URL}/api/opd/visits/${visitId}/parcha-pdf`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'No PDF parcha template available' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          return { data: url };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
   }),
 });
 
@@ -133,4 +165,5 @@ export const {
   useGetOPDPaymentValidityQuery,
   useGetAvailableOpdNursesQuery,
   useGetDoctorNurseAssignmentsQuery,
+  useGetOPDParchaPdfMutation,
 } = opdApi;

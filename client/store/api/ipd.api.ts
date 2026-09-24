@@ -163,6 +163,34 @@ export const ipdApi = baseApi.injectEndpoints({
       },
     }),
 
+    // GET /api/ipd/admissions/:admissionId/parcha-pdf — the uploaded PDF
+    // parcha template merged with this admission's data, server-side. Only
+    // meaningful when the hospital's parcha template is a PDF
+    // (branding.parchaTemplateUrl ends in .pdf); responds 404 otherwise,
+    // which the print page treats as "fall back to the existing image/default
+    // layout". Returns a blob object URL for an <iframe> — same queryFn
+    // pattern as downloadDischargeSummary above.
+    getIPDParchaPdf: build.mutation<string, string>({
+      queryFn: async (admissionId, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        try {
+          const res = await fetch(`${BASE_URL}/api/ipd/admissions/${admissionId}/parcha-pdf`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'No PDF parcha template available' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          return { data: url };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
+
     // ── Patient IPD history ───────────────────────────────────────────────────
 
     getIPDPatientHistory: build.query<PaginatedResult<AdmissionResponse>, {
@@ -209,6 +237,7 @@ export const {
   useAddProgressNoteMutation,
   useDischargePatientMutation,
   useDownloadDischargeSummaryMutation,
+  useGetIPDParchaPdfMutation,
   useGetIPDPatientHistoryQuery,
   useGetBedOccupancySummaryQuery,
   useGetOccupancySummaryQuery,

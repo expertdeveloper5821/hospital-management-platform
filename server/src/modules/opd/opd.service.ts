@@ -6,12 +6,17 @@ import { patientRepository } from '../patient/patient.repository';
 import { paymentRepository } from '../payment/payment.repository';
 import { PaymentReferenceType } from '../payment/payment.types';
 import { departmentService } from '../department/department.service';
+import { departmentRepository } from '../department/department.repository';
 import { tenantService } from '../tenant/tenant.service';
+import { tenantRepository } from '../tenant/tenant.repository';
 import { userRepository } from '../user/user.repository';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { auditService } from '../../shared/services/audit.service';
+import { s3Service } from '../../shared/services/s3.service';
+import { stripRichTextTags } from '../../shared/utils/validation';
+import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
 import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import {
   OPDVisitStatus,
@@ -111,6 +116,69 @@ function redactClinicalDiff(
 
 function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { fullName?: string } {
   return Object.assign(visit, { fullName });
+}
+
+// ─── Parcha PDF template overlay ────────────────────────────────────────────
+// Mirrors the OPD print page's (client/app/(dashboard)/opd/[visitId]/print/
+// page.tsx) field selection exactly, so a PDF template shows the same
+// information the default/image layouts do — just assembled server-side
+// since a PDF template is merged with the visit's data on the server (see
+// OPDService.getParchaPdfContext) rather than composited client-side.
+function calculateAgeFromDob(dob: string): number {
+  const birth = new Date(dob);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const m = today.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+  return Math.max(0, age);
+}
+
+function toDisplayCase(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+function formatParchaDate(date: Date): string {
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function buildOpdParchaOverlay(
+  visit:          IOPDVisit,
+  patient:        { fullName: string; patientId: string; dateOfBirth: string; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null },
+  departmentName: string | null,
+  doctorNames:    string,
+): ParchaOverlayInput {
+  const fieldRows: ParchaOverlayInput['fieldRows'] = [
+    { label: 'Patient Name', value: patient.fullName },
+    { label: 'Patient ID',   value: patient.patientId },
+    { label: 'Age / Gender', value: `${calculateAgeFromDob(patient.dateOfBirth)} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Mobile',       value: patient.mobileNumber },
+  ];
+  if (patient.address)   fieldRows.push({ label: 'Address',     value: patient.address });
+  if (patient.bloodGroup) fieldRows.push({ label: 'Blood Group', value: patient.bloodGroup });
+  fieldRows.push({ label: 'Visit ID',   value: visit.visitId });
+  fieldRows.push({ label: 'Visit Date', value: formatParchaDate(visit.visitDate) });
+  if (departmentName) fieldRows.push({ label: 'Department', value: departmentName });
+  if (doctorNames)     fieldRows.push({ label: 'Doctor',     value: doctorNames });
+  fieldRows.push({ label: 'Registered On', value: formatParchaDate(visit.createdAt) });
+
+  const vitals: ParchaOverlayInput['vitals'] = [
+    { label: 'Weight', value: visit.vitals?.weight          != null ? String(visit.vitals.weight)          : '' },
+    { label: 'Height', value: visit.vitals?.height          != null ? String(visit.vitals.height)          : '' },
+    { label: 'BP',     value: visit.vitals?.bloodPressure   ?? '' },
+    { label: 'Sugar',  value: visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : '' },
+    { label: 'Temp',   value: visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : '' },
+  ];
+
+  return {
+    fieldRows,
+    vitals,
+    bodySections: [
+      { heading: 'Diagnosis',    text: visit.diagnosis ?? '',                   weight: 1 },
+      { heading: 'Prescription', text: visit.prescription ?? '',                weight: 5 },
+      { heading: 'Notes',        text: stripRichTextTags(visit.notes ?? ''),    weight: 3 },
+    ],
+    footerText: 'This is valid for 15 days.',
+  };
 }
 
 // Roles trusted to record a backdated OPD visit (e.g. paper-register backfill).
@@ -630,6 +698,40 @@ export class OPDService {
     if (!visit) throw new NotFoundError('OPD visit not found');
     const patient = await patientRepository.findByPatientId(tenantId, visit.patientId);
     return withFullName(visit, patient?.fullName);
+  }
+
+  // Assembles everything OPDController.getParchaPdf needs to render a PDF
+  // parcha template: the raw template bytes (fetched from S3) plus the
+  // visit's data already shaped into ParchaOverlayInput. Returns null when
+  // the tenant has no PDF template configured (no template at all, or an
+  // image template — those keep using the existing client-side <img>
+  // overlay/default layout, not this endpoint) so the controller can respond
+  // 404 and the print page can fall back cleanly.
+  async getParchaPdfContext(
+    tenantId: string,
+    visit:    IOPDVisit,
+  ): Promise<{ templateBytes: Buffer; overlay: ParchaOverlayInput } | null> {
+    const tenant = await tenantRepository.findById(tenantId);
+    const templateKey = tenant?.branding.parchaTemplateUrl ?? null;
+    if (!templateKey || !/\.pdf$/i.test(templateKey)) return null;
+
+    const [patient, templateBytes] = await Promise.all([
+      patientRepository.findByPatientId(tenantId, visit.patientId),
+      s3Service.getFile(templateKey),
+    ]);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const departmentName = visit.departmentId
+      ? (await departmentRepository.findById(tenantId, visit.departmentId))?.name ?? null
+      : null;
+    const doctorNameMap = await userRepository.findNamesByIds(tenantId, visit.doctorIds ?? []);
+    const doctorNames = (visit.doctorIds ?? [])
+      .map((id) => doctorNameMap.get(id))
+      .filter((n): n is string => !!n)
+      .join(', ');
+
+    const overlay = buildOpdParchaOverlay(visit, patient, departmentName, doctorNames);
+    return { templateBytes, overlay };
   }
 
   async getPatientHistory(

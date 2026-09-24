@@ -6,6 +6,7 @@ import { userRepository } from '../user/user.repository';
 import { ITenant } from './tenant.model';
 import { emailService } from '../../shared/services/email.service';
 import { s3Service } from '../../shared/services/s3.service';
+import { validateSinglePageA4Pdf } from '../../shared/services/parcha-template.service';
 import { auditService } from '../../shared/services/audit.service';
 import { tenantCache } from '../../shared/config/tenant-cache';
 import config from '../../shared/config/env';
@@ -262,6 +263,14 @@ export class TenantService {
     if (!tenant) throw new NotFoundError('Tenant not found');
     if (buffer.length > MAX_PARCHA_TEMPLATE_BYTES) {
       throw new ValidationError('Parcha template file must not exceed 5 MB');
+    }
+
+    // A PDF template is merged with dynamic data onto its own single page at
+    // print time (see parcha-template.service.ts) — reject anything that
+    // isn't exactly one A4-portrait page before it's ever stored, so print
+    // time never has to cope with an unusable template.
+    if (mimeType === 'application/pdf') {
+      await validateSinglePageA4Pdf(buffer);
     }
 
     const ext = mimeType === 'image/png' ? 'png' : mimeType === 'application/pdf' ? 'pdf' : 'jpg';

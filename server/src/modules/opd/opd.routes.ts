@@ -17,6 +17,7 @@ import {
   getPaymentValidity,
   getAvailableNurses,
   getDoctorNurseAssignments,
+  getParchaPdf,
 } from './opd.controller';
 
 const router  = Router();
@@ -71,6 +72,14 @@ router.get('/visits/:visitId',
   ...protect,
   requireRole(...CLINICAL_ROLES),
   getVisit,
+);
+
+// Merged PDF parcha (uploaded PDF template + this visit's dynamic data) —
+// same readers as the visit itself.
+router.get('/visits/:visitId/parcha-pdf',
+  ...protect,
+  requireRole(...CLINICAL_ROLES),
+  getParchaPdf,
 );
 
 // NURSE is included here (unlike elsewhere in this file) but strictly
