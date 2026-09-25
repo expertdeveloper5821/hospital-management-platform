@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { ipdService } from './ipd.service';
 import { buildDischargeSummaryPdf } from './discharge-summary.pdf';
+import { renderParchaOverlay } from '../../shared/services/parcha-template.service';
 import { ValidationError, ForbiddenError } from '../../shared/middleware/error-handler';
 import {
   CreateAdmissionSchema,
@@ -283,6 +284,43 @@ export async function getDischargeSummaryPdf(
       .set({
         'Content-Type':        'application/pdf',
         'Content-Disposition': `attachment; filename="discharge-summary-${idResult.data}.pdf"`,
+        'Content-Length':      pdfBuffer.length.toString(),
+      })
+      .send(pdfBuffer);
+  } catch (err) { next(err); }
+}
+
+// GET /api/ipd/admissions/:admissionId/parcha-pdf — only meaningful when the
+// tenant has a PDF parcha template configured (branding.parchaTemplateUrl
+// ending in .pdf); an image template or no template at all responds 404 so
+// the print page falls back to its existing <img>-overlay / default HTML
+// layout. Same readers as the admission itself (ADMISSION_READERS).
+export async function getParchaPdf(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const tenantId = req.user!.tenantId as string;
+    const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
+    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const context = await ipdService.getParchaPdfContext(idResult.data, tenantId, nurseWardIds, doctorPatientIds);
+    if (!context) {
+      res.status(404).json({ status: 'error', message: 'No PDF parcha template is configured for this hospital.' });
+      return;
+    }
+
+    const pdfBuffer = await renderParchaOverlay(context.templateBytes, context.overlay);
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `inline; filename="ipd-parcha-${idResult.data}.pdf"`,
         'Content-Length':      pdfBuffer.length.toString(),
       })
       .send(pdfBuffer);

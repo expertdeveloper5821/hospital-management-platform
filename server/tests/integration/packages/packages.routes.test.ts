@@ -11,8 +11,9 @@ jest.mock('../../../src/shared/services/audit.service', () => ({
 }));
 
 import app             from '../../../src/app';
-import { UserModel }   from '../../../src/modules/user/user.model';
-import { TenantModel } from '../../../src/modules/tenant/tenant.model';
+import { UserModel }    from '../../../src/modules/user/user.model';
+import { TenantModel }  from '../../../src/modules/tenant/tenant.model';
+import { PackageModel } from '../../../src/modules/packages/packages.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -95,6 +96,33 @@ describe('POST /api/packages — description validation', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data.description ?? null).toBeNull();
+  });
+
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second package or hit the duplicate-name conflict', async () => {
+    const idempotencyKey = 'temp-client-op-pkg-001';
+
+    const first = await request(app)
+      .post('/api/packages')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(validPayload);
+    expect(first.status).toBe(201);
+
+    // Without idempotency replay, a second identical create would normally
+    // 409 here (createPackage rejects a duplicate name) — a real risk for a
+    // retried offline sync attempt of uncertain outcome. The guard must
+    // intercept before the handler ever runs, so this replays 201 instead.
+    const second = await request(app)
+      .post('/api/packages')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(validPayload);
+
+    expect(second.status).toBe(201);
+    expect(second.body.data.packageId).toBe(first.body.data.packageId);
+
+    const packages = await PackageModel.find({ tenantId, name: validPayload.name });
+    expect(packages).toHaveLength(1);
   });
 
   test('returns 400 for description exceeding maximum length', async () => {

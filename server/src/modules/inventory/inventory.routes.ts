@@ -4,6 +4,7 @@ import {
   scopeTenant,
   requireRole,
 } from '../../shared/middleware';
+import { idempotencyGuard } from '../../shared/middleware/idempotency';
 import { UserRole } from '../../shared/types/common.types';
 import {
   createInventoryItem,
@@ -23,6 +24,7 @@ router.use(authenticateJWT, scopeTenant);
 router.post(
   '/',
   requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER),
+  idempotencyGuard('inventory.item.create'),
   createInventoryItem,
 );
 

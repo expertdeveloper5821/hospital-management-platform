@@ -5,6 +5,7 @@ import { IOPDVisit } from './opd.model';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
 import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
+import { renderParchaOverlay } from '../../shared/services/parcha-template.service';
 
 // Notes are stored as rich-text HTML (Tiptap) — the 2000-character limit
 // applies to the visible text a user typed, not the wrapping markup, so the
@@ -50,7 +51,12 @@ const vitalsSchema = z.object({
 const updateVisitSchema = z.object({
   doctorIds:      z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  diagnosis:      z.string().min(1, 'Diagnosis is required.').max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
+  // No `.min(1)` here (unlike completeVisitSchema below, where a diagnosis is
+  // mandatory to finalize a visit) — an OPEN/IN_PROGRESS visit's diagnosis
+  // may be intentionally cleared via Edit (e.g. to redo it), and an empty
+  // string is how the frontend signals that explicit clear rather than "no
+  // change" (see opd/page.tsx's handleUpdate, which always sends this field).
+  diagnosis:      z.string().max(2000, 'Diagnosis cannot exceed 2000 characters.').trim().optional(),
   prescription:   z.string().max(5000, 'Prescription cannot exceed 5000 characters.').optional(),
   notes:          notesSchema,
   vitals:         vitalsSchema,
@@ -150,28 +156,61 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
   } catch (err) { next(err); }
 }
 
+// Shared by getVisit and getParchaPdf — both are read access to the same
+// visit record, so they must agree on exactly who can reach it.
+async function assertVisitReadable(tenantId: string, visit: IOPDVisit, req: Request): Promise<void> {
+  if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
+    const scopedIds = req.user!.role === UserRole.NURSE
+      ? await opdService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role)
+      : await opdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+
+    // A Nurse's direct assignment (this exact visit's own nurseIds) is a
+    // visit-level grant on top of scopedIds' ward-only patient-level scope
+    // — never derived from any other visit for the same patient.
+    const isDirectNurseAssignment = req.user!.role === UserRole.NURSE
+      && (visit.nurseIds ?? []).includes(req.user!.userId);
+
+    if (!scopedIds?.includes(visit.patientId) && !isDirectNurseAssignment) {
+      throw new NotFoundError('OPD visit not found');
+    }
+  }
+}
+
 export async function getVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const tenantId = req.user!.tenantId!;
     const visit = await opdService.getVisitById(tenantId, req.params.visitId);
+    await assertVisitReadable(tenantId, visit, req);
+    res.status(200).json({ status: 'success', data: toResponse(visit) });
+  } catch (err) { next(err); }
+}
 
-    if (req.user!.role === UserRole.NURSE || req.user!.role === UserRole.DOCTOR) {
-      const scopedIds = req.user!.role === UserRole.NURSE
-        ? await opdService.resolveNursePatientIds(tenantId, req.user!.userId, req.user!.role)
-        : await opdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+// GET /api/opd/visits/:visitId/parcha-pdf — only meaningful when the tenant
+// has a PDF parcha template configured (branding.parchaTemplateUrl ending in
+// .pdf); an image template or no template at all responds 404 so the print
+// page falls back to its existing <img>-overlay / default HTML layout.
+// Generated fresh on every request, never persisted — mirrors the discharge
+// summary PDF (ipd.controller.ts's getDischargeSummaryPdf).
+export async function getParchaPdf(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const tenantId = req.user!.tenantId!;
+    const visit = await opdService.getVisitById(tenantId, req.params.visitId);
+    await assertVisitReadable(tenantId, visit, req);
 
-      // A Nurse's direct assignment (this exact visit's own nurseIds) is a
-      // visit-level grant on top of scopedIds' ward-only patient-level scope
-      // — never derived from any other visit for the same patient.
-      const isDirectNurseAssignment = req.user!.role === UserRole.NURSE
-        && (visit.nurseIds ?? []).includes(req.user!.userId);
-
-      if (!scopedIds?.includes(visit.patientId) && !isDirectNurseAssignment) {
-        throw new NotFoundError('OPD visit not found');
-      }
+    const context = await opdService.getParchaPdfContext(tenantId, visit);
+    if (!context) {
+      res.status(404).json({ status: 'error', message: 'No PDF parcha template is configured for this hospital.' });
+      return;
     }
 
-    res.status(200).json({ status: 'success', data: toResponse(visit) });
+    const pdfBuffer = await renderParchaOverlay(context.templateBytes, context.overlay);
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `inline; filename="opd-parcha-${visit.visitId}.pdf"`,
+        'Content-Length':      pdfBuffer.length.toString(),
+      })
+      .send(pdfBuffer);
   } catch (err) { next(err); }
 }
 

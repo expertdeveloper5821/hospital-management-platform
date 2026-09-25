@@ -4,6 +4,7 @@ import {
   authenticateJWT,
   scopeTenant,
   requireRole,
+  idempotencyGuard,
 } from '../../shared/middleware';
 import { UserRole } from '../../shared/types/common.types';
 import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from './lab.types';
@@ -62,6 +63,7 @@ router.get(
 router.patch(
   '/pathology/:requestId',
   requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  idempotencyGuard('lab.pathology.update'),
   editPathologyRequest,
 );
 
@@ -103,6 +105,7 @@ router.get(
 router.patch(
   '/radiology/:requestId',
   requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  idempotencyGuard('lab.radiology.update'),
   editRadiologyRequest,
 );
 

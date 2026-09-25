@@ -3,6 +3,7 @@ import { authenticateJWT }             from '../../shared/middleware/authenticat
 import { scopeTenant }                 from '../../shared/middleware/scope-tenant';
 import { requireRole }                 from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange }  from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }            from '../../shared/middleware/idempotency';
 import { UserRole }                    from '../../shared/types/common.types';
 import {
   createPatient,
@@ -37,6 +38,7 @@ const READERS = [
 router.post('/',
   ...protect,
   requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, ...ADMIN_ROLES),
+  idempotencyGuard('patient.create'),
   createPatient,
 );
 
@@ -102,6 +104,7 @@ router.get('/:patientId',
 router.patch('/:patientId',
   ...protect,
   requireRole(UserRole.RECEPTIONIST, ...ADMIN_ROLES),
+  idempotencyGuard('patient.update'),
   updatePatient,
 );
 

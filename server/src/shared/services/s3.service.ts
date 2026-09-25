@@ -1,5 +1,6 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import type { Readable } from 'stream';
 import config from '../config/env';
 import { AppError } from '../middleware/error-handler';
 import { getCorrelationId } from '../config/request-context';
@@ -93,6 +94,36 @@ class S3Service {
         timestamp:     new Date().toISOString(),
       }));
       throw new AppError('File deletion failed. Please try again.', 500);
+    }
+  }
+
+  /**
+   * Download a file's raw bytes from S3 — used where the server needs the
+   * actual content (e.g. merging dynamic data onto an uploaded PDF template),
+   * as opposed to getPresignedUrl(), which only ever hands the browser a
+   * time-limited link and never reads the object itself.
+   */
+  async getFile(key: string): Promise<Buffer> {
+    try {
+      const result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: this.prefixed(key) }),
+      );
+      const stream = result.Body as Readable;
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks);
+    } catch (err) {
+      console.error(JSON.stringify({
+        level:         'error',
+        event:         's3_download_failure',
+        correlationId: getCorrelationId(),
+        key,
+        message:       (err as Error).message,
+        timestamp:     new Date().toISOString(),
+      }));
+      throw new AppError('Failed to load file from storage. Please try again.', 500);
     }
   }
 

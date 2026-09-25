@@ -31,9 +31,10 @@ const TenantSchema = new Schema<ITenant>(
       pincode:                 { type: String, required: true, trim: true },
     },
     branding: {
-      logoUrl:      { type: String, default: null },
-      displayName:  { type: String, default: '' },
-      primaryColor: { type: String, default: '#1A73E8' },
+      logoUrl:            { type: String, default: null },
+      displayName:        { type: String, default: '' },
+      primaryColor:       { type: String, default: '#1A73E8' },
+      parchaTemplateUrl:  { type: String, default: null },
     },
     // Hospital-configurable OPD business rules. `validityDays` is how long a
     // completed OPD payment covers further OPD visits for the same patient

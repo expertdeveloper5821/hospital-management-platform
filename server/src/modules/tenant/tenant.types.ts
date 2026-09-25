@@ -9,9 +9,15 @@ export interface OnboardingDocuments {
 }
 
 export interface BrandingConfig {
-  logoUrl?:     string; // S3 key
-  displayName:  string;
-  primaryColor: string; // hex e.g. #1A73E8
+  logoUrl?:            string; // S3 key
+  displayName:         string;
+  primaryColor:        string; // hex e.g. #1A73E8
+  // Optional hospital-supplied OPD/IPD prescription slip background (S3 key).
+  // The uploaded image already contains the hospital name, logo, address and
+  // other header details, so OPD/IPD print pages must not render their own
+  // header block on top of it when this is set. null/undefined = use the
+  // app's default parcha layout.
+  parchaTemplateUrl?:  string | null;
 }
 
 // Response shape for GET /:tenantId/branding — branding fields plus the

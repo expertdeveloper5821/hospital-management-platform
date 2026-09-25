@@ -8,3 +8,4 @@ export { errorHandler, AppError, ValidationError, UnauthorizedError,
          ForbiddenError, NotFoundError, ConflictError,
          ServiceUnavailableError } from './error-handler';
 export { addToDenylist, isInDenylist, clearDenylist } from './token-denylist';
+export { idempotencyGuard } from './idempotency';

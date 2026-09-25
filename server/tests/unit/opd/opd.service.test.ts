@@ -21,6 +21,9 @@ import { OPDVisitStatus, OPDPaymentValidityReason } from '../../../src/modules/o
 import { UserRole }          from '../../../src/shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError } from '../../../src/shared/middleware/error-handler';
 import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
+import { auditService }      from '../../../src/shared/services/audit.service';
+
+const mockAuditService = auditService as jest.Mocked<typeof auditService>;
 
 const mockOpdRepo        = opdRepository     as jest.Mocked<typeof opdRepository>;
 const mockPatientRepo    = patientRepository as jest.Mocked<typeof patientRepository>;
@@ -590,6 +593,65 @@ describe('OPDService — example-based', () => {
         service.updateVisit('t1', 'OPD-TEST0001', { visitDate: '2020-01-01' }, 'admin-1', UserRole.HOSPITAL_ADMIN),
       ).resolves.toBeDefined();
     });
+
+    // ── audit trail for clinical field changes ───────────────────────────────
+    test('explicitly clearing a previously-set diagnosis is sent through and audited as [cleared], not [redacted]', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue({ ...makeVisit(), diagnosis: 'Old diagnosis' } as never);
+      mockOpdRepo.update.mockResolvedValue({ ...makeVisit(), diagnosis: '' } as never);
+
+      await service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: '' }, 'doctor-1', UserRole.DOCTOR);
+
+      const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+      expect(updateArg.diagnosis).toBe('');
+
+      const auditArg = mockAuditService.log.mock.calls[0][0];
+      expect(auditArg.userId).toBe('doctor-1');
+      expect(auditArg.previousValue?.diagnosis).toBe('[redacted]');
+      expect(auditArg.newValue?.diagnosis).toBe('[cleared]');
+      // The actual clinical text must never appear in the audit entry.
+      expect(JSON.stringify(auditArg)).not.toContain('Old diagnosis');
+    });
+
+    test('setting a diagnosis for the first time (previously empty) is audited as a plain [redacted] set, not a clear', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never); // diagnosis: null
+      mockOpdRepo.update.mockResolvedValue({ ...makeVisit(), diagnosis: 'Viral fever' } as never);
+
+      await service.updateVisit('t1', 'OPD-TEST0001', { diagnosis: 'Viral fever' }, 'doctor-1', UserRole.DOCTOR);
+
+      const auditArg = mockAuditService.log.mock.calls[0][0];
+      expect(auditArg.previousValue?.diagnosis).toBeNull();
+      expect(auditArg.newValue?.diagnosis).toBe('[redacted]');
+    });
+
+    test('resending an unchanged diagnosis is not recorded in the audit diff at all', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue({ ...makeVisit(), diagnosis: 'Same', notes: 'unchanged too' } as never);
+      mockOpdRepo.update.mockResolvedValue({ ...makeVisit(), diagnosis: 'Same' } as never);
+
+      // Mirrors the frontend's Edit form, which always resends the current
+      // diagnosis/notes value even when the user didn't touch it.
+      await service.updateVisit(
+        't1', 'OPD-TEST0001', { diagnosis: 'Same', notes: 'unchanged too' }, 'doctor-1', UserRole.DOCTOR,
+      );
+
+      // Nothing actually changed, so no audit entry is written at all.
+      expect(mockAuditService.log).not.toHaveBeenCalled();
+    });
+
+    test('doctorIds resent unchanged (order-independent) skips department re-resolution, the duplicate check, and the audit diff', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ doctorIds: ['doc-a', 'doc-b'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ doctorIds: ['doc-a', 'doc-b'] }) as never);
+
+      // Same set, different order — resending it must not be misreported as
+      // a doctor reassignment, nor re-trigger the department/duplicate checks
+      // that a genuine reassignment needs.
+      await service.updateVisit(
+        't1', 'OPD-TEST0001', { doctorIds: ['doc-b', 'doc-a'] }, 'admin-1', UserRole.HOSPITAL_ADMIN,
+      );
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).not.toHaveBeenCalled();
+      expect(mockOpdRepo.findActiveDuplicate).not.toHaveBeenCalled();
+      expect(mockAuditService.log).not.toHaveBeenCalled();
+    });
   });
 
   // ── startConsultation (nurse direct-assignment guard) ────────────────────────
@@ -679,6 +741,27 @@ describe('OPDService — example-based', () => {
         undefined,
       );
       expect(result.status).toBe(OPDVisitStatus.COMPLETED);
+
+      const auditArg = mockAuditService.log.mock.calls[0][0];
+      expect(auditArg.userId).toBe('doctor-1');
+      expect(auditArg.newValue?.diagnosis).toBe('[redacted]');
+      expect(JSON.stringify(auditArg)).not.toContain('Viral fever, resolved');
+    });
+
+    test('records a prescription supplied at Complete in the audit diff, redacted', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never); // prescription: null
+      mockOpdRepo.update.mockResolvedValue(
+        makeVisit({ status: OPDVisitStatus.COMPLETED }) as never,
+      );
+
+      await service.completeVisit(
+        't1', 'OPD-TEST0001', { diagnosis: 'Flu', prescription: 'Paracetamol 500mg' }, 'doctor-1',
+      );
+
+      const auditArg = mockAuditService.log.mock.calls[0][0];
+      expect(auditArg.previousValue?.prescription).toBeNull();
+      expect(auditArg.newValue?.prescription).toBe('[redacted]');
+      expect(JSON.stringify(auditArg)).not.toContain('Paracetamol');
     });
 
     test('throws ConflictError when completing an already-COMPLETED visit', async () => {

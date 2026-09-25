@@ -26,7 +26,8 @@
     "migrate:encrypt-charge-fields": "ts-node scripts/encrypt-charge-fields.ts",
     "migrate:encrypt-ipd-progress-notes": "ts-node scripts/encrypt-ipd-progress-notes.ts",
     "migrate:encrypt-opd-vitals": "ts-node scripts/encrypt-opd-vitals.ts",
-    "migrate:encrypt-ipd-vitals": "ts-node scripts/encrypt-ipd-vitals.ts"
+    "migrate:encrypt-ipd-vitals": "ts-node scripts/encrypt-ipd-vitals.ts",
+    "migrate:ipd-active-admission-indexes": "ts-node scripts/migrate-ipd-add-active-admission-indexes.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.575.0",
@@ -42,6 +43,7 @@
     "mongoose": "8.3.0",
     "multer": "^2.1.1",
     "nodemailer": "6.9.13",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
     "qrcode": "^1.5.4",
     "razorpay": "^2.9.6",
@@ -57,9 +59,8 @@
     "@types/express": "4.17.21",
     "@types/express-serve-static-core": "4.19.8",
     "@types/jest": "29.5.12",
-    "@types/multer": "^1.4.13",
     "@types/jsonwebtoken": "9.0.6",
-
+    "@types/multer": "^1.4.13",
     "@types/node": "^25.7.0",
     "@types/nodemailer": "6.4.14",
     "@types/pdfkit": "^0.17.6",

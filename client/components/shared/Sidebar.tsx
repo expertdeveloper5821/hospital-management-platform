@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { cn, toTitleCase } from '@/lib/utils';
 import { getNavItems } from '@/lib/rbac-nav';
+import { useOnlineStatus } from '@/lib/offline/use-online-status';
 import { useAppSelector } from '@/store/hooks';
 import { useLogoutMutation } from '@/store/api/auth.api';
 import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
@@ -60,6 +61,7 @@ interface SidebarProps {
 
 export function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
+  const isOnline = useOnlineStatus();
   const profile  = useAppSelector((s) => s.auth.profile);
   const branding = useAppSelector((s) => s.auth.branding);
   const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
@@ -125,7 +127,19 @@ export function Sidebar({ onClose }: SidebarProps) {
             <Link
               key={item.href}
               href={item.href}
-              onClick={onClose}
+              onClick={(e) => {
+                // Offline: Next's client-side router needs a fresh RSC
+                // fetch for any route not already sitting in its in-memory
+                // Router Cache, which fails outright with no connection. A
+                // full navigation instead lets the service worker's cached
+                // app-shell document (client/app/sw.ts) answer the request,
+                // which is reliable regardless of Router Cache state.
+                if (!isOnline) {
+                  e.preventDefault();
+                  window.location.assign(item.href);
+                }
+                onClose?.();
+              }}
               className={cn(
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 isActive

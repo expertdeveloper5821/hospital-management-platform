@@ -18,6 +18,8 @@ import {
   completeTenantSetup,
   getBranding,
   updateBranding,
+  uploadParchaTemplate,
+  removeParchaTemplate,
   getOpdSettings,
   updateOpdSettings,
   getPlatformSettings,
@@ -36,6 +38,20 @@ const logoUpload = multer({
       // Pass a ValidationError (400) so the global error handler surfaces a clear,
       // client-readable message instead of a generic 500 "something went wrong".
       cb(new ValidationError('Only JPEG and PNG images are allowed. Please upload a .jpg or .png file.'));
+    }
+  },
+});
+
+// Parcha template — full A4-page hospital-supplied background, larger budget than the logo.
+// Also accepts PDF (a common letterhead export format) alongside PNG/JPEG images.
+const parchaTemplateUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file: Express.Multer.File, cb: FileFilterCallback) => {
+    if (file.mimetype === 'image/jpeg' || file.mimetype === 'image/png' || file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new ValidationError('Only JPEG, PNG, and PDF files are allowed. Please upload a .jpg, .png, or .pdf file.'));
     }
   },
 });
@@ -80,6 +96,10 @@ router.post('/setup', publicRateLimiter, completeTenantSetup);
 // Branding — accessible by Hospital Admin within their tenant
 router.get('/:tenantId/branding',   getBranding);
 router.patch('/:tenantId/branding', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), logoUpload.single('logo'), updateBranding);
+
+// Parcha template — hospital-supplied prescription slip background for OPD/IPD print pages
+router.post('/:tenantId/branding/parcha-template',   authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), parchaTemplateUpload.single('template'), uploadParchaTemplate);
+router.delete('/:tenantId/branding/parcha-template', authenticateJWT, requireFirstPasswordChange, requireRole(UserRole.HOSPITAL_ADMIN), removeParchaTemplate);
 
 // OPD settings — readable by any authenticated tenant role (drives the New OPD
 // Visit payment check); editable by Hospital Admin only. Tenant-pinned in the

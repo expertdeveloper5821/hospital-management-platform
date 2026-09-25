@@ -3,6 +3,7 @@ import {
   authenticateJWT,
   scopeTenant,
   requireRole,
+  idempotencyGuard,
 } from '../../shared/middleware';
 import { UserRole } from '../../shared/types/common.types';
 import {
@@ -26,6 +27,7 @@ router.use(authenticateJWT, scopeTenant);
 router.post(
   '/manual',
   requireRole(UserRole.RECEPTIONIST, UserRole.NURSE, UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
+  idempotencyGuard('payment.manual.create'),
   createManualPayment,
 );
 

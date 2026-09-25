@@ -3,6 +3,7 @@ import { authenticateJWT }            from '../../shared/middleware/authenticate
 import { scopeTenant }                from '../../shared/middleware/scope-tenant';
 import { requireRole }                from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }           from '../../shared/middleware/idempotency';
 import { UserRole }                   from '../../shared/types/common.types';
 import {
   createVisit,
@@ -16,6 +17,7 @@ import {
   getPaymentValidity,
   getAvailableNurses,
   getDoctorNurseAssignments,
+  getParchaPdf,
 } from './opd.controller';
 
 const router  = Router();
@@ -36,6 +38,7 @@ const CLINICAL_ROLES = [
 router.post('/visits',
   ...protect,
   requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  idempotencyGuard('opd.visit.create'),
   createVisit,
 );
 
@@ -71,12 +74,21 @@ router.get('/visits/:visitId',
   getVisit,
 );
 
+// Merged PDF parcha (uploaded PDF template + this visit's dynamic data) —
+// same readers as the visit itself.
+router.get('/visits/:visitId/parcha-pdf',
+  ...protect,
+  requireRole(...CLINICAL_ROLES),
+  getParchaPdf,
+);
+
 // NURSE is included here (unlike elsewhere in this file) but strictly
 // notes-only and only for a visit she's personally assigned to — both
 // enforced in the controller/service, not just by this role gate.
 router.patch('/visits/:visitId',
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
+  idempotencyGuard('opd.visit.update'),
   updateVisit,
 );
 

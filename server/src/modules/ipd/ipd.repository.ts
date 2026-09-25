@@ -6,6 +6,7 @@ import { assertDbConnected } from '../../shared/utils/db-guard';
 import { WardModel, IWard } from './ward.model';
 import { BedModel,  IBed  } from './bed.model';
 import { WardOccupancySummary } from './ipd.types';
+import { AppError, ConflictError } from '../../shared/middleware/error-handler';
 
 export class IPDRepository {
   async findById(admissionId: string, tenantId: string): Promise<IIPDAdmission | null> {
@@ -94,6 +95,56 @@ export class IPDRepository {
   async save(data: Partial<IIPDAdmission>): Promise<IIPDAdmission> {
     assertDbConnected();
     return IPDAdmissionModel.create(data);
+  }
+
+  /**
+   * Creates an admission and marks its bed occupied atomically. The two
+   * partial unique indexes on IPDAdmission — one active admission per bed,
+   * one active admission per patient (see ipd.model.ts) — are the actual
+   * race guard under concurrent or offline-replayed creates; this
+   * transaction's job is only to keep the bed flag consistent with the
+   * admission write, so a mid-write failure can never leave an ADMITTED
+   * admission with a stale/unoccupied bed (the previous sequential
+   * save()-then-updateBedOccupancy() could, and on failure could only log
+   * "CRITICAL" and 500 rather than actually recover).
+   *
+   * Requires the connected MongoDB deployment to support transactions (a
+   * replica set or sharded cluster — true for MongoDB Atlas and any
+   * `--replSet`-enabled deployment; not true for a bare standalone mongod).
+   */
+  async createAdmissionWithBedOccupancy(
+    admissionData: Partial<IIPDAdmission>,
+    bedId: string,
+  ): Promise<IIPDAdmission> {
+    assertDbConnected();
+    const session = await mongoose.startSession();
+    try {
+      let created!: IIPDAdmission;
+      await session.withTransaction(async () => {
+        const [doc] = await IPDAdmissionModel.create([admissionData], { session });
+        created = doc;
+        await BedModel.findOneAndUpdate(
+          { tenantId: admissionData.tenantId, _id: bedId },
+          { isOccupied: true, currentAdmissionId: created.admissionId },
+          { session },
+        );
+      });
+      return created;
+    } catch (err) {
+      const mongoErr = err as { code?: number; keyValue?: Record<string, unknown> };
+      if (mongoErr.code === 11000) {
+        if (mongoErr.keyValue && 'bedId' in mongoErr.keyValue) {
+          throw new AppError('Bed is currently occupied by another active admission.', 409);
+        }
+        if (mongoErr.keyValue && 'patientId' in mongoErr.keyValue) {
+          throw new ConflictError('Patient already has an active admission.');
+        }
+        throw new ConflictError('This admission conflicts with an existing active admission.');
+      }
+      throw err;
+    } finally {
+      await session.endSession();
+    }
   }
 
   async updateStatus(

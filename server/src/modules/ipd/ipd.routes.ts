@@ -3,6 +3,7 @@ import { authenticateJWT }            from '../../shared/middleware/authenticate
 import { scopeTenant }                from '../../shared/middleware/scope-tenant';
 import { requireRole }                from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }           from '../../shared/middleware/idempotency';
 import { UserRole }                   from '../../shared/types/common.types';
 import {
   createAdmission,
@@ -12,6 +13,7 @@ import {
   addProgressNote,
   dischargePatient,
   getDischargeSummaryPdf,
+  getParchaPdf,
   getPatientIPDHistory,
   getBedOccupancySummary,
   createWard,
@@ -37,6 +39,7 @@ router.post(
     UserRole.NURSE,
      ...ADMIN_ROLES),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.admission.create'),
   createAdmission,
 );
 
@@ -72,6 +75,23 @@ router.get(
   getAdmissionById,
 );
 
+// GET /api/ipd/admissions/:admissionId/parcha-pdf — merged PDF parcha
+// (uploaded PDF template + this admission's dynamic data). Same readers as
+// the admission itself.
+router.get(
+  '/admissions/:admissionId/parcha-pdf',
+  ...protect,
+  requireRole(
+    UserRole.RECEPTIONIST,
+    UserRole.DOCTOR,
+    UserRole.NURSE,
+    UserRole.MANAGER,
+    ...ADMIN_ROLES,
+  ),
+  requireFirstPasswordChange,
+  getParchaPdf,
+);
+
 // PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse)
 router.patch(
   '/admissions/:admissionId',
@@ -84,6 +104,7 @@ router.patch(
     UserRole.HOSPITAL_ADMIN,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.admission.update'),
   updateAdmission,
 );
 
@@ -93,6 +114,7 @@ router.post(
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.NURSE),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.progressNote.add'),
   addProgressNote,
 );
 
@@ -182,6 +204,7 @@ router.post('/wards',
   UserRole.MANAGER,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.ward.create'),
   createWard,
 );
 
@@ -208,6 +231,7 @@ router.post('/wards/:wardId/beds',
     UserRole.MANAGER,
   ),
   requireFirstPasswordChange,
+  idempotencyGuard('ipd.bed.add'),
   addBeds,
 );
 

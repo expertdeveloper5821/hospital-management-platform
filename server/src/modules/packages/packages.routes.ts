@@ -3,6 +3,7 @@ import { authenticateJWT }            from '../../shared/middleware/authenticate
 import { scopeTenant }                from '../../shared/middleware/scope-tenant';
 import { requireRole }                from '../../shared/middleware/require-role';
 import { requireFirstPasswordChange } from '../../shared/middleware/require-first-password-change';
+import { idempotencyGuard }           from '../../shared/middleware/idempotency';
 import { UserRole }                   from '../../shared/types/common.types';
 import {
   createPackage,
@@ -28,6 +29,7 @@ const CANCEL_ROLES  = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTI
 router.post('/',
   ...protect,
   requireRole(...CREATE_ROLES),
+  idempotencyGuard('packages.create'),
   createPackage,
 );
 

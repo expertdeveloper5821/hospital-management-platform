@@ -9,6 +9,10 @@ const mockGetPatient = jest.fn();
 
 jest.mock('@/store/api/opd.api', () => ({
   useGetOPDVisitByIdQuery: (...args: unknown[]) => mockGetVisit(...args),
+  // Only exercised when branding.parchaTemplateUrl is a PDF — not the case
+  // in this suite (branding has no parchaTemplateUrl at all), but the hook
+  // is still called unconditionally on every render.
+  useGetOPDParchaPdfMutation: () => [jest.fn(), { isLoading: false }],
 }));
 
 jest.mock('@/store/api/patient.api', () => ({
@@ -89,22 +93,22 @@ describe('OPD Parcha print page — Vitals section', () => {
     jest.clearAllMocks();
   });
 
-  test('renders the Vitals heading and every saved vital with its unit', () => {
+  test('renders the Vitals heading and every saved vital with its short label', () => {
     setup({
       vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6 },
     });
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
     expect(screen.getByText('Vitals')).toBeInTheDocument();
-    expect(screen.getByText('Weight (kg)')).toBeInTheDocument();
+    expect(screen.getByText('Weight')).toBeInTheDocument();
     expect(screen.getByText('68.5')).toBeInTheDocument();
-    expect(screen.getByText('Height (cm)')).toBeInTheDocument();
+    expect(screen.getByText('Height')).toBeInTheDocument();
     expect(screen.getByText('172')).toBeInTheDocument();
-    expect(screen.getByText('Blood Pressure (mmHg)')).toBeInTheDocument();
+    expect(screen.getByText('BP')).toBeInTheDocument();
     expect(screen.getByText('120/80')).toBeInTheDocument();
-    expect(screen.getByText('Sugar (mg/dL)')).toBeInTheDocument();
+    expect(screen.getByText('Sugar')).toBeInTheDocument();
     expect(screen.getByText('95')).toBeInTheDocument();
-    expect(screen.getByText('Body Temperature (°F)')).toBeInTheDocument();
+    expect(screen.getByText('Temp')).toBeInTheDocument();
     expect(screen.getByText('98.6')).toBeInTheDocument();
   });
 
@@ -112,9 +116,9 @@ describe('OPD Parcha print page — Vitals section', () => {
     setup(); // BASE_VISIT.vitals is all null
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
-    // The unit labels are always printed (so the sheet stays fillable by
+    // The short labels are always printed (so the sheet stays fillable by
     // hand), but none of the value slots should show a dash/N-A placeholder.
-    expect(screen.getByText('Weight (kg)')).toBeInTheDocument();
+    expect(screen.getByText('Weight')).toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
     expect(screen.queryByText('N/A')).not.toBeInTheDocument();
     expect(screen.queryByText(/null/i)).not.toBeInTheDocument();

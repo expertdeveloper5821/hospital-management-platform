@@ -131,6 +131,25 @@ export async function updateBranding(req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 }
 
+// ─── Parcha Template (Hospital Admin configurable) ────────────────────────────
+
+export async function uploadParchaTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    if (!req.file) throw new ValidationError('Template file is required');
+    await tenantService.uploadParchaTemplate(tenantId, req.file.buffer, req.file.mimetype, req.user!.userId);
+    res.status(200).json({ status: 'success', data: { message: 'Parcha template updated' } });
+  } catch (err) { next(err); }
+}
+
+export async function removeParchaTemplate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { tenantId } = tenantIdParamSchema.parse(req.params);
+    await tenantService.removeParchaTemplate(tenantId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: { message: 'Parcha template removed' } });
+  } catch (err) { next(err); }
+}
+
 // ─── OPD Settings (Hospital Admin configurable) ───────────────────────────────
 
 // Tenant-scoped self-service settings — unlike branding (public letterhead

@@ -67,14 +67,18 @@ export interface ResetPasswordRequest {
  * phone/website fields exist on the tenant record, so none are included.
  */
 export interface BrandingConfig {
-  logoUrl?:      string | null; // S3 presigned URL or key, may be absent
-  displayName:   string;        // tenant display name
-  primaryColor:  string;        // hex e.g. #1A73E8
-  addressLine?:  string;
-  city?:         string;
-  state?:        string;
-  pincode?:      string;
-  contactEmail?: string;
+  logoUrl?:            string | null; // S3 presigned URL or key, may be absent
+  displayName:         string;        // tenant display name
+  primaryColor:        string;        // hex e.g. #1A73E8
+  addressLine?:        string;
+  city?:               string;
+  state?:              string;
+  pincode?:            string;
+  contactEmail?:       string;
+  // Hospital-supplied OPD/IPD prescription slip background (presigned URL).
+  // Already contains the hospital name, logo, address and header details —
+  // OPD/IPD print pages must not render their own header block when set.
+  parchaTemplateUrl?:  string | null;
 }
  
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -651,6 +655,7 @@ export interface AuditLogEntry {
   action:         string;
   userId:         string;
   userName?:      string;
+  userRole?:      string;
   tenantId:       string | null;
   previousValue?: Record<string, unknown>;
   newValue?:      Record<string, unknown>;

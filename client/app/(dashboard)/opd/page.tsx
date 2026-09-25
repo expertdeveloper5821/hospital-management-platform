@@ -300,7 +300,18 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     }
     updatingRef.current = true;
     try {
-      // Strip empty strings from optional min(1) fields so the backend schema doesn't reject them.
+      // doctorIds is only sent when it actually changed from the visit's
+      // current assignment. It's deliberately excluded from the offline
+      // mutation-policy allowlist (see updateOPDVisit's allowedBodyFields in
+      // lib/offline/mutation-policy.ts) because reassigning doctors needs the
+      // server to re-resolve the department — always resending it here would
+      // silently disqualify every offline diagnosis/prescription/notes/vitals
+      // edit from being queued, which is the one case offline editing exists
+      // to support in the first place.
+      const doctorIdsChanged =
+        editDoctorIds.length !== (visit.doctorIds ?? []).length ||
+        editDoctorIds.some((id) => !(visit.doctorIds ?? []).includes(id));
+
       // A notes-only nurse edit must send *only* notes/vitals — the backend
       // rejects the request outright if any other field is present (see
       // NURSE_EDITABLE_FIELDS in opd.controller.ts), so doctorIds/diagnosis/
@@ -311,8 +322,12 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             vitals: vitalsResult.vitals,
           }
         : {
-            doctorIds:    editDoctorIds,
-            ...(form.diagnosis?.trim()      ? { diagnosis: form.diagnosis.trim() }           : {}),
+            ...(doctorIdsChanged ? { doctorIds: editDoctorIds } : {}),
+            // Sent unconditionally (like prescription/notes below) so
+            // intentionally clearing diagnosis down to blank is actually
+            // submitted instead of silently dropped and left unchanged —
+            // the backend now accepts (and audits) an explicit clear.
+            diagnosis:    (form.diagnosis ?? '').trim(),
             ...(form.prescription != null   ? { prescription: form.prescription }            : {}),
             ...(form.notes        != null   ? { notes: form.notes }                          : {}),
             vitals: vitalsResult.vitals,
@@ -459,7 +474,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         <div className="flex items-start justify-between p-5 border-b shrink-0">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-muted-foreground">#{visit.queueNumber}</span>
+              <span className="text-xs font-mono text-muted-foreground">
+                {visit.queueNumber > 0 ? `#${visit.queueNumber}` : 'Pending sync'}
+              </span>
               <Badge variant={opdStatusVariant(visit.status)}>{opdStatusLabel(visit.status)}</Badge>
             </div>
             <p className="text-sm font-semibold truncate">{visit.fullName ?? visit.patientId}</p>
@@ -990,6 +1007,11 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
         return;
       }
 
+      // The real queue number is assigned server-side and unknown until this
+      // visit syncs (see PENDING_QUEUE_NUMBER in lib/offline/mutation-policy.ts)
+      // — e.g. when it was just created offline. Never show a misleading "#-1".
+      const visitLabel = visit.queueNumber > 0 ? `Visit #${visit.queueNumber}` : 'Visit (pending sync)';
+
       if (effectiveRegType === 'paid' && mode) {
         try {
           await createManualPayment({
@@ -997,10 +1019,10 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             amount,
             paymentMethod: mode,
             description:   validity?.reason === 'DIFFERENT_DOCTOR'
-              ? `OPD Consultation – Visit #${visit.queueNumber} (New Doctor)`
+              ? `OPD Consultation – ${visitLabel} (New Doctor)`
               : paymentForced
-              ? `OPD Consultation – Visit #${visit.queueNumber} (OPD Renewal)`
-              : `OPD Consultation – Visit #${visit.queueNumber}`,
+              ? `OPD Consultation – ${visitLabel} (OPD Renewal)`
+              : `OPD Consultation – ${visitLabel}`,
             referenceType: 'OPD_VISIT',
             referenceId:   visit.visitId,
             transactionId: (mode === 'UPI' || mode === 'CARD') && transactionId.trim()
@@ -1009,7 +1031,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           }).unwrap();
         } catch (err: any) {
           setError(
-            `Visit #${visit.queueNumber} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
+            `${visitLabel} was created, but recording the payment failed: ${err?.data?.message ?? 'please record the payment manually.'}`,
           );
           return;
         }

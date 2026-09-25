@@ -100,28 +100,25 @@ describe('IPDService — example-based', () => {
       mockIpdRepo.findBedById.mockResolvedValue(BASE_BED as never);
       mockIpdRepo.findActiveAdmissionByBed.mockResolvedValue(null);
       mockUserRepo.findById.mockResolvedValue(BASE_DOCTOR as never);
-      mockIpdRepo.save.mockResolvedValue(BASE_ADMISSION as never);
-      mockIpdRepo.updateBedOccupancy.mockResolvedValue({ ...BASE_BED, isOccupied: true } as never);
+      mockIpdRepo.createAdmissionWithBedOccupancy.mockResolvedValue(BASE_ADMISSION as never);
     });
 
-    test('creates admission and marks bed occupied on success', async () => {
+    test('creates admission and occupies the bed atomically on success', async () => {
       const result = await service.createAdmission(validInput, TENANT_ID, RECEPT_ID);
 
       expect(result.admissionId).toBe('adm-uuid-001');
       expect(result.status).toBe(AdmissionStatus.ADMITTED);
-      expect(mockIpdRepo.updateBedOccupancy).toHaveBeenCalledWith(
-        TENANT_ID, 'bed-001', true, expect.any(String),
-      );
-      expect(mockIpdRepo.save).toHaveBeenCalledWith(
+      expect(mockIpdRepo.createAdmissionWithBedOccupancy).toHaveBeenCalledWith(
         expect.objectContaining({
           patientId: 'PAT-00001',
           status:    AdmissionStatus.ADMITTED,
           tenantId:  TENANT_ID,
         }),
+        'bed-001',
       );
     });
 
-    test('throws 409 with occupant admissionId when bed is already occupied', async () => {
+    test('throws 409 with occupant admissionId when bed is already occupied (fast pre-check)', async () => {
       mockIpdRepo.findActiveAdmissionByBed.mockResolvedValue({
         ...BASE_ADMISSION,
         admissionId: 'existing-adm-999',
@@ -133,7 +130,17 @@ describe('IPDService — example-based', () => {
           message:    expect.stringContaining('existing-adm-999'),
         }),
       );
-      expect(mockIpdRepo.save).not.toHaveBeenCalled();
+      expect(mockIpdRepo.createAdmissionWithBedOccupancy).not.toHaveBeenCalled();
+    });
+
+    test('propagates a 409 from createAdmissionWithBedOccupancy (DB-level race lost after the pre-check passed)', async () => {
+      mockIpdRepo.createAdmissionWithBedOccupancy.mockRejectedValue(
+        new AppError('Bed is currently occupied by another active admission.', 409),
+      );
+
+      await expect(service.createAdmission(validInput, TENANT_ID, RECEPT_ID)).rejects.toThrow(
+        expect.objectContaining({ statusCode: 409 }),
+      );
     });
 
     test('throws 404 when patient not found', async () => {

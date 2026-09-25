@@ -30,9 +30,15 @@ interface UpdateBrandingRequest {
 }
 
 interface BrandingDetail {
-  logoUrl?:     string | null;
-  displayName:  string;
-  primaryColor: string;
+  logoUrl?:            string | null;
+  displayName:         string;
+  primaryColor:        string;
+  parchaTemplateUrl?:  string | null;
+  addressLine?:        string;
+  city?:               string;
+  state?:              string;
+  pincode?:            string;
+  contactEmail?:       string;
 }
 
 export interface OPDSettingsDetail {
@@ -105,6 +111,24 @@ export const tenantApi = baseApi.injectEndpoints({
       providesTags: ['Tenant'],
     }),
 
+    // POST /:tenantId/branding/parcha-template — Hospital Admin only
+    uploadParchaTemplate: build.mutation<{ message: string }, { tenantId: string; template: File }>({
+      query: ({ tenantId, template }) => {
+        const body = new FormData();
+        body.append('template', template);
+        return { url: `/api/tenants/${tenantId}/branding/parcha-template`, method: 'POST', body };
+      },
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Tenant'],
+    }),
+
+    // DELETE /:tenantId/branding/parcha-template — Hospital Admin only, reverts to default format
+    removeParchaTemplate: build.mutation<{ message: string }, string>({
+      query: (tenantId) => ({ url: `/api/tenants/${tenantId}/branding/parcha-template`, method: 'DELETE' }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['Tenant'],
+    }),
+
     // GET /:tenantId/opd-settings — readable by any authenticated tenant role
     getOpdSettings: build.query<OPDSettingsDetail, string>({
       query: (tenantId) => `/api/tenants/${tenantId}/opd-settings`,
@@ -134,6 +158,8 @@ export const {
   useResendInviteMutation,
   useUpdateBrandingMutation,
   useGetBrandingQuery,
+  useUploadParchaTemplateMutation,
+  useRemoveParchaTemplateMutation,
   useGetOpdSettingsQuery,
   useUpdateOpdSettingsMutation,
 } = tenantApi;

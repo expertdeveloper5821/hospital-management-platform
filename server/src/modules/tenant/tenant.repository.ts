@@ -53,6 +53,11 @@ export class TenantRepository {
     await TenantModel.findByIdAndUpdate(tenantId, { $set: update });
   }
 
+  async updateParchaTemplate(tenantId: string, parchaTemplateUrl: string | null): Promise<void> {
+    assertDbConnected();
+    await TenantModel.findByIdAndUpdate(tenantId, { $set: { 'branding.parchaTemplateUrl': parchaTemplateUrl } });
+  }
+
   async updateOpdValidityDays(tenantId: string, validityDays: number): Promise<void> {
     assertDbConnected();
     await TenantModel.findByIdAndUpdate(tenantId, { $set: { 'opdSettings.validityDays': validityDays } });
