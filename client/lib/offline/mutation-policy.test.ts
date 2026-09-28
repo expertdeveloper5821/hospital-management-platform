@@ -326,6 +326,24 @@ describe('planOfflineCreate', () => {
     expect(plan?.tempIdRefs).toEqual([]);
   });
 
+  test('createPathologyRequest / createRadiologyRequest: temp patientId records a dependency, real patientId does not', () => {
+    const patientTempId = `${TEMP_ID_PREFIX}patient-new`;
+    const path = planOfflineCreate('createPathologyRequest', {
+      url: '/api/lab/pathology', method: 'POST',
+      body: { patientId: patientTempId, testType: 'CBC', referredBy: 'SELF' },
+    });
+    expect(path).toMatchObject({ entityType: 'PATHOLOGY_REQUEST', idField: 'requestId', url: '/api/lab/pathology' });
+    expect(path?.dependsOn).toEqual([patientTempId]);
+    expect(path?.tempIdRefs).toEqual([{ path: 'patientId', tempId: patientTempId }]);
+
+    const rad = planOfflineCreate('createRadiologyRequest', {
+      url: '/api/lab/radiology', method: 'POST',
+      body: { patientId: 'PAT-1', imagingType: 'MRI', referredBy: 'SELF' },
+    });
+    expect(rad).toMatchObject({ entityType: 'RADIOLOGY_REQUEST', idField: 'requestId', url: '/api/lab/radiology' });
+    expect(rad?.dependsOn).toEqual([]);
+  });
+
   test('addBeds is deliberately not on the generic CREATE allowlist (bulk multi-entity create doesn\'t fit that table\'s model) — see planOfflineAddBed instead', () => {
     expect(planOfflineCreate('addBeds', {
       url: '/api/ipd/wards/W-1/beds', method: 'POST', body: { bedNumbers: ['101', '102'] },
@@ -460,6 +478,25 @@ describe('buildCreateOptimisticRecord', () => {
       packageId: 'temp-pkg1', tenantId: 'tenant-1', name: 'Basic Checkup',
       price: 500, includedServices: ['Consultation', 'Blood Test'], status: 'ACTIVE',
     });
+  });
+
+  test('PATHOLOGY_REQUEST / RADIOLOGY_REQUEST: PENDING + NORMAL, SELF renders as "Self", only the matching type field is set', () => {
+    const path = buildCreateOptimisticRecord('PATHOLOGY_REQUEST', 'temp-l1', {
+      patientId: 'PAT-1', testType: 'CBC', referredBy: 'SELF', notes: 'fasting',
+    }, 'tenant-1', 'user-1');
+    expect(path).toMatchObject({
+      requestId: 'temp-l1', patientId: 'PAT-1', tenantId: 'tenant-1', requestedBy: 'user-1',
+      testType: 'CBC', referredBy: 'SELF', referredByName: 'Self',
+      status: 'PENDING', priority: 'NORMAL', notes: 'fasting', reportUrl: null,
+    });
+    expect(path).not.toHaveProperty('imagingType');
+    expect(typeof path.requestedAt).toBe('string');
+
+    const rad = buildCreateOptimisticRecord('RADIOLOGY_REQUEST', 'temp-l2', {
+      patientId: 'PAT-1', imagingType: 'MRI', referredBy: 'DOC-1',
+    }, 'tenant-1', 'user-1');
+    expect(rad).toMatchObject({ requestId: 'temp-l2', imagingType: 'MRI', notes: null, referredByName: '' });
+    expect(rad).not.toHaveProperty('testType');
   });
 
   test('CHARGE: always status UNPAID, rounds amount to 2dp, clears testType fields for a non-lab category, stamps addedBy from userId', () => {

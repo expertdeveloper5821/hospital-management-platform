@@ -10,7 +10,8 @@
 // caches (it only ever caches 200s). The PWA manifest's start_url points
 // straight at /dashboard for the same reason (see manifest.ts).
 //
-// Every entry here is a top-level list page only — same rule as the original
+// Every entry here is a top-level list page (plus /packages/new — see its
+// entry below) — same rule as the original
 // five (Dashboard/Patients/OPD/IPD/Lab): the route's own page.tsx must be a
 // pure Client Component with no server-fetched data in its initial HTML/RSC
 // payload, verified for each of these against app/(dashboard)/<route>/page.tsx
@@ -33,6 +34,11 @@ export const APP_SHELL_ROUTES = [
   '/inventory',
   '/wards',
   '/packages',
+  // The one non-list entry: a static (non-dynamic) create form, itself a pure
+  // Client Component with no server-fetched data — without it the offline
+  // "New Package" button's navigation fails before the (offline-queued)
+  // createPackage mutation ever gets a chance to run.
+  '/packages/new',
   '/payments',
   '/revenue',
   '/billing',

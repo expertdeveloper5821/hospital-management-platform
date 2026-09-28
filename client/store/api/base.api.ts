@@ -112,6 +112,8 @@ const CREATE_CACHE_ENDPOINT: Partial<Record<OutboxEntityType, string>> = {
   BED:            'listBeds',
   PACKAGE:        'listPackages',
   CHARGE:         'listCharges',
+  PATHOLOGY_REQUEST: 'listPathologyRequests',
+  RADIOLOGY_REQUEST: 'listRadiologyRequests',
 };
 
 /**
@@ -137,7 +139,8 @@ async function tryQueueOfflineCreate(
   // has no way to know (it's a pure module, no Redux state access) — filled
   // in here from whatever's already sitting in the RTK Query cache, exactly
   // like an online create would eventually show once its own GETs land.
-  if (plan.entityType === 'OPD_VISIT' || plan.entityType === 'IPD_ADMISSION' || plan.entityType === 'MANUAL_PAYMENT') {
+  const isLabRequest = plan.entityType === 'PATHOLOGY_REQUEST' || plan.entityType === 'RADIOLOGY_REQUEST';
+  if (plan.entityType === 'OPD_VISIT' || plan.entityType === 'IPD_ADMISSION' || plan.entityType === 'MANUAL_PAYMENT' || isLabRequest) {
     const patient = findCachedEntityById(state, 'patientId', String(plan.body.patientId ?? ''));
     if (patient && typeof patient.fullName === 'string') optimisticData.fullName = patient.fullName;
   }
@@ -146,6 +149,21 @@ async function tryQueueOfflineCreate(
     if (ward && typeof ward.name === 'string') optimisticData.wardName = ward.name;
     const bed = findCachedEntityById(state, 'bedId', String(plan.body.bedId ?? ''));
     if (bed && typeof bed.bedNumber === 'string') optimisticData.bedNumber = bed.bedNumber;
+  }
+  if (isLabRequest) {
+    // Same "name || email" resolution as CHARGE's addedByName below, and as
+    // lab.service.ts's getRequesterName / getReferredByName server-side.
+    const me = findCachedEntityById(state, 'userId', session.userId);
+    const myName = (me && typeof me.name === 'string' && me.name) || state.auth.profile?.email || null;
+    if (myName) optimisticData.requestedByName = myName;
+    const referredBy = String(plan.body.referredBy ?? 'SELF');
+    if (referredBy !== 'SELF') {
+      const doctor = findCachedEntityById(state, 'userId', referredBy);
+      const doctorName = (doctor && typeof doctor.name === 'string' && doctor.name)
+        || (doctor && typeof doctor.email === 'string' && doctor.email)
+        || 'Self';
+      optimisticData.referredByName = doctorName;
+    }
   }
   if (plan.entityType === 'CHARGE') {
     // MyProfileResponse (getMyProfile) carries a `name`; MeResponse (the
@@ -333,12 +351,17 @@ const baseQueryWithToasts: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   const isCacheableQuery = api.type === 'query'
     && (!!QUERY_CACHE_POLICIES[api.endpoint] || isSingletonCacheEndpoint(api.endpoint));
 
-  // Skip waiting on a network timeout when the browser already knows it has
-  // no connection — synthesize the same transport-level failure fetchBaseQuery
-  // would eventually report, so everything below (offline queueing / cache
-  // fallback, then the existing error-toast fallback) behaves identically
-  // either way.
-  const knownOffline = (isEligibleMutation || isCacheableQuery)
+  // Skip waiting on a network timeout when the browser already reports no
+  // connection — synthesize the same transport-level failure fetchBaseQuery
+  // would eventually report, so the offline queueing below behaves
+  // identically either way. Mutations only: a queued mutation is still
+  // flushed by processor.ts (which deliberately ignores navigator.onLine), so
+  // a stale `false` just delays it. Queries must NOT take this shortcut —
+  // navigator.onLine can stay stuck at `false` while actually online (see
+  // app/(dashboard)/layout.tsx), which would keep serving stale IndexedDB
+  // data instead of ever asking the API. A query always tries the network
+  // and falls back to the cache below only on a genuine FETCH_ERROR.
+  const knownOffline = isEligibleMutation
     && typeof navigator !== 'undefined' && navigator.onLine === false;
 
   const result = knownOffline

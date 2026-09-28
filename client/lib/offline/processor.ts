@@ -36,6 +36,8 @@ const ENTITY_TAGS: Record<OutboxEntityType, OfflineTagType[]> = {
   WARD:                 ['IPD'],
   BED:                  ['IPD'],
   PACKAGE:              ['Package'],
+  PATHOLOGY_REQUEST:    ['Lab'],
+  RADIOLOGY_REQUEST:    ['Lab'],
   // Matches addCharge's own invalidatesTags (charges.api.ts) — a new charge
   // also affects the patient's bill total.
   CHARGE:               ['Charge', 'Bill'],

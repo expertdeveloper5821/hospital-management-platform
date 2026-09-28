@@ -38,7 +38,30 @@ function base64ToBuffer(base64: string): Uint8Array {
  * derived from the password, JWT, or anything server-known — independent of
  * any value an intercepted network payload could reconstruct.
  */
-export async function getOrCreateClientKey(tenantId: string, userId: string): Promise<CryptoKey> {
+// First-use key creation is get → generate → write, which isn't atomic: two
+// concurrent callers (e.g. a fire-and-forget read-through cache write racing
+// an outbox enqueue) could each generate a key, with the last write winning —
+// leaving anything already encrypted under the losing key permanently
+// undecryptable (an outbox entry the processor then marks FAILED). Concurrent
+// callers in this tab share one in-flight lookup; `add` (never `put`) plus the
+// re-read below covers the same race across tabs. The map only holds
+// in-flight lookups, never a settled key, so a deleted/recreated database is
+// always re-read.
+const inFlightKeyLookups = new Map<string, Promise<CryptoKey>>();
+
+export function getOrCreateClientKey(tenantId: string, userId: string): Promise<CryptoKey> {
+  const lookupId = `${tenantId}:${userId}`;
+  const inFlight = inFlightKeyLookups.get(lookupId);
+  if (inFlight) return inFlight;
+
+  const lookup = loadOrCreateClientKey(tenantId, userId).finally(() => {
+    inFlightKeyLookups.delete(lookupId);
+  });
+  inFlightKeyLookups.set(lookupId, lookup);
+  return lookup;
+}
+
+async function loadOrCreateClientKey(tenantId: string, userId: string): Promise<CryptoKey> {
   const db = await openOfflineDb(tenantId, userId);
   const existing = await db.get('cryptoKeys', KEY_RECORD_ID);
   if (existing) return existing.key;
@@ -49,12 +72,19 @@ export async function getOrCreateClientKey(tenantId: string, userId: string): Pr
     ['encrypt', 'decrypt'],
   );
 
-  await db.put('cryptoKeys', {
-    id:        KEY_RECORD_ID,
-    key,
-    algorithm: 'AES-GCM-256',
-    createdAt: Date.now(),
-  });
+  try {
+    await db.add('cryptoKeys', {
+      id:        KEY_RECORD_ID,
+      key,
+      algorithm: 'AES-GCM-256',
+      createdAt: Date.now(),
+    });
+  } catch (err) {
+    // Another tab stored its key first — use that one, never overwrite it.
+    const winner = await db.get('cryptoKeys', KEY_RECORD_ID);
+    if (winner) return winner.key;
+    throw err;
+  }
 
   return key;
 }
