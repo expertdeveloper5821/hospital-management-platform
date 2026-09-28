@@ -21,9 +21,8 @@ const TAG_LENGTH = 16;
 const PREFIX     = 'enc:v1:';
 
 // Which key a given field is encrypted under. Each purpose resolves to its own
-// 32-byte key (see AppConfig.security); MEDICAL and PAYMENT fall back to the
-// AADHAAR key when their own env var is unset so existing deployments keep
-// starting.
+// 32-byte key (see AppConfig.security), used for both encryption and
+// decryption of that purpose only — there is no cross-purpose fallback.
 export const EncryptionKeyPurpose = {
   AADHAAR: 'AADHAAR',
   MEDICAL: 'MEDICAL',

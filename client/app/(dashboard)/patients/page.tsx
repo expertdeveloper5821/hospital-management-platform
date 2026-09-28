@@ -376,6 +376,8 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const PATIENTS_PAGE_SIZE = 10;
+
 export default function PatientsPage() {
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
@@ -396,10 +398,18 @@ export default function PatientsPage() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data, isFetching } = useSearchPatientsQuery({ q: debouncedSearch || undefined, page, limit: 10 });
+  // Always go to the API on mount/return to this page, and again on reconnect
+  // or tab focus, so a list served from the offline IndexedDB fallback never
+  // stays on screen once the backend is reachable again.
+  const { data, isFetching } = useSearchPatientsQuery(
+    { q: debouncedSearch || undefined, page, limit: PATIENTS_PAGE_SIZE },
+    { refetchOnMountOrArgChange: true, refetchOnReconnect: true, refetchOnFocus: true },
+  );
 
   const patients    = data?.data    ?? [];
-  const totalPages  = data ? Math.ceil(data.total / 20) : 1;
+  // Divide by the page size the response was actually built with — the
+  // offline cache fallback returns everything cached as one page (limit = total).
+  const totalPages  = data ? Math.max(1, Math.ceil(data.total / (data.limit || PATIENTS_PAGE_SIZE))) : 1;
 
   const canRegister = role === 'RECEPTIONIST' || role === 'NURSE' || role === 'HOSPITAL_ADMIN';
 

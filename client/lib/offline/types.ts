@@ -9,6 +9,12 @@ export type OutboxEntityType =
   | 'IPD_PROGRESS_NOTE'
   | 'IPD_ADMISSION_VITALS'
   | 'LAB_REQUEST'
+  // CREATE-only: pathology and radiology requests share one backend module
+  // but live under different cache-store key prefixes and GET endpoints, so
+  // their offline CREATEs need distinct types (LAB_REQUEST above stays the
+  // shared UPDATE type for the notes-only edit path).
+  | 'PATHOLOGY_REQUEST'
+  | 'RADIOLOGY_REQUEST'
   | 'MANUAL_PAYMENT'
   | 'INVENTORY_ITEM'
   | 'WARD'

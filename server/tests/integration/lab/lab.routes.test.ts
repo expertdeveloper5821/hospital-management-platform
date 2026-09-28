@@ -150,6 +150,33 @@ describe('POST /api/lab/pathology', () => {
     expect(res.body.data.reportUrl).toBeNull();
   });
 
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second pathology request', async () => {
+    const idempotencyKey = 'temp-client-op-path-001';
+    const payload = { patientId: 'PAT-001', testType: 'Offline CBC', referredBy: 'SELF', notes: 'queued offline' };
+
+    const first = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+    expect(first.status).toBe(201);
+
+    // A sync retry of uncertain outcome replays the stored response instead
+    // of running the handler (and creating a duplicate) a second time.
+    const second = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+    expect(second.status).toBe(201);
+    expect(second.body.data.requestId).toBe(first.body.data.requestId);
+
+    const docs = await PathologyRequestModel.find({ tenantId, testType: 'Offline CBC' });
+    expect(docs).toHaveLength(1);
+    expect(docs[0].patientId).toBe('PAT-001');
+    expect(docs[0].notes).toBe('queued offline');
+  });
+
   test('returns 404 when patient does not exist', async () => {
     const res = await request(app)
       .post('/api/lab/pathology')
@@ -647,6 +674,30 @@ describe('POST /api/lab/radiology', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('PENDING');
     expect(res.body.data.imagingType).toBe('X-Ray Chest');
+  });
+
+  test('Idempotency-Key replay: retrying the same offline-queued create does not create a second radiology request', async () => {
+    const idempotencyKey = 'temp-client-op-rad-001';
+    const payload = { patientId: 'PAT-001', imagingType: 'Offline MRI', referredBy: 'SELF' };
+
+    const first = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+    expect(first.status).toBe(201);
+
+    const second = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+    expect(second.status).toBe(201);
+    expect(second.body.data.requestId).toBe(first.body.data.requestId);
+
+    const docs = await RadiologyRequestModel.find({ tenantId, imagingType: 'Offline MRI' });
+    expect(docs).toHaveLength(1);
+    expect(docs[0].patientId).toBe('PAT-001');
   });
 
   test('201 — radiologist can create a radiology request', async () => {

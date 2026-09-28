@@ -1001,4 +1001,11 @@ describe('CACHE_STORE_BY_ENTITY / CACHE_STORE_KEY_PREFIX_BY_ENTITY — new offli
     expect(CACHE_STORE_KEY_PREFIX_BY_ENTITY.CHARGE).toBeUndefined();
     expect(CACHE_STORE_KEY_PREFIX_BY_ENTITY.MANUAL_PAYMENT).toBeUndefined();
   });
+
+  test('pathology/radiology CREATEs share cache_lab_requests under the same prefixes their GET policies use', () => {
+    expect(CACHE_STORE_BY_ENTITY.PATHOLOGY_REQUEST).toBe('cache_lab_requests');
+    expect(CACHE_STORE_BY_ENTITY.RADIOLOGY_REQUEST).toBe('cache_lab_requests');
+    expect(CACHE_STORE_KEY_PREFIX_BY_ENTITY.PATHOLOGY_REQUEST).toBe(QUERY_CACHE_POLICIES.listPathologyRequests.storeKeyPrefix);
+    expect(CACHE_STORE_KEY_PREFIX_BY_ENTITY.RADIOLOGY_REQUEST).toBe(QUERY_CACHE_POLICIES.listRadiologyRequests.storeKeyPrefix);
+  });
 });

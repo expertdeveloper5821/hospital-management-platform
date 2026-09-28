@@ -38,6 +38,8 @@ export const CACHE_STORE_BY_ENTITY: Partial<Record<OutboxEntityType, CacheStoreN
   BED:             'cache_wards_beds',
   PACKAGE:         'cache_packages',
   CHARGE:          'cache_charges',
+  PATHOLOGY_REQUEST: 'cache_lab_requests',
+  RADIOLOGY_REQUEST: 'cache_lab_requests',
 };
 
 // WARD and BED share cache_wards_beds under a key prefix (see
@@ -49,6 +51,8 @@ export const CACHE_STORE_BY_ENTITY: Partial<Record<OutboxEntityType, CacheStoreN
 export const CACHE_STORE_KEY_PREFIX_BY_ENTITY: Partial<Record<OutboxEntityType, string>> = {
   WARD: 'ward:',
   BED:  'bed:',
+  PATHOLOGY_REQUEST: 'pathology:',
+  RADIOLOGY_REQUEST: 'radiology:',
 };
 
 type ResponseShape = 'single' | 'array' | 'wrapped';
@@ -305,7 +309,7 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
   },
   listPathologyRequests: {
     cacheStore: 'cache_lab_requests', idField: 'requestId', responseShape: 'wrapped',
-    sensitiveFields: LAB_SENSITIVE_FIELDS, storeKeyPrefix: 'pathology:',
+    sensitiveFields: LAB_SENSITIVE_FIELDS, storeKeyPrefix: 'pathology:', sortPendingFirst: true,
     filterFromUrl: [
       { kind: 'exact', param: 'status', field: 'status' },
       { kind: 'exact', param: 'patientId', field: 'patientId' },
@@ -321,7 +325,7 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
   },
   listRadiologyRequests: {
     cacheStore: 'cache_lab_requests', idField: 'requestId', responseShape: 'wrapped',
-    sensitiveFields: LAB_SENSITIVE_FIELDS, storeKeyPrefix: 'radiology:',
+    sensitiveFields: LAB_SENSITIVE_FIELDS, storeKeyPrefix: 'radiology:', sortPendingFirst: true,
     filterFromUrl: [
       { kind: 'exact', param: 'status', field: 'status' },
       { kind: 'exact', param: 'patientId', field: 'patientId' },
@@ -525,15 +529,21 @@ export async function cacheQueryResult(
 // the offline list order matches the online order instead of IndexedDB's
 // arbitrary key-based getAll() order. Applied to any policy with
 // sortPendingFirst set — see readCachedQueryResult.
+// Lab requests carry no createdAt — the backend sorts them by requestedAt
+// DESC instead (lab.repository.ts), so that's the fallback sort key here.
+function recordSortTimestamp(record: CachedRecord): string {
+  const { createdAt, requestedAt } = record.plaintextFields;
+  if (typeof createdAt === 'string') return createdAt;
+  return typeof requestedAt === 'string' ? requestedAt : '';
+}
+
 function comparePendingFirstRecords(a: CachedRecord, b: CachedRecord): number {
   const aPending = !!a.pendingSync;
   const bPending = !!b.pendingSync;
   if (aPending !== bPending) return aPending ? -1 : 1;
   if (aPending) return b.cachedAt - a.cachedAt;
 
-  const aCreatedAt = typeof a.plaintextFields.createdAt === 'string' ? a.plaintextFields.createdAt : '';
-  const bCreatedAt = typeof b.plaintextFields.createdAt === 'string' ? b.plaintextFields.createdAt : '';
-  return bCreatedAt.localeCompare(aCreatedAt);
+  return recordSortTimestamp(b).localeCompare(recordSortTimestamp(a));
 }
 
 async function decryptRecord(record: CachedRecord, key: CryptoKey): Promise<Record<string, unknown>> {

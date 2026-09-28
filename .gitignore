@@ -12,3 +12,5 @@ client/public/sw.js
 client/public/sw.js.map
 client/public/swe-worker*.js
 client/public/swe-worker*.js.map
+
+

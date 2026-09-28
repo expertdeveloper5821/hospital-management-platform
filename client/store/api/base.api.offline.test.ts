@@ -449,6 +449,76 @@ describe('base.api offline GET fallback / read-through cache', () => {
     expect((result as unknown as { error: { status: number; data: unknown } }).error.status).toBe(503);
   });
 
+  test('a stale navigator.onLine === false never blocks a query — the patient list still comes fresh from the API', async () => {
+    const tenantId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const store = buildStore(tenantId, userId);
+
+    // Prime the cache with an old row so a (wrong) cache short-circuit would be observable.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      status: 'success',
+      data: { data: [{ patientId: 'PAT-OLD', fullName: 'Old' }], total: 1, page: 1, limit: 10 },
+    }));
+    await store.dispatch(patientApi.endpoints.searchPatients.initiate({ page: 1, limit: 10 }));
+    await flush();
+
+    const originalNavigator = (globalThis as { navigator?: unknown }).navigator;
+    Object.defineProperty(globalThis, 'navigator', { value: { onLine: false }, configurable: true });
+
+    try {
+      fetchMock.mockResolvedValueOnce(jsonResponse({
+        status: 'success',
+        data: { data: [{ patientId: 'PAT-NEW', fullName: 'Fresh' }], total: 15, page: 1, limit: 10 },
+      }));
+      const result = await store.dispatch(
+        patientApi.endpoints.searchPatients.initiate({ page: 1, limit: 10 }, { forceRefetch: true }),
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect((result as unknown as { data: { data: unknown[]; total: number } }).data).toMatchObject({
+        data: [expect.objectContaining({ patientId: 'PAT-NEW' })],
+        total: 15,
+      });
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', { value: originalNavigator, configurable: true });
+    }
+  });
+
+  test('patient list served from the cache while offline is replaced by fresh API data on the next online fetch', async () => {
+    const tenantId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const store = buildStore(tenantId, userId);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      status: 'success',
+      data: { data: [{ patientId: 'PAT-1', fullName: 'Jane' }], total: 1, page: 1, limit: 10 },
+    }));
+    await store.dispatch(patientApi.endpoints.searchPatients.initiate({ page: 1, limit: 10 }));
+    await flush();
+
+    // Genuinely offline — falls back to IndexedDB.
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const offline = await store.dispatch(
+      patientApi.endpoints.searchPatients.initiate({ page: 1, limit: 10 }, { forceRefetch: true }),
+    );
+    expect((offline as unknown as { data: { data: unknown[] } }).data.data).toEqual([
+      expect.objectContaining({ patientId: 'PAT-1' }),
+    ]);
+
+    // Back online (what refetchOnReconnect / refetchOnFocus trigger) — the API answer wins.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      status: 'success',
+      data: { data: [{ patientId: 'PAT-2', fullName: 'New' }, { patientId: 'PAT-1', fullName: 'Jane' }], total: 2, page: 1, limit: 10 },
+    }));
+    const online = await store.dispatch(
+      patientApi.endpoints.searchPatients.initiate({ page: 1, limit: 10 }, { forceRefetch: true }),
+    );
+    expect((online as unknown as { data: { data: unknown[]; total: number } }).data).toMatchObject({
+      data: [expect.objectContaining({ patientId: 'PAT-2' }), expect.objectContaining({ patientId: 'PAT-1' })],
+      total: 2,
+    });
+  });
+
   test('array-shaped list fallback (getOPDQueue) serves the previously cached queue while offline', async () => {
     const tenantId = crypto.randomUUID();
     const userId = crypto.randomUUID();

@@ -232,6 +232,22 @@ const OFFLINE_CREATE_POLICIES: Record<string, CreateMutationPolicy> = {
     idField:    'chargeId',
     dependsOnBodyField: 'patientId',
   },
+  // Lab's New Request modal — a single self-contained POST whose only
+  // temp-id-eligible reference is the patient (an offline-registered patient
+  // can be picked from the offline patient search), handled exactly like
+  // OPD_VISIT/IPD_ADMISSION/CHARGE above.
+  createPathologyRequest: {
+    entityType: 'PATHOLOGY_REQUEST',
+    endpoint:   '/api/lab/pathology',
+    idField:    'requestId',
+    dependsOnBodyField: 'patientId',
+  },
+  createRadiologyRequest: {
+    entityType: 'RADIOLOGY_REQUEST',
+    endpoint:   '/api/lab/radiology',
+    idField:    'requestId',
+    dependsOnBodyField: 'patientId',
+  },
 };
 
 // The real OPD queueNumber is a server-computed, per-day sequential count —
@@ -498,6 +514,32 @@ export function buildCreateOptimisticRecord(
       cancelledBy: null, cancelledAt: null,
       createdAt: now,
       updatedAt: now,
+    };
+  }
+
+  if (entityType === 'PATHOLOGY_REQUEST' || entityType === 'RADIOLOGY_REQUEST') {
+    return {
+      requestId:       tempId,
+      patientId:       body.patientId,
+      // Denormalized display names — base.api.ts fills these in best-effort
+      // from the RTK Query cache (see tryQueueOfflineCreate).
+      fullName:        null,
+      tenantId,
+      requestedBy:     userId ?? null,
+      requestedByName: null,
+      ...(entityType === 'PATHOLOGY_REQUEST'
+        ? { testType: body.testType }
+        : { imagingType: body.imagingType }),
+      referredBy:      body.referredBy ?? 'SELF',
+      // lab.service.ts's getReferredByName renders 'SELF' as "Self".
+      referredByName:  (body.referredBy ?? 'SELF') === 'SELF' ? 'Self' : '',
+      // lab.service.ts's create always starts PENDING; priority defaults NORMAL (lab.model.ts).
+      status:          'PENDING',
+      priority:        'NORMAL',
+      notes:           body.notes ?? null,
+      reportUrl:       null,
+      requestedAt:     now,
+      updatedAt:       now,
     };
   }
 

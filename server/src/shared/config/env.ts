@@ -140,21 +140,12 @@ const config: AppConfig = {
     pollIntervalSeconds: parseInt(process.env.DASHBOARD_POLL_INTERVAL_SECONDS ?? '60', 10),
   },
   security: {
-    aadhaarEncryptionKey: process.env.AADHAAR_ENCRYPTION_KEY!,
-    // Falls back to AADHAAR_ENCRYPTION_KEY so existing deployments keep
-    // starting (and keep decrypting) without an ops change the moment this
-    // feature ships. Set a dedicated MEDICAL_DATA_ENCRYPTION_KEY — separate
-    // keys per data domain is the intended configuration; the fallback is a
-    // migration convenience, not the target state. Rotating away from the
-    // fallback later requires re-encrypting existing rows (see
-    // scripts/encrypt-medical-fields.ts).
-    medicalDataEncryptionKey:
-      process.env.MEDICAL_DATA_ENCRYPTION_KEY || process.env.AADHAAR_ENCRYPTION_KEY!,
-    // Same fallback rationale as medicalDataEncryptionKey — set a dedicated
-    // PAYMENT_DATA_ENCRYPTION_KEY; rotating off the fallback later requires
-    // re-encrypting existing rows (see scripts/encrypt-payment-fields.ts).
-    paymentDataEncryptionKey:
-      process.env.PAYMENT_DATA_ENCRYPTION_KEY || process.env.AADHAAR_ENCRYPTION_KEY!,
+    // One dedicated key per data domain — no cross-domain fallback. Each is
+    // required (see .env.example) and used for both encryption and decryption
+    // of its own purpose only.
+    aadhaarEncryptionKey:     process.env.AADHAAR_ENCRYPTION_KEY!,
+    medicalDataEncryptionKey: process.env.MEDICAL_DATA_ENCRYPTION_KEY!,
+    paymentDataEncryptionKey: process.env.PAYMENT_DATA_ENCRYPTION_KEY!,
   },
 };
 

@@ -45,6 +45,7 @@ const radiologyUpload = multer({
 router.post(
   '/pathology',
   requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RECEPTIONIST),
+  idempotencyGuard('lab.pathology.create'),
   createPathologyRequest,
 );
 
@@ -87,6 +88,7 @@ router.patch(
 router.post(
   '/radiology',
   requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST, UserRole.NURSE, UserRole.RECEPTIONIST),
+  idempotencyGuard('lab.radiology.create'),
   createRadiologyRequest,
 );
 

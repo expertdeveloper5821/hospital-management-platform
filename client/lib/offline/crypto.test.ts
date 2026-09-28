@@ -76,6 +76,20 @@ describe('offline crypto', () => {
     expect(plain).toBe('persisted-key-check');
   });
 
+  test('concurrent first-use calls all resolve to the one persisted key (no last-write-wins race)', async () => {
+    const tenant = 'tenant-race';
+    const user = 'user-race';
+    const keys = await Promise.all(Array.from({ length: 5 }, () => getOrCreateClientKey(tenant, user)));
+
+    // Everything encrypted under any of the concurrently-returned keys must
+    // still decrypt with the key a later (fresh) lookup reads back.
+    const later = await getOrCreateClientKey(tenant, user);
+    for (const key of keys) {
+      const ciphertext = await encryptClientField('race-check', key);
+      await expect(decryptClientField(ciphertext, later)).resolves.toBe('race-check');
+    }
+  });
+
   test('different (tenantId, userId) pairs get independent keys', async () => {
     const keyA = await getOrCreateClientKey('tenant-a', 'user-a');
     const keyB = await getOrCreateClientKey('tenant-b', 'user-b');
