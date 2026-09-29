@@ -28,7 +28,7 @@ router.post('/',
 
 router.get('/',
   ...authAndScope,
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE_MANAGER),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.RECEPTIONIST),
   requireFirstPasswordChange,
   listCharges,
 );

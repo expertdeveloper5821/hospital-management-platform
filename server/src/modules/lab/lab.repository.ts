@@ -4,6 +4,46 @@ import { ListLabRequestsQuery } from './lab.types';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
+// patientId condition shared by the list queries: a scope list (Doctor's
+// assigned patients and/or search matches) intersected with an optional
+// explicit ?patientId. Returns undefined when neither applies.
+function patientIdCondition(patientIds: string[] | undefined, patientId: string | undefined): unknown {
+  if (patientIds && patientId) return patientIds.includes(patientId) ? patientId : { $in: [] };
+  if (patientIds)              return { $in: patientIds };
+  if (patientId)               return patientId;
+  return undefined;
+}
+
+// A Doctor also sees requests where they were picked as "Referred By", even for
+// patients outside their OPD/IPD assignments. `patientIds` here is the
+// search-only filter (no assignment scope) applied to the referral branch.
+export interface LabReferralScope {
+  doctorId:    string;
+  patientIds?: string[];
+}
+
+function buildListFilter(
+  tenantId:    string,
+  query:       ListLabRequestsQuery,
+  patientIds?: string[],
+  referral?:   LabReferralScope,
+): Record<string, unknown> {
+  const { patientId, status } = query;
+  const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
+  const scopedCond = patientIdCondition(patientIds, patientId);
+  if (referral && scopedCond !== undefined) {
+    const referralCond = patientIdCondition(referral.patientIds, patientId);
+    filter['$or'] = [
+      { patientId: scopedCond },
+      { referredBy: referral.doctorId, ...(referralCond !== undefined ? { patientId: referralCond } : {}) },
+    ];
+  } else if (scopedCond !== undefined) {
+    filter['patientId'] = scopedCond;
+  }
+  if (status) filter['status'] = status;
+  return filter;
+}
+
 export class LabRepository {
 
   // ─── Pathology ─────────────────────────────────────────────────────────────
@@ -24,19 +64,12 @@ export class LabRepository {
     tenantId:    string,
     query:       ListLabRequestsQuery,
     patientIds?: string[],
+    referral?:   LabReferralScope,
   ): Promise<PaginatedResult<IPathologyRequest>> {
     assertDbConnected();
-    const { patientId, status, page, limit } = query;
+    const { page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
-    if (patientIds && patientId) {
-      filter['patientId'] = patientIds.includes(patientId) ? patientId : { $in: [] };
-    } else if (patientIds) {
-      filter['patientId'] = { $in: patientIds };
-    } else if (patientId) {
-      filter['patientId'] = patientId;
-    }
-    if (status)          filter['status']    = status;
+    const filter = buildListFilter(tenantId, query, patientIds, referral);
 
     const [data, total] = await Promise.all([
       PathologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),
@@ -99,19 +132,12 @@ export class LabRepository {
     tenantId:    string,
     query:       ListLabRequestsQuery,
     patientIds?: string[],
+    referral?:   LabReferralScope,
   ): Promise<PaginatedResult<IRadiologyRequest>> {
     assertDbConnected();
-    const { patientId, status, page, limit } = query;
+    const { page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
-    if (patientIds && patientId) {
-      filter['patientId'] = patientIds.includes(patientId) ? patientId : { $in: [] };
-    } else if (patientIds) {
-      filter['patientId'] = { $in: patientIds };
-    } else if (patientId) {
-      filter['patientId'] = patientId;
-    }
-    if (status)          filter['status']    = status;
+    const filter = buildListFilter(tenantId, query, patientIds, referral);
 
     const [data, total] = await Promise.all([
       RadiologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),

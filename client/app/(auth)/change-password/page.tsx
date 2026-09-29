@@ -1,9 +1,11 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,6 +36,9 @@ export default function ChangePasswordPage() {
   const router   = useRouter();
   const dispatch = useAppDispatch();
   const [changePassword, { isLoading, error, isSuccess }] = useChangePasswordMutation();
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew,     setShowNew]     = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const {
     register,
@@ -76,12 +81,27 @@ export default function ChangePasswordPage() {
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="currentPassword">Current password</Label>
-            <Input
-              id="currentPassword"
-              type="password"
-              autoComplete="current-password"
-              {...register('currentPassword')}
-            />
+            <div className="relative">
+              <Input
+                id="currentPassword"
+                type={showCurrent ? 'text' : 'password'}
+                autoComplete="current-password"
+                className="pr-10"
+                {...register('currentPassword')}
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrent((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+                aria-label={showCurrent ? 'Hide password' : 'Show password'}
+                tabIndex={-1}
+              >
+                {showCurrent
+                  ? <EyeOff className="h-4 w-4" aria-hidden="true" />
+                  : <Eye className="h-4 w-4" aria-hidden="true" />
+                }
+              </button>
+            </div>
             {errors.currentPassword && (
               <p className="text-xs text-destructive">{errors.currentPassword.message}</p>
             )}
@@ -89,12 +109,27 @@ export default function ChangePasswordPage() {
 
           <div className="space-y-2">
             <Label htmlFor="newPassword">New password</Label>
-            <Input
-              id="newPassword"
-              type="password"
-              autoComplete="new-password"
-              {...register('newPassword')}
-            />
+            <div className="relative">
+              <Input
+                id="newPassword"
+                type={showNew ? 'text' : 'password'}
+                autoComplete="new-password"
+                className="pr-10"
+                {...register('newPassword')}
+              />
+              <button
+                type="button"
+                onClick={() => setShowNew((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+                aria-label={showNew ? 'Hide password' : 'Show password'}
+                tabIndex={-1}
+              >
+                {showNew
+                  ? <EyeOff className="h-4 w-4" aria-hidden="true" />
+                  : <Eye className="h-4 w-4" aria-hidden="true" />
+                }
+              </button>
+            </div>
             {errors.newPassword ? (
               <p className="text-xs text-destructive">{errors.newPassword.message}</p>
             ) : (
@@ -104,12 +139,27 @@ export default function ChangePasswordPage() {
 
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">Confirm new password</Label>
-            <Input
-              id="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              {...register('confirmPassword')}
-            />
+            <div className="relative">
+              <Input
+                id="confirmPassword"
+                type={showConfirm ? 'text' : 'password'}
+                autoComplete="new-password"
+                className="pr-10"
+                {...register('confirmPassword')}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm((v) => !v)}
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+                aria-label={showConfirm ? 'Hide password' : 'Show password'}
+                tabIndex={-1}
+              >
+                {showConfirm
+                  ? <EyeOff className="h-4 w-4" aria-hidden="true" />
+                  : <Eye className="h-4 w-4" aria-hidden="true" />
+                }
+              </button>
+            </div>
             {errors.confirmPassword && (
               <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
             )}

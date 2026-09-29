@@ -85,9 +85,11 @@ router.get('/visits/:visitId/parcha-pdf',
 // NURSE is included here (unlike elsewhere in this file) but strictly
 // notes-only and only for a visit she's personally assigned to — both
 // enforced in the controller/service, not just by this role gate.
+// RECEPTIONIST is limited to the doctor/nurse assignment (department is
+// re-resolved from the doctors) — enforced in the controller.
 router.patch('/visits/:visitId',
   ...protect,
-  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.RECEPTIONIST),
   idempotencyGuard('opd.visit.update'),
   updateVisit,
 );
@@ -106,11 +108,11 @@ router.get('/patients/:patientId/payment-validity',
   getPaymentValidity,
 );
 
-// Assign Nurse (New OPD Visit form) — same role set as visit creation, since
-// only those roles ever need the nurse dropdown / assignment lookup.
+// Assign Nurse (New OPD Visit form + Edit Visit's Assigned Nurses) — visit
+// creation roles plus DOCTOR, who can reassign nurses from the Edit form.
 router.get('/nurses/available',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.DOCTOR),
   getAvailableNurses,
 );
 

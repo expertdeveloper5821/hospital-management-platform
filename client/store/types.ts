@@ -257,6 +257,7 @@ export interface AvailableOpdNurseResponse {
 
 export interface UpdateOPDVisitRequest {
   doctorIds?:      string[];
+  nurseIds?:       string[]; // Receptionist-only
   visitDate?:      string;
   diagnosis?:      string;
   prescription?:   string;

@@ -2483,7 +2483,18 @@ describe('Assign Nurse — GET /api/opd/nurses/available', () => {
     expect(res.body.data).toHaveLength(0);
   });
 
-  test('403 — a role outside the visit-creation set (e.g. Doctor) cannot list available nurses', async () => {
+  test('403 — a role outside the permitted set (e.g. Nurse) cannot list available nurses', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const nurse  = await seedUser(tid, 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(nurse._id.toString(), tid, UserRole.NURSE);
+
+    const res = await request(app).get('/api/opd/nurses/available').set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  test('200 — a Doctor can list available nurses (Edit Visit → Assigned Nurses)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     const doctor = await seedUser(tid, 'doc@h.com', UserRole.DOCTOR);
@@ -2491,7 +2502,7 @@ describe('Assign Nurse — GET /api/opd/nurses/available', () => {
 
     const res = await request(app).get('/api/opd/nurses/available').set(bearer(token));
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 
   test('401 — unauthenticated', async () => {

@@ -119,102 +119,104 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">Add Inventory Item</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2 space-y-1.5">
-              <Label htmlFor="ci-name">Name *</Label>
-              <Input
-                id="ci-name"
-                value={form.name}
-                onChange={(e) => set('name', e.target.value)}
-                placeholder="e.g. Surgical Gloves, Paracetamol 500mg…"
-                required
-              />
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="ci-name">Name *</Label>
+                <Input
+                  id="ci-name"
+                  value={form.name}
+                  onChange={(e) => set('name', e.target.value)}
+                  placeholder="e.g. Surgical Gloves, Paracetamol 500mg…"
+                  required
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-category">Category *</Label>
-              <select
-                id="ci-category"
-                value={form.category}
-                onChange={(e) => set('category', e.target.value)}
-                required
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="" disabled>Select a category…</option>
-                {INVENTORY_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-category">Category *</Label>
+                <select
+                  id="ci-category"
+                  value={form.category}
+                  onChange={(e) => set('category', e.target.value)}
+                  required
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="" disabled>Select a category…</option>
+                  {INVENTORY_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-unit">Unit *</Label>
-              <Input
-                id="ci-unit"
-                value={form.unit}
-                onChange={(e) => set('unit', e.target.value)}
-                placeholder="e.g. Box, Piece, Bottle, Pair…"
-                required
-              />
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-unit">Unit *</Label>
+                <Input
+                  id="ci-unit"
+                  value={form.unit}
+                  onChange={(e) => set('unit', e.target.value)}
+                  placeholder="e.g. Box, Piece, Bottle, Pair…"
+                  required
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-qty">Initial Quantity *</Label>
-              <Input
-                id="ci-qty"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={form.quantity === 0 ? '' : form.quantity}
-                onChange={(e) => set('quantity', parseDigits(e.target.value) ?? 0)}
-                placeholder="0"
-              />
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-qty">Initial Quantity *</Label>
+                <Input
+                  id="ci-qty"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={form.quantity === 0 ? '' : form.quantity}
+                  onChange={(e) => set('quantity', parseDigits(e.target.value) ?? 0)}
+                  placeholder="0"
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ci-threshold">Low Stock Threshold *</Label>
-              <Input
-                id="ci-threshold"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={form.lowStockThreshold === 0 ? '' : form.lowStockThreshold}
-                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
-                placeholder="0"
-              />
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ci-threshold">Low Stock Threshold *</Label>
+                <Input
+                  id="ci-threshold"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={form.lowStockThreshold === 0 ? '' : form.lowStockThreshold}
+                  onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                  placeholder="0"
+                />
+              </div>
 
-            <div className="sm:col-span-2 space-y-1.5">
-              <Label htmlFor="ci-desc">Description (optional)</Label>
-              <textarea
-                id="ci-desc"
-                rows={2}
-                value={form.description ?? ''}
-                onChange={(e) => set('description', e.target.value)}
-                placeholder="Additional details about this item…"
-                maxLength={1000}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-              <CharCounter value={form.description ?? ''} max={1000} />
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="ci-desc">Description (optional)</Label>
+                <textarea
+                  id="ci-desc"
+                  rows={2}
+                  value={form.description ?? ''}
+                  onChange={(e) => set('description', e.target.value)}
+                  placeholder="Additional details about this item…"
+                  maxLength={1000}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+                <CharCounter value={form.description ?? ''} max={1000} />
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>
               {isLoading ? 'Adding…' : 'Add Item'}
@@ -266,89 +268,91 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">Edit Inventory Item</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2 space-y-1.5">
-              <Label htmlFor="ei-name">Name *</Label>
-              <Input
-                id="ei-name"
-                value={form.name ?? ''}
-                onChange={(e) => set('name', e.target.value)}
-                required
-              />
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="ei-name">Name *</Label>
+                <Input
+                  id="ei-name"
+                  value={form.name ?? ''}
+                  onChange={(e) => set('name', e.target.value)}
+                  required
+                />
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ei-category">Category *</Label>
-              <select
-                id="ei-category"
-                value={form.category ?? ''}
-                onChange={(e) => set('category', e.target.value)}
-                required
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="" disabled>Select a category…</option>
-                {!(INVENTORY_CATEGORIES as readonly string[]).includes(item.category) && (
-                  <option value={item.category}>{item.category}</option>
-                )}
-                {INVENTORY_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ei-category">Category *</Label>
+                <select
+                  id="ei-category"
+                  value={form.category ?? ''}
+                  onChange={(e) => set('category', e.target.value)}
+                  required
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="" disabled>Select a category…</option>
+                  {!(INVENTORY_CATEGORIES as readonly string[]).includes(item.category) && (
+                    <option value={item.category}>{item.category}</option>
+                  )}
+                  {INVENTORY_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ei-unit">Unit *</Label>
-              <Input
-                id="ei-unit"
-                value={form.unit ?? ''}
-                onChange={(e) => set('unit', e.target.value)}
-                required
-              />
-            </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ei-unit">Unit *</Label>
+                <Input
+                  id="ei-unit"
+                  value={form.unit ?? ''}
+                  onChange={(e) => set('unit', e.target.value)}
+                  required
+                />
+              </div>
 
-            <div className="sm:col-span-2 space-y-1.5">
-              <Label htmlFor="ei-threshold">Low Stock Threshold</Label>
-              <Input
-                id="ei-threshold"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={!form.lowStockThreshold ? '' : form.lowStockThreshold}
-                onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
-                placeholder="0"
-              />
-              <p className="text-xs text-muted-foreground">To update stock quantity, use the Update Stock action.</p>
-            </div>
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="ei-threshold">Low Stock Threshold</Label>
+                <Input
+                  id="ei-threshold"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={!form.lowStockThreshold ? '' : form.lowStockThreshold}
+                  onChange={(e) => set('lowStockThreshold', parseDigits(e.target.value) ?? 0)}
+                  placeholder="0"
+                />
+                <p className="text-xs text-muted-foreground">To update stock quantity, use the Update Stock action.</p>
+              </div>
 
-            <div className="sm:col-span-2 space-y-1.5">
-              <Label htmlFor="ei-desc">Description (optional)</Label>
-              <textarea
-                id="ei-desc"
-                rows={2}
-                value={form.description ?? ''}
-                onChange={(e) => set('description', e.target.value)}
-                maxLength={1000}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              />
-              <CharCounter value={form.description ?? ''} max={1000} />
+              <div className="sm:col-span-2 space-y-1.5">
+                <Label htmlFor="ei-desc">Description (optional)</Label>
+                <textarea
+                  id="ei-desc"
+                  rows={2}
+                  value={form.description ?? ''}
+                  onChange={(e) => set('description', e.target.value)}
+                  maxLength={1000}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+                <CharCounter value={form.description ?? ''} max={1000} />
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>
               {isLoading ? 'Saving…' : 'Save Changes'}
@@ -566,8 +570,8 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <div>
             <h2 className="text-base font-semibold">Update Stock</h2>
             <p className="text-xs text-muted-foreground mt-0.5">{item.name}</p>
@@ -577,82 +581,84 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-3">
-            <span className="text-sm text-muted-foreground">Current Stock</span>
-            <span className="text-lg font-bold">{item.quantity} {item.unit}</span>
-          </div>
+            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-4 py-3">
+              <span className="text-sm text-muted-foreground">Current Stock</span>
+              <span className="text-lg font-bold">{item.quantity} {item.unit}</span>
+            </div>
 
-          <div className="space-y-1.5">
-            <Label>Operation</Label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setDirection('add')}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 rounded-md border py-2 text-sm font-medium transition-colors',
-                  direction === 'add'
-                    ? 'border-green-500 bg-green-50 text-green-700'
-                    : 'hover:bg-muted',
-                )}
-              >
-                <ArrowUp className="h-4 w-4" />
-                Add Stock
-              </button>
-              <button
-                type="button"
-                onClick={() => setDirection('remove')}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 rounded-md border py-2 text-sm font-medium transition-colors',
-                  direction === 'remove'
-                    ? 'border-red-500 bg-red-50 text-red-700'
-                    : 'hover:bg-muted',
-                )}
-              >
-                <ArrowDown className="h-4 w-4" />
-                Remove Stock
-              </button>
+            <div className="space-y-1.5">
+              <Label>Operation</Label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDirection('add')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-md border py-2 text-sm font-medium transition-colors',
+                    direction === 'add'
+                      ? 'border-green-500 bg-green-50 text-green-700'
+                      : 'hover:bg-muted',
+                  )}
+                >
+                  <ArrowUp className="h-4 w-4" />
+                  Add Stock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDirection('remove')}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 rounded-md border py-2 text-sm font-medium transition-colors',
+                    direction === 'remove'
+                      ? 'border-red-500 bg-red-50 text-red-700'
+                      : 'hover:bg-muted',
+                  )}
+                >
+                  <ArrowDown className="h-4 w-4" />
+                  Remove Stock
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="su-qty">Quantity *</Label>
+              <Input
+                id="su-qty"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                value={quantityChange === 0 ? '' : quantityChange}
+                onChange={(e) => setQuantityChange(parseDigits(e.target.value) ?? 0)}
+                placeholder="1"
+              />
+            </div>
+
+            <div className={cn(
+              'flex items-center justify-between rounded-md border px-4 py-2 text-sm',
+              newQty < 0 ? 'border-destructive bg-destructive/5 text-destructive' : 'border-border bg-muted/20',
+            )}>
+              <span className="text-muted-foreground">New Stock</span>
+              <span className="font-semibold">{newQty < 0 ? 'Invalid' : `${newQty} ${item.unit}`}</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="su-reason">Reason *</Label>
+              <Input
+                id="su-reason"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. Restocking, Usage, Disposal, Audit correction…"
+                required
+              />
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="su-qty">Quantity *</Label>
-            <Input
-              id="su-qty"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              value={quantityChange === 0 ? '' : quantityChange}
-              onChange={(e) => setQuantityChange(parseDigits(e.target.value) ?? 0)}
-              placeholder="1"
-            />
-          </div>
-
-          <div className={cn(
-            'flex items-center justify-between rounded-md border px-4 py-2 text-sm',
-            newQty < 0 ? 'border-destructive bg-destructive/5 text-destructive' : 'border-border bg-muted/20',
-          )}>
-            <span className="text-muted-foreground">New Stock</span>
-            <span className="font-semibold">{newQty < 0 ? 'Invalid' : `${newQty} ${item.unit}`}</span>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="su-reason">Reason *</Label>
-            <Input
-              id="su-reason"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Restocking, Usage, Disposal, Audit correction…"
-              required
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading || newQty < 0}>
               {isLoading ? 'Saving…' : 'Update Stock'}

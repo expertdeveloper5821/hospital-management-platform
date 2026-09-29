@@ -117,94 +117,96 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6 space-y-5">
-        <div className="flex items-center justify-between">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between shrink-0 px-4 sm:px-6 pt-4 sm:pt-6">
           <h2 className="text-lg font-semibold">Create User</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="cu-name">Full Name</Label>
-            <Input
-              id="cu-name"
-              placeholder="Dr. Priya Sharma"
-              value={name}
-              onChange={(e) => {
-                setName(sanitizeUserName(e.target.value));
-                setError(null);
-              }}
-              minLength={2}
-              maxLength={200}
-              pattern="[A-Za-z][A-Za-z .'-]{1,199}"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cu-email">Email</Label>
-            <Input
-              id="cu-email"
-              type="email"
-              placeholder="staff@hospital.com"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setError(null);
-              }}
-              maxLength={254}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cu-role">Role</Label>
-            <select
-              id="cu-role"
-              value={role}
-              onChange={(e) => { setRole(e.target.value as UserRole); setDepartmentIds([]); }}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              {ASSIGNABLE_ROLES.map((r) => (
-                <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
-          </div>
-
-          {DEPARTMENT_ROLES.has(role) && (
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
-              <Label>Departments</Label>
-              {(departments ?? []).length === 0 ? (
-                <p className="text-xs text-muted-foreground">No departments available.</p>
-              ) : (
-                <div className="rounded-md border border-input max-h-36 overflow-y-auto divide-y">
-                  {(departments ?? []).map((d) => (
-                    <label key={d.departmentId} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <input
-                        type="checkbox"
-                        className="accent-primary h-4 w-4 shrink-0"
-                        checked={departmentIds.includes(d.departmentId)}
-                        onChange={(e) => {
-                          setDepartmentIds((prev) =>
-                            e.target.checked
-                              ? [...prev, d.departmentId]
-                              : prev.filter((id) => id !== d.departmentId)
-                          );
-                        }}
-                      />
-                      <span className="text-sm">{d.name}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
+              <Label htmlFor="cu-name">Full Name</Label>
+              <Input
+                id="cu-name"
+                placeholder="Dr. Priya Sharma"
+                value={name}
+                onChange={(e) => {
+                  setName(sanitizeUserName(e.target.value));
+                  setError(null);
+                }}
+                minLength={2}
+                maxLength={200}
+                pattern="[A-Za-z][A-Za-z .'-]{1,199}"
+                required
+              />
             </div>
-          )}
+            <div className="space-y-2">
+              <Label htmlFor="cu-email">Email</Label>
+              <Input
+                id="cu-email"
+                type="email"
+                placeholder="staff@hospital.com"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError(null);
+                }}
+                maxLength={254}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="cu-role">Role</Label>
+              <select
+                id="cu-role"
+                value={role}
+                onChange={(e) => { setRole(e.target.value as UserRole); setDepartmentIds([]); }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {ASSIGNABLE_ROLES.map((r) => (
+                  <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </div>
 
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
-          )}
+            {DEPARTMENT_ROLES.has(role) && (
+              <div className="space-y-2">
+                <Label>Departments</Label>
+                {(departments ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No departments available.</p>
+                ) : (
+                  <div className="rounded-md border border-input max-h-36 overflow-y-auto divide-y">
+                    {(departments ?? []).map((d) => (
+                      <label key={d.departmentId} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors">
+                        <input
+                          type="checkbox"
+                          className="accent-primary h-4 w-4 shrink-0"
+                          checked={departmentIds.includes(d.departmentId)}
+                          onChange={(e) => {
+                            setDepartmentIds((prev) =>
+                              e.target.checked
+                                ? [...prev, d.departmentId]
+                                : prev.filter((id) => id !== d.departmentId)
+                            );
+                          }}
+                        />
+                        <span className="text-sm">{d.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-          <div className="flex justify-end gap-3 pt-1">
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 shrink-0 px-4 sm:px-6 pt-1 pb-4 sm:pb-6">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
               Cancel
             </Button>

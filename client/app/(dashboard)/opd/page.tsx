@@ -212,6 +212,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
   const nurseNotesOnly = role === 'NURSE' && (visit.nurseIds ?? []).includes(userId ?? '');
+  // A Receptionist's Edit access is the Department/Doctor/Nurse assignment
+  // only — mirrors RECEPTIONIST_EDITABLE_FIELDS in opd.controller.ts.
+  const receptionistAssignOnly = role === 'RECEPTIONIST';
 
   // Look up the payment linked directly to this visit (referenceId) rather than
   // guessing from patientId + calendar date — a patient can have other payments
@@ -237,6 +240,11 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
 
   const [editDoctorIds,    setEditDoctorIds]    = useState<string[]>(visit.doctorIds ?? []);
   const [editAddDoctorId,  setEditAddDoctorId]  = useState('');
+
+  const { data: editNursesData } = useGetAvailableOpdNursesQuery(undefined, { skip: !(receptionistAssignOnly || canEdit) });
+  const editAvailableNurses = editNursesData ?? [];
+  const [editNurseIds,    setEditNurseIds]    = useState<string[]>(visit.nurseIds ?? []);
+  const [editAddNurseId,  setEditAddNurseId]  = useState('');
 
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
     diagnosis:      visit.diagnosis      ?? '',
@@ -282,6 +290,27 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     if (updating || updatingRef.current) return;
     setError('');
+    if (receptionistAssignOnly) {
+      // Only changed assignments are sent — the backend rejects any other
+      // field from a Receptionist (see RECEPTIONIST_EDITABLE_FIELDS).
+      const changed = (next: string[], prev: string[]) =>
+        next.length !== prev.length || next.some((id) => !prev.includes(id));
+      const body: UpdateOPDVisitRequest = {
+        ...(changed(editDoctorIds, visit.doctorIds ?? []) ? { doctorIds: editDoctorIds } : {}),
+        ...(changed(editNurseIds,  visit.nurseIds  ?? []) ? { nurseIds:  editNurseIds  } : {}),
+      };
+      updatingRef.current = true;
+      try {
+        const updated = await updateVisit({ visitId: visit.visitId, ...body }).unwrap();
+        onUpdate(updated);
+        setMode('view');
+      } catch (err: any) {
+        setError(opdErrorMessage(err, 'Failed to update visit.'));
+      } finally {
+        updatingRef.current = false;
+      }
+      return;
+    }
     if ((form.diagnosis ?? '').trim().length > 2000) {
       setError('Diagnosis cannot exceed 2000 characters.');
       return;
@@ -311,6 +340,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       const doctorIdsChanged =
         editDoctorIds.length !== (visit.doctorIds ?? []).length ||
         editDoctorIds.some((id) => !(visit.doctorIds ?? []).includes(id));
+      const nurseIdsChanged =
+        editNurseIds.length !== (visit.nurseIds ?? []).length ||
+        editNurseIds.some((id) => !(visit.nurseIds ?? []).includes(id));
 
       // A notes-only nurse edit must send *only* notes/vitals — the backend
       // rejects the request outright if any other field is present (see
@@ -323,6 +355,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           }
         : {
             ...(doctorIdsChanged ? { doctorIds: editDoctorIds } : {}),
+            // Like doctorIds, only sent when changed (keeps offline-queueable
+            // diagnosis/prescription/notes/vitals edits unaffected).
+            ...(nurseIdsChanged ? { nurseIds: editNurseIds } : {}),
             // Sent unconditionally (like prescription/notes below) so
             // intentionally clearing diagnosis down to blank is actually
             // submitted instead of silently dropped and left unchanged —
@@ -381,6 +416,8 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       notes:        visit.notes        ?? '',
     });
     setVitalsForm(vitalsToInputs(visit.vitals));
+    setEditNurseIds(visit.nurseIds ?? []);
+    setEditAddNurseId('');
     setMode('edit');
   }
 
@@ -464,6 +501,121 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     </div>
   );
 
+  // Assigned Nurses — shared by the Receptionist assignment-only form and the
+  // full Doctor/Hospital Admin edit form (a Nurse's form never shows it).
+  const nurseAssignFields = (
+    <div className="space-y-1.5">
+      <Label>Assigned Nurses</Label>
+      {editNurseIds.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {editNurseIds.map((id) => {
+            const label = editAvailableNurses.find((n) => n.userId === id)?.name ?? nurseNames([id]);
+            return (
+              <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                <span className="truncate min-w-0" title={label}>{label}</span>
+                <button type="button" onClick={() => setEditNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <select
+          value={editAddNurseId}
+          onChange={(e) => setEditAddNurseId(e.target.value)}
+          className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">— Add nurse —</option>
+          {editAvailableNurses.filter((n) => !editNurseIds.includes(n.userId)).map((n) => (
+            <option key={n.userId} value={n.userId}>{n.name}</option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          disabled={!editAddNurseId}
+          onClick={() => {
+            if (editAddNurseId && !editNurseIds.includes(editAddNurseId)) {
+              setEditNurseIds((prev) => [...prev, editAddNurseId]);
+              setEditAddNurseId('');
+            }
+          }}
+          className="shrink-0 h-10"
+        >
+          <Plus className="h-4 w-4 mr-1.5" />
+          Add Nurse
+        </Button>
+      </div>
+    </div>
+  );
+
+  // Department filter + Assigned Doctors — shared by the full edit form and
+  // the Receptionist assignment-only form below.
+  const departmentDoctorFields = (
+    <>
+      <div className="space-y-1.5">
+        <Label htmlFor="ep-dept">Department</Label>
+        <select
+          id="ep-dept"
+          value={selectedDepartmentId}
+          onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="">— All Departments —</option>
+          {editDepartments.map((dept) => (
+            <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <Label>Assigned Doctors</Label>
+        {editDoctorIds.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {editDoctorIds.map((id) => {
+              const d = allDoctors.find((u) => u.userId === id);
+              return (
+                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                  <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
+                  <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <select
+            value={editAddDoctorId}
+            onChange={(e) => setEditAddDoctorId(e.target.value)}
+            className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="">— Add doctor —</option>
+            {editDoctors.filter((d) => !editDoctorIds.includes(d.userId)).map((d) => (
+              <option key={d.userId} value={d.userId}>{d.name}</option>
+            ))}
+          </select>
+          {/* Matches the New OPD Visit dialog's Add Doctor button. */}
+          <Button
+            type="button"
+            disabled={!editAddDoctorId}
+            onClick={() => {
+              if (editAddDoctorId && !editDoctorIds.includes(editAddDoctorId)) {
+                setEditDoctorIds((prev) => [...prev, editAddDoctorId]);
+                setEditAddDoctorId('');
+              }
+            }}
+            className="shrink-0 h-10"
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Add Doctor
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
   return (
     <DialogOverlay className="justify-end bg-black/40" onClick={onClose}>
       <div
@@ -496,6 +648,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           {/* View mode */}
           {mode === 'view' && (
             <div>
+              {f('Department',       visit.departmentId
+                ? (editDepartments.find((d) => d.departmentId === visit.departmentId)?.name ?? visit.departmentId)
+                : null)}
               {f('Doctor(s)',        doctorNames(visit.doctorIds ?? []))}
               {f('Nurse(s)',         nurseNames(visit.nurseIds ?? []))}
               {f('Diagnosis',       visit.diagnosis)}
@@ -560,70 +715,30 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               {vitalsFields}
             </form>
           )}
-          {mode === 'edit' && !nurseNotesOnly && (
+          {/* Edit mode — Receptionist gets an assignment-only form:
+              Department/Doctors/Nurses are editable, everything else is
+              shown read-only and never submitted (see handleUpdate). */}
+          {mode === 'edit' && receptionistAssignOnly && (
+            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+              <p className="text-xs text-muted-foreground">Only the department, doctor and nurse fields can be edited.</p>
+              {departmentDoctorFields}
+              {nurseAssignFields}
+              {f('Diagnosis',    visit.diagnosis)}
+              {f('Prescription', visit.prescription ? (
+                <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
+              ) : null)}
+              {f('Notes',        <RichTextDisplay value={visit.notes} />)}
+            </form>
+          )}
+          {mode === 'edit' && !nurseNotesOnly && !receptionistAssignOnly && (
             // noValidate: the Vitals number inputs' min/max are UX hints only
             // — without this, a browser/jsdom blocks the submit event
             // entirely on an out-of-range value before handleUpdate ever
             // runs, showing a native tooltip instead of our own styled error
             // banner (the same one every other validation error uses).
             <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
-              <div className="space-y-1.5">
-                <Label htmlFor="ep-dept">Department</Label>
-                <select
-                  id="ep-dept"
-                  value={selectedDepartmentId}
-                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">— All Departments —</option>
-                  {editDepartments.map((dept) => (
-                    <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Assigned Doctors</Label>
-                {editDoctorIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {editDoctorIds.map((id) => {
-                      const d = allDoctors.find((u) => u.userId === id);
-                      return (
-                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                          <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
-                          <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <select
-                    value={editAddDoctorId}
-                    onChange={(e) => setEditAddDoctorId(e.target.value)}
-                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">— Add doctor —</option>
-                    {editDoctors.filter((d) => !editDoctorIds.includes(d.userId)).map((d) => (
-                      <option key={d.userId} value={d.userId}>{d.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={!editAddDoctorId}
-                    onClick={() => {
-                      if (editAddDoctorId && !editDoctorIds.includes(editAddDoctorId)) {
-                        setEditDoctorIds((prev) => [...prev, editAddDoctorId]);
-                        setEditAddDoctorId('');
-                      }
-                    }}
-                    className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
+              {departmentDoctorFields}
+              {nurseAssignFields}
               <div className="space-y-1.5">
                 <Label htmlFor="ep-diagnosis">Diagnosis</Label>
                 <textarea
@@ -714,7 +829,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               // Wraps to a second row rather than crushing four buttons into
               // the 448px panel when the visit is still waiting.
               <div className="flex flex-wrap items-stretch gap-3">
-                {(canEdit || nurseNotesOnly) && (
+                {(canEdit || nurseNotesOnly || receptionistAssignOnly) && (
                   <Button
                     variant="outline"
                     className="min-w-[120px] flex-1 h-10 rounded-lg border-slate-300 bg-white font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50"
@@ -1046,339 +1161,341 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   return (
     <>
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">New OPD Visit</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          {/* Patient search */}
-          <div className="space-y-1.5">
-            <Label>Patient *</Label>
-            {selectedPatient ? (
-              <div className="flex items-center justify-between rounded-md border px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium">{selectedPatient.fullName}</p>
-                  <p className="text-xs text-muted-foreground">{selectedPatient.patientId} · {selectedPatient.mobileNumber}</p>
+            {/* Patient search */}
+            <div className="space-y-1.5">
+              <Label>Patient *</Label>
+              {selectedPatient ? (
+                <div className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium">{selectedPatient.fullName}</p>
+                    <p className="text-xs text-muted-foreground">{selectedPatient.patientId} · {selectedPatient.mobileNumber}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPatient(null)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPatient(null)}
-                  className="text-muted-foreground hover:text-foreground"
+              ) : (
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Search patient by name or mobile…"
+                      value={patientSearch}
+                      onChange={(e) => setPatientSearch(e.target.value)}
+                    />
+                    {debouncedPSearch && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                        {fetchingPatients && (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+                        )}
+                        {!fetchingPatients && patients.length === 0 && (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
+                        )}
+                        {patients.map((p) => (
+                          <button
+                            key={p.patientId}
+                            type="button"
+                            className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                            onClick={() => { setSelectedPatient(p); setPatientSearch(''); }}
+                          >
+                            <span className="text-sm font-medium">{p.fullName}</span>
+                            <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <Button type="button" onClick={() => setShowAddPatient(true)} className="shrink-0 h-10">
+                    <UserPlus className="h-4 w-4 mr-1.5" />
+                    Add Patient
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Department + Visit Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="nv-dept">Department</Label>
+                <select
+                  id="nv-dept"
+                  value={selectedDepartmentId}
+                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <X className="h-4 w-4" />
-                </button>
+                  <option value="">— All Departments —</option>
+                  {departments.map((dept) => (
+                    <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
+                  ))}
+                </select>
               </div>
-            ) : (
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="pl-9"
-                    placeholder="Search patient by name or mobile…"
-                    value={patientSearch}
-                    onChange={(e) => setPatientSearch(e.target.value)}
-                  />
-                  {debouncedPSearch && (
-                    <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
-                      {fetchingPatients && (
-                        <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
-                      )}
-                      {!fetchingPatients && patients.length === 0 && (
-                        <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
-                      )}
-                      {patients.map((p) => (
-                        <button
-                          key={p.patientId}
-                          type="button"
-                          className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
-                          onClick={() => { setSelectedPatient(p); setPatientSearch(''); }}
-                        >
-                          <span className="text-sm font-medium">{p.fullName}</span>
-                          <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="nv-date">Visit Date</Label>
+                <Input
+                  id="nv-date"
+                  type="date"
+                  min={canBackdate ? undefined : todayISO()}
+                  value={form.visitDate ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
+                  className="relative pr-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-3 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:bottom-0 [&::-webkit-calendar-picker-indicator]:my-auto [&::-webkit-calendar-picker-indicator]:h-5 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                />
+              </div>
+            </div>
+
+            {/* Doctors */}
+            <div className="space-y-1.5">
+              <Label>Assign Doctors</Label>
+              {selectedDoctorIds.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedDoctorIds.map((id) => {
+                    const d = allDoctors.find((u) => u.userId === id);
+                    return (
+                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                        <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
+                        <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
+                          <X className="h-3 w-3" />
                         </button>
-                      ))}
-                    </div>
-                  )}
+                      </span>
+                    );
+                  })}
                 </div>
-                <Button type="button" onClick={() => setShowAddPatient(true)} className="shrink-0 h-10">
-                  <UserPlus className="h-4 w-4 mr-1.5" />
-                  Add Patient
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Department + Visit Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="nv-dept">Department</Label>
-              <select
-                id="nv-dept"
-                value={selectedDepartmentId}
-                onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">— All Departments —</option>
-                {departments.map((dept) => (
-                  <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="nv-date">Visit Date</Label>
-              <Input
-                id="nv-date"
-                type="date"
-                min={canBackdate ? undefined : todayISO()}
-                value={form.visitDate ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, visitDate: e.target.value }))}
-                className="relative pr-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-3 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:bottom-0 [&::-webkit-calendar-picker-indicator]:my-auto [&::-webkit-calendar-picker-indicator]:h-5 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
-              />
-            </div>
-          </div>
-
-          {/* Doctors */}
-          <div className="space-y-1.5">
-            <Label>Assign Doctors</Label>
-            {selectedDoctorIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {selectedDoctorIds.map((id) => {
-                  const d = allDoctors.find((u) => u.userId === id);
-                  return (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                      <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
-                      <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <select
-                value={addDoctorId}
-                onChange={(e) => setAddDoctorId(e.target.value)}
-                className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">— Add doctor —</option>
-                {doctors.filter((d) => !selectedDoctorIds.includes(d.userId)).map((d) => (
-                  <option key={d.userId} value={d.userId}>{d.name}</option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                disabled={!addDoctorId}
-                onClick={() => {
-                  if (addDoctorId && !selectedDoctorIds.includes(addDoctorId)) {
-                    setSelectedDoctorIds((prev) => [...prev, addDoctorId]);
-                    setAddDoctorId('');
-                  }
-                }}
-                className="shrink-0 h-10"
-              >
-                <Plus className="h-4 w-4 mr-1.5" />
-                Add Doctor
-              </Button>
-            </div>
-          </div>
-
-          {/* Nurse — doctor-wise, optional, multi-select (same chip pattern as
-              Assign Doctors). Keyed off the first assigned doctor, same
-              convention the department resolution already uses. */}
-          <div className="space-y-1.5">
-            <Label>Assign Nurse (Optional)</Label>
-            {primaryDoctorId && assignedNurses.filter((n) => n.isAvailable).length > 0 && (
-              <p className="rounded-md bg-success/10 px-3 py-2 text-xs text-success">
-                ✓ Already assigned nurse{assignedNurses.filter((n) => n.isAvailable).length > 1 ? 's' : ''}: {assignedNurses.filter((n) => n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')}
-              </p>
-            )}
-            {primaryDoctorId && assignedNurses.filter((n) => !n.isAvailable).length > 0 && (
-              <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
-                {assignedNurses.filter((n) => !n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')} {assignedNurses.filter((n) => !n.isAvailable).length > 1 ? 'are' : 'is'} currently on IPD ward duty — select another nurse.
-              </p>
-            )}
-            {selectedNurseIds.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {selectedNurseIds.map((id) => {
-                  const n = availableNurses.find((u) => u.userId === id);
-                  const label = n?.name ?? assignedNurses.find((a) => a.nurseId === id)?.nurseName ?? id;
-                  return (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                      <span className="truncate min-w-0" title={label}>{label}</span>
-                      <button type="button" onClick={() => setSelectedNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-            {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).length === 0 && selectedNurseIds.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No available nurses</p>
-            ) : (
+              )}
               <div className="flex gap-2">
                 <select
-                  value={addNurseId}
-                  onChange={(e) => setAddNurseId(e.target.value)}
+                  value={addDoctorId}
+                  onChange={(e) => setAddDoctorId(e.target.value)}
                   className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option value="">— Add nurse —</option>
-                  {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).map((n) => (
-                    <option key={n.userId} value={n.userId}>{n.name}</option>
+                  <option value="">— Add doctor —</option>
+                  {doctors.filter((d) => !selectedDoctorIds.includes(d.userId)).map((d) => (
+                    <option key={d.userId} value={d.userId}>{d.name}</option>
                   ))}
                 </select>
                 <Button
                   type="button"
-                  disabled={!addNurseId}
+                  disabled={!addDoctorId}
                   onClick={() => {
-                    if (addNurseId && !selectedNurseIds.includes(addNurseId)) {
-                      setSelectedNurseIds((prev) => [...prev, addNurseId]);
-                      setAddNurseId('');
+                    if (addDoctorId && !selectedDoctorIds.includes(addDoctorId)) {
+                      setSelectedDoctorIds((prev) => [...prev, addDoctorId]);
+                      setAddDoctorId('');
                     }
                   }}
                   className="shrink-0 h-10"
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
-                  Add Nurse
+                  Add Doctor
                 </Button>
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label htmlFor="nv-notes">Notes (optional)</Label>
-            <RichTextEditor
-              id="nv-notes"
-              rows={2}
-              value={form.notes ?? ''}
-              onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
-              maxLength={2000}
-            />
-          </div>
-
-          {/* Registration Type / Payment — driven by the backend's OPD payment
-              validity check for the selected patient + doctor(s) (see getOPDPaymentValidity). */}
-          <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
-            <p className="text-sm font-medium">OPD Payment</p>
-
-            {!selectedPatient ? (
-              <p className="text-sm text-muted-foreground">Select a patient to check OPD payment status.</p>
-            ) : checkingValidity && !paymentValidity ? (
-              <p className="text-sm text-muted-foreground">Checking previous OPD payment…</p>
-            ) : paymentValidity?.reason === 'VALID' ? (
-              <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
-                Existing OPD payment is valid until {formatDate(paymentValidity.validUntil!)}. No new payment is required for this visit.
-              </p>
-            ) : (
-              <>
-                {paymentValidity?.reason === 'EXPIRED' && (
-                  <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-                    Previous OPD payment validity expired on {formatDate(paymentValidity.validUntil!)}. A new OPD payment is required to continue.
-                  </p>
-                )}
-
-                {paymentValidity?.reason === 'DIFFERENT_DOCTOR' && (
-                  <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
-                    This patient&apos;s existing OPD payment does not cover the selected doctor(s). A new OPD payment is required to continue.
-                  </p>
-                )}
-
-                {paymentValidity?.reason !== 'EXPIRED' && paymentValidity?.reason !== 'DIFFERENT_DOCTOR' && (
-                  <>
-                    <p className="text-xs text-muted-foreground -mt-1">Registration Type *</p>
-                    <div className="flex gap-2">
-                      {(['free', 'paid'] as const).map((t) => (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => {
-                            setRegType(t);
-                            if (t === 'free') { setPaymentAmount(''); setPaymentMode(''); setTransactionId(''); }
-                            setError('');
-                          }}
-                          className={[
-                            'flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize transition-colors',
-                            regType === t
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-input bg-background hover:bg-muted',
-                          ].join(' ')}
-                        >
-                          {t}
+            {/* Nurse — doctor-wise, optional, multi-select (same chip pattern as
+                Assign Doctors). Keyed off the first assigned doctor, same
+                convention the department resolution already uses. */}
+            <div className="space-y-1.5">
+              <Label>Assign Nurse (Optional)</Label>
+              {primaryDoctorId && assignedNurses.filter((n) => n.isAvailable).length > 0 && (
+                <p className="rounded-md bg-success/10 px-3 py-2 text-xs text-success">
+                  ✓ Already assigned nurse{assignedNurses.filter((n) => n.isAvailable).length > 1 ? 's' : ''}: {assignedNurses.filter((n) => n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')}
+                </p>
+              )}
+              {primaryDoctorId && assignedNurses.filter((n) => !n.isAvailable).length > 0 && (
+                <p className="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
+                  {assignedNurses.filter((n) => !n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')} {assignedNurses.filter((n) => !n.isAvailable).length > 1 ? 'are' : 'is'} currently on IPD ward duty — select another nurse.
+                </p>
+              )}
+              {selectedNurseIds.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedNurseIds.map((id) => {
+                    const n = availableNurses.find((u) => u.userId === id);
+                    const label = n?.name ?? assignedNurses.find((a) => a.nurseId === id)?.nurseName ?? id;
+                    return (
+                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                        <span className="truncate min-w-0" title={label}>{label}</span>
+                        <button type="button" onClick={() => setSelectedNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
+                          <X className="h-3 w-3" />
                         </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).length === 0 && selectedNurseIds.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No available nurses</p>
+              ) : (
+                <div className="flex gap-2">
+                  <select
+                    value={addNurseId}
+                    onChange={(e) => setAddNurseId(e.target.value)}
+                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">— Add nurse —</option>
+                    {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).map((n) => (
+                      <option key={n.userId} value={n.userId}>{n.name}</option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    disabled={!addNurseId}
+                    onClick={() => {
+                      if (addNurseId && !selectedNurseIds.includes(addNurseId)) {
+                        setSelectedNurseIds((prev) => [...prev, addNurseId]);
+                        setAddNurseId('');
+                      }
+                    }}
+                    className="shrink-0 h-10"
+                  >
+                    <Plus className="h-4 w-4 mr-1.5" />
+                    Add Nurse
+                  </Button>
+                </div>
+              )}
+            </div>
 
-                {regType === 'paid' && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="nv-pay-amount">Amount (₹) *</Label>
-                      <Input
-                        id="nv-pay-amount"
-                        type="number"
-                        min="1"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={paymentAmount}
-                        onChange={(e) => setPaymentAmount(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Payment Mode *</Label>
+            {/* Notes */}
+            <div className="space-y-1.5">
+              <Label htmlFor="nv-notes">Notes (optional)</Label>
+              <RichTextEditor
+                id="nv-notes"
+                rows={2}
+                value={form.notes ?? ''}
+                onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
+                maxLength={2000}
+              />
+            </div>
+
+            {/* Registration Type / Payment — driven by the backend's OPD payment
+                validity check for the selected patient + doctor(s) (see getOPDPaymentValidity). */}
+            <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
+              <p className="text-sm font-medium">OPD Payment</p>
+
+              {!selectedPatient ? (
+                <p className="text-sm text-muted-foreground">Select a patient to check OPD payment status.</p>
+              ) : checkingValidity && !paymentValidity ? (
+                <p className="text-sm text-muted-foreground">Checking previous OPD payment…</p>
+              ) : paymentValidity?.reason === 'VALID' ? (
+                <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+                  Existing OPD payment is valid until {formatDate(paymentValidity.validUntil!)}. No new payment is required for this visit.
+                </p>
+              ) : (
+                <>
+                  {paymentValidity?.reason === 'EXPIRED' && (
+                    <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+                      Previous OPD payment validity expired on {formatDate(paymentValidity.validUntil!)}. A new OPD payment is required to continue.
+                    </p>
+                  )}
+
+                  {paymentValidity?.reason === 'DIFFERENT_DOCTOR' && (
+                    <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">
+                      This patient&apos;s existing OPD payment does not cover the selected doctor(s). A new OPD payment is required to continue.
+                    </p>
+                  )}
+
+                  {paymentValidity?.reason !== 'EXPIRED' && paymentValidity?.reason !== 'DIFFERENT_DOCTOR' && (
+                    <>
+                      <p className="text-xs text-muted-foreground -mt-1">Registration Type *</p>
                       <div className="flex gap-2">
-                        {PAYMENT_MODES.map(({ value, label }) => (
+                        {(['free', 'paid'] as const).map((t) => (
                           <button
-                            key={value}
+                            key={t}
                             type="button"
                             onClick={() => {
-                              setPaymentMode(value);
-                              if (value === 'CASH') setTransactionId('');
+                              setRegType(t);
+                              if (t === 'free') { setPaymentAmount(''); setPaymentMode(''); setTransactionId(''); }
+                              setError('');
                             }}
-                            className={cn(
-                              'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                              paymentMode === value
+                            className={[
+                              'flex-1 rounded-md border px-3 py-2 text-sm font-medium capitalize transition-colors',
+                              regType === t
                                 ? 'border-primary bg-primary text-primary-foreground'
                                 : 'border-input bg-background hover:bg-muted',
-                            )}
+                            ].join(' ')}
                           >
-                            {label}
+                            {t}
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </>
+                  )}
 
-                    {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+                  {regType === 'paid' && (
+                    <>
                       <div className="space-y-1.5">
-                        <Label htmlFor="nv-pay-txn">Transaction ID (optional)</Label>
+                        <Label htmlFor="nv-pay-amount">Amount (₹) *</Label>
                         <Input
-                          id="nv-pay-txn"
-                          type="text"
-                          placeholder="e.g. UPI reference / last 4 digits"
-                          value={transactionId}
-                          onChange={(e) => setTransactionId(e.target.value)}
+                          id="nv-pay-amount"
+                          type="number"
+                          min="1"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={paymentAmount}
+                          onChange={(e) => setPaymentAmount(e.target.value)}
+                          required
                         />
                       </div>
-                    )}
-                  </>
-                )}
-              </>
-            )}
+                      <div className="space-y-1.5">
+                        <Label>Payment Mode *</Label>
+                        <div className="flex gap-2">
+                          {PAYMENT_MODES.map(({ value, label }) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => {
+                                setPaymentMode(value);
+                                if (value === 'CASH') setTransactionId('');
+                              }}
+                              className={cn(
+                                'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                                paymentMode === value
+                                  ? 'border-primary bg-primary text-primary-foreground'
+                                  : 'border-input bg-background hover:bg-muted',
+                              )}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+                        <div className="space-y-1.5">
+                          <Label htmlFor="nv-pay-txn">Transaction ID (optional)</Label>
+                          <Input
+                            id="nv-pay-txn"
+                            type="text"
+                            placeholder="e.g. UPI reference / last 4 digits"
+                            value={transactionId}
+                            onChange={(e) => setTransactionId(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading || !selectedPatient}>
               {isLoading ? 'Creating…' : 'Create Visit'}

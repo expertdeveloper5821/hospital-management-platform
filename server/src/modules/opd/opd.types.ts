@@ -52,6 +52,7 @@ export interface OPDVitals {
 
 export interface UpdateOPDVisitRequest {
   doctorIds?:      string[];
+  nurseIds?:       string[]; // Receptionist-only (see opd.controller.ts)
   visitDate?:      string; // YYYY-MM-DD — triggers queue number recalculation
   diagnosis?:      string;
   prescription?:   string;

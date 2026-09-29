@@ -863,208 +863,210 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   return (
     <>
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">New Admission</h2>
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
 
-          {/* Step 1 — Patient */}
-          <div className="space-y-1.5">
-            <Label>Patient</Label>
-            <PatientSearch value={patient} onChange={setPatient} onAddPatient={() => setShowAddPatient(true)} />
-          </div>
-
-          {/* Step 2 — Ward */}
-          <div className="space-y-1.5">
-            <Label htmlFor="na-ward">Ward</Label>
-            <select
-              id="na-ward"
-              value={wardId}
-              onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
-              required
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Select ward…</option>
-              {wards.map((w) => (
-                <option key={w.wardId} value={w.wardId}>
-                  {w.name}{w.floor ? ` — Floor ${w.floor}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Step 3 — Bed selector */}
-          {wardId && (
+            {/* Step 1 — Patient */}
             <div className="space-y-1.5">
-              <Label>Bed</Label>
-              {allBeds.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No beds in this ward yet.</p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-3">
-                    {allBeds.map((b) => {
-                      const isSelected = bedId === b.bedId;
-                      const isAvailable = !b.isOccupied;
-                      return (
-                        <button
-                          key={b.bedId}
-                          type="button"
-                          disabled={!isAvailable}
-                          onClick={() => setBedId(b.bedId)}
-                          className={[
-                            'inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-medium transition-colors',
-                            isSelected
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : isAvailable
-                                ? 'border-green-500/50 bg-green-50 text-green-700 hover:bg-green-100'
-                                : 'border-muted bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed',
-                          ].join(' ')}
-                          title={b.isOccupied ? 'Occupied' : 'Available'}
-                        >
-                          <Bed className="h-3 w-3" />
-                          {b.bedNumber}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {availableBeds.length} of {allBeds.length} beds available in {selectedWard?.name}
-                  </p>
-                  {availableBeds.length === 0 && (
-                    <p className="flex items-center gap-1 text-xs text-destructive">
-                      <AlertTriangle className="h-3 w-3" />
-                      All beds are occupied in this ward.
-                    </p>
-                  )}
-                </>
-              )}
+              <Label>Patient</Label>
+              <PatientSearch value={patient} onChange={setPatient} onAddPatient={() => setShowAddPatient(true)} />
             </div>
-          )}
 
-          {/* Step 4 — Department filter (optional) */}
-          <div className="space-y-1.5">
-            <Label htmlFor="na-dept">Department <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            <select
-              id="na-dept"
-              value={selectedDepartmentId}
-              onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">— All Departments —</option>
-              {departments.map((dept) => (
-                <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Step 5 — Doctors (optional) */}
-          <div className="space-y-1.5">
-            <Label>Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
-            {selectedDoctors.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {selectedDoctors.map((d) => (
-                  <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                    <span className="truncate min-w-0" title={d.name}>{d.name}</span>
-                    <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
+            {/* Step 2 — Ward */}
+            <div className="space-y-1.5">
+              <Label htmlFor="na-ward">Ward</Label>
               <select
-                value={addDoctorId}
-                onChange={(e) => setAddDoctorId(e.target.value)}
-                className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                id="na-ward"
+                value={wardId}
+                onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
+                required
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">— Add doctor —</option>
-                {doctorList.filter((d) => !selectedDoctors.some((x) => x.userId === d.userId)).map((d) => (
-                  <option key={d.userId} value={d.userId}>{d.name}</option>
+                <option value="">Select ward…</option>
+                {wards.map((w) => (
+                  <option key={w.wardId} value={w.wardId}>
+                    {w.name}{w.floor ? ` — Floor ${w.floor}` : ''}
+                  </option>
                 ))}
               </select>
-              <Button
-                type="button"
-                disabled={!addDoctorId}
-                onClick={() => {
-                  const d = allDoctors.find((u) => u.userId === addDoctorId);
-                  if (d && !selectedDoctors.some((x) => x.userId === d.userId)) {
-                    setSelectedDoctors((prev) => [...prev, d]);
-                    setAddDoctorId('');
-                  }
-                }}
-                className="shrink-0 h-10"
-              >
-                <Plus className="h-4 w-4 mr-1.5" />
-                Add Doctor
-              </Button>
             </div>
-          </div>
 
-          {/* Step 6 — Payment */}
-          <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
-            <p className="text-sm font-medium">Payment *</p>
+            {/* Step 3 — Bed selector */}
+            {wardId && (
+              <div className="space-y-1.5">
+                <Label>Bed</Label>
+                {allBeds.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No beds in this ward yet.</p>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-3">
+                      {allBeds.map((b) => {
+                        const isSelected = bedId === b.bedId;
+                        const isAvailable = !b.isOccupied;
+                        return (
+                          <button
+                            key={b.bedId}
+                            type="button"
+                            disabled={!isAvailable}
+                            onClick={() => setBedId(b.bedId)}
+                            className={[
+                              'inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs font-medium transition-colors',
+                              isSelected
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : isAvailable
+                                  ? 'border-green-500/50 bg-green-50 text-green-700 hover:bg-green-100'
+                                  : 'border-muted bg-muted/40 text-muted-foreground opacity-50 cursor-not-allowed',
+                            ].join(' ')}
+                            title={b.isOccupied ? 'Occupied' : 'Available'}
+                          >
+                            <Bed className="h-3 w-3" />
+                            {b.bedNumber}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {availableBeds.length} of {allBeds.length} beds available in {selectedWard?.name}
+                    </p>
+                    {availableBeds.length === 0 && (
+                      <p className="flex items-center gap-1 text-xs text-destructive">
+                        <AlertTriangle className="h-3 w-3" />
+                        All beds are occupied in this ward.
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Step 4 — Department filter (optional) */}
             <div className="space-y-1.5">
-              <Label htmlFor="na-pay-amount">Amount (₹) *</Label>
-              <Input
-                id="na-pay-amount"
-                type="number"
-                min="1"
-                step="0.01"
-                placeholder="0.00"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payment Mode *</Label>
-              <div className="flex gap-2">
-                {IPD_PAYMENT_MODES.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => {
-                      setPaymentMode(value);
-                      if (value === 'CASH') setTransactionId('');
-                    }}
-                    className={[
-                      'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
-                      paymentMode === value
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-input bg-background hover:bg-muted',
-                    ].join(' ')}
-                  >
-                    {label}
-                  </button>
+              <Label htmlFor="na-dept">Department <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <select
+                id="na-dept"
+                value={selectedDepartmentId}
+                onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— All Departments —</option>
+                {departments.map((dept) => (
+                  <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
                 ))}
+              </select>
+            </div>
+
+            {/* Step 5 — Doctors (optional) */}
+            <div className="space-y-1.5">
+              <Label>Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              {selectedDoctors.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedDoctors.map((d) => (
+                    <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
+                      <span className="truncate min-w-0" title={d.name}>{d.name}</span>
+                      <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <select
+                  value={addDoctorId}
+                  onChange={(e) => setAddDoctorId(e.target.value)}
+                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— Add doctor —</option>
+                  {doctorList.filter((d) => !selectedDoctors.some((x) => x.userId === d.userId)).map((d) => (
+                    <option key={d.userId} value={d.userId}>{d.name}</option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  disabled={!addDoctorId}
+                  onClick={() => {
+                    const d = allDoctors.find((u) => u.userId === addDoctorId);
+                    if (d && !selectedDoctors.some((x) => x.userId === d.userId)) {
+                      setSelectedDoctors((prev) => [...prev, d]);
+                      setAddDoctorId('');
+                    }
+                  }}
+                  className="shrink-0 h-10"
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Add Doctor
+                </Button>
               </div>
             </div>
 
-            {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+            {/* Step 6 — Payment */}
+            <div className="rounded-md border border-input p-4 space-y-3 bg-muted/30">
+              <p className="text-sm font-medium">Payment *</p>
               <div className="space-y-1.5">
-                <Label htmlFor="na-pay-txn">Transaction ID (optional)</Label>
+                <Label htmlFor="na-pay-amount">Amount (₹) *</Label>
                 <Input
-                  id="na-pay-txn"
-                  type="text"
-                  placeholder="e.g. UPI reference / last 4 digits"
-                  value={transactionId}
-                  onChange={(e) => setTransactionId(e.target.value)}
+                  id="na-pay-amount"
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  required
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label>Payment Mode *</Label>
+                <div className="flex gap-2">
+                  {IPD_PAYMENT_MODES.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setPaymentMode(value);
+                        if (value === 'CASH') setTransactionId('');
+                      }}
+                      className={[
+                        'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                        paymentMode === value
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-input bg-background hover:bg-muted',
+                      ].join(' ')}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="na-pay-txn">Transaction ID (optional)</Label>
+                  <Input
+                    id="na-pay-txn"
+                    type="text"
+                    placeholder="e.g. UPI reference / last 4 digits"
+                    value={transactionId}
+                    onChange={(e) => setTransactionId(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
             )}
           </div>
 
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
-          )}
-
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
               Cancel
             </Button>

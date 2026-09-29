@@ -53,7 +53,7 @@ export default function PackageDetailPage() {
       setPatientId(''); setAssignedDate('');
       setAssignSuccess(`Package assigned successfully. Assignment ID: ${result.assignmentId}`);
     } catch {
-      setAssignError('Failed to assign package. Check the patient ID and try again.');
+      setAssignError('This package is already assigned to this patient.');
     }
   };
 
