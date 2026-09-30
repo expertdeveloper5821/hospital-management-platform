@@ -51,6 +51,9 @@ export interface IIPDAdmission extends Document {
   dischargeDate:    Date | null;
   progressNotes:    ProgressNote[];
   vitals:           IIPDVitals;
+  prescription:          string | null;
+  dischargeSummaryNotes: string | null;
+  dischargedBy:          string | null; // userId who finalized the discharge
   tenantId:         string;
   createdAt:        Date;
   updatedAt:        Date;
@@ -98,6 +101,14 @@ const ipdAdmissionSchema = new Schema<IIPDAdmission>(
     // alongside progressNotes[].note — see ENCRYPTED_IPD_FIELDS.objectFields
     // below.
     vitals:         { type: IPDVitalsSchema, default: () => ({}) },
+    // Clinical free-text — encrypted at rest (ENCRYPTED_IPD_FIELDS.fields
+    // below), so no `maxlength` here; the limit is enforced on plaintext by
+    // UpdatePrescriptionSchema / DischargePatientSchema (ipd.types.ts).
+    prescription:          { type: String, default: null },
+    dischargeSummaryNotes: { type: String, default: null },
+    // userId of the authenticated user who finalized the discharge — plaintext
+    // (an id, not PHI); null for admissions discharged before it was stored.
+    dischargedBy:          { type: String, default: null },
     tenantId:       { type: String, required: true },
   },
   {
@@ -146,17 +157,20 @@ ipdAdmissionSchema.index(
 // unchanged and never see a key. `noteId`, `doctorId` and `timestamp` stay
 // plaintext — they are resolved/sorted/looked up and never carry PHI.
 //
+// prescription and dischargeSummaryNotes are top-level clinical free-text,
+// encrypted like OPDVisit.prescription via plain `fields`.
+//
 // vitals' bloodPressure/weight/height/sugar/bodyTemperature are structured
 // clinical readings, encrypted the same way via objectFields (single nested
 // subdocument — see EncryptedObjectFieldSpec).
 //
-// Safe because no `note`/vitals.* value is ever used in a filter, sort, index,
+// Safe because no `note`/vitals.*/prescription/dischargeSummaryNotes value is ever used in a filter, sort, index,
 // aggregation or `distinct()` — verified across ipd.repository.ts (only
 // admissionId / tenantId / patientId / bedId / wardId / status / departmentId /
 // assignedDoctorIds are query keys) and every consumer. Legacy plaintext
 // elements are passed through untouched on read.
 const ENCRYPTED_IPD_FIELDS = {
-  fields:      [] as string[],
+  fields:      ['prescription', 'dischargeSummaryNotes'],
   arrayFields: [{ path: 'progressNotes', fields: ['note'] }],
   objectFields: [
     {

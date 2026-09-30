@@ -10,6 +10,7 @@ export interface StaffIdCardPdfOptions {
   expiresAt:       Date;
   primaryColor:    string;
   logoUrl?:        string | null;
+  // Accepted for call-site compatibility; the card no longer renders a photo.
   profileImageUrl?: string | null;
 }
 
@@ -44,15 +45,17 @@ export function computeExpiryDate(issuedAt: Date): Date {
 }
 
 export async function buildStaffIdCardPdf(options: StaffIdCardPdfOptions): Promise<Buffer> {
-  const [logoBuffer, profileBuffer] = await Promise.all([
-    options.logoUrl        ? fetchBuffer(options.logoUrl).catch(() => null)        : Promise.resolve(null),
-    options.profileImageUrl ? fetchBuffer(options.profileImageUrl).catch(() => null) : Promise.resolve(null),
-  ]);
+  const logoBuffer = options.logoUrl
+    ? await fetchBuffer(options.logoUrl).catch(() => null)
+    : null;
 
   return new Promise((resolve, reject) => {
-    // A6 landscape: 148×105 mm → ~419×298 pt
+    // Compact landscape card: 340×214 pt (~120×75 mm, ID-1 aspect ratio)
+    const W = 340;
+    const H = 214;
+
     const doc = new PDFDocument({
-      size:    [419, 298],
+      size:    [W, H],
       margins: { top: 0, bottom: 0, left: 0, right: 0 },
       compress: true,
     });
@@ -62,71 +65,65 @@ export async function buildStaffIdCardPdf(options: StaffIdCardPdfOptions): Promi
     doc.on('end',   () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const W = 419;
-    const H = 298;
     const [pr, pg, pb] = hexToRgb(options.primaryColor ?? '#2563EB');
+    const PAD      = 18;
+    const HEADER_H = 58;
+    const FOOTER_H = 30;
 
     // White background
     doc.rect(0, 0, W, H).fill('white');
 
-    // Top color band
-    doc.rect(0, 0, W, 52).fill([pr, pg, pb]);
+    // Header band
+    doc.rect(0, 0, W, HEADER_H).fill([pr, pg, pb]);
 
-    // Logo area (top-left of band)
+    // Logo on a white tile so it stays legible against any brand colour
+    const LOGO_TILE = 44;
+    const LOGO_SIZE = 38;
+    const logoTileY = (HEADER_H - LOGO_TILE) / 2;
+    let titleX = PAD;
+
     if (logoBuffer) {
       try {
-        doc.image(logoBuffer, 12, 10, { width: 32, height: 32, fit: [32, 32] });
+        doc.roundedRect(PAD, logoTileY, LOGO_TILE, LOGO_TILE, 6).fill('white');
+        const inset = (LOGO_TILE - LOGO_SIZE) / 2;
+        doc.image(logoBuffer, PAD + inset, logoTileY + inset, {
+          fit: [LOGO_SIZE, LOGO_SIZE], align: 'center', valign: 'center',
+        });
+        titleX = PAD + LOGO_TILE + 12;
       } catch {
-        // leave blank
+        // unreadable logo — title falls back to the left edge
       }
     }
 
-    // Hospital / card title in band
-    doc.fillColor('white').fontSize(11).font('Helvetica-Bold')
-      .text('STAFF ID CARD', 54, 18, { width: 240, lineBreak: false });
+    // Card title, vertically centred in the header
+    doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
+      .text('STAFF ID CARD', titleX, HEADER_H / 2 - 6, { width: W - titleX - PAD, lineBreak: false });
 
-    // Photo / silhouette area (right side of band, extending into body)
-    const PHOTO_X = W - 78;
-    const PHOTO_Y = 14;
-    const PHOTO_W = 60;
-    const PHOTO_H = 70;
-
-    if (profileBuffer) {
-      try {
-        doc.image(profileBuffer, PHOTO_X, PHOTO_Y, { width: PHOTO_W, height: PHOTO_H, fit: [PHOTO_W, PHOTO_H] });
-      } catch {
-        doc.rect(PHOTO_X, PHOTO_Y, PHOTO_W, PHOTO_H).fill('#CCCCCC');
-      }
-    } else {
-      doc.rect(PHOTO_X, PHOTO_Y, PHOTO_W, PHOTO_H).fill('#CCCCCC');
-      doc.fillColor('#888888').fontSize(8).font('Helvetica')
-        .text('Photo', PHOTO_X, PHOTO_Y + PHOTO_H / 2 - 4, { width: PHOTO_W, align: 'center', lineBreak: false });
-    }
-
-    // Body fields
-    const BODY_X  = 16;
-    const FIELD_W = PHOTO_X - BODY_X - 12;
-    let y = 62;
-    const rowH = 26;
+    // Body fields — full width now that there is no photo column
+    const FIELD_W = W - PAD * 2;
+    const rowH    = 30;
+    let y = HEADER_H + 14;
 
     const field = (label: string, value: string, fy: number): void => {
       doc.fillColor('#777777').fontSize(7).font('Helvetica-Bold')
-        .text(label.toUpperCase(), BODY_X, fy, { width: FIELD_W, lineBreak: false });
-      doc.fillColor('#111111').fontSize(10).font('Helvetica-Bold')
-        .text(value, BODY_X, fy + 9, { width: FIELD_W, lineBreak: false });
+        .text(label.toUpperCase(), PAD, fy, { width: FIELD_W, lineBreak: false, characterSpacing: 0.5 });
+      doc.fillColor('#111111').fontSize(11).font('Helvetica-Bold')
+        .text(value, PAD, fy + 10, { width: FIELD_W, lineBreak: false, ellipsis: true });
     };
 
     field('Name',        options.name,       y); y += rowH;
-    field('Role',        options.role,        y); y += rowH;
-    field('Employee ID', options.employeeId,  y); y += rowH;
+    field('Role',        options.role,       y); y += rowH;
+    field('Employee ID', options.employeeId, y);
 
-    // Footer band
-    doc.rect(0, H - 36, W, 36).fill([pr, pg, pb]);
+    // Footer band — issued on the left, expiry on the right
+    doc.rect(0, H - FOOTER_H, W, FOOTER_H).fill([pr, pg, pb]);
     const issued  = options.issuedAt.toISOString().slice(0, 10);
     const expires = options.expiresAt.toISOString().slice(0, 10);
-    doc.fillColor('white').fontSize(7).font('Helvetica')
-      .text(`Issued: ${issued}`, BODY_X, H - 24, { width: 140, lineBreak: false })
-      .text(`Expires: ${expires}`, BODY_X + 150, H - 24, { width: 140, lineBreak: false });
+    const footerY = H - FOOTER_H / 2 - 3.5;
+    const halfW   = (W - PAD * 2) / 2;
+    doc.fillColor('white').fontSize(8).font('Helvetica')
+      .text(`Issued: ${issued}`,   PAD,         footerY, { width: halfW, lineBreak: false })
+      .text(`Expires: ${expires}`, PAD + halfW, footerY, { width: halfW, align: 'right', lineBreak: false });
 
     doc.end();
   });

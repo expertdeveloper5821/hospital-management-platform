@@ -65,6 +65,7 @@ describe('PatientService — example-based', () => {
     const validReq = {
       fullName:     'Ravi Kumar',
       dateOfBirth:  '1990-05-15',
+      age:          35,
       gender:       Gender.MALE,
       mobileNumber: '9876543210',
       address:      '12 MG Road, Bengaluru',
@@ -494,6 +495,7 @@ describe('PatientService — property-based', () => {
               {
                 fullName:     `Patient ${i}`,
                 dateOfBirth:  '1990-01-01',
+                age:          36,
                 gender:       Gender.MALE,
                 mobileNumber: `98765${String(i).padStart(5, '0')}`,
                 address:      'Test Address',

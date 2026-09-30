@@ -19,6 +19,13 @@ function formatDate(iso: string | Date): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Stored age wins; legacy patients registered before Age existed fall back to DOB.
+function patientAge(age: number | null, dob: string | null): number | null {
+  if (age != null) return age;
+  if (!dob) return null;
+  return Math.floor((Date.now() - new Date(dob).getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+}
+
 function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 px-5 py-4">
@@ -430,7 +437,8 @@ export default function PatientDetailPage({ params }: { params: { patientId: str
         {activeTab === 'info' && (
           <div className="space-y-4">
             <div className="rounded-xl border bg-card divide-y">
-              <DetailRow icon={<Calendar className="h-4 w-4" />}   label="Date of Birth" value={formatDate(patient.dateOfBirth)} />
+              <DetailRow icon={<User className="h-4 w-4" />}       label="Age"           value={patientAge(patient.age, patient.dateOfBirth) != null ? `${patientAge(patient.age, patient.dateOfBirth)} years` : null} />
+              <DetailRow icon={<Calendar className="h-4 w-4" />}   label="Date of Birth" value={patient.dateOfBirth ? formatDate(patient.dateOfBirth) : null} />
               <DetailRow icon={<User className="h-4 w-4" />}       label="Gender"        value={patient.gender} />
               <DetailRow icon={<Phone className="h-4 w-4" />}      label="Mobile"        value={patient.mobileNumber} />
               <DetailRow icon={<MapPin className="h-4 w-4" />}     label="Address"       value={patient.address} />

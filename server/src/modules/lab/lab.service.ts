@@ -460,6 +460,7 @@ export class LabService {
     userId:             string,
     input:              EditPathologyRequestInput,
     allowedPatientIds?: string[],
+    userRole?:          UserRole,
   ): Promise<PathologyRequestResponse> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
@@ -468,6 +469,15 @@ export class LabService {
     }
     if (doc.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Cannot edit a completed pathology request', 409);
+    }
+    if (
+      userRole !== undefined &&
+      input.status !== undefined &&
+      input.status !== doc.status &&
+      userRole !== UserRole.HOSPITAL_ADMIN &&
+      userRole !== UserRole.PATHOLOGIST
+    ) {
+      throw new ForbiddenError('Only Hospital Admin or Pathologist can change the status of a pathology request');
     }
 
     const editableKeys = ['testType', 'notes', 'priority', 'status'] as const;
@@ -540,6 +550,7 @@ export class LabService {
     userId:             string,
     input:              EditRadiologyRequestInput,
     allowedPatientIds?: string[],
+    userRole?:          UserRole,
   ): Promise<RadiologyRequestResponse> {
     const doc = await labRepository.findRadiologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Radiology request not found');
@@ -548,6 +559,15 @@ export class LabService {
     }
     if (doc.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Cannot edit a completed radiology request', 409);
+    }
+    if (
+      userRole !== undefined &&
+      input.status !== undefined &&
+      input.status !== doc.status &&
+      userRole !== UserRole.HOSPITAL_ADMIN &&
+      userRole !== UserRole.RADIOLOGIST
+    ) {
+      throw new ForbiddenError('Only Hospital Admin or Radiologist can change the status of a radiology request');
     }
 
     const editableKeys = ['imagingType', 'notes', 'priority', 'status'] as const;

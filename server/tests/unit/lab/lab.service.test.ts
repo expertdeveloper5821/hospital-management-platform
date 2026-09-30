@@ -291,6 +291,37 @@ describe('LabService — editPathologyRequest', () => {
     expect(mockLabRepo.updatePathology).not.toHaveBeenCalled();
   });
 
+  test('rejects a status change from a DOCTOR with 403', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology  = jest.fn();
+    await expect(
+      service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, UserRole.DOCTOR),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockLabRepo.updatePathology).not.toHaveBeenCalled();
+  });
+
+  test('rejects a status change from a RADIOLOGIST with 403', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology  = jest.fn();
+    await expect(
+      service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, UserRole.RADIOLOGIST),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  test('allows a DOCTOR to resend the unchanged status with other edits', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology  = jest.fn().mockResolvedValue(makePathologyDoc());
+    await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { status: 'PENDING', priority: 'URGENT' }, undefined, UserRole.DOCTOR);
+    expect(mockLabRepo.updatePathology).toHaveBeenCalled();
+  });
+
+  test.each([UserRole.HOSPITAL_ADMIN, UserRole.PATHOLOGIST])('allows %s to change status', async (role) => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology  = jest.fn().mockResolvedValue(makePathologyDoc({ status: LabRequestStatus.IN_PROGRESS }));
+    const result = await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, role);
+    expect(result.status).toBe(LabRequestStatus.IN_PROGRESS);
+  });
+
   test('updates only fields present in input', async () => {
     const doc     = makePathologyDoc();
     const updated = makePathologyDoc({ testType: 'New CBC', priority: 'URGENT' });
@@ -472,6 +503,37 @@ describe('LabService — editRadiologyRequest', () => {
     await expect(
       service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { imagingType: 'MRI Brain' }),
     ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  test('rejects a status change from a DOCTOR with 403', async () => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology  = jest.fn();
+    await expect(
+      service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, UserRole.DOCTOR),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockLabRepo.updateRadiology).not.toHaveBeenCalled();
+  });
+
+  test('rejects a status change from a PATHOLOGIST with 403', async () => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology  = jest.fn();
+    await expect(
+      service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, UserRole.PATHOLOGIST),
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  test('allows a DOCTOR to resend the unchanged status with other edits', async () => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology  = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    await service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { status: 'PENDING', priority: 'URGENT' }, undefined, UserRole.DOCTOR);
+    expect(mockLabRepo.updateRadiology).toHaveBeenCalled();
+  });
+
+  test.each([UserRole.HOSPITAL_ADMIN, UserRole.RADIOLOGIST])('allows %s to change status', async (role) => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology  = jest.fn().mockResolvedValue(makeRadiologyDoc({ status: LabRequestStatus.IN_PROGRESS }));
+    const result = await service.editRadiologyRequest('req-radio-001', TENANT, DOCTOR, { status: 'IN_PROGRESS' }, undefined, role);
+    expect(result.status).toBe(LabRequestStatus.IN_PROGRESS);
   });
 
   test('updates only fields present in input', async () => {

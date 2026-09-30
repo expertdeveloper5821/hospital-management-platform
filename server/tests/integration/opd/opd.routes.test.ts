@@ -1552,7 +1552,7 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(403);
   });
 
-  test('403 — Receptionist cannot update vitals (route-level role gate)', async () => {
+  test('200 — Receptionist can record vitals', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedVisit(tid, { visitId: 'OPD-VIT00006' });
@@ -1563,6 +1563,22 @@ describe('OPD Vitals', () => {
       .patch('/api/opd/visits/OPD-VIT00006')
       .set(bearer(token))
       .send({ vitals: { weight: 70 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals.weight).toBe(70);
+  });
+
+  test("403 — a Receptionist sending vitals alongside diagnosis is rejected (vitals doesn't open the door to other fields)", async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-VIT00016' });
+    const rc    = await seedUser(tid, 'rc-vit2@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-VIT00016')
+      .set(bearer(token))
+      .send({ vitals: { weight: 70 }, diagnosis: 'Viral fever' });
 
     expect(res.status).toBe(403);
   });

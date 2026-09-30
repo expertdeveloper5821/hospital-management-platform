@@ -429,6 +429,8 @@ export function buildCreateOptimisticRecord(
       dischargeDate:     null,
       progressNotes:     [],
       vitals:            EMPTY_VITALS,
+      prescription:          null,
+      dischargeSummaryNotes: null,
     };
   }
 

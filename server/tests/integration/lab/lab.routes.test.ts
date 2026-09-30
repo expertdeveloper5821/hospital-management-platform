@@ -792,10 +792,31 @@ describe('PATCH /api/lab/pathology/:requestId', () => {
     expect(res.body.data.testType).toBe('Urine Analysis');
   });
 
-  test('200 — doctor can change status to IN_PROGRESS', async () => {
+  test('403 — doctor cannot change status', async () => {
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}`)
       .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    expect(res.status).toBe(403);
+    const doc = await PathologyRequestModel.findOne({ requestId, tenantId }).lean();
+    expect(doc?.status).toBe('PENDING');
+  });
+
+  test('200 — pathologist can change status to IN_PROGRESS', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('IN_PROGRESS');
+  });
+
+  test('200 — hospital admin can change status to IN_PROGRESS', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ status: 'IN_PROGRESS' });
 
     expect(res.status).toBe(200);
@@ -947,6 +968,25 @@ describe('PATCH /api/lab/radiology/:requestId', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.imagingType).toBe('CT Scan Brain');
     expect(res.body.data.priority).toBe('URGENT');
+  });
+
+  test('200 — radiologist can change status to IN_PROGRESS', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('IN_PROGRESS');
+  });
+
+  test('403 — doctor cannot change status', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${requestId}`)
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ status: 'IN_PROGRESS' });
+
+    expect(res.status).toBe(403);
   });
 
   test('409 — cannot edit a COMPLETED request', async () => {

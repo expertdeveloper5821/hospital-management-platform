@@ -97,6 +97,9 @@ export default function IPDAdmissionDetailPage({ params }: { params: { admission
         {admission.dischargeDate && (
           <DetailRow icon={<Activity className="h-4 w-4" />}  label="Discharge Date"   value={formatDate(admission.dischargeDate)} />
         )}
+        {admission.prescription && (
+          <DetailRow icon={<FileText className="h-4 w-4" />}  label="Prescription"     value={admission.prescription} />
+        )}
       </div>
 
       {admission.status === 'DISCHARGED' && canDownloadSummary && (

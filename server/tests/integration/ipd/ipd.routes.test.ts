@@ -516,7 +516,7 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
       wardName:         ward.name,
       bedId:            toId(bed),
       bedNumber:        bed.bedNumber,
-      assignedDoctorId: toId(doctor),
+      assignedDoctorIds: [toId(doctor)],
       status:           AdmissionStatus.ADMITTED,
       admissionDate:    new Date(),
       dischargeDate:    null,
@@ -527,11 +527,17 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
     const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
       .patch(`/api/ipd/admissions/${ADM_TO_DISCHARGE_ID}/discharge`)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dischargeSummaryNotes: 'Recovered well. Review after 7 days.' });
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe(AdmissionStatus.DISCHARGED);
     expect(res.body.data.dischargeDate).not.toBeNull();
+    expect(res.body.data.dischargeSummaryNotes).toBe('Recovered well. Review after 7 days.');
+
+    // Notes are encrypted at rest
+    const raw = await mongoose.connection.collection('ipd_admissions').findOne({ admissionId: ADM_TO_DISCHARGE_ID });
+    expect(String(raw?.dischargeSummaryNotes)).toMatch(/^enc:v1:/);
 
     // Bed must be released
     const updatedBed = await BedModel.findById(bed._id);
@@ -549,7 +555,7 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
       wardName:         'General Ward',
       bedId:            'bed-placeholder',
       bedNumber:        'G-01',
-      assignedDoctorId: toId(doctor),
+      assignedDoctorIds: [toId(doctor)],
       status:           AdmissionStatus.DISCHARGED,
       admissionDate:    new Date(),
       dischargeDate:    new Date(),
@@ -560,9 +566,95 @@ describe('PATCH /api/ipd/admissions/:admissionId/discharge', () => {
     const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
     const res   = await request(app)
       .patch(`/api/ipd/admissions/${ADM_ALREADY_DIS_ID}/discharge`)
-      .set('Authorization', `Bearer ${token}`);
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dischargeSummaryNotes: 'Notes' });
 
     expect(res.status).toBe(400);
+  });
+
+  test('returns 400 when discharge summary notes are missing', async () => {
+    const tenant = await seedTenant();
+    const token  = makeToken('admin-001', toId(tenant), UserRole.HOSPITAL_ADMIN);
+    const res    = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_TO_DISCHARGE_ID}/discharge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dischargeSummaryNotes: '   ' });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('returns 403 for RECEPTIONIST', async () => {
+    const tenant = await seedTenant();
+    const token  = makeToken('rec-001', toId(tenant), UserRole.RECEPTIONIST);
+    const res    = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_TO_DISCHARGE_ID}/discharge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ dischargeSummaryNotes: 'Notes' });
+
+    expect(res.status).toBe(403);
+  });
+});
+
+const ADM_PRESCRIPTION_ID = 'b2000000-0000-0000-0000-000000000003';
+
+describe('PATCH /api/ipd/admissions/:admissionId/prescription', () => {
+  async function seedAdmittedAdmission() {
+    const tenant  = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant), true);
+    const doctor  = await seedUser(UserRole.DOCTOR, toId(tenant));
+    await IPDAdmissionModel.create({
+      admissionId:       ADM_PRESCRIPTION_ID,
+      patientId:         patient.patientId,
+      wardId:            toId(ward),
+      wardName:          ward.name,
+      bedId:             toId(bed),
+      bedNumber:         bed.bedNumber,
+      assignedDoctorIds: [toId(doctor)],
+      status:            AdmissionStatus.ADMITTED,
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId:          toId(tenant),
+    });
+    return { tenant, doctor };
+  }
+
+  test('assigned Doctor saves the prescription (encrypted at rest)', async () => {
+    const { tenant, doctor } = await seedAdmittedAdmission();
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_PRESCRIPTION_ID}/prescription`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prescription: 'Inj. Ceftriaxone 1g IV BD x 5 days' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.prescription).toBe('Inj. Ceftriaxone 1g IV BD x 5 days');
+    const raw = await mongoose.connection.collection('ipd_admissions').findOne({ admissionId: ADM_PRESCRIPTION_ID });
+    expect(String(raw?.prescription)).toMatch(/^enc:v1:/);
+  });
+
+  test('returns 403 for a Doctor not assigned to the admission', async () => {
+    const { tenant } = await seedAdmittedAdmission();
+    const token = makeToken('unassigned-doctor-001', toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_PRESCRIPTION_ID}/prescription`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prescription: 'x' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('returns 403 for ADMIN', async () => {
+    const { tenant } = await seedAdmittedAdmission();
+    const token = makeToken('admin-001', toId(tenant), UserRole.ADMIN);
+    const res   = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_PRESCRIPTION_ID}/prescription`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ prescription: 'x' });
+
+    expect(res.status).toBe(403);
   });
 });
 

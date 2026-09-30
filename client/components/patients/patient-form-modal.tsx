@@ -43,7 +43,7 @@ function sanitizeAlphaSpace(value: string) {
 
 // Compose the structured address fields into the single `address` string that the
 // backend stores and the medical card / detail view render.
-function composeAddress(f: CreatePatientRequest): string {
+function composeAddress(f: PatientFormState): string {
   const parts = [f.addressLine1, f.addressLine2, f.city, f.state]
     .map((s) => (s ?? '').trim())
     .filter(Boolean);
@@ -57,7 +57,7 @@ function composeAddress(f: CreatePatientRequest): string {
 
 // Address payload sent on create/update: the derived `address` plus the structured
 // fields (empty optionals normalised to undefined so backend validation passes).
-function addressPayload(f: CreatePatientRequest) {
+function addressPayload(f: PatientFormState) {
   return {
     address:      composeAddress(f),
     addressLine1: f.addressLine1?.trim() || undefined,
@@ -71,7 +71,10 @@ function addressPayload(f: CreatePatientRequest) {
 
 type PatientFormErrors = Partial<Record<string, string>>;
 
-function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
+// Age is held as the raw input string while editing and converted on submit.
+type PatientFormState = Omit<CreatePatientRequest, 'age'> & { age: string };
+
+function validatePatientForm(form: PatientFormState): PatientFormErrors {
   const errors: PatientFormErrors = {};
 
   const name = form.fullName.trim();
@@ -85,9 +88,7 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     errors.fullName = 'Name can only contain letters, spaces, dots, hyphens, and apostrophes.';
   }
 
-  if (!form.dateOfBirth) {
-    errors.dateOfBirth = 'Date of birth is required.';
-  } else {
+  if (form.dateOfBirth) {
     const dob   = new Date(form.dateOfBirth);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -97,6 +98,12 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
     } else if (ageYears > 150) {
       errors.dateOfBirth = 'Please enter a valid date of birth.';
     }
+  }
+
+  if (!form.age.trim()) {
+    errors.age = 'Age is required.';
+  } else if (!/^\d+$/.test(form.age.trim()) || Number(form.age) > 150) {
+    errors.age = 'Enter a valid age between 0 and 150.';
   }
 
   if (!form.mobileNumber) {
@@ -116,9 +123,7 @@ function validatePatientForm(form: CreatePatientRequest): PatientFormErrors {
   if (!form.state || !form.state.trim()) {
     errors.state = 'State is required.';
   }
-  if (!form.pincode || !form.pincode.trim()) {
-    errors.pincode = 'Pincode is required.';
-  } else if (!/^\d{6}$/.test(form.pincode.trim())) {
+  if (form.pincode && form.pincode.trim() && !/^\d{6}$/.test(form.pincode.trim())) {
     errors.pincode = 'Pincode must be exactly 6 digits.';
   }
 
@@ -153,9 +158,10 @@ export interface PatientFormModalProps {
 }
 
 export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientFormModalProps) {
-  const [form, setForm] = useState<CreatePatientRequest>({
+  const [form, setForm] = useState<PatientFormState>({
     fullName:               initial?.fullName               ?? '',
     dateOfBirth:            initial?.dateOfBirth ? initial.dateOfBirth.substring(0, 10) : '',
+    age:                    initial?.age != null ? String(initial.age) : '',
     gender:                 initial?.gender                 ?? 'MALE',
     mobileNumber:           sanitizeMobile(initial?.mobileNumber ?? ''),
     address:                initial?.address                ?? '',
@@ -184,7 +190,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
   const errors   = validatePatientForm(form);
   const hasErrors = Object.keys(errors).length > 0;
 
-  function set(field: keyof CreatePatientRequest, value: string | boolean | undefined) {
+  function set(field: keyof PatientFormState, value: string | boolean | undefined) {
     setForm((f) => ({ ...f, [field]: value }));
     setApiError('');
     setDuplicateInfo(null);
@@ -214,7 +220,8 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
       if (mode === 'edit' && initial) {
         const body: UpdatePatientRequest = {
           fullName:               form.fullName,
-          dateOfBirth:            form.dateOfBirth,
+          dateOfBirth:            form.dateOfBirth || undefined,
+          age:                    Number(form.age),
           gender:                 form.gender,
           mobileNumber:           form.mobileNumber,
           ...addressPayload(form),
@@ -229,6 +236,8 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
       } else {
         const body: CreatePatientRequest = {
           ...form,
+          dateOfBirth:            form.dateOfBirth            || undefined,
+          age:                    Number(form.age),
           aadhaarNumber:          form.aadhaarNumber          || undefined,
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
@@ -255,6 +264,8 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
     try {
       const body: CreatePatientRequest = {
         ...form,
+        dateOfBirth:            form.dateOfBirth            || undefined,
+        age:                    Number(form.age),
         aadhaarNumber:          form.aadhaarNumber          || undefined,
         emergencyContactName:   form.emergencyContactName   || undefined,
         emergencyContactMobile: form.emergencyContactMobile || undefined,
@@ -325,7 +336,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="dob">Date of Birth *</Label>
+                <Label htmlFor="dob">Date of Birth</Label>
                 <Input
                   id="dob"
                   type="date"
@@ -337,6 +348,22 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                   className={inputClass('dateOfBirth')}
                 />
                 {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="age">Age *</Label>
+                <Input
+                  id="age"
+                  inputMode="numeric"
+                  value={form.age}
+                  onChange={(e) => set('age', e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  onBlur={() => touch('age')}
+                  placeholder="Age in years"
+                  maxLength={3}
+                  aria-invalid={!!fe('age')}
+                  className={inputClass('age')}
+                />
+                {fe('age') && <p className="text-xs text-destructive">{fe('age')}</p>}
               </div>
 
               <div className="space-y-1">
@@ -418,7 +445,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <Label htmlFor="pincode">Pincode *</Label>
+                    <Label htmlFor="pincode">Pincode</Label>
                     <Input
                       id="pincode"
                       inputMode="numeric"

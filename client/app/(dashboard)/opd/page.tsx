@@ -95,6 +95,8 @@ function opdErrorMessage(err: any, fallback: string): string {
 
 const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED', 'NO_SHOW']);
 
+const DEPARTMENT_DOCTOR_MESSAGE = 'Changing the department requires selecting a doctor from the selected department.';
+
 // ─── Vitals (OPD Edit form) ─────────────────────────────────────────────────
 // Mirrors OPDService.updateVisit's DEFAULT_VITALS/merge contract on the
 // backend: weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>"
@@ -241,6 +243,26 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [editDoctorIds,    setEditDoctorIds]    = useState<string[]>(visit.doctorIds ?? []);
   const [editAddDoctorId,  setEditAddDoctorId]  = useState('');
 
+  // Picking a specific department drops any assigned doctor who doesn't
+  // belong to it. Changing away from the visit's saved department then
+  // requires at least one doctor from the new one before Save is allowed —
+  // the backend derives departmentId from the doctors, so this keeps the
+  // saved Department/Doctor pair consistent.
+  function handleEditDepartmentChange(departmentId: string) {
+    setSelectedDepartmentId(departmentId);
+    setEditAddDoctorId('');
+    if (departmentId) {
+      setEditDoctorIds((prev) => prev.filter((id) =>
+        editAllDoctors.find((d) => d.userId === id)?.departmentIds.includes(departmentId)));
+    }
+  }
+  const departmentChanged = selectedDepartmentId !== (visit.departmentId ?? '');
+  const departmentDoctorInvalid =
+    !!selectedDepartmentId && departmentChanged && (
+      editDoctorIds.length === 0 ||
+      editDoctorIds.some((id) => !editAllDoctors.find((d) => d.userId === id)?.departmentIds.includes(selectedDepartmentId))
+    );
+
   const { data: editNursesData } = useGetAvailableOpdNursesQuery(undefined, { skip: !(receptionistAssignOnly || canEdit) });
   const editAvailableNurses = editNursesData ?? [];
   const [editNurseIds,    setEditNurseIds]    = useState<string[]>(visit.nurseIds ?? []);
@@ -251,8 +273,8 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     prescription:   visit.prescription   ?? '',
     notes:          visit.notes          ?? '',
   });
-  // Vitals — editable by Doctor, Nurse and Hospital Admin alike (the only
-  // roles that can even reach Edit mode; see canEdit/nurseNotesOnly), unlike
+  // Vitals — editable by Doctor, Nurse, Receptionist and Hospital Admin alike
+  // (see canEdit/nurseNotesOnly/receptionistAssignOnly), unlike
   // diagnosis/prescription which stay read-only for a Nurse.
   const [vitalsForm, setVitalsForm] = useState<VitalsInputState>(vitalsToInputs(visit.vitals));
   const [completeForm, setCompleteForm] = useState<CompleteOPDVisitRequest>({
@@ -290,14 +312,24 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     if (updating || updatingRef.current) return;
     setError('');
+    if (!nurseNotesOnly && departmentDoctorInvalid) {
+      setError(DEPARTMENT_DOCTOR_MESSAGE);
+      return;
+    }
     if (receptionistAssignOnly) {
-      // Only changed assignments are sent — the backend rejects any other
-      // field from a Receptionist (see RECEPTIONIST_EDITABLE_FIELDS).
+      // Only changed assignments (plus vitals) are sent — the backend rejects
+      // any other field from a Receptionist (see RECEPTIONIST_EDITABLE_FIELDS).
+      const receptionistVitals = parseVitalsInputs(vitalsForm);
+      if ('error' in receptionistVitals) {
+        setError(receptionistVitals.error);
+        return;
+      }
       const changed = (next: string[], prev: string[]) =>
         next.length !== prev.length || next.some((id) => !prev.includes(id));
       const body: UpdateOPDVisitRequest = {
         ...(changed(editDoctorIds, visit.doctorIds ?? []) ? { doctorIds: editDoctorIds } : {}),
         ...(changed(editNurseIds,  visit.nurseIds  ?? []) ? { nurseIds:  editNurseIds  } : {}),
+        vitals: receptionistVitals.vitals,
       };
       updatingRef.current = true;
       try {
@@ -416,6 +448,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       notes:        visit.notes        ?? '',
     });
     setVitalsForm(vitalsToInputs(visit.vitals));
+    setSelectedDepartmentId(visit.departmentId ?? '');
+    setEditDoctorIds(visit.doctorIds ?? []);
+    setEditAddDoctorId('');
     setEditNurseIds(visit.nurseIds ?? []);
     setEditAddNurseId('');
     setMode('edit');
@@ -449,8 +484,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     </div>
   );
 
-  // Shared by both edit forms below (full and Nurse notes-only) — Doctor,
-  // Nurse and Hospital Admin can all record vitals, unlike diagnosis/
+  // Shared by all three edit forms below (full, Nurse notes-only and
+  // Receptionist) — Doctor, Nurse, Receptionist and Hospital Admin can all
+  // record vitals, unlike diagnosis/
   // prescription which stay read-only for a Nurse. Only one of the two forms
   // is ever mounted at a time, so the shared `ep-*` input ids never collide.
   const vitalsFields = (
@@ -559,7 +595,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         <select
           id="ep-dept"
           value={selectedDepartmentId}
-          onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
+          onChange={(e) => handleEditDepartmentChange(e.target.value)}
           className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="">— All Departments —</option>
@@ -567,6 +603,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
           ))}
         </select>
+        {departmentDoctorInvalid && (
+          <p role="alert" className="text-xs text-destructive">{DEPARTMENT_DOCTOR_MESSAGE}</p>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label>Assigned Doctors</Label>
@@ -720,7 +759,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               shown read-only and never submitted (see handleUpdate). */}
           {mode === 'edit' && receptionistAssignOnly && (
             <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
-              <p className="text-xs text-muted-foreground">Only the department, doctor and nurse fields can be edited.</p>
+              <p className="text-xs text-muted-foreground">Only the department, doctor, nurse and vitals fields can be edited.</p>
               {departmentDoctorFields}
               {nurseAssignFields}
               {f('Diagnosis',    visit.diagnosis)}
@@ -728,6 +767,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
               {f('Notes',        <RichTextDisplay value={visit.notes} />)}
+              {vitalsFields}
             </form>
           )}
           {mode === 'edit' && !nurseNotesOnly && !receptionistAssignOnly && (
@@ -875,7 +915,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             {mode === 'edit' && (
               <div className="flex gap-3">
                 <Button variant="outline" className="flex-1 h-10 rounded-lg" onClick={() => setMode('view')}>Back</Button>
-                <Button type="submit" form="editForm" className="flex-1 h-10 rounded-lg" disabled={updating}>
+                <Button type="submit" form="editForm" className="flex-1 h-10 rounded-lg" disabled={updating || (!nurseNotesOnly && departmentDoctorInvalid)}>
                   {updating ? 'Saving…' : 'Save Changes'}
                 </Button>
               </div>

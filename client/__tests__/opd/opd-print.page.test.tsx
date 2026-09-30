@@ -43,6 +43,7 @@ const BASE_PATIENT: PatientResponse = {
   patientId:                 'PAT-TEST0001',
   fullName:                  'Ravi Kumar',
   dateOfBirth:               '1990-05-15',
+  age:                       null,
   gender:                    'MALE',
   mobileNumber:              '9876543210',
   address:                   '12 MG Road',
@@ -208,7 +209,11 @@ describe('OPD Parcha print page — unrelated content unchanged', () => {
     expect(screen.getByText('Test Hospital')).toBeInTheDocument();
     expect(screen.getByText('Ravi Kumar')).toBeInTheDocument();
     expect(screen.getByText('PAT-TEST0001')).toBeInTheDocument();
-    expect(screen.getByText('OPD-PRINT001')).toBeInTheDocument();
+    // Visit ID is no longer printed; "Valid Till" (registration + 5 days)
+    // replaces "Registered On".
+    expect(screen.queryByText('OPD-PRINT001')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Registered On/)).not.toBeInTheDocument();
+    expect(screen.getByText('06 Jan 2026')).toBeInTheDocument();
     expect(screen.getByText(/Doctor's Signature/)).toBeInTheDocument();
     expect(screen.getByText(/valid for 15 days/)).toBeInTheDocument();
   });

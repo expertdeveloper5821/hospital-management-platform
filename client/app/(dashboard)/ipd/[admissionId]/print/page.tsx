@@ -16,6 +16,16 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Slip validity: 5 calendar days after the patient's registration date.
+// setDate() rolls over month/year boundaries using each month's real length
+// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
+const SLIP_VALIDITY_DAYS = 5;
+function computeValidTill(registeredAt: string): string {
+  const d = new Date(registeredAt);
+  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+  return d.toISOString();
+}
+
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -302,7 +312,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
         <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
           <Field label="Patient Name" value={patient.fullName} />
           <Field label="Patient ID"   value={patient.patientId} mono />
-          <Field label="Age / Gender" value={`${calculateAge(patient.dateOfBirth)} years / ${toDisplay(patient.gender)}`} />
+          <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
           <Field label="Mobile"       value={patient.mobileNumber} />
           {patient.address && <Field label="Address" value={patient.address} span />}
           {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
@@ -310,10 +320,16 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
           <Field label="Admission ID"   value={admission.admissionId} mono />
           <Field label="Status"         value={toDisplay(admission.status)} />
           <Field label="Ward / Bed"     value={`${admission.wardName} / Bed ${admission.bedNumber}`} />
-          {departmentName && <Field label="Department" value={departmentName} />}
-          {doctorNames && <Field label="Doctor(s)" value={doctorNames} />}
           <Field label="Admission Date" value={formatDate(admission.admissionDate)} />
           {admission.dischargeDate && <Field label="Discharge Date" value={formatDate(admission.dischargeDate)} />}
+          <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
+          {(doctorNames || departmentName) && (
+            <Field
+              label="Doctor(s) / Department"
+              value={[doctorNames, departmentName].filter(Boolean).join(' — ')}
+              span
+            />
+          )}
         </div>
 
         <div className="mt-3 border-b border-gray-300" />
@@ -352,6 +368,13 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
               <p className="text-[11px] text-gray-400 italic">No progress notes recorded.</p>
             ) : (
               sortedNotes.map((note) => <ProgressNoteEntry key={note.noteId} note={note} />)
+            )}
+
+            <p className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Prescription</p>
+            {admission.prescription ? (
+              <p className="text-[11px] text-gray-900 whitespace-pre-wrap break-inside-avoid">{admission.prescription}</p>
+            ) : (
+              <p className="text-[11px] text-gray-400 italic">No prescription recorded.</p>
             )}
           </div>
         </div>

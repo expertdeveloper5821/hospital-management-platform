@@ -484,6 +484,77 @@ describe('base.api offline GET fallback / read-through cache', () => {
     }
   });
 
+  describe('offline IPD admissions list — Ward and Status filters', () => {
+    const ADMISSIONS = [
+      { admissionId: 'ADM-1', patientId: 'PAT-1', wardId: 'W-1', status: 'ADMITTED',   createdAt: '2026-09-04T00:00:00.000Z' },
+      { admissionId: 'ADM-2', patientId: 'PAT-2', wardId: 'W-2', status: 'ADMITTED',   createdAt: '2026-09-03T00:00:00.000Z' },
+      { admissionId: 'ADM-3', patientId: 'PAT-3', wardId: 'W-1', status: 'DISCHARGED', createdAt: '2026-09-02T00:00:00.000Z' },
+      { admissionId: 'ADM-4', patientId: 'PAT-4', wardId: 'W-2', status: 'DISCHARGED', createdAt: '2026-09-01T00:00:00.000Z' },
+    ];
+
+    // Primes the cache with both statuses (two online fetches, as the page
+    // does when the user switches the Status dropdown), then goes offline.
+    async function primedOfflineStore() {
+      const store = buildStore(crypto.randomUUID(), crypto.randomUUID());
+      for (const status of ['ADMITTED', 'DISCHARGED'] as const) {
+        const rows = ADMISSIONS.filter((a) => a.status === status);
+        fetchMock.mockResolvedValueOnce(jsonResponse({
+          status: 'success',
+          data: { data: rows, total: rows.length, page: 1, limit: 10, totalPages: 1 },
+        }));
+        await store.dispatch(ipdApi.endpoints.listAdmissions.initiate({ status, page: 1, limit: 10 }));
+        await flush();
+      }
+      fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+      return store;
+    }
+
+    async function offlineIds(store: Awaited<ReturnType<typeof primedOfflineStore>>, query: Record<string, unknown>) {
+      const result = await store.dispatch(
+        ipdApi.endpoints.listAdmissions.initiate({ page: 1, limit: 10, ...query } as never, { forceRefetch: true }),
+      );
+      expect('error' in result).toBe(false);
+      return (result as unknown as { data: { data: { admissionId: string }[] } }).data.data.map((a) => a.admissionId);
+    }
+
+    test('Status filter returns only cached admissions with that status', async () => {
+      const store = await primedOfflineStore();
+      expect(await offlineIds(store, { status: 'ADMITTED' })).toEqual(['ADM-1', 'ADM-2']);
+      expect(await offlineIds(store, { status: 'DISCHARGED' })).toEqual(['ADM-3', 'ADM-4']);
+    });
+
+    test('status defaults to ADMITTED offline when the caller omits it (matches the online query)', async () => {
+      const store = await primedOfflineStore();
+      expect(await offlineIds(store, {})).toEqual(['ADM-1', 'ADM-2']);
+    });
+
+    test('Ward filter returns only cached admissions in that ward', async () => {
+      const store = await primedOfflineStore();
+      expect(await offlineIds(store, { status: 'ADMITTED', wardId: 'W-1' })).toEqual(['ADM-1']);
+      expect(await offlineIds(store, { status: 'ADMITTED', wardId: 'W-2' })).toEqual(['ADM-2']);
+    });
+
+    test('Ward + Status together narrow by both', async () => {
+      const store = await primedOfflineStore();
+      expect(await offlineIds(store, { status: 'DISCHARGED', wardId: 'W-1' })).toEqual(['ADM-3']);
+      expect(await offlineIds(store, { status: 'DISCHARGED', wardId: 'W-2' })).toEqual(['ADM-4']);
+      expect(await offlineIds(store, { status: 'DISCHARGED', wardId: 'W-NONE' })).toEqual([]);
+    });
+
+    test('online requests still send the filters to the API unchanged', async () => {
+      const store = buildStore(crypto.randomUUID(), crypto.randomUUID());
+      fetchMock.mockResolvedValueOnce(jsonResponse({
+        status: 'success', data: { data: [], total: 0, page: 1, limit: 10, totalPages: 1 },
+      }));
+      await store.dispatch(ipdApi.endpoints.listAdmissions.initiate({ status: 'DISCHARGED', wardId: 'W-1', page: 1, limit: 10 }));
+
+      const requestUrl = new URL((fetchMock.mock.calls[0][0] as Request).url);
+      expect(requestUrl.pathname).toBe('/api/ipd/admissions');
+      expect(requestUrl.searchParams.get('status')).toBe('DISCHARGED');
+      expect(requestUrl.searchParams.get('wardId')).toBe('W-1');
+    });
+  });
+
   test('patient list served from the cache while offline is replaced by fresh API data on the next online fetch', async () => {
     const tenantId = crypto.randomUUID();
     const userId = crypto.randomUUID();

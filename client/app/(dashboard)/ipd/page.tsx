@@ -8,6 +8,7 @@ import {
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
+  useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,
 } from '@/store/api/ipd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
@@ -40,6 +41,8 @@ import {
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+const DEPARTMENT_DOCTOR_MESSAGE = 'Changing the department requires selecting a doctor from the selected department.';
 
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
   CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque',
@@ -345,6 +348,10 @@ interface AdmissionPanelProps {
   onUpdate:      (a: AdmissionResponse) => void;
   canEdit:       boolean;
   canEditVitals: boolean; // DOCTOR, NURSE, HOSPITAL_ADMIN only — narrower than canEdit
+  // HOSPITAL_ADMIN, this admission's assigned Doctor(s), or a Nurse on its
+  // ward — mirrors the backend's per-admission check (IPDService
+  // assertCanManageAdmission). Gates both Prescription edits and Discharge.
+  canManageClinical: boolean;
   canDischarge:  boolean;
   doctorMap:     Record<string, string>;
   onDischarge:   (a: AdmissionResponse) => void;
@@ -356,11 +363,16 @@ interface AdmissionPanelProps {
 
 function AdmissionPanel({
   admission, onClose, onUpdate,
-  canEdit, canEditVitals, canDischarge, doctorMap,
+  canEdit, canEditVitals, canManageClinical, canDischarge, doctorMap,
   onDischarge, onNotes, canProgress, canViewPayment, canDownloadSummary,
 }: AdmissionPanelProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [error, setError] = useState<string | null>(null);
+
+  // Prescription — edited in the Edit form (below Bed) by canManageClinical
+  // users only; saved through its own RBAC-enforced endpoint on Save Changes.
+  const [rxDraft, setRxDraft] = useState(admission.prescription ?? '');
+  const [updatePrescription, { isLoading: savingRx }] = useUpdateAdmissionPrescriptionMutation();
 
   const admissionDateStr = new Date(admission.admissionDate).toISOString().substring(0, 10);
   // Skipped entirely for roles without payment visibility so no payment data is fetched for them.
@@ -397,21 +409,46 @@ function AdmissionPanel({
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
 
+  // Picking a specific department drops any newly-picked doctor who doesn't
+  // belong to it. Changing away from the admission's saved department then
+  // requires at least one doctor from the new one before Save is allowed —
+  // the backend re-stamps departmentId from the doctors, so this keeps the
+  // saved Department/Doctor pair consistent.
+  function handleEditDepartmentChange(departmentId: string) {
+    setSelectedDepartmentId(departmentId);
+    setEditAddDoctorId('');
+    if (departmentId) {
+      setEditDoctors((prev) => prev.filter((d) => d.departmentIds.includes(departmentId)));
+    }
+  }
+  const departmentChanged = selectedDepartmentId !== (admission.departmentId ?? '');
+  const departmentDoctorInvalid =
+    !!selectedDepartmentId && departmentChanged && (
+      editDoctors.length === 0 ||
+      editDoctors.some((d) => !d.departmentIds.includes(selectedDepartmentId))
+    );
+
   const [updateAdmission, { isLoading: saving }] = useUpdateAdmissionMutation();
 
   function enterEdit() {
-    setSelectedDepartmentId('');
+    setSelectedDepartmentId(admission.departmentId ?? '');
     setEditDoctors([]);
     setEditAddDoctorId('');
     setWardId(admission.wardId);
     setBedId(admission.bedId);
     setVitalsForm(vitalsToInputs(admission.vitals));
+    setRxDraft(admission.prescription ?? '');
     setError(null);
     setMode('edit');
   }
 
   async function handleSave() {
     setError(null);
+
+    if (departmentDoctorInvalid) {
+      setError(DEPARTMENT_DOCTOR_MESSAGE);
+      return;
+    }
 
     // Validate: if ward changed, a bed must be selected in the new ward
     const wardChanged = wardId !== admission.wardId;
@@ -438,7 +475,15 @@ function AdmissionPanel({
       body.vitals = vitalsResult.vitals;
     }
 
-    if (!body.assignedDoctorIds && !body.wardId && !body.bedId && !body.vitals) {
+    const prescription = rxDraft.trim();
+    const prescriptionChanged = canManageClinical && prescription !== (admission.prescription ?? '');
+    if (prescriptionChanged && prescription.length > 5000) {
+      setError('Prescription cannot exceed 5000 characters.');
+      return;
+    }
+
+    const hasAdmissionChanges = !!(body.assignedDoctorIds || body.wardId || body.bedId || body.vitals);
+    if (!hasAdmissionChanges && !prescriptionChanged) {
       setMode('view');
       return;
     }
@@ -449,7 +494,13 @@ function AdmissionPanel({
     }
 
     try {
-      const updated = await updateAdmission({ admissionId: admission.admissionId, ...body }).unwrap();
+      let updated = admission;
+      if (hasAdmissionChanges) {
+        updated = await updateAdmission({ admissionId: admission.admissionId, ...body }).unwrap();
+      }
+      if (prescriptionChanged) {
+        updated = await updatePrescription({ admissionId: admission.admissionId, prescription }).unwrap();
+      }
       onUpdate(updated);
       setMode('view');
     } catch (err: unknown) {
@@ -499,12 +550,18 @@ function AdmissionPanel({
             <div>
               {row('Ward',          admission.wardName)}
               {row('Bed',           admission.bedNumber)}
-              {row('Doctor(s)',      admission.assignedDoctorIds?.length
+              {row('Department',    admission.departmentId
+                ? departments.find((d) => d.departmentId === admission.departmentId)?.name ?? admission.departmentId
+                : null)}
+              {row('Doctor(s)',     admission.assignedDoctorIds?.length
                 ? admission.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ')
                 : '—')}
               {row('Admitted',      new Date(admission.admissionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }))}
               {row('Discharged',    admission.dischargeDate
                 ? new Date(admission.dischargeDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+                : null)}
+              {row('Prescription',  admission.prescription
+                ? <span className="whitespace-pre-wrap">{admission.prescription}</span>
                 : null)}
               {row('Progress Notes', (
                 <button
@@ -547,7 +604,7 @@ function AdmissionPanel({
                 <select
                   id="ap-dept"
                   value={selectedDepartmentId}
-                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setEditAddDoctorId(''); }}
+                  onChange={(e) => handleEditDepartmentChange(e.target.value)}
                   className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   <option value="">— All Departments —</option>
@@ -555,6 +612,9 @@ function AdmissionPanel({
                     <option key={d.departmentId} value={d.departmentId}>{d.name}</option>
                   ))}
                 </select>
+                {departmentDoctorInvalid && (
+                  <p role="alert" className="text-xs text-destructive">{DEPARTMENT_DOCTOR_MESSAGE}</p>
+                )}
               </div>
 
               {/* Doctors */}
@@ -662,6 +722,23 @@ function AdmissionPanel({
                 )}
               </div>
 
+              {/* Prescription — directly below Bed. HOSPITAL_ADMIN, assigned
+                  Doctor(s), or the ward's Nurse only (backend enforces the same). */}
+              {canManageClinical && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="ap-prescription">Prescription</Label>
+                  <textarea
+                    id="ap-prescription"
+                    value={rxDraft}
+                    onChange={(e) => setRxDraft(e.target.value)}
+                    rows={4}
+                    maxLength={5000}
+                    placeholder="e.g. Tab. Paracetamol 500mg — 1 tablet twice daily after meals"
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                </div>
+              )}
+
               {/* Vitals — Doctor, Nurse and Hospital Admin only; Receptionist/Admin
                   can edit ward/bed/doctors above but not vitals (canEditVitals). */}
               {canEditVitals && (
@@ -750,8 +827,8 @@ function AdmissionPanel({
                 <Button variant="outline" className="flex-1" onClick={() => { setMode('view'); setError(null); }}>
                   Back
                 </Button>
-                <Button className="flex-1" disabled={saving} onClick={handleSave}>
-                  {saving ? 'Saving…' : 'Save Changes'}
+                <Button className="flex-1" disabled={saving || savingRx || departmentDoctorInvalid} onClick={handleSave}>
+                  {saving || savingRx ? 'Saving…' : 'Save Changes'}
                 </Button>
               </div>
             )}
@@ -1219,6 +1296,70 @@ function DischargeConfirm({ admission, onConfirm, onCancel, loading }: Discharge
   );
 }
 
+// ─── Discharge Summary Notes (final discharge step) ───────────────────────────
+// Shown after the user confirms in DischargeConfirm. The discharge itself only
+// happens when these notes are submitted.
+
+interface DischargeNotesModalProps {
+  admission: AdmissionResponse;
+  onSubmit:  (notes: string) => void;
+  onCancel:  () => void;
+  loading:   boolean;
+  error:     string | null;
+}
+
+function DischargeNotesModal({ admission, onSubmit, onCancel, loading, error }: DischargeNotesModalProps) {
+  const [notes, setNotes] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  function handleSubmit() {
+    const trimmed = notes.trim();
+    if (!trimmed) { setLocalError('Discharge summary notes are required.'); return; }
+    if (trimmed.length > 5000) { setLocalError('Discharge summary notes cannot exceed 5000 characters.'); return; }
+    setLocalError(null);
+    onSubmit(trimmed);
+  }
+
+  const shownError = localError ?? error;
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-lg p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold">Discharge Summary Notes</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Enter the discharge summary for{' '}
+            <span className="font-medium text-foreground">{admission.fullName ?? admission.patientId}</span>.
+          
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="discharge-summary-notes">Notes <span className="text-destructive">*</span></Label>
+          <textarea
+            id="discharge-summary-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={7}
+            maxLength={5000}
+            autoFocus
+            placeholder="Condition at discharge, treatment given, medication and follow-up advice…"
+            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          />
+        </div>
+        {shownError && (
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{shownError}</p>
+        )}
+        <div className="flex justify-end gap-3">
+          <Button variant="outline" onClick={onCancel} disabled={loading}>Cancel</Button>
+          <Button variant="destructive" onClick={handleSubmit} disabled={loading}>
+            {loading ? 'Discharging…' : 'Submit & Discharge'}
+          </Button>
+        </div>
+      </div>
+    </DialogOverlay>
+  );
+}
+
 // ─── Admissions Tab ───────────────────────────────────────────────────────────
 
 function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] }) {
@@ -1234,6 +1375,8 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const [viewFor,         setViewFor]         = useState<AdmissionResponse | null>(null);
   const [notesFor,        setNotesFor]        = useState<AdmissionResponse | null>(null);
   const [dischargeFor,    setDischargeFor]    = useState<AdmissionResponse | null>(null);
+  const [dischargeNotesFor, setDischargeNotesFor] = useState<AdmissionResponse | null>(null);
+  const [dischargeError,  setDischargeError]  = useState<string | null>(null);
   const [justDischarged,  setJustDischarged]  = useState<AdmissionResponse | null>(null);
 
   useEffect(() => {
@@ -1274,12 +1417,18 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.DOCTOR ||
     role === UserRole.NURSE ||
     role === UserRole.HOSPITAL_ADMIN;
-  const canDischarge =
-    role === UserRole.DOCTOR ||
-    role === UserRole.NURSE ||
-    role === UserRole.HOSPITAL_ADMIN ||
-    role === UserRole.ADMIN ||
-    role === UserRole.RECEPTIONIST;
+  // Per-admission — mirrors the backend's assertCanManageAdmission
+  // (ipd.service.ts): Hospital Admin, a Doctor in assignedDoctorIds, or a
+  // Nurse on the admission ward's roster. Gates Prescription edits and Discharge.
+  const canManageAdmission = (a: AdmissionResponse): boolean => {
+    if (role === UserRole.HOSPITAL_ADMIN) return true;
+    if (!userId) return false;
+    if (role === UserRole.DOCTOR) return (a.assignedDoctorIds ?? []).includes(userId);
+    if (role === UserRole.NURSE) {
+      return wards.some((w) => w.wardId === a.wardId && w.assignedNurseIds.includes(userId));
+    }
+    return false;
+  };
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role);
   const canDownloadSummary = DISCHARGE_SUMMARY_DOWNLOAD_ROLES.includes(role);
 
@@ -1287,7 +1436,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const total      = data?.total      ?? 0;
   const totalPages = data?.totalPages ?? 1;
 
-  async function handleDischargeConfirm() {
+  // Step 1 — Confirm Discharge only advances to the notes step; nothing is
+  // saved until the discharge summary notes are submitted.
+  function handleDischargeConfirm() {
     if (!dischargeFor) return;
     // Guard: admissionId must be a non-empty string to avoid a broken URL
     // (/api/ipd/admissions//discharge) that hits the 404 catch-all.
@@ -1295,9 +1446,23 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
       setDischargeFor(null);
       return;
     }
-    const result = await discharge(dischargeFor.admissionId);
+    setDischargeError(null);
+    setDischargeNotesFor(dischargeFor);
     setDischargeFor(null);
-    if ('data' in result && result.data) setJustDischarged(result.data);
+  }
+
+  // Step 2 — final discharge with the entered notes.
+  async function handleDischargeSubmit(dischargeSummaryNotes: string) {
+    if (!dischargeNotesFor) return;
+    setDischargeError(null);
+    const result = await discharge({ admissionId: dischargeNotesFor.admissionId, dischargeSummaryNotes });
+    if ('data' in result && result.data) {
+      setDischargeNotesFor(null);
+      setJustDischarged(result.data);
+    } else {
+      const msg = ('error' in result ? (result.error as { data?: { message?: string } })?.data?.message : undefined);
+      setDischargeError(msg ?? 'Failed to discharge patient.');
+    }
   }
 
   return (
@@ -1421,7 +1586,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                       <Printer className="h-3 w-3 mr-1" />
                       Print
                     </Button>
-                    {canDischarge && a.status === 'ADMITTED' && (
+                    {canManageAdmission(a) && a.status === 'ADMITTED' && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -1521,7 +1686,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                             <Printer className="h-3 w-3 mr-1" />
                             Print
                           </Button>
-                          {canDischarge && a.status === 'ADMITTED' && (
+                          {canManageAdmission(a) && a.status === 'ADMITTED' && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -1566,7 +1731,8 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           onUpdate={(updated) => setViewFor(updated)}
           canEdit={canEdit}
           canEditVitals={canEditVitals}
-          canDischarge={canDischarge}
+          canManageClinical={canManageAdmission(viewFor)}
+          canDischarge={canManageAdmission(viewFor)}
           canProgress={canProgress}
           canViewPayment={canViewPayment}
           canDownloadSummary={canDownloadSummary}
@@ -1581,6 +1747,15 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           onConfirm={handleDischargeConfirm}
           onCancel={() => setDischargeFor(null)}
           loading={discharging}
+        />
+      )}
+      {dischargeNotesFor && (
+        <DischargeNotesModal
+          admission={dischargeNotesFor}
+          onSubmit={handleDischargeSubmit}
+          onCancel={() => { setDischargeNotesFor(null); setDischargeError(null); }}
+          loading={discharging}
+          error={dischargeError}
         />
       )}
       {justDischarged && (
