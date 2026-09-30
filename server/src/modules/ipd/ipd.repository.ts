@@ -181,6 +181,20 @@ export class IPDRepository {
     );
   }
 
+  // Patient's most recently updated admission — the source a new OPD visit /
+  // IPD admission seeds its vitals from (vitals are one shared state per patient).
+  async findLatestByPatient(tenantId: string, patientId: string): Promise<IIPDAdmission | null> {
+    assertDbConnected();
+    return IPDAdmissionModel.findOne({ tenantId, patientId }).sort({ updatedAt: -1 });
+  }
+
+  // Write the patient's latest vitals onto every one of their admissions so
+  // OPD and IPD always show the same readings. Filters on plaintext keys only.
+  async setVitalsByPatient(tenantId: string, patientId: string, vitals: IPDVitals): Promise<void> {
+    assertDbConnected();
+    await IPDAdmissionModel.updateMany({ tenantId, patientId }, { $set: { vitals } });
+  }
+
   async appendProgressNote(
     admissionId: string,
     tenantId: string,

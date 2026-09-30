@@ -208,8 +208,8 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">
             New {type === 'pathology' ? 'Pathology' : 'Radiology'} Request
           </h2>
@@ -218,59 +218,61 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          <div className="space-y-1.5">
-            <Label>Patient *</Label>
-            <PatientCombobox
-              selected={patient}
-              onSelect={setPatient}
-              onClear={() => setPatient(null)}
-            />
+            <div className="space-y-1.5">
+              <Label>Patient *</Label>
+              <PatientCombobox
+                selected={patient}
+                onSelect={setPatient}
+                onClear={() => setPatient(null)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="nr-referredby">Referred By</Label>
+              <select
+                id="nr-referredby"
+                value={referredBy}
+                onChange={(e) => setReferredBy(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                {!isDoctorSelf && <option value={LAB_REFERRED_BY_SELF}>Self</option>}
+                {doctors.map((d) => (
+                  <option key={d.userId} value={d.userId}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="nr-testtype">{fieldLabel} *</Label>
+              <Input
+                id="nr-testtype"
+                value={testType}
+                onChange={(e) => setTestType(e.target.value)}
+                placeholder={fieldPlaceholder}
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="nr-notes">Clinical Notes (optional)</Label>
+              <RichTextEditor
+                id="nr-notes"
+                rows={3}
+                value={notes}
+                onChange={setNotes}
+                placeholder="Any relevant clinical information for the lab…"
+                maxLength={2000}
+              />
+            </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="nr-referredby">Referred By</Label>
-            <select
-              id="nr-referredby"
-              value={referredBy}
-              onChange={(e) => setReferredBy(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              {!isDoctorSelf && <option value={LAB_REFERRED_BY_SELF}>Self</option>}
-              {doctors.map((d) => (
-                <option key={d.userId} value={d.userId}>{d.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="nr-testtype">{fieldLabel} *</Label>
-            <Input
-              id="nr-testtype"
-              value={testType}
-              onChange={(e) => setTestType(e.target.value)}
-              placeholder={fieldPlaceholder}
-              required
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="nr-notes">Clinical Notes (optional)</Label>
-            <RichTextEditor
-              id="nr-notes"
-              rows={3}
-              value={notes}
-              onChange={setNotes}
-              placeholder="Any relevant clinical information for the lab…"
-              maxLength={2000}
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading || !patient}>
               {isLoading ? 'Submitting…' : 'Submit Request'}
@@ -438,8 +440,8 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <h2 className="text-base font-semibold">
             Edit {isPathology ? 'Pathology' : 'Radiology'} Request
           </h2>
@@ -448,59 +450,61 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="er-type">{fieldLabel}</Label>
-            <Input
-              id="er-type"
-              value={typeField}
-              onChange={(e) => setTypeField(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="er-notes">Clinical Notes</Label>
-            <RichTextEditor
-              id="er-notes"
-              rows={3}
-              value={notes}
-              onChange={setNotes}
-              maxLength={2000}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="er-priority">Priority</Label>
-              <select
-                id="er-priority"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as LabRequestPriority)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="NORMAL">Normal</option>
-                <option value="URGENT">Urgent</option>
-              </select>
+              <Label htmlFor="er-type">{fieldLabel}</Label>
+              <Input
+                id="er-type"
+                value={typeField}
+                onChange={(e) => setTypeField(e.target.value)}
+              />
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="er-status">Status</Label>
-              <select
-                id="er-status"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'PENDING' | 'IN_PROGRESS')}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="PENDING">Pending</option>
-                <option value="IN_PROGRESS">In Progress</option>
-              </select>
+              <Label htmlFor="er-notes">Clinical Notes</Label>
+              <RichTextEditor
+                id="er-notes"
+                rows={3}
+                value={notes}
+                onChange={setNotes}
+                maxLength={2000}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="er-priority">Priority</Label>
+                <select
+                  id="er-priority"
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as LabRequestPriority)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="NORMAL">Normal</option>
+                  <option value="URGENT">Urgent</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="er-status">Status</Label>
+                <select
+                  id="er-status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as 'PENDING' | 'IN_PROGRESS')}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="PENDING">Pending</option>
+                  <option value="IN_PROGRESS">In Progress</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>
               {isLoading ? 'Saving…' : 'Save Changes'}

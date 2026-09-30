@@ -271,8 +271,8 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-6 border-b">
+      <div className="relative w-full max-w-2xl max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-6 border-b shrink-0">
           <h2 className="text-lg font-semibold">
             {mode === 'edit' ? 'Edit Patient' : 'Register New Patient'}
           </h2>
@@ -281,251 +281,253 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} noValidate className="p-6 space-y-5">
-          {/* Duplicate warning */}
-          {duplicateInfo && (
-            <div className="flex gap-3 rounded-md border border-yellow-400 bg-yellow-50 p-4 text-sm text-yellow-800">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <div className="space-y-2">
-                <p>
-                  Patient already exists — a patient with this name and mobile number already exists (ID:{' '}
-                  <strong>{duplicateInfo.existingPatientId}</strong>). Do you want to register anyway?
-                </p>
-                <div className="flex gap-2">
-                  <Button type="button" size="sm" variant="outline" onClick={handleForceCreate} disabled={isLoading}>
-                    Yes, register anyway
-                  </Button>
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setDuplicateInfo(null)}>
-                    Cancel
-                  </Button>
+        <form onSubmit={handleSubmit} noValidate className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
+            {/* Duplicate warning */}
+            {duplicateInfo && (
+              <div className="flex gap-3 rounded-md border border-yellow-400 bg-yellow-50 p-4 text-sm text-yellow-800">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div className="space-y-2">
+                  <p>
+                    Patient already exists — a patient with this name and mobile number already exists (ID:{' '}
+                    <strong>{duplicateInfo.existingPatientId}</strong>). Do you want to register anyway?
+                  </p>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={handleForceCreate} disabled={isLoading}>
+                      Yes, register anyway
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setDuplicateInfo(null)}>
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {apiError && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{apiError}</p>
-          )}
+            {apiError && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{apiError}</p>
+            )}
 
-          {/* Required fields */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2 space-y-1">
-              <Label htmlFor="fullName">Full Name *</Label>
-              <Input
-                id="fullName"
-                value={form.fullName}
-                onChange={(e) => set('fullName', e.target.value)}
-                onBlur={() => touch('fullName')}
-                placeholder="Enter full name"
-                aria-invalid={!!fe('fullName')}
-                className={inputClass('fullName')}
-              />
-              {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="dob">Date of Birth *</Label>
-              <Input
-                id="dob"
-                type="date"
-                value={form.dateOfBirth}
-                max={new Date().toISOString().substring(0, 10)}
-                onChange={(e) => set('dateOfBirth', e.target.value)}
-                onBlur={() => touch('dateOfBirth')}
-                aria-invalid={!!fe('dateOfBirth')}
-                className={inputClass('dateOfBirth')}
-              />
-              {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="gender">Gender *</Label>
-              <select
-                id="gender"
-                value={form.gender}
-                onChange={(e) => set('gender', e.target.value as Gender)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                {GENDERS.map((g) => (
-                  <option key={g} value={g}>{genderLabel(g)}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="mobile">Mobile Number *</Label>
-              <div className="flex">
-                <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+            {/* Required fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2 space-y-1">
+                <Label htmlFor="fullName">Full Name *</Label>
                 <Input
-                  id="mobile"
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={10}
-                  value={form.mobileNumber}
-                  onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
-                  onBlur={() => touch('mobileNumber')}
-                  placeholder="XXXXXXXXXX"
-                  aria-invalid={!!fe('mobileNumber')}
-                  className={`${inputClass('mobileNumber')} rounded-l-none`}
+                  id="fullName"
+                  value={form.fullName}
+                  onChange={(e) => set('fullName', e.target.value)}
+                  onBlur={() => touch('fullName')}
+                  placeholder="Enter full name"
+                  aria-invalid={!!fe('fullName')}
+                  className={inputClass('fullName')}
                 />
-              </div>
-              {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="bloodGroup">Blood Group</Label>
-              <select
-                id="bloodGroup"
-                value={form.bloodGroup ?? ''}
-                onChange={(e) => set('bloodGroup', e.target.value as BloodGroup || undefined)}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">— Select —</option>
-                {BLOOD_GROUPS.map((bg) => (
-                  <option key={bg} value={bg}>{bg}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="sm:col-span-2 space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="addressLine1">Address Line 1 *</Label>
-                <Input
-                  id="addressLine1"
-                  value={form.addressLine1 ?? ''}
-                  onChange={(e) => set('addressLine1', e.target.value)}
-                  onBlur={() => touch('addressLine1')}
-                  placeholder="House/Flat No., Building, Street"
-                  maxLength={200}
-                  aria-invalid={!!fe('addressLine1')}
-                  className={inputClass('addressLine1')}
-                />
-                {fe('addressLine1') && <p className="text-xs text-destructive">{fe('addressLine1')}</p>}
+                {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="addressLine2">Address Line 2</Label>
+                <Label htmlFor="dob">Date of Birth *</Label>
                 <Input
-                  id="addressLine2"
-                  value={form.addressLine2 ?? ''}
-                  onChange={(e) => set('addressLine2', e.target.value)}
-                  placeholder="Area, Landmark - Optional"
-                  maxLength={200}
-                  className={inputClass('addressLine2')}
+                  id="dob"
+                  type="date"
+                  value={form.dateOfBirth}
+                  max={new Date().toISOString().substring(0, 10)}
+                  onChange={(e) => set('dateOfBirth', e.target.value)}
+                  onBlur={() => touch('dateOfBirth')}
+                  aria-invalid={!!fe('dateOfBirth')}
+                  className={inputClass('dateOfBirth')}
                 />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label htmlFor="pincode">Pincode *</Label>
-                  <Input
-                    id="pincode"
-                    inputMode="numeric"
-                    value={form.pincode ?? ''}
-                    onChange={(e) => set('pincode', e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    onBlur={() => touch('pincode')}
-                    placeholder="6-digit PIN"
-                    maxLength={6}
-                    aria-invalid={!!fe('pincode')}
-                    className={inputClass('pincode')}
-                  />
-                  {fe('pincode') && <p className="text-xs text-destructive">{fe('pincode')}</p>}
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="city">City *</Label>
-                  <Input
-                    id="city"
-                    value={form.city ?? ''}
-                    onChange={(e) => set('city', e.target.value)}
-                    onBlur={() => touch('city')}
-                    placeholder="City"
-                    maxLength={100}
-                    aria-invalid={!!fe('city')}
-                    className={inputClass('city')}
-                  />
-                  {fe('city') && <p className="text-xs text-destructive">{fe('city')}</p>}
-                </div>
+                {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="state">State *</Label>
+                <Label htmlFor="gender">Gender *</Label>
                 <select
-                  id="state"
-                  value={form.state ?? ''}
-                  onChange={(e) => set('state', e.target.value)}
-                  onBlur={() => touch('state')}
-                  aria-invalid={!!fe('state')}
-                  className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${inputClass('state')}`}
+                  id="gender"
+                  value={form.gender}
+                  onChange={(e) => set('gender', e.target.value as Gender)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option value="">— Select state —</option>
-                  {INDIAN_STATES.map((s) => (
-                    <option key={s} value={s}>{s}</option>
+                  {GENDERS.map((g) => (
+                    <option key={g} value={g}>{genderLabel(g)}</option>
                   ))}
                 </select>
-                {fe('state') && <p className="text-xs text-destructive">{fe('state')}</p>}
-              </div>
-            </div>
-          </div>
-
-          {/* Optional fields */}
-          <details className="group">
-            <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground select-none">
-              Optional details (Aadhaar, emergency contact)
-            </summary>
-            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="aadhaar">Aadhaar Number</Label>
-                <Input
-                  id="aadhaar"
-                  value={form.aadhaarNumber ?? ''}
-                  onChange={(e) => set('aadhaarNumber', e.target.value.replace(/\D/g, '').slice(0, 12))}
-                  onBlur={() => touch('aadhaarNumber')}
-                  placeholder="12-digit Aadhaar"
-                  maxLength={12}
-                  inputMode="numeric"
-                  aria-invalid={!!fe('aadhaarNumber')}
-                  className={inputClass('aadhaarNumber')}
-                />
-                {fe('aadhaarNumber') && <p className="text-xs text-destructive">{fe('aadhaarNumber')}</p>}
               </div>
 
               <div className="space-y-1">
-                <Label htmlFor="ecName">Emergency Contact Name</Label>
-                <Input
-                  id="ecName"
-                  value={form.emergencyContactName ?? ''}
-                  onChange={(e) => set('emergencyContactName', sanitizeAlphaSpace(e.target.value))}
-                  onBlur={() => touch('emergencyContactName')}
-                  placeholder="Contact name"
-                  aria-invalid={!!fe('emergencyContactName')}
-                  className={inputClass('emergencyContactName')}
-                />
-                {fe('emergencyContactName') && <p className="text-xs text-destructive">{fe('emergencyContactName')}</p>}
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
+                <Label htmlFor="mobile">Mobile Number *</Label>
                 <div className="flex">
                   <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
                   <Input
-                    id="ecMobile"
+                    id="mobile"
                     type="tel"
                     inputMode="numeric"
                     maxLength={10}
-                    value={form.emergencyContactMobile ?? ''}
-                    onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
-                    onBlur={() => touch('emergencyContactMobile')}
+                    value={form.mobileNumber}
+                    onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
+                    onBlur={() => touch('mobileNumber')}
                     placeholder="XXXXXXXXXX"
-                    aria-invalid={!!fe('emergencyContactMobile')}
-                    className={`${inputClass('emergencyContactMobile')} rounded-l-none`}
+                    aria-invalid={!!fe('mobileNumber')}
+                    className={`${inputClass('mobileNumber')} rounded-l-none`}
                   />
                 </div>
-                {fe('emergencyContactMobile') && <p className="text-xs text-destructive">{fe('emergencyContactMobile')}</p>}
+                {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="bloodGroup">Blood Group</Label>
+                <select
+                  id="bloodGroup"
+                  value={form.bloodGroup ?? ''}
+                  onChange={(e) => set('bloodGroup', e.target.value as BloodGroup || undefined)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">— Select —</option>
+                  {BLOOD_GROUPS.map((bg) => (
+                    <option key={bg} value={bg}>{bg}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-2 space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="addressLine1">Address Line 1 *</Label>
+                  <Input
+                    id="addressLine1"
+                    value={form.addressLine1 ?? ''}
+                    onChange={(e) => set('addressLine1', e.target.value)}
+                    onBlur={() => touch('addressLine1')}
+                    placeholder="House/Flat No., Building, Street"
+                    maxLength={200}
+                    aria-invalid={!!fe('addressLine1')}
+                    className={inputClass('addressLine1')}
+                  />
+                  {fe('addressLine1') && <p className="text-xs text-destructive">{fe('addressLine1')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="addressLine2">Address Line 2</Label>
+                  <Input
+                    id="addressLine2"
+                    value={form.addressLine2 ?? ''}
+                    onChange={(e) => set('addressLine2', e.target.value)}
+                    placeholder="Area, Landmark - Optional"
+                    maxLength={200}
+                    className={inputClass('addressLine2')}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="pincode">Pincode *</Label>
+                    <Input
+                      id="pincode"
+                      inputMode="numeric"
+                      value={form.pincode ?? ''}
+                      onChange={(e) => set('pincode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      onBlur={() => touch('pincode')}
+                      placeholder="6-digit PIN"
+                      maxLength={6}
+                      aria-invalid={!!fe('pincode')}
+                      className={inputClass('pincode')}
+                    />
+                    {fe('pincode') && <p className="text-xs text-destructive">{fe('pincode')}</p>}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="city">City *</Label>
+                    <Input
+                      id="city"
+                      value={form.city ?? ''}
+                      onChange={(e) => set('city', e.target.value)}
+                      onBlur={() => touch('city')}
+                      placeholder="City"
+                      maxLength={100}
+                      aria-invalid={!!fe('city')}
+                      className={inputClass('city')}
+                    />
+                    {fe('city') && <p className="text-xs text-destructive">{fe('city')}</p>}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="state">State *</Label>
+                  <select
+                    id="state"
+                    value={form.state ?? ''}
+                    onChange={(e) => set('state', e.target.value)}
+                    onBlur={() => touch('state')}
+                    aria-invalid={!!fe('state')}
+                    className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring ${inputClass('state')}`}
+                  >
+                    <option value="">— Select state —</option>
+                    {INDIAN_STATES.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  {fe('state') && <p className="text-xs text-destructive">{fe('state')}</p>}
+                </div>
               </div>
             </div>
-          </details>
 
-          <div className="flex justify-end gap-3 pt-2">
+            {/* Optional fields */}
+            <details className="group">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground select-none">
+                Optional details (Aadhaar, emergency contact)
+              </summary>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="aadhaar">Aadhaar Number</Label>
+                  <Input
+                    id="aadhaar"
+                    value={form.aadhaarNumber ?? ''}
+                    onChange={(e) => set('aadhaarNumber', e.target.value.replace(/\D/g, '').slice(0, 12))}
+                    onBlur={() => touch('aadhaarNumber')}
+                    placeholder="12-digit Aadhaar"
+                    maxLength={12}
+                    inputMode="numeric"
+                    aria-invalid={!!fe('aadhaarNumber')}
+                    className={inputClass('aadhaarNumber')}
+                  />
+                  {fe('aadhaarNumber') && <p className="text-xs text-destructive">{fe('aadhaarNumber')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="ecName">Emergency Contact Name</Label>
+                  <Input
+                    id="ecName"
+                    value={form.emergencyContactName ?? ''}
+                    onChange={(e) => set('emergencyContactName', sanitizeAlphaSpace(e.target.value))}
+                    onBlur={() => touch('emergencyContactName')}
+                    placeholder="Contact name"
+                    aria-invalid={!!fe('emergencyContactName')}
+                    className={inputClass('emergencyContactName')}
+                  />
+                  {fe('emergencyContactName') && <p className="text-xs text-destructive">{fe('emergencyContactName')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="ecMobile">Emergency Contact Mobile</Label>
+                  <div className="flex">
+                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                    <Input
+                      id="ecMobile"
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      value={form.emergencyContactMobile ?? ''}
+                      onChange={(e) => set('emergencyContactMobile', sanitizeMobile(e.target.value))}
+                      onBlur={() => touch('emergencyContactMobile')}
+                      placeholder="XXXXXXXXXX"
+                      aria-invalid={!!fe('emergencyContactMobile')}
+                      className={`${inputClass('emergencyContactMobile')} rounded-l-none`}
+                    />
+                  </div>
+                  {fe('emergencyContactMobile') && <p className="text-xs text-destructive">{fe('emergencyContactMobile')}</p>}
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div className="flex justify-end gap-3 shrink-0 px-6 pt-1 pb-6">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
               Cancel
             </Button>

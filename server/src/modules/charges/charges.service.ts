@@ -6,7 +6,7 @@ import { userRepository } from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
 import { paymentService } from '../payment/payment.service';
 import { paymentRepository } from '../payment/payment.repository';
-import { PaymentReferenceType, PaymentMethod } from '../payment/payment.types';
+import { PaymentReferenceType, PaymentMethod, PaymentStatus } from '../payment/payment.types';
 import { auditService }  from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import {
@@ -117,6 +117,21 @@ class ChargeService {
       newValue:   { chargeId: charge.chargeId, patientId: data.patientId, amount: charge.amount, category: data.category },
     });
 
+    // Mirror the new charge into Payments as PENDING; markPaid / cancelCharge
+    // settle it to COMPLETED / CANCELLED. Failure must not undo the charge.
+    try {
+      await paymentService.createPendingChargePayment(
+        {
+          patientId:   charge.patientId,
+          amount:      charge.amount,
+          description: `Billing Charge – ${charge.description}`,
+          chargeId:    charge.chargeId,
+        },
+        tenantId,
+        addedBy,
+      );
+    } catch { /* pending payment creation failure must not undo the charge */ }
+
     return charge;
   }
 
@@ -168,6 +183,16 @@ class ChargeService {
       previousValue: { status: 'UNPAID' },
       newValue:      { status: 'CANCELLED', cancelledBy },
     });
+
+    // Settle the charge's PENDING Payment record to CANCELLED.
+    try {
+      const pendingPayment = await paymentRepository.findByReference(
+        tenantId, PaymentReferenceType.CHARGE, chargeId,
+      );
+      if (pendingPayment) {
+        await paymentService.settleChargePayment(pendingPayment, PaymentStatus.CANCELLED, cancelledBy);
+      }
+    } catch { /* payment status sync failure must not undo the charge's CANCELLED status */ }
 
     // Notify original adder if a different user cancelled the charge
     if (cancelledBy !== charge.addedBy) {
@@ -234,17 +259,19 @@ class ChargeService {
       newValue:      { status: 'PAID', paidBy },
     });
 
-    // Auto-create the matching Payment record so this charge appears in
-    // Payments / Revenue / Department-wise Revenue (under "Other" — CHARGE is
-    // deliberately not registered in REFERENCE_DEPARTMENT_SOURCES, see
-    // payment.types.ts). Guarded against duplicates in case markPaid is ever
-    // invoked more than once for the same charge; failure to create the
-    // payment must never undo the charge's PAID status.
+    // Settle the charge's PENDING Payment record (created by addCharge) to
+    // COMPLETED so it counts in Payments / Revenue / Department-wise Revenue
+    // (under "Other" — CHARGE is deliberately not registered in
+    // REFERENCE_DEPARTMENT_SOURCES, see payment.types.ts). Charges added
+    // before the PENDING record existed have none, so one is created
+    // COMPLETED instead. Failure must never undo the charge's PAID status.
     try {
       const existingPayment = await paymentRepository.findByReference(
         tenantId, PaymentReferenceType.CHARGE, chargeId,
       );
-      if (!existingPayment) {
+      if (existingPayment) {
+        await paymentService.settleChargePayment(existingPayment, PaymentStatus.COMPLETED, paidBy);
+      } else {
         await paymentService.createManualPayment(
           {
             patientId:     updated!.patientId,

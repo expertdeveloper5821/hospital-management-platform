@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { paymentRepository }  from './payment.repository';
 import { IPayment }            from './payment.model';
 import {
+  PaymentMethod,
   PaymentStatus,
   PaymentReferenceType,
   CreateManualPaymentInput,
@@ -164,6 +165,112 @@ export class PaymentService {
     } catch { /* swallow — audit must not block payment */ }
 
     return toResponse(payment);
+  }
+
+  // ─── Billing charge → Payments sync ─────────────────────────────────────────
+  // A Billing charge's Payment record is created PENDING when the charge is
+  // added, and settled when the charge is marked paid (COMPLETED, receipt
+  // generated) or cancelled (CANCELLED). PENDING/CANCELLED records never count
+  // towards revenue — every revenue aggregation filters status COMPLETED.
+
+  async createPendingChargePayment(
+    input:    { patientId: string; amount: number; description: string; chargeId: string },
+    tenantId: string,
+    userId:   string,
+  ): Promise<IPayment> {
+    const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const paymentId = uuidv4();
+    const payment = await paymentRepository.save({
+      paymentId,
+      tenantId,
+      patientId:         input.patientId,
+      fullName:          patient.fullName,
+      amount:            input.amount,
+      paymentMethod:     PaymentMethod.CASH,
+      description:       input.description,
+      status:            PaymentStatus.PENDING,
+      receiptS3Key:      null,
+      razorpayOrderId:   null,
+      razorpayPaymentId: null,
+      referenceType:     PaymentReferenceType.CHARGE,
+      referenceId:       input.chargeId,
+      transactionId:     null,
+      createdBy:         userId,
+    });
+
+    try {
+      await auditService.log({
+        entityType: AuditEntityType.PAYMENT_RECORD,
+        entityId:   paymentId,
+        action:     'CREATE',
+        userId,
+        tenantId,
+        newValue:   {
+          patientId: input.patientId,
+          amount:    input.amount,
+          method:    PaymentMethod.CASH,
+          status:    PaymentStatus.PENDING,
+        },
+      });
+    } catch { /* swallow — audit must not block payment */ }
+
+    return payment;
+  }
+
+  // Settle a PENDING charge payment. Returns null when the record was no longer
+  // PENDING (already settled by a concurrent request).
+  async settleChargePayment(
+    record: IPayment,
+    status: typeof PaymentStatus.COMPLETED | typeof PaymentStatus.CANCELLED,
+    userId: string,
+  ): Promise<IPayment | null> {
+    if (record.status !== PaymentStatus.PENDING) return null;
+
+    const fields: Partial<IPayment> = { status };
+
+    if (status === PaymentStatus.COMPLETED) {
+      const tenant  = await tenantRepository.findById(record.tenantId);
+      const patient = await patientRepository.findByPatientId(record.tenantId, record.patientId);
+      if (patient) {
+        try {
+          const receiptBuffer = await pdfService.generateReceipt({
+            receiptNumber: record.paymentId,
+            patientName:   patient.fullName,
+            patientId:     patient.patientId,
+            paymentDate:   new Date(),
+            amountInr:     record.amount,
+            paymentMethod: record.paymentMethod,
+            description:   record.description,
+            hospitalName:  tenant?.branding.displayName || tenant?.name || 'Hospital',
+            primaryColor:  tenant?.branding.primaryColor || '#1A73E8',
+          });
+          const key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
+          await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
+          fields.receiptS3Key = key; // only recorded once the upload actually succeeds
+        } catch { /* receipt generation failure must not fail completion */ }
+      }
+    }
+
+    const updated = await paymentRepository.updateFromStatus(
+      record.paymentId, record.tenantId, PaymentStatus.PENDING, fields,
+    );
+    if (!updated) return null;
+
+    try {
+      await auditService.log({
+        entityType: AuditEntityType.PAYMENT_RECORD,
+        entityId:   record.paymentId,
+        action:     'UPDATE',
+        userId,
+        tenantId:   record.tenantId,
+        previousValue: { status: PaymentStatus.PENDING },
+        newValue:      { status },
+      });
+    } catch { /* swallow */ }
+
+    return updated;
   }
 
   // ─── U5-C-02: Create Razorpay order (UPI / Card) ───────────────────────────

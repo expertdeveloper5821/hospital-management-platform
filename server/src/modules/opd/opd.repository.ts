@@ -2,7 +2,7 @@ import { OPDVisitModel, IOPDVisit } from './opd.model';
 import { OpdNurseAssignmentModel, IOpdNurseAssignment } from './opd-nurse-assignment.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
-import { OPDVisitStatus, ACTIVE_STATUSES } from './opd.types';
+import { OPDVisitStatus, ACTIVE_STATUSES, OPDVitals } from './opd.types';
 import { ConflictError } from '../../shared/middleware/error-handler';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 
@@ -204,6 +204,20 @@ export class OPDRepository {
       }
       throw err;
     }
+  }
+
+  // Patient's most recently updated visit — the source a new OPD visit / IPD
+  // admission seeds its vitals from (vitals are one shared state per patient).
+  async findLatestByPatient(tenantId: string, patientId: string): Promise<IOPDVisit | null> {
+    assertDbConnected();
+    return OPDVisitModel.findOne({ tenantId, patientId }).sort({ updatedAt: -1 });
+  }
+
+  // Write the patient's latest vitals onto every one of their visits so OPD
+  // and IPD always show the same readings. Filters on plaintext keys only.
+  async setVitalsByPatient(tenantId: string, patientId: string, vitals: OPDVitals): Promise<void> {
+    assertDbConnected();
+    await OPDVisitModel.updateMany({ tenantId, patientId }, { $set: { vitals } });
   }
 
   // Sweep visits left on the queue after their visit date has passed. Bulk

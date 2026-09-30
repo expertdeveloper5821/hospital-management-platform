@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
+import { findLatestPatientVitals, syncPatientVitals } from './patient-vitals.sync';
 import { ipdService } from '../ipd/ipd.service';
 import { ipdRepository } from '../ipd/ipd.repository';
 import { patientRepository } from '../patient/patient.repository';
@@ -245,7 +246,12 @@ export class OPDService {
       nurseIds.push(await this.assertNurseAvailableForOpd(tenantId, id));
     }
 
+    // Vitals are shared per patient — a new visit starts from the latest
+    // readings recorded in OPD or IPD.
+    const latestVitals = await findLatestPatientVitals(tenantId, data.patientId);
+
     const visit = await opdRepository.save({
+      ...(latestVitals ? { vitals: latestVitals } : {}),
       visitId,
       tenantId,
       patientId:      data.patientId,
@@ -366,13 +372,30 @@ export class OPDService {
       }
     }
 
+    // Nurse reassignment (Receptionist/Doctor/Hospital Admin — a Nurse is
+    // kept off it by the controller's NURSE_EDITABLE_FIELDS).
+    // Only newly added nurses are validated — one already on the visit stays
+    // valid even if she has since moved to IPD ward duty.
+    if (data.nurseIds !== undefined) {
+      const requestedNurseIds = [...new Set(data.nurseIds)];
+      const existingNurseIds  = visit.nurseIds ?? [];
+      for (const id of requestedNurseIds) {
+        if (!existingNurseIds.includes(id)) await this.assertNurseAvailableForOpd(tenantId, id);
+      }
+      updateData.nurseIds = requestedNurseIds;
+      if (!isSameFieldValue(existingNurseIds, requestedNurseIds)) {
+        previousValue.nurseIds = existingNurseIds;
+        newValue.nurseIds      = requestedNurseIds;
+      }
+    }
+
     // Vitals merge onto the visit's existing readings rather than replacing
     // the whole sub-document — data.vitals only carries the sub-fields the
     // caller actually sent (see UpdateOPDVisitRequest.vitals), so recording
     // just one reading (e.g. weight) never wipes out the others already on
     // file. Role is not re-checked here: the route/controller already limit
-    // this endpoint to DOCTOR/HOSPITAL_ADMIN/NURSE, and NURSE_EDITABLE_FIELDS
-    // in the controller is the sole gate on which of those roles may touch it.
+    // vitals to DOCTOR/HOSPITAL_ADMIN/NURSE (RECEPTIONIST_EDITABLE_FIELDS keeps
+    // a Receptionist off them).
     if (data.vitals !== undefined) {
       // visit.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable
@@ -462,6 +485,12 @@ export class OPDService {
     const updateFilterPatientIds = isDirectNurseAssignment ? undefined : scopedPatientIds;
     const updated = await opdRepository.update(tenantId, visitId, updateData, updateFilterPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
+
+    // Vitals are shared per patient — write the merged readings through to
+    // every OPD visit and IPD admission of this patient.
+    if (updateData.vitals) {
+      await syncPatientVitals(tenantId, visit.patientId, updateData.vitals);
+    }
 
     // Skip the audit write entirely for a genuine no-op save (edit opened
     // and saved with nothing actually changed) — every field above is only

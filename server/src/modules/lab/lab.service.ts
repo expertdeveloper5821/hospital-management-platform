@@ -269,13 +269,15 @@ export class LabService {
   }
 
   async getPathologyRequest(
-    requestId:          string,
-    tenantId:           string,
-    allowedPatientIds?: string[],
+    requestId:           string,
+    tenantId:            string,
+    allowedPatientIds?:  string[],
+    referredByDoctorId?: string,
   ): Promise<PathologyRequestResponse> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
-    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+    const isReferredDoctor = !!referredByDoctorId && doc.referredBy === referredByDoctorId;
+    if (allowedPatientIds && !isReferredDoctor && !allowedPatientIds.includes(doc.patientId)) {
       throw new NotFoundError('Pathology request not found');
     }
     return toPathologyResponse(doc);
@@ -285,12 +287,16 @@ export class LabService {
     tenantId:           string,
     query:              ListLabRequestsQuery,
     doctorPatientIds?:  string[],
+    referredByDoctorId?: string,
   ): Promise<PaginatedResult<PathologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
     const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
-    const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds);
+    const referral = referredByDoctorId && doctorPatientIds
+      ? { doctorId: referredByDoctorId, patientIds: searchPatientIds }
+      : undefined;
+    const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds, referral);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(
@@ -410,13 +416,15 @@ export class LabService {
   }
 
   async getRadiologyRequest(
-    requestId:          string,
-    tenantId:           string,
-    allowedPatientIds?: string[],
+    requestId:           string,
+    tenantId:            string,
+    allowedPatientIds?:  string[],
+    referredByDoctorId?: string,
   ): Promise<RadiologyRequestResponse> {
     const doc = await labRepository.findRadiologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Radiology request not found');
-    if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
+    const isReferredDoctor = !!referredByDoctorId && doc.referredBy === referredByDoctorId;
+    if (allowedPatientIds && !isReferredDoctor && !allowedPatientIds.includes(doc.patientId)) {
       throw new NotFoundError('Radiology request not found');
     }
     return toRadiologyResponse(doc);
@@ -426,12 +434,16 @@ export class LabService {
     tenantId:          string,
     query:             ListLabRequestsQuery,
     doctorPatientIds?: string[],
+    referredByDoctorId?: string,
   ): Promise<PaginatedResult<RadiologyRequestResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
     const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
-    const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds);
+    const referral = referredByDoctorId && doctorPatientIds
+      ? { doctorId: referredByDoctorId, patientIds: searchPatientIds }
+      : undefined;
+    const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds, referral);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
     const data = await Promise.all(

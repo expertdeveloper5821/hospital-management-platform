@@ -46,7 +46,7 @@ export const opdApi = baseApi.injectEndpoints({
     updateOPDVisit: build.mutation<OPDVisitResponse, { visitId: string } & UpdateOPDVisitRequest>({
       query: ({ visitId, ...body }) => ({ url: `/api/opd/visits/${visitId}`, method: 'PATCH', body }),
       transformResponse: (raw: ApiSuccess<OPDVisitResponse>) => raw.data,
-      invalidatesTags: ['OPD'],
+      invalidatesTags: ['OPD', 'IPD'], // IPD too: vitals are shared per patient
     }),
 
     startOPDConsultation: build.mutation<OPDVisitResponse, string>({

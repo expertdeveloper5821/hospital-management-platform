@@ -41,7 +41,12 @@ function ChargeStatusBadge({ status }: { status: ChargeStatus }) {
 // ADMIN / HOSPITAL_ADMIN / FINANCE_MANAGER can create charges from this
 // cross-patient screen, and the backend permits them every category. MANAGER
 // can view the billing list but is rejected by the API on create, so no modal.
+// RECEPTIONIST may add charges too, but the backend excludes ROOM and NURSING for it.
 function AddChargeModal({ onClose }: { onClose: () => void }) {
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const categories = role === 'RECEPTIONIST'
+    ? CATEGORIES.filter((c) => c !== 'ROOM' && c !== 'NURSING')
+    : CATEGORIES;
   const [addCharge, { isLoading }] = useAddChargeMutation();
   const [patientId, setPatientId]     = useState('');
   const [category, setCategory]       = useState<ChargeCategory>('CONSULTATION');
@@ -129,7 +134,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
                 value={category}
                 onChange={(e) => handleCategoryChange(e.target.value as ChargeCategory)}
               >
-                {CATEGORIES.map((c) => <option key={c} value={c}>{toTitleCase(c)}</option>)}
+                {categories.map((c) => <option key={c} value={c}>{toTitleCase(c)}</option>)}
               </select>
             </div>
             {isLabTest && (
@@ -195,7 +200,7 @@ export default function BillingPage() {
   const router  = useRouter();
   const profile = useAppSelector((s) => s.auth.profile);
 
-  const allowedRoles = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'FINANCE_MANAGER'];
+  const allowedRoles = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'FINANCE_MANAGER', 'RECEPTIONIST'];
   if (profile && !allowedRoles.includes(profile.role)) {
     router.replace('/dashboard');
     return null;
@@ -219,7 +224,7 @@ export default function BillingPage() {
     limit: 20,
   });
 
-  const canManageCharge = ['HOSPITAL_ADMIN', 'ADMIN', 'FINANCE_MANAGER'].includes(profile?.role ?? '');
+  const canManageCharge = ['HOSPITAL_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'RECEPTIONIST'].includes(profile?.role ?? '');
   const canAddCharge = canManageCharge;
 
   const [cancelCharge,   { isLoading: cancelling }] = useCancelChargeMutation();

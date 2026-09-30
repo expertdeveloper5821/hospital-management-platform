@@ -96,86 +96,88 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] overflow-y-auto p-6 space-y-5">
-        <div className="flex items-center justify-between">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between shrink-0 px-6 pt-6">
           <h2 className="text-lg font-semibold">{existing ? 'Edit Department' : 'Create Department'}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="dept-name">Name <span className="text-destructive">*</span></Label>
-            <Input
-              id="dept-name"
-              placeholder="e.g. Cardiology"
-              value={name}
-              onChange={(e) => { setName(e.target.value); setError(null); }}
-              maxLength={200}
-              required
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="dept-desc">Description</Label>
-            <Input
-              id="dept-desc"
-              placeholder="Optional description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              maxLength={1000}
-            />
-            <CharCounter value={description} max={1000} />
-          </div>
-
-          {/* Doctors section — only when editing (need a departmentId to assign) */}
-          {existing && (
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
-              <Label>Assigned Doctors</Label>
+              <Label htmlFor="dept-name">Name <span className="text-destructive">*</span></Label>
               <Input
-                placeholder="Search doctors…"
-                value={doctorSearch}
-                onChange={(e) => setDoctorSearch(e.target.value)}
-                className="h-8 text-sm"
+                id="dept-name"
+                placeholder="e.g. Cardiology"
+                value={name}
+                onChange={(e) => { setName(e.target.value); setError(null); }}
+                maxLength={200}
+                required
               />
-              {allDoctors.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No doctors available.</p>
-              ) : (
-                <div className="rounded-md border max-h-48 overflow-y-auto divide-y">
-                  {filteredDoctors.map((d) => (
-                    <label
-                      key={d.userId}
-                      className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        className="accent-primary h-4 w-4 shrink-0"
-                        checked={assigned.has(d.userId)}
-                        onChange={() => toggleDoctor(d.userId)}
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{d.name || 'Unnamed'}</p>
-                        <p className="text-xs text-muted-foreground truncate">{d.email}</p>
-                      </div>
-                    </label>
-                  ))}
-                  {filteredDoctors.length === 0 && (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">No doctors match your search.</p>
-                  )}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground">
-                {assigned.size} doctor{assigned.size !== 1 ? 's' : ''} assigned
-              </p>
             </div>
-          )}
 
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
-          )}
+            <div className="space-y-2">
+              <Label htmlFor="dept-desc">Description</Label>
+              <Input
+                id="dept-desc"
+                placeholder="Optional description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={1000}
+              />
+              <CharCounter value={description} max={1000} />
+            </div>
 
-          <div className="flex justify-end gap-3 pt-1">
+            {/* Doctors section — only when editing (need a departmentId to assign) */}
+            {existing && (
+              <div className="space-y-2">
+                <Label>Assigned Doctors</Label>
+                <Input
+                  placeholder="Search doctors…"
+                  value={doctorSearch}
+                  onChange={(e) => setDoctorSearch(e.target.value)}
+                  className="h-8 text-sm"
+                />
+                {allDoctors.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No doctors available.</p>
+                ) : (
+                  <div className="rounded-md border max-h-48 overflow-y-auto divide-y">
+                    {filteredDoctors.map((d) => (
+                      <label
+                        key={d.userId}
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-primary h-4 w-4 shrink-0"
+                          checked={assigned.has(d.userId)}
+                          onChange={() => toggleDoctor(d.userId)}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{d.name || 'Unnamed'}</p>
+                          <p className="text-xs text-muted-foreground truncate">{d.email}</p>
+                        </div>
+                      </label>
+                    ))}
+                    {filteredDoctors.length === 0 && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">No doctors match your search.</p>
+                    )}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {assigned.size} doctor{assigned.size !== 1 ? 's' : ''} assigned
+                </p>
+              </div>
+            )}
+
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 shrink-0 px-6 pt-1 pb-6">
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>
               {isLoading ? 'Saving…' : existing ? 'Save Changes' : 'Create'}

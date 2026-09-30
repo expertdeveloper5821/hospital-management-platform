@@ -47,7 +47,7 @@ export const packagesApi = baseApi.injectEndpoints({
       query: ({ packageId, ...body }) => ({ url: `/api/packages/${packageId}/assignments`, method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<AssignmentResponse>) => raw.data,
       // Assigning a package auto-creates a charge, so Billing/patient-bill must refresh too.
-      invalidatesTags: ['PackageAssignment', 'Charge', 'Bill'],
+      invalidatesTags: ['PackageAssignment', 'Charge', 'Bill', 'Payment'],
     }),
 
     cancelAssignment: build.mutation<AssignmentResponse, { packageId: string; assignmentId: string }>({

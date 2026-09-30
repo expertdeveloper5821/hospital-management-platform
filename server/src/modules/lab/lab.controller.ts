@@ -25,6 +25,12 @@ async function resolveDoctorPatientIds(tenantId: string, userId: string, role: s
   return [...new Set([...opdIds, ...ipdIds])];
 }
 
+// Read access (list/get) additionally covers requests where the Doctor was
+// selected as "Referred By". Undefined for any other role.
+function referredByDoctorId(userId: string, role: string): string | undefined {
+  return role === UserRole.DOCTOR ? userId : undefined;
+}
+
 const requestIdSchema = z.string().uuid('requestId must be a valid UUID');
 
 // ─── Pathology ────────────────────────────────────────────────────────────────
@@ -58,7 +64,9 @@ export async function listPathologyRequests(
     }
     const tenantId = req.user!.tenantId as string;
     const doctorPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await labService.listPathologyRequests(tenantId, parsed.data, doctorPatientIds);
+    const result = await labService.listPathologyRequests(
+      tenantId, parsed.data, doctorPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+    );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -71,7 +79,9 @@ export async function getPathologyRequest(
     if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
     const tenantId = req.user!.tenantId as string;
     const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await labService.getPathologyRequest(id.data, tenantId, allowedPatientIds);
+    const result = await labService.getPathologyRequest(
+      id.data, tenantId, allowedPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+    );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -132,7 +142,9 @@ export async function listRadiologyRequests(
     }
     const tenantId = req.user!.tenantId as string;
     const doctorPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await labService.listRadiologyRequests(tenantId, parsed.data, doctorPatientIds);
+    const result = await labService.listRadiologyRequests(
+      tenantId, parsed.data, doctorPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+    );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }
@@ -145,7 +157,9 @@ export async function getRadiologyRequest(
     if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
     const tenantId = req.user!.tenantId as string;
     const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await labService.getRadiologyRequest(id.data, tenantId, allowedPatientIds);
+    const result = await labService.getRadiologyRequest(
+      id.data, tenantId, allowedPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+    );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

@@ -285,8 +285,8 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <div>
             <h2 className="text-base font-semibold">Record Manual Payment</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -301,79 +301,81 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
+        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
 
-          <div className="space-y-1.5">
-            <Label>Patient *</Label>
-            <PatientSearchInput
-              value={form.patientId}
-              onChange={(id) => set("patientId", id)}
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label>Patient *</Label>
+              <PatientSearchInput
+                value={form.patientId}
+                onChange={(id) => set("patientId", id)}
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="mp-amount">Amount (₹) *</Label>
-            <Input
-              id="mp-amount"
-              type="number"
-              min={1}
-              step={0.01}
-              value={form.amount || ""}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
-                  setError("Amount cannot exceed 10 digits.");
-                  return;
-                }
-                set("amount", parseFloat(raw) || 0);
-              }}
-              placeholder="e.g. 500"
-              required
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mp-amount">Amount (₹) *</Label>
+              <Input
+                id="mp-amount"
+                type="number"
+                min={1}
+                step={0.01}
+                value={form.amount || ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                    setError("Amount cannot exceed 10 digits.");
+                    return;
+                  }
+                  set("amount", parseFloat(raw) || 0);
+                }}
+                placeholder="e.g. 500"
+                required
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <Label>Payment Method *</Label>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {(["CASH", "CHEQUE", "UPI", "CARD"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => set("paymentMethod", m)}
-                  className={cn(
-                    "rounded-md border py-2 text-sm font-medium transition-colors",
-                    form.paymentMethod === m
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "hover:bg-muted",
-                  )}
-                >
-                  {METHOD_LABELS[m]}
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              <Label>Payment Method *</Label>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {(["CASH", "CHEQUE", "UPI", "CARD"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => set("paymentMethod", m)}
+                    className={cn(
+                      "rounded-md border py-2 text-sm font-medium transition-colors",
+                      form.paymentMethod === m
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "hover:bg-muted",
+                    )}
+                  >
+                    {METHOD_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="mp-desc">Description *</Label>
+              <textarea
+                id="mp-desc"
+                rows={2}
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="e.g. OPD consultation fee, Lab test charges…"
+                maxLength={500}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                required
+              />
+              <CharCounter value={form.description} max={500} />
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="mp-desc">Description *</Label>
-            <textarea
-              id="mp-desc"
-              rows={2}
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              placeholder="e.g. OPD consultation fee, Lab test charges…"
-              maxLength={500}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              required
-            />
-            <CharCounter value={form.description} max={500} />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button
               type="button"
               variant="outline"
@@ -517,8 +519,8 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
 
   return (
     <DialogOverlay className="items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-lg bg-background shadow-xl">
-        <div className="flex items-center justify-between p-5 border-b">
+      <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <div>
             <h2 className="text-base font-semibold">Pay via Razorpay</h2>
             <p className="text-xs text-muted-foreground mt-0.5">UPI or Card</p>
@@ -531,84 +533,86 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleLaunch} className="p-5 space-y-4">
-          {error && (
-            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </p>
-          )}
+        <form onSubmit={handleLaunch} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
 
-          <div className="space-y-1.5">
-            <Label>Patient *</Label>
-            <PatientSearchInput
-              value={form.patientId}
-              onChange={(id) => set("patientId", id)}
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label>Patient *</Label>
+              <PatientSearchInput
+                value={form.patientId}
+                onChange={(id) => set("patientId", id)}
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="rp-amount">Amount (₹) *</Label>
-            <Input
-              id="rp-amount"
-              type="number"
-              min={1}
-              step={0.01}
-              value={form.amount || ""}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
-                  setError("Amount cannot exceed 10 digits.");
-                  return;
-                }
-                set("amount", parseFloat(raw) || 0);
-              }}
-              placeholder="e.g. 1000"
-              required
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="rp-amount">Amount (₹) *</Label>
+              <Input
+                id="rp-amount"
+                type="number"
+                min={1}
+                step={0.01}
+                value={form.amount || ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (digitCount(raw) > MAX_AMOUNT_DIGITS) {
+                    setError("Amount cannot exceed 10 digits.");
+                    return;
+                  }
+                  set("amount", parseFloat(raw) || 0);
+                }}
+                placeholder="e.g. 1000"
+                required
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <Label>Payment Method *</Label>
-            <div className="flex gap-3">
-              {(["UPI", "CARD"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => set("paymentMethod", m)}
-                  className={cn(
-                    "flex-1 rounded-md border py-2 text-sm font-medium transition-colors",
-                    form.paymentMethod === m
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "hover:bg-muted",
-                  )}
-                >
-                  {METHOD_LABELS[m]}
-                </button>
-              ))}
+            <div className="space-y-1.5">
+              <Label>Payment Method *</Label>
+              <div className="flex gap-3">
+                {(["UPI", "CARD"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => set("paymentMethod", m)}
+                    className={cn(
+                      "flex-1 rounded-md border py-2 text-sm font-medium transition-colors",
+                      form.paymentMethod === m
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "hover:bg-muted",
+                    )}
+                  >
+                    {METHOD_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="rp-desc">Description *</Label>
+              <textarea
+                id="rp-desc"
+                rows={2}
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="e.g. IPD admission fee, Surgery charges…"
+                maxLength={500}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                required
+              />
+              <CharCounter value={form.description} max={500} />
+            </div>
+
+            <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+              You will be redirected to Razorpay's secure checkout. The receipt is
+              generated automatically after payment confirmation.
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="rp-desc">Description *</Label>
-            <textarea
-              id="rp-desc"
-              rows={2}
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              placeholder="e.g. IPD admission fee, Surgery charges…"
-              maxLength={500}
-              className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-              required
-            />
-            <CharCounter value={form.description} max={500} />
-          </div>
-
-          <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-            You will be redirected to Razorpay's secure checkout. The receipt is
-            generated automatically after payment confirmation.
-          </div>
-
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
             <Button
               type="button"
               variant="outline"

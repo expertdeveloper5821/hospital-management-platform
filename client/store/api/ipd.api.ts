@@ -120,7 +120,7 @@ export const ipdApi = baseApi.injectEndpoints({
         };
       },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
-      invalidatesTags: ['IPD'],
+      invalidatesTags: ['IPD', 'OPD'], // OPD too: vitals are shared per patient
     }),
 
     dischargePatient: build.mutation<AdmissionResponse, string>({

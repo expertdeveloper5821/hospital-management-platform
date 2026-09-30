@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { ipdRepository } from './ipd.repository';
 import { opdRepository } from '../opd/opd.repository';
+import { findLatestPatientVitals, syncPatientVitals } from '../opd/patient-vitals.sync';
 import { IIPDAdmission } from './ipd.model';
 import { IWard }          from './ward.model';
 import { IBed }           from './bed.model';
@@ -393,8 +394,13 @@ export class IPDService {
     // race-condition arbiter under concurrent or offline-replayed creates —
     // steps [1b]/[5] above are a fast, friendly pre-check only; a
     // duplicate-key hit here is mapped to a 409 by the repository.
+    // Vitals are shared per patient — a new admission starts from the latest
+    // readings recorded in OPD or IPD.
+    const latestVitals = await findLatestPatientVitals(tenantId, input.patientId);
+
     const admission = await ipdRepository.createAdmissionWithBedOccupancy(
       {
+        ...(latestVitals ? { vitals: latestVitals } : {}),
         admissionId:       uuidv4(),
         patientId:         input.patientId,
         wardId:            input.wardId,
@@ -592,6 +598,12 @@ export class IPDService {
 
     const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
     if (!updated) throw new NotFoundError('Admission not found');
+
+    // Vitals are shared per patient — write the merged readings through to
+    // every OPD visit and IPD admission of this patient.
+    if (fields.vitals) {
+      await syncPatientVitals(tenantId, admission.patientId, fields.vitals);
+    }
 
     try {
       await auditService.log({

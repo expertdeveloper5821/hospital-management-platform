@@ -50,6 +50,7 @@ const vitalsSchema = z.object({
 
 const updateVisitSchema = z.object({
   doctorIds:      z.array(z.string().min(1)).optional(),
+  nurseIds:       z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   // No `.min(1)` here (unlike completeVisitSchema below, where a diagnosis is
   // mandatory to finalize a visit) — an OPEN/IN_PROGRESS visit's diagnosis
@@ -223,6 +224,12 @@ export async function getParchaPdf(req: Request, res: Response, next: NextFuncti
 // per-field check is needed to keep Receptionist/Manager/etc. off vitals.
 const NURSE_EDITABLE_FIELDS = new Set(['notes', 'vitals']);
 
+// A Receptionist's Edit access is the doctor/nurse assignment only (department
+// follows the doctors — see OPDService.updateVisit). Reassigning nurses on an
+// existing visit is also open to DOCTOR/HOSPITAL_ADMIN (full edit access);
+// a Nurse is still kept off it by NURSE_EDITABLE_FIELDS.
+const RECEPTIONIST_EDITABLE_FIELDS = new Set(['doctorIds', 'nurseIds']);
+
 export async function updateVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const body = updateVisitSchema.safeParse(req.body);
@@ -232,6 +239,11 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
       const disallowed = Object.keys(body.data).filter((key) => !NURSE_EDITABLE_FIELDS.has(key));
       if (disallowed.length > 0) {
         throw new ForbiddenError('Nurses may only update the notes field for an OPD visit.');
+      }
+    } else if (req.user!.role === UserRole.RECEPTIONIST) {
+      const disallowed = Object.keys(body.data).filter((key) => !RECEPTIONIST_EDITABLE_FIELDS.has(key));
+      if (disallowed.length > 0) {
+        throw new ForbiddenError('Receptionists may only update the doctor, nurse and department assignment for an OPD visit.');
       }
     }
 

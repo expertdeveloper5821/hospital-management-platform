@@ -181,6 +181,22 @@ export class PaymentRepository {
     );
   }
 
+  // Atomic status transition — only applies when the record is still in
+  // `fromStatus`, so a concurrent settle can't overwrite a newer status.
+  async updateFromStatus(
+    paymentId:  string,
+    tenantId:   string,
+    fromStatus: PaymentStatus,
+    fields:     Partial<IPayment>,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    return PaymentModel.findOneAndUpdate(
+      { paymentId, tenantId, status: fromStatus },
+      { $set: fields },
+      { new: true },
+    );
+  }
+
   async sumByMethod(
     tenantId: string,
     query:    PaymentSummaryQuery,
