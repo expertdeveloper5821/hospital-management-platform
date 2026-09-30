@@ -983,7 +983,7 @@ describe('GET /api/ipd/admissions — doctor patient-assignment scoping (OPD + I
     });
   }
 
-  test('200 — a patient assigned to the doctor only through an OPD visit has their IPD admission listed', async () => {
+  test('200 — active IPD list strictly filters by assignedDoctorIds; patient linked only via OPD is not listed', async () => {
     const tenant = await seedTenant();
     const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
     const ADM_ID = 'e1000000-0000-0000-0000-000000000001';
@@ -1007,7 +1007,38 @@ describe('GET /api/ipd/admissions — doctor patient-assignment scoping (OPD + I
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).toContain(ADM_ID);
+    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).not.toContain(ADM_ID);
+  });
+
+  test('200 — previous doctor transferred away from active admission does not see patient in active list', async () => {
+    const tenant      = await seedTenant();
+    const doctor      = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const otherDoctor = await UserModel.create({
+      name: 'New Doctor', tenantId: toId(tenant), email: 'new-doctor-transfer@inttest.com',
+      passwordHash: '$2a$12$hashedpwd', role: UserRole.DOCTOR, isActive: true, isFirstLogin: false,
+    });
+    const ADM_ID = 'e1000000-0000-0000-0000-000000000099';
+
+    // Patient originally had OPD with doctor, but IPD admission is assigned to otherDoctor
+    await OPDVisitModel.create({
+      visitId:        'OPD-TRANSFER01',
+      tenantId:       toId(tenant),
+      patientId:      'PAT-TRANSFER',
+      doctorIds:      [toId(doctor)],
+      departmentId:   null,
+      visitDate:      new Date(),
+      queueNumber:    1,
+      status:         'COMPLETED',
+    });
+    await seedAdmission({ admissionId: ADM_ID, patientId: 'PAT-TRANSFER', assignedDoctorIds: [toId(otherDoctor)], tenantId: toId(tenant) });
+
+    const token = makeToken(toId(doctor), toId(tenant), UserRole.DOCTOR);
+    const res   = await request(app)
+      .get('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data.map((a: { admissionId: string }) => a.admissionId)).not.toContain(ADM_ID);
   });
 
   test('200 — a patient assigned to the doctor through IPD assignedDoctorIds remains listed', async () => {

@@ -120,10 +120,14 @@ export async function listAdmissions(
     }
 
     const tenantId = req.user!.tenantId as string;
+    const isDoctor = req.user!.role === UserRole.DOCTOR;
+    const doctorId = isDoctor ? req.user!.userId : undefined;
 
     const nurseWardIds     = await ipdService.resolveNurseWardIds(tenantId, req.user!.userId, req.user!.role);
-    const doctorPatientIds = await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
-    const result = await ipdService.listAdmissions(tenantId, parsed.data, nurseWardIds, doctorPatientIds);
+    const doctorPatientIds = isDoctor && parsed.data.status === 'ADMITTED'
+      ? undefined
+      : await ipdService.resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const result = await ipdService.listAdmissions(tenantId, parsed.data, nurseWardIds, doctorPatientIds, doctorId);
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) {

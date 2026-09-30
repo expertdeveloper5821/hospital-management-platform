@@ -969,12 +969,21 @@ export class IPDService {
     query:             ListAdmissionsQuery,
     nurseWardIds?:     string[],
     doctorPatientIds?: string[],
+    doctorId?:         string,
   ): Promise<PaginatedResult<AdmissionResponse>> {
     const searchPatientIds = query.search
       ? await resolvePatientIdsBySearch(tenantId, query.search)
       : undefined;
-    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, doctorPatientIds);
-    const result = await ipdRepository.findActiveAdmissions(tenantId, query, scopedPatientIds, nurseWardIds);
+    const isDoctorActiveFilter = Boolean(doctorId && query.status === 'ADMITTED');
+    const effectiveDoctorPatientIds = isDoctorActiveFilter ? undefined : doctorPatientIds;
+    const scopedPatientIds = combinePatientIdFilters(searchPatientIds, effectiveDoctorPatientIds);
+    const result = await ipdRepository.findActiveAdmissions(
+      tenantId,
+      query,
+      scopedPatientIds,
+      nurseWardIds,
+      isDoctorActiveFilter ? doctorId : undefined,
+    );
     const admissions = result.data;
 
     const patientIds = admissions.map(a => a.patientId);
