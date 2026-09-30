@@ -1,18 +1,21 @@
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockUseListAdmissionsQuery = jest.fn();
+const mockDischarge = jest.fn();
+let mockWards: unknown[] = [];
 
 jest.mock('@/store/api/ipd.api', () => ({
-  useListWardsQuery: () => ({ data: [], isLoading: false }),
+  useListWardsQuery: () => ({ data: mockWards, isLoading: false }),
   useListBedsQuery: () => ({ data: [] }),
   useListAdmissionsQuery: (...args: unknown[]) => mockUseListAdmissionsQuery(...args),
   useCreateAdmissionMutation: () => [jest.fn(), { isLoading: false }],
   useUpdateAdmissionMutation: () => [jest.fn(), { isLoading: false }],
   useAddProgressNoteMutation: () => [jest.fn(), { isLoading: false }],
-  useDischargePatientMutation: () => [jest.fn(), { isLoading: false }],
+  useUpdateAdmissionPrescriptionMutation: () => [jest.fn(), { isLoading: false }],
+  useDischargePatientMutation: () => [mockDischarge, { isLoading: false }],
   useDownloadDischargeSummaryMutation: () => [jest.fn(), { isLoading: false }],
 }));
 
@@ -52,10 +55,11 @@ jest.mock('@/components/patients/patient-form-modal', () => ({
 }));
 
 let mockRole = 'RECEPTIONIST';
+let mockUserId: string | undefined;
 
 jest.mock('@/store/hooks', () => ({
   useAppSelector: (selector: (s: unknown) => unknown) =>
-    selector({ auth: { profile: { role: mockRole } } }),
+    selector({ auth: { profile: { role: mockRole, userId: mockUserId } } }),
   useAppDispatch: () => jest.fn(),
 }));
 
@@ -65,6 +69,9 @@ const EMPTY_ADMISSIONS = { data: { data: [], total: 0, totalPages: 1 }, isLoadin
 
 beforeEach(() => {
   mockUseListAdmissionsQuery.mockReturnValue(EMPTY_ADMISSIONS);
+  mockWards = [];
+  mockUserId = undefined;
+  mockDischarge.mockReset();
 });
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -166,5 +173,122 @@ describe('IPDPage — Progress note staff name display', () => {
     expect(screen.getByText('Nurse Priya Singh')).toBeInTheDocument();
     // Must not fall back to the old doctor-only placeholder for a nurse's note.
     expect(screen.queryByText(/^Dr\./)).not.toBeInTheDocument();
+  });
+});
+
+describe('IPDPage — Prescription & Discharge permissions', () => {
+  const admission = {
+    admissionId:       'adm-rx-1',
+    patientId:         'PAT-00000002',
+    fullName:          'Rx Patient',
+    wardId:            'ward-1',
+    wardName:          'General Ward',
+    bedId:             'bed-1',
+    bedNumber:         'G-01',
+    assignedDoctorIds: ['doc-assigned'],
+    departmentId:      null,
+    status:            'ADMITTED',
+    admissionDate:     '2026-01-01T00:00:00.000Z',
+    dischargeDate:     null,
+    progressNotes:     [],
+    vitals:            { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null },
+    prescription:          'Tab. Paracetamol 500mg BD',
+    dischargeSummaryNotes: null,
+  };
+
+  function renderWith(role: string, userId?: string) {
+    mockRole = role;
+    mockUserId = userId;
+    mockUseListAdmissionsQuery.mockReturnValue({
+      data: { data: [admission], total: 1, totalPages: 1 },
+      isLoading: false, isFetching: false, refetch: jest.fn(),
+    });
+    render(<IPDPage />);
+  }
+
+  const dischargeButtons = () => screen.queryAllByRole('button', { name: /^discharge$/i });
+
+  test('HOSPITAL_ADMIN can discharge', () => {
+    renderWith('HOSPITAL_ADMIN', 'admin-1');
+    expect(dischargeButtons().length).toBeGreaterThan(0);
+  });
+
+  test('assigned Doctor can discharge', () => {
+    renderWith('DOCTOR', 'doc-assigned');
+    expect(dischargeButtons().length).toBeGreaterThan(0);
+  });
+
+  test('unassigned Doctor cannot discharge', () => {
+    renderWith('DOCTOR', 'doc-other');
+    expect(dischargeButtons()).toHaveLength(0);
+  });
+
+  test('Nurse on the admission ward can discharge', () => {
+    mockWards = [{ wardId: 'ward-1', name: 'General Ward', floor: null, assignedNurseIds: ['nurse-1'], tenantId: 't', createdAt: '' }];
+    renderWith('NURSE', 'nurse-1');
+    expect(dischargeButtons().length).toBeGreaterThan(0);
+  });
+
+  test('Nurse not on the admission ward cannot discharge', () => {
+    mockWards = [{ wardId: 'ward-1', name: 'General Ward', floor: null, assignedNurseIds: ['nurse-1'], tenantId: 't', createdAt: '' }];
+    renderWith('NURSE', 'nurse-2');
+    expect(dischargeButtons()).toHaveLength(0);
+  });
+
+  test('RECEPTIONIST cannot discharge', () => {
+    renderWith('RECEPTIONIST', 'rec-1');
+    expect(dischargeButtons()).toHaveLength(0);
+  });
+
+  test('view panel shows the prescription; the Edit form offers it to an assigned Doctor', () => {
+    renderWith('DOCTOR', 'doc-assigned');
+    fireEvent.click(screen.getAllByRole('button', { name: /^view$/i })[0]);
+    expect(screen.getByText('Tab. Paracetamol 500mg BD')).toBeInTheDocument();
+    // No separate prescription Add/Edit button — only the admission Edit.
+    expect(screen.queryByRole('button', { name: /^add$/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^edit$/i })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(screen.getByLabelText('Prescription')).toHaveValue('Tab. Paracetamol 500mg BD');
+  });
+
+  test('Edit form hides Prescription from RECEPTIONIST (read-only in view)', () => {
+    renderWith('RECEPTIONIST', 'rec-1');
+    fireEvent.click(screen.getAllByRole('button', { name: /^view$/i })[0]);
+    expect(screen.getByText('Tab. Paracetamol 500mg BD')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(screen.queryByLabelText('Prescription')).not.toBeInTheDocument();
+  });
+
+  test('view panel does not show a separate Discharge Summary section', () => {
+    mockUseListAdmissionsQuery.mockReturnValue({
+      data: { data: [{ ...admission, status: 'DISCHARGED', dischargeDate: '2026-01-05T00:00:00.000Z', dischargeSummaryNotes: 'Stable at discharge.' }], total: 1, totalPages: 1 },
+      isLoading: false, isFetching: false, refetch: jest.fn(),
+    });
+    mockRole = 'HOSPITAL_ADMIN';
+    render(<IPDPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: /^view$/i })[0]);
+    expect(screen.queryByText('Stable at discharge.')).not.toBeInTheDocument();
+  });
+
+  test('Confirm Discharge opens the notes step; discharge requires notes and sends them', async () => {
+    mockDischarge.mockResolvedValue({ data: { ...admission, status: 'DISCHARGED', dischargeDate: '2026-01-05T00:00:00.000Z', dischargeSummaryNotes: 'Stable.' } });
+    renderWith('HOSPITAL_ADMIN', 'admin-1');
+
+    fireEvent.click(dischargeButtons()[0]);
+    fireEvent.click(screen.getByRole('button', { name: /confirm discharge/i }));
+    expect(mockDischarge).not.toHaveBeenCalled();
+    expect(screen.getByText('Discharge Summary Notes')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /submit & discharge/i }));
+    expect(screen.getByText(/discharge summary notes are required/i)).toBeInTheDocument();
+    expect(mockDischarge).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/notes/i), { target: { value: '  Stable.  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /submit & discharge/i }));
+
+    await waitFor(() => expect(mockDischarge).toHaveBeenCalledWith({ admissionId: 'adm-rx-1', dischargeSummaryNotes: 'Stable.' }));
+    expect(await screen.findByText('Patient Discharged')).toBeInTheDocument();
   });
 });

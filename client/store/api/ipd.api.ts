@@ -123,8 +123,25 @@ export const ipdApi = baseApi.injectEndpoints({
       invalidatesTags: ['IPD', 'OPD'], // OPD too: vitals are shared per patient
     }),
 
-    dischargePatient: build.mutation<AdmissionResponse, string>({
-      query: (admissionId) => {
+    // Hospital Admin, the admission's assigned Doctor(s), or a Nurse on its
+    // ward only — the backend refuses anyone else with 403.
+    updateAdmissionPrescription: build.mutation<AdmissionResponse, { admissionId: string; prescription: string }>({
+      query: ({ admissionId, prescription }) => {
+        if (!admissionId) throw new Error('admissionId is required');
+        return {
+          url:    `/api/ipd/admissions/${admissionId}/prescription`,
+          method: 'PATCH',
+          body:   { prescription },
+        };
+      },
+      transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
+    // Final discharge — dischargeSummaryNotes is required and saved on the
+    // admission (and printed on the Discharge Summary PDF).
+    dischargePatient: build.mutation<AdmissionResponse, { admissionId: string; dischargeSummaryNotes: string }>({
+      query: ({ admissionId, dischargeSummaryNotes }) => {
         // Defensive guard: an empty admissionId would produce the URL
         // /api/ipd/admissions//discharge (double-slash) which hits the 404 handler.
         if (!admissionId) {
@@ -133,6 +150,7 @@ export const ipdApi = baseApi.injectEndpoints({
         return {
           url:    `/api/ipd/admissions/${admissionId}/discharge`,
           method: 'PATCH',
+          body:   { dischargeSummaryNotes },
         };
       },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
@@ -235,6 +253,7 @@ export const {
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
   useAddProgressNoteMutation,
+  useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,
   useDownloadDischargeSummaryMutation,
   useGetIPDParchaPdfMutation,

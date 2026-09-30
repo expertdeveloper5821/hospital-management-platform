@@ -13,7 +13,7 @@ import { PatientModel }      from '../../../src/modules/patient/patient.model';
 import { userRepository }    from '../../../src/modules/user/user.repository';
 import { IPDService }        from '../../../src/modules/ipd/ipd.service';
 import { AdmissionStatus }   from '../../../src/modules/ipd/ipd.types';
-import { AppError, NotFoundError } from '../../../src/shared/middleware/error-handler';
+import { AppError, ForbiddenError, NotFoundError } from '../../../src/shared/middleware/error-handler';
 import { UserRole }          from '../../../src/shared/types/common.types';
 
 const mockIpdRepo     = ipdRepository     as jest.Mocked<typeof ipdRepository>;
@@ -291,6 +291,9 @@ describe('IPDService — example-based', () => {
 
   // ── dischargePatient ──────────────────────────────────────────────────────────
   describe('dischargePatient', () => {
+    const DISCHARGE_INPUT = { dischargeSummaryNotes: 'Stable, discharged on oral meds.' };
+    const DOCTOR_ACTOR    = { userId: DOCTOR_ID, role: UserRole.DOCTOR };
+
     test('sets status to DISCHARGED and releases bed', async () => {
       const dischargedAdmission = {
         ...BASE_ADMISSION,
@@ -301,11 +304,60 @@ describe('IPDService — example-based', () => {
       mockIpdRepo.updateStatus.mockResolvedValue(dischargedAdmission as never);
       mockIpdRepo.updateBedOccupancy.mockResolvedValue({ ...BASE_BED, isOccupied: false } as never);
 
-      const result = await service.dischargePatient('adm-uuid-001', TENANT_ID, DOCTOR_ID);
+      const result = await service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, DOCTOR_ACTOR);
 
       expect(result.status).toBe(AdmissionStatus.DISCHARGED);
       expect(result.dischargeDate).not.toBeNull();
       expect(mockIpdRepo.updateBedOccupancy).toHaveBeenCalledWith(TENANT_ID, 'bed-001', false, null);
+      expect(mockIpdRepo.updateStatus).toHaveBeenCalledWith('adm-uuid-001', TENANT_ID, expect.objectContaining({
+        status:                AdmissionStatus.DISCHARGED,
+        dischargeSummaryNotes: DISCHARGE_INPUT.dischargeSummaryNotes,
+        dischargedBy:          DOCTOR_ID,
+      }));
+    });
+
+    test('allows HOSPITAL_ADMIN to discharge any admission', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+      mockIpdRepo.updateStatus.mockResolvedValue({ ...BASE_ADMISSION, status: AdmissionStatus.DISCHARGED, dischargeDate: new Date() } as never);
+
+      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'admin-1', role: UserRole.HOSPITAL_ADMIN }))
+        .resolves.toMatchObject({ status: AdmissionStatus.DISCHARGED });
+    });
+
+    test('allows a Nurse assigned to the admission ward', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+      mockIpdRepo.findWardById.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['nurse-1'] } as never);
+      mockIpdRepo.updateStatus.mockResolvedValue({ ...BASE_ADMISSION, status: AdmissionStatus.DISCHARGED, dischargeDate: new Date() } as never);
+
+      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'nurse-1', role: UserRole.NURSE }))
+        .resolves.toMatchObject({ status: AdmissionStatus.DISCHARGED });
+    });
+
+    test('rejects a Doctor not assigned to the admission', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+
+      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'other-doctor', role: UserRole.DOCTOR }))
+        .rejects.toThrow(ForbiddenError);
+      expect(mockIpdRepo.updateStatus).not.toHaveBeenCalled();
+    });
+
+    test('rejects a Nurse not on the admission ward roster', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+      mockIpdRepo.findWardById.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['someone-else'] } as never);
+
+      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'nurse-1', role: UserRole.NURSE }))
+        .rejects.toThrow(ForbiddenError);
+      expect(mockIpdRepo.updateStatus).not.toHaveBeenCalled();
+    });
+
+    test('rejects any other role (e.g. ADMIN, RECEPTIONIST)', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+
+      for (const role of [UserRole.ADMIN, UserRole.RECEPTIONIST]) {
+        await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: DOCTOR_ID, role }))
+          .rejects.toThrow(ForbiddenError);
+      }
+      expect(mockIpdRepo.updateStatus).not.toHaveBeenCalled();
     });
 
     test('throws 400 when patient is already discharged', async () => {
@@ -314,7 +366,7 @@ describe('IPDService — example-based', () => {
         status: AdmissionStatus.DISCHARGED,
       } as never);
 
-      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DOCTOR_ID)).rejects.toThrow(
+      await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, DOCTOR_ACTOR)).rejects.toThrow(
         expect.objectContaining({ statusCode: 400, message: expect.stringContaining('already discharged') }),
       );
       expect(mockIpdRepo.updateStatus).not.toHaveBeenCalled();
@@ -324,9 +376,50 @@ describe('IPDService — example-based', () => {
     test('throws 404 when admission not found', async () => {
       mockIpdRepo.findById.mockResolvedValue(null);
 
-      await expect(service.dischargePatient('missing', TENANT_ID, DOCTOR_ID)).rejects.toThrow(
+      await expect(service.dischargePatient('missing', TENANT_ID, DISCHARGE_INPUT, DOCTOR_ACTOR)).rejects.toThrow(
         NotFoundError,
       );
+    });
+  });
+
+  // ── updatePrescription ────────────────────────────────────────────────────────
+  describe('updatePrescription', () => {
+    test('assigned Doctor saves the prescription and the audit entry is redacted', async () => {
+      const { auditService } = jest.requireMock('../../../src/shared/services/audit.service');
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+      mockIpdRepo.updateAdmissionFields.mockResolvedValue({ ...BASE_ADMISSION, prescription: 'Tab. Paracetamol 500mg BD' } as never);
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+
+      const result = await service.updatePrescription('adm-uuid-001', TENANT_ID,
+        { prescription: 'Tab. Paracetamol 500mg BD' }, { userId: DOCTOR_ID, role: UserRole.DOCTOR });
+
+      expect(result.prescription).toBe('Tab. Paracetamol 500mg BD');
+      expect(mockIpdRepo.updateAdmissionFields).toHaveBeenCalledWith('adm-uuid-001', TENANT_ID, { prescription: 'Tab. Paracetamol 500mg BD' });
+      expect(JSON.stringify(auditService.log.mock.calls)).not.toContain('Paracetamol');
+    });
+
+    test('empty string clears the prescription to null', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+      mockIpdRepo.updateAdmissionFields.mockResolvedValue({ ...BASE_ADMISSION, prescription: null } as never);
+
+      await service.updatePrescription('adm-uuid-001', TENANT_ID, { prescription: '' }, { userId: 'admin-1', role: UserRole.HOSPITAL_ADMIN });
+
+      expect(mockIpdRepo.updateAdmissionFields).toHaveBeenCalledWith('adm-uuid-001', TENANT_ID, { prescription: null });
+    });
+
+    test('rejects an unassigned Doctor', async () => {
+      mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
+
+      await expect(service.updatePrescription('adm-uuid-001', TENANT_ID, { prescription: 'x' }, { userId: 'other-doctor', role: UserRole.DOCTOR }))
+        .rejects.toThrow(ForbiddenError);
+      expect(mockIpdRepo.updateAdmissionFields).not.toHaveBeenCalled();
+    });
+
+    test('rejects edits on a discharged admission', async () => {
+      mockIpdRepo.findById.mockResolvedValue({ ...BASE_ADMISSION, status: AdmissionStatus.DISCHARGED } as never);
+
+      await expect(service.updatePrescription('adm-uuid-001', TENANT_ID, { prescription: 'x' }, { userId: DOCTOR_ID, role: UserRole.DOCTOR }))
+        .rejects.toThrow(expect.objectContaining({ statusCode: 400 }));
     });
   });
 

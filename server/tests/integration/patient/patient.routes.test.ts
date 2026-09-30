@@ -139,6 +139,7 @@ async function seedPatient(tenantId: string, overrides: Partial<{
 const VALID_PATIENT_BODY = {
   fullName:     'Priya Sharma',
   dateOfBirth:  '1992-03-20',
+  age:          34,
   gender:       'FEMALE',
   mobileNumber: '9123456789',
   address:      '5 Park Street, Mumbai',
@@ -299,6 +300,42 @@ describe('POST /api/patients', () => {
       .send({ fullName: 'Only Name' }); // missing required fields
 
     expect(res.status).toBe(400);
+  });
+
+  test('400 — missing age', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+    const { age: _age, ...body } = VALID_PATIENT_BODY;
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send(body);
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — dateOfBirth and pincode are optional; age is stored and returned', async () => {
+    const tenant = await seedTenant();
+    const rc     = await seedUser(tenant._id.toString(), 'rc@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+    const { dateOfBirth: _dob, ...body } = VALID_PATIENT_BODY;
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...body, age: 42 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.age).toBe(42);
+    expect(res.body.data.dateOfBirth).toBeNull();
+    expect(res.body.data.pincode).toBeNull();
+
+    const get = await request(app)
+      .get(`/api/patients/${res.body.data.patientId}`)
+      .set(bearer(token));
+    expect(get.body.data.age).toBe(42);
   });
 
   test('400 — invalid gender value', async () => {

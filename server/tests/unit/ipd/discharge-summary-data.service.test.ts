@@ -367,6 +367,15 @@ describe('IPDService — getDischargeSummaryData', () => {
       expect(result.admission.dischargedByName).toBe('Dr. Asha Rao');
     });
 
+    test('prefers the stored dischargedBy user (the finalizer) over the audit-log lookup', async () => {
+      mockIpdRepo.findById = jest.fn().mockResolvedValue({ ...BASE_ADMISSION, dischargedBy: NURSE_ID } as never);
+      mockAuditFind.mockReturnValue(makeAuditQuery([]));
+      mockUserRepo.findNamesByIds = jest.fn().mockResolvedValue(new Map([[NURSE_ID, 'Nurse Priya']]));
+
+      const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);
+      expect(result.admission.dischargedByName).toBe('Nurse Priya');
+    });
+
     test('resolves to null (not an error) when no matching audit entry exists', async () => {
       mockAuditFind.mockReturnValue(makeAuditQuery([]));
       const result = await service.getDischargeSummaryData(ADMISSION_ID, TENANT_ID, UserRole.HOSPITAL_ADMIN);

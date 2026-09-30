@@ -294,8 +294,22 @@ async function tryQueueOffline(
 // { url, method, body } object (fetchBaseQuery accepts either) — e.g.
 // patientApi's getPatientById: `query: (patientId) => \`/api/patients/${patientId}\``.
 // Both forms need to resolve to the same URL for cache matching.
+// A few (ipdApi's listAdmissions) pass their filters as a `params` object
+// instead of a pre-built query string — fetchBaseQuery appends those to the
+// real request, so they're appended here too (skipping undefined, as
+// fetchBaseQuery does); otherwise the offline cache read's filterFromUrl
+// would see no status/wardId/search and return every cached row.
 function resolveRequestUrl(args: string | FetchArgs): string {
-  return typeof args === 'string' ? args : args.url;
+  if (typeof args === 'string') return args;
+  if (!args.params) return args.url;
+
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(args.params as Record<string, unknown>)) {
+    if (value !== undefined) qs.set(key, String(value));
+  }
+  const query = qs.toString();
+  if (!query) return args.url;
+  return `${args.url}${args.url.includes('?') ? '&' : '?'}${query}`;
 }
 
 /**

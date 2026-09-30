@@ -17,6 +17,12 @@ jest.mock('@/store/api/dashboard.api', () => ({
   useGetDashboardStatsQuery: (...args: unknown[]) => mockGetDashboardStats(...args),
 }));
 
+jest.mock('@/store/api/attendance.api', () => ({
+  useGetMyAttendanceQuery: () => ({ data: { summary: {}, records: [] }, isLoading: false }),
+  useCheckInMutation:      () => [jest.fn(), { isLoading: false }],
+  useCheckOutMutation:     () => [jest.fn(), { isLoading: false }],
+}));
+
 jest.mock('@/store/api/user.api', () => ({
   useGetMyProfileQuery: () => ({ data: { name: 'Test User' } }),
 }));

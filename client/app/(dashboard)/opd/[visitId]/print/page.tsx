@@ -15,6 +15,16 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Slip validity: 5 calendar days after the patient's registration date.
+// setDate() rolls over month/year boundaries using each month's real length
+// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
+const SLIP_VALIDITY_DAYS = 5;
+function computeValidTill(registeredAt: string): string {
+  const d = new Date(registeredAt);
+  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+  return d.toISOString();
+}
+
 // Mirrors server/src/shared/services/pdf.service.ts calculateAge — kept in
 // sync manually since the client has no shared date-math utility yet.
 function calculateAge(dob: string): number {
@@ -282,16 +292,20 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
         <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
           <Field label="Patient Name" value={patient.fullName} />
           <Field label="Patient ID"   value={patient.patientId} mono />
-          <Field label="Age / Gender" value={`${calculateAge(patient.dateOfBirth)} years / ${toDisplay(patient.gender)}`} />
+          <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
           <Field label="Mobile"       value={patient.mobileNumber} />
           {patient.address && <Field label="Address" value={patient.address} span />}
           {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
 
-          <Field label="Visit ID"   value={visit.visitId} mono />
           <Field label="Visit Date" value={formatDate(visit.visitDate)} />
-          {departmentName && <Field label="Department" value={departmentName} />}
-          {doctorNames && <Field label="Doctor" value={doctorNames} />}
-          <Field label="Registered On" value={formatDate(visit.createdAt)} />
+          <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
+          {(doctorNames || departmentName) && (
+            <Field
+              label="Doctor / Department"
+              value={[doctorNames, departmentName].filter(Boolean).join(' — ')}
+              span
+            />
+          )}
         </div>
 
         <div className="mt-3 border-b border-gray-300" />

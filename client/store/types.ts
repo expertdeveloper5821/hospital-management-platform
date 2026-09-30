@@ -116,7 +116,8 @@ export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-'
 export interface PatientResponse {
   patientId:                 string;
   fullName:                  string;
-  dateOfBirth:               string;
+  dateOfBirth:               string | null;
+  age:                       number | null;
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
@@ -140,7 +141,8 @@ export interface PatientResponse {
  
 export interface CreatePatientRequest {
   fullName:                  string;
-  dateOfBirth:               string; // YYYY-MM-DD
+  dateOfBirth?:              string; // YYYY-MM-DD
+  age:                       number;
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
@@ -163,6 +165,7 @@ export interface CreatePatientRequest {
 export interface UpdatePatientRequest {
   fullName?:               string;
   dateOfBirth?:            string;
+  age?:                    number;
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;
@@ -450,6 +453,8 @@ export interface AdmissionResponse {
   dischargeDate:    string | null;
   progressNotes:    ProgressNote[];
   vitals:           IPDVitals;
+  prescription:          string | null;
+  dischargeSummaryNotes: string | null;
 }
  
 export interface WardOccupancySummary {

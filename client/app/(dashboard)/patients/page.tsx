@@ -53,6 +53,11 @@ function calcAge(dob: string) {
   return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
 }
 
+// Stored age wins; legacy patients registered before Age existed fall back to DOB.
+function patientAge(p: PatientResponse): number | null {
+  return p.age ?? (p.dateOfBirth ? calcAge(p.dateOfBirth) : null);
+}
+
 // Fixed size so every Blood Group pill (A+, A-, B+, B-, AB+, AB-, O+, O-)
 // renders at the same footprint — identical width, height, padding, font
 // size, and border radius, with text centered regardless of label length.
@@ -183,7 +188,8 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
         <div className="flex-1 overflow-y-auto">
           {tab === 'details' && (
             <div className="p-5 space-y-1">
-              {row('Date of Birth', `${formatDate(patient.dateOfBirth)} (${calcAge(patient.dateOfBirth)} years)`)}
+              {row('Age',           patientAge(patient) != null ? `${patientAge(patient)} years` : null)}
+              {row('Date of Birth', patient.dateOfBirth ? formatDate(patient.dateOfBirth) : null)}
               {row('Gender',        genderLabel(patient.gender))}
               {row('Mobile',        patient.mobileNumber)}
               {row('Blood Group',   patient.bloodGroup)}
@@ -465,6 +471,7 @@ export default function PatientsPage() {
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient ID</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Registration Date</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Age / Gender</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Mobile</th>
@@ -480,9 +487,10 @@ export default function PatientsPage() {
                       onClick={() => { setSelected(p); setEditing(false); }}
                     >
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.patientId}</td>
+                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(p.createdAt)}</td>
                       <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={p.fullName}>{p.fullName}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground">
-                        {calcAge(p.dateOfBirth)} years · {genderLabel(p.gender)}
+                        {patientAge(p) != null ? `${patientAge(p)} years · ` : ''}{genderLabel(p.gender)}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{p.mobileNumber}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">

@@ -21,7 +21,8 @@ export type BloodGroup = typeof BloodGroup[keyof typeof BloodGroup];
 
 export interface CreatePatientRequest {
   fullName:               string;
-  dateOfBirth:            string; // YYYY-MM-DD
+  dateOfBirth?:           string; // YYYY-MM-DD
+  age:                    number;
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
@@ -44,6 +45,7 @@ export interface CreatePatientRequest {
 export interface UpdatePatientRequest {
   fullName?:               string;
   dateOfBirth?:            string;
+  age?:                    number;
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;

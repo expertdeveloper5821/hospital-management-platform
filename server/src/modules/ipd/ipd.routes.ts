@@ -11,6 +11,7 @@ import {
   getAdmissionById,
   updateAdmission,
   addProgressNote,
+  updatePrescription,
   dischargePatient,
   getDischargeSummaryPdf,
   getParchaPdf,
@@ -118,17 +119,30 @@ router.post(
   addProgressNote,
 );
 
-// PATCH /api/ipd/admissions/:admissionId/discharge — Doctor/Nurse/Admin/Receptionist discharges patient
+// Prescription writers / dischargers — role gate only; IPDService further
+// restricts Doctor/Nurse to the admission's assigned Doctor(s) / ward Nurse(s).
+const ADMISSION_CLINICAL_MANAGERS = [
+  UserRole.HOSPITAL_ADMIN,
+  UserRole.DOCTOR,
+  UserRole.NURSE,
+];
+
+// PATCH /api/ipd/admissions/:admissionId/prescription — create/edit the IPD prescription
+router.patch(
+  '/admissions/:admissionId/prescription',
+  ...protect,
+  requireRole(...ADMISSION_CLINICAL_MANAGERS),
+  requireFirstPasswordChange,
+  idempotencyGuard('ipd.admission.prescription'),
+  updatePrescription,
+);
+
+// PATCH /api/ipd/admissions/:admissionId/discharge — Hospital Admin / assigned
+// Doctor / assigned Nurse discharges the patient with discharge summary notes
 router.patch(
   '/admissions/:admissionId/discharge',
   ...protect,
-  requireRole(
-    UserRole.DOCTOR,
-    UserRole.NURSE,
-    UserRole.HOSPITAL_ADMIN,
-    UserRole.ADMIN,
-    UserRole.RECEPTIONIST,
-  ),
+  requireRole(...ADMISSION_CLINICAL_MANAGERS),
   requireFirstPasswordChange,
   dischargePatient,
 );

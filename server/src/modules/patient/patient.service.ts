@@ -45,7 +45,8 @@ export class PatientService {
       patientId,
       tenantId,
       fullName:                  data.fullName,
-      dateOfBirth:               new Date(data.dateOfBirth).toISOString(),
+      dateOfBirth:               data.dateOfBirth ? new Date(data.dateOfBirth).toISOString() : null,
+      age:                       data.age,
       gender:                    data.gender,
       mobileNumber:              data.mobileNumber,
       address:                   data.address,
@@ -91,7 +92,7 @@ export class PatientService {
     const updateData:    Partial<IPatient>        = {};
 
     const fields = [
-      'fullName', 'gender', 'mobileNumber', 'address',
+      'fullName', 'age', 'gender', 'mobileNumber', 'address',
       'addressLine1', 'addressLine2', 'city', 'state', 'country', 'pincode',
       'aadhaarNumber', 'emergencyContactName', 'emergencyContactMobile', 'bloodGroup',
       'departmentId',

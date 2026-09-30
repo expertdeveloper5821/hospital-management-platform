@@ -8,6 +8,8 @@ import {
   CreateAdmissionSchema,
   AddProgressNoteSchema,
   ListAdmissionsQuerySchema,
+  UpdatePrescriptionSchema,
+  DischargePatientSchema,
 } from './ipd.types';
 import { IWard } from './ward.model';
 import { IBed  } from './bed.model';
@@ -234,6 +236,42 @@ export async function addProgressNote(
   }
 }
 
+// Prescription write access is per-admission (HOSPITAL_ADMIN, assigned
+// Doctor(s), or a Nurse on the admission's ward) — enforced in
+// IPDService.updatePrescription on top of the route's requireRole.
+export async function updatePrescription(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const parsed = UpdatePrescriptionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status:  'error',
+        message: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const tenantId = req.user!.tenantId as string;
+    const result   = await ipdService.updatePrescription(
+      idResult.data,
+      tenantId,
+      parsed.data,
+      { userId: req.user!.userId, role: req.user!.role },
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
 export async function dischargePatient(
   req: Request,
   res: Response,
@@ -246,9 +284,23 @@ export async function dischargePatient(
       return;
     }
 
+    const parsed = DischargePatientSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        status:  'error',
+        message: 'Validation failed',
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
     const tenantId = req.user!.tenantId as string;
-    const userId   = req.user!.userId;
-    const result   = await ipdService.dischargePatient(idResult.data, tenantId, userId);
+    const result   = await ipdService.dischargePatient(
+      idResult.data,
+      tenantId,
+      parsed.data,
+      { userId: req.user!.userId, role: req.user!.role },
+    );
 
     res.status(200).json({ status: 'success', data: result });
   } catch (err) {

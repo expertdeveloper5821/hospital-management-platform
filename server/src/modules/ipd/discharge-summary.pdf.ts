@@ -266,6 +266,20 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
       field('Discharge Date:', formatDateTime(data.admission.dischargeDate));
       field('Discharged By:', data.admission.dischargedByName);
 
+      // ── Discharge Summary Notes ──────────────────────────────────────────────
+      // Plain text entered at final discharge, with who finalized it and the
+      // actual final-submission time (admission.dischargeDate — not the PDF
+      // generation time). Omitted entirely for admissions discharged before
+      // these notes were captured.
+      if (data.admission.dischargeSummaryNotes) {
+        sectionHeading('Discharge Summary Notes');
+        doc.font('Helvetica').fontSize(9.5).fillColor('#1a1a1a')
+          .text(data.admission.dischargeSummaryNotes, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
+        doc.moveDown(0.5);
+        field('Discharged By:', data.admission.dischargedByName);
+        field('Discharged On:', formatDateTime(data.admission.dischargeDate));
+      }
+
       // ── Progress Notes ───────────────────────────────────────────────────────
       if (data.admission.progressNotes.length > 0) {
         sectionHeading('Progress Notes');

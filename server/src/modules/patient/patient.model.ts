@@ -10,7 +10,10 @@ export interface IPatient extends Document {
   fullName:               string;
   // Stored (and returned) as an ISO-8601 string — the field is encrypted at
   // rest (see below) and ciphertext cannot live in a Date-typed path.
-  dateOfBirth:            string;
+  dateOfBirth:            string | null;
+  // Age in years as entered at registration. Null only on legacy rows created
+  // before the field existed.
+  age:                    number | null;
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
@@ -50,7 +53,7 @@ const PatientSchema = new Schema<IPatient>(
     // left untouched.
     dateOfBirth: {
       type:     String,
-      required: true,
+      default:  null,
       set: (v: unknown): unknown => {
         if (v instanceof Date) return Number.isNaN(v.getTime()) ? v : v.toISOString();
         if (typeof v === 'string' && v.length > 0 && !isEncryptedField(v)) {
@@ -60,6 +63,7 @@ const PatientSchema = new Schema<IPatient>(
         return v;
       },
     },
+    age:                    { type: Number, default: null, min: 0 },
     gender:                 { type: String, required: true, enum: Object.values(Gender) },
     mobileNumber:           { type: String, required: true, trim: true },
     address:                { type: String, required: true, trim: true },

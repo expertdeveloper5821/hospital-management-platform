@@ -13,7 +13,8 @@ const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] a
 
 const createPatientSchema = z.object({
   fullName:                  z.string().min(1).max(200).trim(),
-  dateOfBirth:               z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+  dateOfBirth:               z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+  age:                       z.number().int().min(0).max(150),
   gender:                    z.enum(GENDER_VALUES),
   mobileNumber:              z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits'),
   address:                   z.string().min(1).max(500).trim(),
@@ -36,6 +37,7 @@ const createPatientSchema = z.object({
 const updatePatientSchema = z.object({
   fullName:               z.string().min(1).max(200).trim().optional(),
   dateOfBirth:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  age:                    z.number().int().min(0).max(150).optional(),
   gender:                 z.enum(GENDER_VALUES).optional(),
   mobileNumber:           z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits').optional(),
   address:                z.string().min(1).max(500).trim().optional(),
@@ -56,7 +58,8 @@ function toResponse(p: IPatient) {
   return {
     patientId:                 p.patientId,
     fullName:                  p.fullName,
-    dateOfBirth:               p.dateOfBirth,
+    dateOfBirth:               p.dateOfBirth               ?? null,
+    age:                       p.age                       ?? null,
     gender:                    p.gender,
     mobileNumber:              p.mobileNumber,
     address:                   p.address,

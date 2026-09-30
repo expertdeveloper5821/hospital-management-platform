@@ -12,6 +12,8 @@ import {
   WardOccupancySummary,
   CreateAdmissionInput,
   AddProgressNoteInput,
+  UpdatePrescriptionInput,
+  DischargePatientInput,
   ListAdmissionsQuery,
   CreateWardRequest,
   AddBedsRequest,
@@ -35,6 +37,7 @@ import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/c
 import {
   AppError,
   ConflictError,
+  ForbiddenError,
   NotFoundError,
 } from '../../shared/middleware/error-handler';
 import { PatientModel } from '../patient/patient.model';
@@ -162,9 +165,20 @@ function formatParchaDateTime(date: Date): string {
   });
 }
 
+// Slip validity: 5 calendar days after the patient's registration date.
+// setDate() rolls over month/year boundaries using each month's real length
+// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
+// Mirrors computeValidTill in the client print page.
+const SLIP_VALIDITY_DAYS = 5;
+function computeValidTill(registeredAt: Date): Date {
+  const d = new Date(registeredAt);
+  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+  return d;
+}
+
 function buildIpdParchaOverlay(
   admission:      IIPDAdmission,
-  patient:        { fullName: string; patientId: string; dateOfBirth: string; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null },
+  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
   departmentName: string | null,
   doctorNames:    string,
   staffNameMap:   Map<string, string>,
@@ -172,7 +186,7 @@ function buildIpdParchaOverlay(
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
     { label: 'Patient ID',   value: patient.patientId },
-    { label: 'Age / Gender', value: `${calculateAge(new Date(patient.dateOfBirth))} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : '—')} years / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
   if (patient.address)    fieldRows.push({ label: 'Address',     value: patient.address });
@@ -180,10 +194,12 @@ function buildIpdParchaOverlay(
   fieldRows.push({ label: 'Admission ID', value: admission.admissionId });
   fieldRows.push({ label: 'Status',       value: toDisplayCase(admission.status) });
   fieldRows.push({ label: 'Ward / Bed',   value: `${admission.wardName} / Bed ${admission.bedNumber}` });
-  if (departmentName) fieldRows.push({ label: 'Department', value: departmentName });
-  if (doctorNames)     fieldRows.push({ label: 'Doctor(s)',  value: doctorNames });
   fieldRows.push({ label: 'Admission Date', value: formatParchaDate(admission.admissionDate) });
   if (admission.dischargeDate) fieldRows.push({ label: 'Discharge Date', value: formatParchaDate(admission.dischargeDate) });
+  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(computeValidTill(patient.createdAt)) });
+  if (doctorNames || departmentName) {
+    fieldRows.push({ label: 'Doctor(s) / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
+  }
 
   const vitals: ParchaOverlayInput['vitals'] = [
     { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
@@ -208,6 +224,7 @@ function buildIpdParchaOverlay(
     vitals,
     bodySections: [
       { heading: 'Progress Notes', text: notesText, weight: 1 },
+      { heading: 'Prescription',   text: admission.prescription || 'No prescription recorded.', weight: 0.5 },
     ],
     footerText: `Generated on ${formatParchaDateTime(new Date())}`,
   };
@@ -295,6 +312,29 @@ function assertAdmissionInScope(
   }
 }
 
+// Who may write an admission's prescription or discharge it: Hospital Admin
+// (any admission in the tenant), a Doctor listed in assignedDoctorIds, or a
+// Nurse on the admission ward's roster (Ward.assignedNurseIds is the source of
+// truth for nurse assignment — see resolveNurseWardIds). Every other role and
+// every unassigned Doctor/Nurse is refused. The route's requireRole already
+// narrows callers to these three roles; this adds the per-admission check.
+async function assertCanManageAdmission(
+  admission: IIPDAdmission,
+  tenantId:  string,
+  actor:     { userId: string; role: UserRole },
+  action:    string,
+): Promise<void> {
+  if (actor.role === UserRole.HOSPITAL_ADMIN) return;
+  if (actor.role === UserRole.DOCTOR && (admission.assignedDoctorIds ?? []).includes(actor.userId)) return;
+  if (actor.role === UserRole.NURSE) {
+    const ward = await ipdRepository.findWardById(tenantId, admission.wardId);
+    if (ward?.assignedNurseIds?.includes(actor.userId)) return;
+  }
+  throw new ForbiddenError(
+    `Only Hospital Admin, the assigned Doctor(s), or the assigned Nurse of this admission can ${action}.`,
+  );
+}
+
 async function toResponse(
   doc:           IIPDAdmission,
   tenantId:      string,
@@ -328,6 +368,8 @@ async function toResponse(
       sugar:           doc.vitals?.sugar           ?? null,
       bodyTemperature: doc.vitals?.bodyTemperature ?? null,
     },
+    prescription:          doc.prescription ?? null,
+    dischargeSummaryNotes: doc.dischargeSummaryNotes ?? null,
   };
 }
 
@@ -648,13 +690,51 @@ export class IPDService {
     return toResponse(updated, tenantId, patient?.fullName ?? null);
   }
 
-  async dischargePatient(
+  async updatePrescription(
     admissionId: string,
     tenantId:    string,
-    userId:      string,
+    input:       UpdatePrescriptionInput,
+    actor:       { userId: string; role: UserRole },
   ): Promise<AdmissionResponse> {
     const admission = await ipdRepository.findById(admissionId, tenantId);
     if (!admission) throw new NotFoundError('Admission not found');
+    await assertCanManageAdmission(admission, tenantId, actor, 'update the prescription');
+    if (admission.status !== AdmissionStatus.ADMITTED) {
+      throw new AppError('Cannot edit a discharged admission', 400);
+    }
+
+    const prescription = input.prescription || null;
+    const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, { prescription });
+    if (!updated) throw new NotFoundError('Admission not found');
+
+    // prescription is encrypted at rest — the audit trail records only *that*
+    // it changed, never its content (same rule as redactVitals).
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      admissionId,
+        action:        'UPDATE',
+        userId:        actor.userId,
+        tenantId,
+        previousValue: { prescription: REDACTED_MARKER },
+        newValue:      { prescription: REDACTED_MARKER },
+      });
+    } catch { /* swallow */ }
+
+    const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
+    return toResponse(updated, tenantId, patient?.fullName ?? null);
+  }
+
+  async dischargePatient(
+    admissionId: string,
+    tenantId:    string,
+    input:       DischargePatientInput,
+    actor:       { userId: string; role: UserRole },
+  ): Promise<AdmissionResponse> {
+    const userId = actor.userId;
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+    await assertCanManageAdmission(admission, tenantId, actor, 'discharge this patient');
 
     if (admission.status !== AdmissionStatus.ADMITTED) {
       throw new AppError('Patient is already discharged', 400);
@@ -664,6 +744,8 @@ export class IPDService {
     const updated = await ipdRepository.updateStatus(admissionId, tenantId, {
       status: AdmissionStatus.DISCHARGED,
       dischargeDate,
+      dischargeSummaryNotes: input.dischargeSummaryNotes,
+      dischargedBy:          userId,
     });
     if (!updated) throw new NotFoundError('Admission not found');
 
@@ -733,6 +815,7 @@ export class IPDService {
     admission.assignedDoctorIds.forEach((id) => userIds.add(id));
     admission.progressNotes.forEach((n) => userIds.add(n.doctorId));
     (ward?.assignedNurseIds ?? []).forEach((id) => userIds.add(id));
+    if (admission.dischargedBy) userIds.add(admission.dischargedBy);
     opdVisits.forEach((v) => v.doctorIds.forEach((id) => userIds.add(id)));
     pathologyRequests.forEach((r) => userIds.add(r.requestedBy));
     radiologyRequests.forEach((r) => userIds.add(r.requestedBy));
@@ -836,7 +919,7 @@ export class IPDService {
       patient: {
         patientId:        patient.patientId,
         fullName:         patient.fullName,
-        age:              calculateAge(new Date(patient.dateOfBirth)),
+        age:              patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : 0),
         gender:           patient.gender,
         mobileNumber:     patient.mobileNumber,
         address:          patient.address || null,
@@ -862,7 +945,10 @@ export class IPDService {
         assignedNurseNames:  namesFor(ward?.assignedNurseIds ?? []),
         admissionDate:       admission.admissionDate.toISOString(),
         dischargeDate:       admission.dischargeDate!.toISOString(),
-        dischargedByName,
+        // The stored finalizer wins; the audit-log lookup covers admissions
+        // discharged before dischargedBy was recorded.
+        dischargedByName: (admission.dischargedBy ? nameMap.get(admission.dischargedBy) : undefined) ?? dischargedByName,
+        dischargeSummaryNotes: admission.dischargeSummaryNotes ?? null,
         progressNotes: [...admission.progressNotes]
           .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
           .map((n) => ({

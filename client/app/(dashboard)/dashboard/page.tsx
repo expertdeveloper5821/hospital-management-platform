@@ -20,6 +20,7 @@ import { useAppSelector, useAppDispatch } from '@/store/hooks';
 import { logout }        from '@/store/slices/auth.slice';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { AttendanceQuickBar } from '@/components/dashboard/AttendanceQuickBar';
 import { cn }     from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -461,6 +462,10 @@ export default function DashboardPage() {
              spacing/responsive layout as each other; each section's counts
              are independently date-scoped (backend sends only the fields
              this role can see). ── */}
+      {/* Compact self check-in/out — same Attendance API/record as the
+          Attendance page. Super Admin has no self attendance. */}
+      {role && role !== 'SUPER_ADMIN' && <AttendanceQuickBar />}
+
       <HospitalOverviewSection
         title="Hospital Overview — Today"
         alertCards={todayOverviewCards}

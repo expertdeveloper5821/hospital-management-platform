@@ -88,6 +88,7 @@ function makeData(overrides: Partial<DischargeSummaryData> = {}): DischargeSumma
       assignedDoctorNames: ['Dr. Asha Rao'], assignedNurseNames: ['Nurse Priya'],
       admissionDate: '2026-01-06T08:00:00.000Z', dischargeDate: '2026-01-10T14:30:00.000Z',
       dischargedByName: 'Dr. Asha Rao',
+      dischargeSummaryNotes: 'Discharged in stable condition.\nContinue oral antibiotics for 5 days.',
       progressNotes: [
         { authorName: 'Nurse Priya', authorRole: 'NURSE', timestamp: '2026-01-07T09:00:00.000Z', noteHtml: 'Vitals stable. <u>No complaints</u>.' },
         { authorName: null, authorRole: null, timestamp: '2026-01-08T09:00:00.000Z', noteHtml: 'Legacy plain-text note with no author on record.' },
@@ -148,6 +149,23 @@ describe('buildDischargeSummaryPdf', () => {
     const buf = await buildDischargeSummaryPdf({ ...base, admission: { ...base.admission, progressNotes: manyNotes } });
     expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
     expect(pageCount(buf)).toBeGreaterThan(1);
+  });
+
+  test('renders the Discharge Summary Notes section only when notes were recorded', async () => {
+    const base = makeData();
+    const hex = (t: string) => Buffer.from(t, 'latin1').toString('hex');
+    const withNotes    = decompressContentStreams(await buildDischargeSummaryPdf(makeData())).toLowerCase();
+    const withoutNotes = decompressContentStreams(await buildDischargeSummaryPdf({
+      ...base, admission: { ...base.admission, dischargeSummaryNotes: null },
+    })).toLowerCase();
+
+    expect(withNotes).toContain(hex('Notes'));
+    expect(withNotes).toContain(hex('antibiotics'));
+    // "Discharged On:" — matched as "ed On:" because kerning splits the word;
+    // "Registered On:" also matches, so assert exactly one extra occurrence.
+    const count = (t: string) => t.split(hex('ed On:')).length - 1;
+    expect(count(withNotes)).toBe(count(withoutNotes) + 1);
+    expect(withoutNotes).not.toContain(hex('antibiotics'));
   });
 
   test('handles legacy plain-text notes (pre-rich-text data) safely', async () => {

@@ -55,6 +55,26 @@ export const AddProgressNoteSchema = z.object({
 
 export type AddProgressNoteInput = z.infer<typeof AddProgressNoteSchema>;
 
+// ─── IPD Prescription / Discharge Summary Notes ──────────────────────────────
+// Plain-text clinical free-text (textarea input). Both are encrypted at rest
+// (MEDICAL key — see ipd.model.ts's ENCRYPTED_IPD_FIELDS), so the length limit
+// lives here on the plaintext rather than as a schema `maxlength`.
+export const UpdatePrescriptionSchema = z.object({
+  // Empty string clears the prescription back to null.
+  prescription: z.string().trim().max(5000, 'Prescription cannot exceed 5000 characters'),
+});
+
+export type UpdatePrescriptionInput = z.infer<typeof UpdatePrescriptionSchema>;
+
+export const DischargePatientSchema = z.object({
+  dischargeSummaryNotes: z.string()
+    .trim()
+    .min(1, 'Discharge summary notes are required')
+    .max(5000, 'Discharge summary notes cannot exceed 5000 characters'),
+});
+
+export type DischargePatientInput = z.infer<typeof DischargePatientSchema>;
+
 // ─── IPD Vitals ──────────────────────────────────────────────────────────────
 // Recorded from the IPD Admission View → Edit form only (not at admission
 // creation, not on discharge) — mirrors OPD's vitals contract (see
@@ -97,6 +117,8 @@ export interface AdmissionResponse {
   dischargeDate:     string | null;
   progressNotes:     ProgressNoteResponse[];
   vitals:            IPDVitals;
+  prescription:          string | null;
+  dischargeSummaryNotes: string | null;
 }
 
 // Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)
@@ -121,8 +143,10 @@ export interface AddBedsRequest {
 
 // ─── Internal Types ───────────────────────────────────────────────────────────
 export interface StatusUpdate {
-  status:        AdmissionStatus;
-  dischargeDate: Date;
+  status:                AdmissionStatus;
+  dischargeDate:         Date;
+  dischargeSummaryNotes: string;
+  dischargedBy:          string;
 }
 
 // ─── Discharge Summary PDF — data contract ────────────────────────────────────
@@ -179,6 +203,9 @@ export interface DischargeSummaryAdmission {
   admissionDate:        string;
   dischargeDate:        string;
   dischargedByName:     string | null;
+  // Plain text entered at final discharge; null for admissions discharged
+  // before this field existed (the PDF omits the section then).
+  dischargeSummaryNotes: string | null;
   progressNotes:        DischargeSummaryProgressNote[];
 }
 

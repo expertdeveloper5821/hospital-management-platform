@@ -206,7 +206,7 @@ export async function editPathologyRequest(
     const tenantId = req.user!.tenantId as string;
     const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const result = await labService.editPathologyRequest(
-      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds,
+      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds, req.user!.role as UserRole,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
@@ -246,7 +246,7 @@ export async function editRadiologyRequest(
     const tenantId = req.user!.tenantId as string;
     const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const result = await labService.editRadiologyRequest(
-      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds,
+      id.data, tenantId, req.user!.userId, parsed.data, allowedPatientIds, req.user!.role as UserRole,
     );
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }

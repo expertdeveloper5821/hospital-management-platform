@@ -142,25 +142,36 @@ function formatParchaDate(date: Date): string {
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Slip validity: 5 calendar days after the patient's registration date.
+// setDate() rolls over month/year boundaries using each month's real length
+// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
+// Mirrors computeValidTill in the client print page.
+const SLIP_VALIDITY_DAYS = 5;
+function computeValidTill(registeredAt: Date): Date {
+  const d = new Date(registeredAt);
+  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+  return d;
+}
+
 function buildOpdParchaOverlay(
   visit:          IOPDVisit,
-  patient:        { fullName: string; patientId: string; dateOfBirth: string; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null },
+  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
   departmentName: string | null,
   doctorNames:    string,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
     { label: 'Patient ID',   value: patient.patientId },
-    { label: 'Age / Gender', value: `${calculateAgeFromDob(patient.dateOfBirth)} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAgeFromDob(patient.dateOfBirth) : '—')} years / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
   if (patient.address)   fieldRows.push({ label: 'Address',     value: patient.address });
   if (patient.bloodGroup) fieldRows.push({ label: 'Blood Group', value: patient.bloodGroup });
-  fieldRows.push({ label: 'Visit ID',   value: visit.visitId });
   fieldRows.push({ label: 'Visit Date', value: formatParchaDate(visit.visitDate) });
-  if (departmentName) fieldRows.push({ label: 'Department', value: departmentName });
-  if (doctorNames)     fieldRows.push({ label: 'Doctor',     value: doctorNames });
-  fieldRows.push({ label: 'Registered On', value: formatParchaDate(visit.createdAt) });
+  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(computeValidTill(patient.createdAt)) });
+  if (doctorNames || departmentName) {
+    fieldRows.push({ label: 'Doctor / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
+  }
 
   const vitals: ParchaOverlayInput['vitals'] = [
     { label: 'Weight', value: visit.vitals?.weight          != null ? String(visit.vitals.weight)          : '' },
@@ -394,8 +405,7 @@ export class OPDService {
     // caller actually sent (see UpdateOPDVisitRequest.vitals), so recording
     // just one reading (e.g. weight) never wipes out the others already on
     // file. Role is not re-checked here: the route/controller already limit
-    // vitals to DOCTOR/HOSPITAL_ADMIN/NURSE (RECEPTIONIST_EDITABLE_FIELDS keeps
-    // a Receptionist off them).
+    // vitals to DOCTOR/HOSPITAL_ADMIN/NURSE/RECEPTIONIST.
     if (data.vitals !== undefined) {
       // visit.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable

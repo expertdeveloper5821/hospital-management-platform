@@ -407,6 +407,12 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
 
   const fieldLabel = isPathology ? 'Test Type' : 'Imaging Type';
 
+  // Status may only be changed by Hospital Admin, or the lab role that owns
+  // this request type (Pathologist / Radiologist). Mirrors lab.service.ts.
+  const role = useAppSelector((s) => s.auth.profile?.role);
+  const canChangeStatus =
+    role === 'HOSPITAL_ADMIN' || role === (isPathology ? 'PATHOLOGIST' : 'RADIOLOGIST');
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -417,7 +423,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
           testType:  typeField.trim() || undefined,
           notes:     notes.trim() || null,
           priority,
-          status,
+          ...(canChangeStatus ? { status } : {}),
         }).unwrap();
       } else {
         await editRadiology({
@@ -425,7 +431,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
           imagingType: typeField.trim() || undefined,
           notes:       notes.trim() || null,
           priority,
-          status,
+          ...(canChangeStatus ? { status } : {}),
         }).unwrap();
       }
       onClose();
@@ -495,7 +501,8 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
                   id="er-status"
                   value={status}
                   onChange={(e) => setStatus(e.target.value as 'PENDING' | 'IN_PROGRESS')}
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  disabled={!canChangeStatus}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="PENDING">Pending</option>
                   <option value="IN_PROGRESS">In Progress</option>

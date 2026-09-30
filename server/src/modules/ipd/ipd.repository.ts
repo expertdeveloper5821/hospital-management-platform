@@ -171,6 +171,7 @@ export class IPDRepository {
       bedId:             string;
       bedNumber:         string;
       vitals:            IPDVitals;
+      prescription:      string | null;
     }>,
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();

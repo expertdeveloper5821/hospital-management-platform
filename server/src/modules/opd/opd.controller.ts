@@ -220,15 +220,15 @@ export async function getParchaPdf(req: Request, res: Response, next: NextFuncti
 // strictly read-only for her, enforced here regardless of what the request
 // body contains, not just by the frontend hiding those fields. Vitals are
 // otherwise gated purely by the route's role list (DOCTOR, HOSPITAL_ADMIN,
-// NURSE) — no other role can reach this endpoint at all, so no further
-// per-field check is needed to keep Receptionist/Manager/etc. off vitals.
+// NURSE, RECEPTIONIST) — no other role can reach this endpoint at all, so no
+// further per-field check is needed to keep Manager/etc. off vitals.
 const NURSE_EDITABLE_FIELDS = new Set(['notes', 'vitals']);
 
-// A Receptionist's Edit access is the doctor/nurse assignment only (department
-// follows the doctors — see OPDService.updateVisit). Reassigning nurses on an
-// existing visit is also open to DOCTOR/HOSPITAL_ADMIN (full edit access);
-// a Nurse is still kept off it by NURSE_EDITABLE_FIELDS.
-const RECEPTIONIST_EDITABLE_FIELDS = new Set(['doctorIds', 'nurseIds']);
+// A Receptionist's Edit access is the doctor/nurse assignment (department
+// follows the doctors — see OPDService.updateVisit) plus vitals. Reassigning
+// nurses on an existing visit is also open to DOCTOR/HOSPITAL_ADMIN (full edit
+// access); a Nurse is still kept off it by NURSE_EDITABLE_FIELDS.
+const RECEPTIONIST_EDITABLE_FIELDS = new Set(['doctorIds', 'nurseIds', 'vitals']);
 
 export async function updateVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -243,7 +243,7 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
     } else if (req.user!.role === UserRole.RECEPTIONIST) {
       const disallowed = Object.keys(body.data).filter((key) => !RECEPTIONIST_EDITABLE_FIELDS.has(key));
       if (disallowed.length > 0) {
-        throw new ForbiddenError('Receptionists may only update the doctor, nurse and department assignment for an OPD visit.');
+        throw new ForbiddenError('Receptionists may only update the doctor, nurse and department assignment and vitals for an OPD visit.');
       }
     }
 
