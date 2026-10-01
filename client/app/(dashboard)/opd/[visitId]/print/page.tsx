@@ -255,8 +255,6 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             <Field label="Patient ID"   value={patient.patientId} mono />
             <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
             <Field label="Mobile"       value={patient.mobileNumber} />
-            {patient.address && <Field label="Address" value={patient.address} span />}
-            {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
 
             <Field label="Visit Date" value={formatDate(visit.visitDate)} />
             <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
@@ -267,6 +265,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
                 span
               />
             )}
+            {patient.address && <Field label="Address" value={patient.address} span />}
           </div>
 
           <div className="mt-3 border-b border-gray-300" />

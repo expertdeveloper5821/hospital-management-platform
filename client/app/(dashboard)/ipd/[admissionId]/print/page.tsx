@@ -275,10 +275,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
             <Field label="Patient ID"   value={patient.patientId} mono />
             <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
             <Field label="Mobile"       value={patient.mobileNumber} />
-            {patient.address && <Field label="Address" value={patient.address} span />}
-            {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
 
-            <Field label="Admission ID"   value={admission.admissionId} mono />
             <Field label="Status"         value={toDisplay(admission.status)} />
             <Field label="Ward / Bed"     value={`${admission.wardName} / Bed ${admission.bedNumber}`} />
             <Field label="Admission Date" value={formatDate(admission.admissionDate)} />
@@ -291,6 +288,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
                 span
               />
             )}
+            {patient.address && <Field label="Address" value={patient.address} span />}
           </div>
 
           <div className="mt-3 border-b border-gray-300" />
@@ -323,7 +321,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
               </div>
             </div>
 
-            <div className="flex-1 pl-4" style={{ minHeight: '80mm' }}>
+            <div className="flex-1 pl-4 pb-3" style={{ minHeight: '80mm' }}>
               {sortedNotes.length > 0 && (
                 <>
                   <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Progress Notes</p>
