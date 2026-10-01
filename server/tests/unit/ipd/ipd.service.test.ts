@@ -521,6 +521,62 @@ describe('IPDService — example-based', () => {
       );
       expect(mockUserRepo.findById).not.toHaveBeenCalled();
     });
+
+    test('when doctorId is provided and status is ADMITTED, scopes strictly by assigned doctorId and not broad doctorPatientIds', async () => {
+      mockIpdRepo.findActiveAdmissions.mockResolvedValue({
+        data: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      } as never);
+      (PatientModel.find as jest.Mock) = makeFindMock([]);
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+
+      await service.listAdmissions(
+        TENANT_ID,
+        { status: AdmissionStatus.ADMITTED, page: 1, limit: 20 } as never,
+        undefined,
+        ['PAT-OPD-HISTORICAL'],
+        DOCTOR_ID,
+      );
+
+      expect(mockIpdRepo.findActiveAdmissions).toHaveBeenCalledWith(
+        TENANT_ID,
+        { status: AdmissionStatus.ADMITTED, page: 1, limit: 20 },
+        undefined,
+        undefined,
+        DOCTOR_ID,
+      );
+    });
+
+    test('when status is DISCHARGED, broad doctorPatientIds is retained for historical scoping', async () => {
+      mockIpdRepo.findActiveAdmissions.mockResolvedValue({
+        data: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      } as never);
+      (PatientModel.find as jest.Mock) = makeFindMock([]);
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+
+      await service.listAdmissions(
+        TENANT_ID,
+        { status: AdmissionStatus.DISCHARGED, page: 1, limit: 20 } as never,
+        undefined,
+        ['PAT-OPD-HISTORICAL'],
+        DOCTOR_ID,
+      );
+
+      expect(mockIpdRepo.findActiveAdmissions).toHaveBeenCalledWith(
+        TENANT_ID,
+        { status: AdmissionStatus.DISCHARGED, page: 1, limit: 20 },
+        ['PAT-OPD-HISTORICAL'],
+        undefined,
+        undefined,
+      );
+    });
   });
 
   // ── Role-based access scope resolution ───────────────────────────────────────
