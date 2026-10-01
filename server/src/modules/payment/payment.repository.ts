@@ -1,3 +1,4 @@
+import { ClientSession } from 'mongoose';
 import { PaymentModel, IPayment } from './payment.model';
 import {
   PaymentMethod, PaymentStatus, PaymentReferenceType,
@@ -195,6 +196,35 @@ export class PaymentRepository {
       { $set: fields },
       { new: true },
     );
+  }
+
+  // Cancels every still-active (COMPLETED / PENDING) payment linked to one
+  // reference — used when that referenced record is removed (OPD visit
+  // delete). The record itself is kept for history; CANCELLED is excluded by
+  // every revenue/validity query (they all filter status COMPLETED). Takes the
+  // caller's session so it commits/aborts together with the caller's write.
+  // Returns the payments as they were before cancellation (for the audit log).
+  async cancelActiveByReference(
+    tenantId:      string,
+    referenceType: PaymentReferenceType,
+    referenceId:   string,
+    session:       ClientSession,
+  ): Promise<IPayment[]> {
+    assertDbConnected();
+    const filter = {
+      tenantId,
+      referenceType,
+      referenceId,
+      status: { $in: [PaymentStatus.COMPLETED, PaymentStatus.PENDING] },
+    };
+    const active = await PaymentModel.find(filter, null, { session });
+    if (active.length === 0) return [];
+    await PaymentModel.updateMany(
+      { ...filter, paymentId: { $in: active.map((p) => p.paymentId) } },
+      { $set: { status: PaymentStatus.CANCELLED } },
+      { session },
+    );
+    return active;
   }
 
   async sumByMethod(

@@ -1,4 +1,8 @@
+import mongoose from 'mongoose';
 import { OPDVisitModel, IOPDVisit } from './opd.model';
+import { IPayment } from '../payment/payment.model';
+import { PaymentReferenceType } from '../payment/payment.types';
+import { paymentRepository } from '../payment/payment.repository';
 import { OpdNurseAssignmentModel, IOpdNurseAssignment } from './opd-nurse-assignment.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
@@ -203,6 +207,45 @@ export class OPDRepository {
         throw new ConflictError(DUPLICATE_APPOINTMENT_MESSAGE);
       }
       throw err;
+    }
+  }
+
+  // Hard delete, restricted to a visit that is still active (OPEN /
+  // IN_PROGRESS) — the status filter makes the check-and-delete atomic, so a
+  // visit completed/cancelled concurrently is never removed. Every active
+  // payment linked to the visit (referenceType OPD_VISIT) is cancelled in the
+  // same transaction, so a deleted visit never leaves an active payment
+  // behind (and a failed cancellation never leaves the visit deleted).
+  //
+  // Requires a transaction-capable MongoDB deployment (replica set / Atlas) —
+  // same requirement as IPDRepository.createAdmissionWithBedOccupancy.
+  async deleteActiveByVisitIdCancellingPayments(
+    tenantId: string,
+    visitId:  string,
+  ): Promise<{ deleted: IOPDVisit | null; cancelledPayments: IPayment[] }> {
+    assertDbConnected();
+    const session = await mongoose.startSession();
+    try {
+      let deleted: IOPDVisit | null = null;
+      let cancelledPayments: IPayment[] = [];
+      await session.withTransaction(async () => {
+        deleted = await OPDVisitModel.findOneAndDelete(
+          {
+            tenantId,
+            visitId,
+            status: { $in: [...ACTIVE_STATUSES] }, // spread — Mongoose rejects a readonly array
+          },
+          { session },
+        );
+        cancelledPayments = deleted
+          ? await paymentRepository.cancelActiveByReference(
+              tenantId, PaymentReferenceType.OPD_VISIT, visitId, session,
+            )
+          : [];
+      });
+      return { deleted, cancelledPayments };
+    } finally {
+      await session.endSession();
     }
   }
 
