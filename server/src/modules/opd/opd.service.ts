@@ -184,11 +184,12 @@ function buildOpdParchaOverlay(
   return {
     fieldRows,
     vitals,
+    // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
       { heading: 'Diagnosis',    text: visit.diagnosis ?? '',                   weight: 1 },
       { heading: 'Prescription', text: visit.prescription ?? '',                weight: 5 },
       { heading: 'Notes',        text: stripRichTextTags(visit.notes ?? ''),    weight: 3 },
-    ],
+    ].filter((section) => section.text.trim() !== ''),
     footerText: 'This is valid for 15 days.',
   };
 }

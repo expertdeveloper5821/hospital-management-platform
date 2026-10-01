@@ -37,3 +37,28 @@ describe('generateId — example-based', () => {
     expect(generateId()).not.toBe(generateId());
   });
 });
+
+// ─── Sensitive URL redaction ──────────────────────────────────────────────────
+import { loggableUrl } from '../../../src/shared/middleware/request-logger';
+
+describe('loggableUrl', () => {
+  const token = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde';
+
+  test.each([
+    `/api/public/staff-verification/${token}`,
+    `/api/public/staff-verification/${token}?utm=x`,
+    `/API/PUBLIC/STAFF-VERIFICATION/${token}`,
+    `/api/public/staff-verification?token=${token}`,
+  ])('redacts staff verification token in %s', (originalUrl) => {
+    // Inside the mounted router req.url has the prefix stripped — originalUrl drives the match.
+    const out = loggableUrl({ originalUrl, url: `/${token}` });
+    expect(out).toBe('/api/public/staff-verification/[REDACTED]');
+    expect(out).not.toContain(token);
+  });
+
+  test('leaves other URLs untouched', () => {
+    expect(loggableUrl({ originalUrl: '/api/patients?page=2', url: '/api/patients?page=2' }))
+      .toBe('/api/patients?page=2');
+    expect(loggableUrl({ originalUrl: '/api/public/staff-verification-other', url: '/x' })).toBe('/x');
+  });
+});

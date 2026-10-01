@@ -15,6 +15,12 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// True when a (possibly rich-text) value has visible text. Empty optional
+// sections are hidden entirely so the ones below move up with no gap.
+function hasText(value: string | null | undefined): boolean {
+  return !!value && value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim() !== '';
+}
+
 // Slip validity: 5 calendar days after the patient's registration date.
 // setDate() rolls over month/year boundaries using each month's real length
 // (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
@@ -159,11 +165,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   }, [ready, showPdfTemplate]);
 
   function handlePrintClick() {
-    if (showPdfTemplate) {
-      iframeRef.current?.contentWindow?.print();
-    } else {
-      window.print();
-    }
+    window.print();
   }
 
   if (visitLoading || patientLoading) {
@@ -202,8 +204,136 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   // name, logo, address, etc. as a full-page background — skip the app's own
   // header block on top of it, and reserve extra top space for it instead of
   // the default header's own vertical footprint. A PDF template is handled
-  // entirely above (showPdfTemplate) and never reaches this HTML layout.
+  // entirely below (showPdfTemplate): the PDF is the on-screen preview only,
+  // and this HTML sheet is what gets printed.
   const hasImageTemplate = !!branding?.parchaTemplateUrl && !hasPdfTemplate;
+
+  const sheet = (
+    <>
+        {/* Print: plain A4 with no page margin (so the browser adds no
+            date/title/URL/page-number header or footer). The 3.5 cm top /
+            2 cm bottom space is the sheet's own print padding, repeated on
+            every printed page via box-decoration-break: clone. */}
+        {/* A4 sheet — the only thing meant to reach the printer */}
+        <div
+          className={`parcha-sheet relative px-[16mm] ${hasImageTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} print:pt-[35mm] print:pb-[20mm] print:box-decoration-clone text-[12px] leading-snug`}
+        >
+          {hasImageTemplate && (
+            // Real <img>, not a CSS background — prints reliably without the
+            // browser's "background graphics" print option being enabled.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={branding!.parchaTemplateUrl!}
+              alt=""
+              aria-hidden="true"
+              className="absolute top-0 left-0 w-[210mm] h-[297mm] object-cover z-0 print:hidden"
+            />
+          )}
+          <div className="relative z-10 print:flex print:flex-col print:min-h-[242mm]">
+          {!hasImageTemplate && (
+            <div className="print:hidden">
+              {/* Hospital header */}
+              <div className="flex items-start gap-4">
+                {branding?.logoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
+                )}
+                <div className="flex-1 min-w-0 text-center">
+                  <h1 className="text-xl font-bold tracking-tight">{hospitalName}</h1>
+                  {hospitalAddress && <p className="text-[11px] text-gray-600 mt-0.5">{hospitalAddress}</p>}
+                  {branding?.contactEmail && <p className="text-[11px] text-gray-600">{branding.contactEmail}</p>}
+                </div>
+                {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
+              </div>
+              <div className="mt-3 border-b-2 border-gray-800" />
+            </div>
+          )}
+
+          {/* Patient + Visit details */}
+          <div className="mt-4 print:mt-0 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
+            <Field label="Patient Name" value={patient.fullName} />
+            <Field label="Patient ID"   value={patient.patientId} mono />
+            <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
+            <Field label="Mobile"       value={patient.mobileNumber} />
+            {patient.address && <Field label="Address" value={patient.address} span />}
+            {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
+
+            <Field label="Visit Date" value={formatDate(visit.visitDate)} />
+            <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
+            {(doctorNames || departmentName) && (
+              <Field
+                label="Doctor / Department"
+                value={[doctorNames, departmentName].filter(Boolean).join(' — ')}
+                span
+              />
+            )}
+          </div>
+
+          <div className="mt-3 border-b border-gray-300" />
+
+          {/* Vitals (left) + Diagnosis/Prescription/Notes (right) — replaces
+              the previous blank writing box. `visit` comes straight from
+              useGetOPDVisitByIdQuery, which the OPD Edit/Complete mutations
+              invalidate (see opd.api.ts's 'OPD' tag), so this always paints
+              whatever was most recently saved, on every load of this page. A
+              vital never recorded renders as a blank ruled line rather than a
+              placeholder, so the printed sheet can still be filled in by hand
+              for exactly the readings the app never collected. */}
+          {/* No box borders — a single vertical divider (border-r on the
+              Vitals column) separates the two columns instead. `items-stretch`
+              (the flex default) makes both columns match the taller side's
+              height, so the divider always runs from the top of this section
+              to the bottom of the clinical column, whatever that height ends
+              up being. */}
+          <div className="mt-4 flex break-inside-avoid">
+            {/* Vitals stays compact/top-aligned — only the divider (not the
+                row spacing) extends down to match the clinical column. */}
+            <div className="w-[42mm] shrink-0 pr-3 border-r border-gray-300">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Vitals</p>
+              <div className="space-y-1.5">
+                <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
+                <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
+                <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
+                <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
+                <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
+              </div>
+            </div>
+
+            <div
+              className="flex-1 pl-4"
+              style={{ minHeight: hasText(visit.diagnosis) || hasText(visit.prescription) || hasText(visit.notes) ? '150mm' : undefined }}
+            >
+              {hasText(visit.diagnosis) && (
+                <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
+              )}
+              {hasText(visit.prescription) && (
+                <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
+              )}
+              {hasText(visit.notes) && (
+                <ClinicalField label="Notes" minHeight="40mm">
+                  <div className="min-h-[40mm] border-b border-gray-300 print:border-b-0">
+                    <RichTextDisplay value={visit.notes} fallback="" className="text-[11px]" />
+                  </div>
+                </ClinicalField>
+              )}
+            </div>
+          </div>
+
+          {/* Signature */}
+          <div className="mt-6 flex justify-end break-inside-avoid print:order-last print:mt-auto print:pt-6">
+            <div className="w-56 text-center">
+              <div className="border-t border-gray-500 pt-1 text-[11px] text-gray-600">Doctor&apos;s Signature</div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="mt-6 pt-2 border-t border-gray-200 print:border-t-0 text-center text-[10px] text-gray-500">
+            This is valid for 15 days.
+          </div>
+          </div>
+        </div>
+    </>
+  );
 
   if (showPdfTemplate) {
     return (
@@ -223,11 +353,11 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             ref={iframeRef}
             src={pdfUrl}
             title="OPD Parcha"
-            className="parcha-sheet block mx-auto border-0 bg-white w-[210mm] h-[297mm] print:w-full print:h-screen"
+            className="parcha-sheet block mx-auto border-0 bg-white w-[210mm] h-[297mm] print:hidden"
             onLoad={() => {
               if (!pdfPrintedRef.current) {
                 pdfPrintedRef.current = true;
-                setTimeout(() => iframeRef.current?.contentWindow?.print(), 300);
+                setTimeout(() => window.print(), 300);
               }
             }}
           />
@@ -236,6 +366,9 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             Preparing printable slip…
           </div>
         )}
+
+        {/* Print output: the plain A4 sheet below, never the template PDF. */}
+        <div className="hidden print:block">{sheet}</div>
       </div>
     );
   }
@@ -253,115 +386,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
         </Button>
       </div>
 
-      {/* A4 sheet — the only thing meant to reach the printer */}
-      <div
-        className={`parcha-sheet relative px-[16mm] ${hasImageTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
-      >
-        {hasImageTemplate && (
-          // Real <img>, not a CSS background — prints reliably without the
-          // browser's "background graphics" print option being enabled.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={branding!.parchaTemplateUrl!}
-            alt=""
-            aria-hidden="true"
-            className="absolute top-0 left-0 w-[210mm] h-[297mm] object-cover z-0"
-          />
-        )}
-        <div className="relative z-10">
-        {!hasImageTemplate && (
-          <>
-            {/* Hospital header */}
-            <div className="flex items-start gap-4">
-              {branding?.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
-              )}
-              <div className="flex-1 min-w-0 text-center">
-                <h1 className="text-xl font-bold tracking-tight">{hospitalName}</h1>
-                {hospitalAddress && <p className="text-[11px] text-gray-600 mt-0.5">{hospitalAddress}</p>}
-                {branding?.contactEmail && <p className="text-[11px] text-gray-600">{branding.contactEmail}</p>}
-              </div>
-              {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
-            </div>
-            <div className="mt-3 border-b-2 border-gray-800" />
-          </>
-        )}
-
-        {/* Patient + Visit details */}
-        <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
-          <Field label="Patient Name" value={patient.fullName} />
-          <Field label="Patient ID"   value={patient.patientId} mono />
-          <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
-          <Field label="Mobile"       value={patient.mobileNumber} />
-          {patient.address && <Field label="Address" value={patient.address} span />}
-          {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
-
-          <Field label="Visit Date" value={formatDate(visit.visitDate)} />
-          <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
-          {(doctorNames || departmentName) && (
-            <Field
-              label="Doctor / Department"
-              value={[doctorNames, departmentName].filter(Boolean).join(' — ')}
-              span
-            />
-          )}
-        </div>
-
-        <div className="mt-3 border-b border-gray-300" />
-
-        {/* Vitals (left) + Diagnosis/Prescription/Notes (right) — replaces
-            the previous blank writing box. `visit` comes straight from
-            useGetOPDVisitByIdQuery, which the OPD Edit/Complete mutations
-            invalidate (see opd.api.ts's 'OPD' tag), so this always paints
-            whatever was most recently saved, on every load of this page. A
-            vital never recorded renders as a blank ruled line rather than a
-            placeholder, so the printed sheet can still be filled in by hand
-            for exactly the readings the app never collected. */}
-        {/* No box borders — a single vertical divider (border-r on the
-            Vitals column) separates the two columns instead. `items-stretch`
-            (the flex default) makes both columns match the taller side's
-            height, so the divider always runs from the top of this section
-            to the bottom of the clinical column, whatever that height ends
-            up being. */}
-        <div className="mt-4 flex break-inside-avoid">
-          {/* Vitals stays compact/top-aligned — only the divider (not the
-              row spacing) extends down to match the clinical column. */}
-          <div className="w-[42mm] shrink-0 pr-3 border-r border-gray-300">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Vitals</p>
-            <div className="space-y-1.5">
-              <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
-              <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
-              <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
-              <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
-              <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
-            </div>
-          </div>
-
-          <div className="flex-1 pl-4" style={{ minHeight: '150mm' }}>
-            <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
-            <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
-            <ClinicalField label="Notes" minHeight="40mm">
-              <div className="min-h-[40mm] border-b border-gray-300">
-                <RichTextDisplay value={visit.notes} fallback="" className="text-[11px]" />
-              </div>
-            </ClinicalField>
-          </div>
-        </div>
-
-        {/* Signature */}
-        <div className="mt-6 flex justify-end break-inside-avoid">
-          <div className="w-56 text-center">
-            <div className="border-t border-gray-500 pt-1 text-[11px] text-gray-600">Doctor&apos;s Signature</div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-6 pt-2 border-t border-gray-200 text-center text-[10px] text-gray-500">
-          This is valid for 15 days.
-        </div>
-        </div>
-      </div>
+      {sheet}
     </div>
   );
 }

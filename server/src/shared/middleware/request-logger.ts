@@ -2,6 +2,19 @@ import { Request, Response, NextFunction } from 'express';
 import { generateId } from '../utils/index';
 import { requestContext } from '../config/request-context';
 
+// Paths whose remainder is a bearer-style secret (Staff ID Card QR tokens).
+// Case-insensitive because Express routing is. Matched against originalUrl:
+// inside a mounted router req.url has the mount prefix stripped.
+const SENSITIVE_PATH = /^\/api\/public\/staff-verification(?:[/?].*)?$/i;
+
+/** URL as it should appear in logs — secrets in sensitive paths replaced. */
+export function loggableUrl(req: Pick<Request, 'url' | 'originalUrl'>): string {
+  const original = req.originalUrl ?? req.url;
+  return SENSITIVE_PATH.test(original)
+    ? '/api/public/staff-verification/[REDACTED]'
+    : req.url;
+}
+
 /**
  * Structured request logger with correlation ID and AsyncLocalStorage context.
  * LOG-01..06: Generate correlationId → attach to req + response header →
@@ -38,7 +51,7 @@ export function requestLogger(
           level,
           correlationId,
           method:        req.method,
-          url:           req.url,
+          url:           loggableUrl(req),
           statusCode:    status,
           responseTimeMs,
           timestamp:     new Date().toISOString(),

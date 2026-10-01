@@ -10,6 +10,19 @@ const nextConfig = {
       },
     ],
   },
+  // Public Staff ID Card QR landing page: keep it out of search indexes and
+  // never leak its URL onward via Referer.
+  async headers() {
+    return [
+      {
+        source: '/verify-staff',
+        headers: [
+          { key: 'X-Robots-Tag',    value: 'noindex, nofollow, noarchive' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
+    ];
+  },
 };
 
 const withSerwist = withSerwistInit({

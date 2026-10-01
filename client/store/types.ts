@@ -708,6 +708,21 @@ export interface StaffIdCardResponse {
   isNew:        boolean;
 }
 
+// Public Staff ID Card QR verification (GET /api/public/staff-verification/:token).
+// Every non-valid outcome has the same shape and carries no staff details.
+export type StaffVerificationResponse =
+  | {
+      valid:        true;
+      status:       'ACTIVE';
+      name:         string;
+      employeeId:   string; // masked — last 6 characters only
+      role:         string;
+      hospitalName: string;
+      issuedAt:     string; // YYYY-MM-DD
+      expiresAt:    string; // YYYY-MM-DD
+    }
+  | { valid: false; status: 'INACTIVE' };
+
 // ─── Packages ─────────────────────────────────────────────────────────────────
 
 export type PackageStatus    = 'ACTIVE' | 'INACTIVE';

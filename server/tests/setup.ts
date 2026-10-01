@@ -31,3 +31,5 @@ process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp_test_webhook_secret_32chars!';
 process.env.AADHAAR_ENCRYPTION_KEY      = 'dGVzdC1hYWRoYWFyLWVuY3J5cHRpb24ta2V5LTMyYiE=';
 process.env.MEDICAL_DATA_ENCRYPTION_KEY = 'dGVzdC1tZWRpY2FsLWVuY3J5cHRpb24ta2V5LTMyYiE=';
 process.env.PAYMENT_DATA_ENCRYPTION_KEY = 'dGVzdC1wYXltZW50LWVuY3J5cHRpb24ta2V5LTMyYiE=';
+// Public origin printed into Staff ID Card QR codes (test-only).
+process.env.STAFF_VERIFY_BASE_URL       = 'https://hospital-management-platform-sakt.vercel.app';
