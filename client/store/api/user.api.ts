@@ -113,6 +113,12 @@ export const userApi = baseApi.injectEndpoints({
       invalidatesTags: ['User'],
     }),
 
+    updateUserEmail: build.mutation<{ message: string }, { userId: string; email: string }>({
+      query: ({ userId, email }) => ({ url: `/api/users/${userId}`, method: 'PATCH', body: { email } }),
+      transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
+      invalidatesTags: ['User'],
+    }),
+
     deactivateUser: build.mutation<{ message: string }, string>({
       query: (userId) => ({ url: `/api/users/${userId}/deactivate`, method: 'PATCH' }),
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
@@ -136,6 +142,7 @@ export const {
   useGetUserByIdQuery,
   useCreateUserMutation,
   useUpdateUserRoleMutation,
+  useUpdateUserEmailMutation,
   useDeactivateUserMutation,
   useReactivateUserMutation,
 } = userApi;
