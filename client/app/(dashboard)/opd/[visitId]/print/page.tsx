@@ -327,7 +327,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
           </div>
 
           {/* Footer */}
-          <div className="mt-6 pt-2 border-t border-gray-200 print:border-t-0 text-center text-[10px] text-gray-500">
+          <div className="mt-6 pt-2 border-t border-gray-200 text-center text-[10px] text-gray-500 print:hidden">
             This is valid for 15 days.
           </div>
           </div>
