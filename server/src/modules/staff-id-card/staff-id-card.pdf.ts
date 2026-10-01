@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import QRCode from 'qrcode';
 import https from 'https';
 import http from 'http';
 
@@ -9,6 +10,8 @@ export interface StaffIdCardPdfOptions {
   issuedAt:        Date;
   expiresAt:       Date;
   primaryColor:    string;
+  // Public verification URL — the ONLY content encoded in the QR code.
+  verificationUrl: string;
   logoUrl?:        string | null;
   // Accepted for call-site compatibility; the card no longer renders a photo.
   profileImageUrl?: string | null;
@@ -36,8 +39,10 @@ async function fetchBuffer(url: string): Promise<Buffer | null> {
   });
 }
 
-export function buildS3Key(tenantId: string, userId: string): string {
-  return `tenants/${tenantId}/staff-id-cards/${userId}.pdf`;
+// One object per generation (never overwritten in place), so a PDF and the
+// token hash recorded alongside it can't be split apart by a concurrent regenerate.
+export function buildS3Key(tenantId: string, userId: string, generationId: string): string {
+  return `tenants/${tenantId}/staff-id-cards/${userId}/${generationId}.pdf`;
 }
 
 export function computeExpiryDate(issuedAt: Date): Date {
@@ -45,6 +50,11 @@ export function computeExpiryDate(issuedAt: Date): Date {
 }
 
 export async function buildStaffIdCardPdf(options: StaffIdCardPdfOptions): Promise<Buffer> {
+  // Build the QR matrix up front so an encoding failure rejects before any
+  // drawing starts. It is rendered as vector squares (not a raster PNG) so it
+  // stays sharp at any print resolution.
+  const qr = QRCode.create(options.verificationUrl, { errorCorrectionLevel: 'M' });
+
   const logoBuffer = options.logoUrl
     ? await fetchBuffer(options.logoUrl).catch(() => null)
     : null;
@@ -99,10 +109,38 @@ export async function buildStaffIdCardPdf(options: StaffIdCardPdfOptions): Promi
     doc.fillColor('white').fontSize(13).font('Helvetica-Bold')
       .text('STAFF ID CARD', titleX, HEADER_H / 2 - 6, { width: W - titleX - PAD, lineBreak: false });
 
-    // Body fields — full width now that there is no photo column
-    const FIELD_W = W - PAD * 2;
+    // White content area between header and footer: fields on the left,
+    // verification QR on the right, both vertically centred in it.
+    const BODY_TOP = HEADER_H;
+    const BODY_H   = H - HEADER_H - FOOTER_H;
+    const QR_SIZE  = 88;
+    const QR_GAP   = 14;
+    const qrX      = W - PAD - QR_SIZE;
+    const qrY      = BODY_TOP + (BODY_H - QR_SIZE) / 2;
+
+    // The surrounding white body (≥ 16pt on every side) doubles as the QR quiet zone.
+    const modules = qr.modules;
+    const cell    = QR_SIZE / modules.size;
+    for (let row = 0; row < modules.size; row++) {
+      let col = 0;
+      while (col < modules.size) {
+        if (!modules.get(row, col)) { col++; continue; }
+        // Merge horizontal runs into one rect so no hairline seams appear between modules.
+        const start = col;
+        while (col < modules.size && modules.get(row, col)) col++;
+        doc.rect(qrX + start * cell, qrY + row * cell, (col - start) * cell, cell);
+      }
+    }
+    doc.fill('black');
+
+    doc.fillColor('#777777').fontSize(6).font('Helvetica')
+      .text('Scan to verify', qrX, qrY + QR_SIZE + 3, { width: QR_SIZE, align: 'center', lineBreak: false });
+
+    // Body fields — left column, clear of the QR
+    const FIELD_W = qrX - QR_GAP - PAD;
     const rowH    = 30;
-    let y = HEADER_H + 14;
+    const FIELDS_H = rowH * 2 + 10 + 11; // two row gaps + last label + last value
+    let y = BODY_TOP + (BODY_H - FIELDS_H) / 2;
 
     const field = (label: string, value: string, fy: number): void => {
       doc.fillColor('#777777').fontSize(7).font('Helvetica-Bold')

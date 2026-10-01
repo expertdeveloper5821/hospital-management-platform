@@ -1,4 +1,4 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose              from 'mongoose';
 import request               from 'supertest';
 import jwt                   from 'jsonwebtoken';
@@ -32,6 +32,7 @@ import { OpdNurseAssignmentModel } from '../../../src/modules/opd/opd-nurse-assi
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { WardModel }         from '../../../src/modules/ipd/ward.model';
 import { PaymentModel }      from '../../../src/modules/payment/payment.model';
+import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { OPDVisitStatus }         from '../../../src/modules/opd/opd.types';
 import { Gender }                 from '../../../src/modules/patient/patient.types';
@@ -40,12 +41,15 @@ import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/att
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
-let mongod: MongoMemoryServer;
+let mongod: MongoMemoryReplSet;
 
+// Replica set (not a standalone mongod): DELETE /visits/:visitId removes the
+// visit and cancels its linked payment(s) in one MongoDB transaction, which
+// is only supported against a replica set.
 beforeAll(async () => {
-  mongod = await MongoMemoryServer.create();
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongod.getUri());
-});
+}, 60000);
 
 afterAll(async () => {
   await mongoose.disconnect();
@@ -388,9 +392,11 @@ describe('POST /api/opd/visits', () => {
       .send({ ...VALID_VISIT_BODY, doctorIds: ['doc-1'] });
     expect(first.status).toBe(201);
 
+    const admin      = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const adminToken = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
     await request(app)
       .patch(`/api/opd/visits/${first.body.data.visitId}/cancel`)
-      .set(bearer(token));
+      .set(bearer(adminToken));
 
     const second = await request(app)
       .post('/api/opd/visits')
@@ -1362,7 +1368,7 @@ describe('PATCH /api/opd/visits/:visitId', () => {
     expect(res.status).toBe(409);
   });
 
-  test('403 — Receptionist cannot update visit content', async () => {
+  test('403 — Receptionist cannot update clinical content (diagnosis)', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedVisit(tid, { visitId: 'OPD-RBAC0001' });
@@ -1372,7 +1378,63 @@ describe('PATCH /api/opd/visits/:visitId', () => {
     const res = await request(app)
       .patch('/api/opd/visits/OPD-RBAC0001')
       .set(bearer(token))
-      .send({ notes: 'Should fail' });
+      .send({ diagnosis: 'Should fail' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('200 — Receptionist updates notes, visit date and patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedPatient(tid, 'PAT-TEST0002');
+    await seedVisit(tid, { visitId: 'OPD-RCED0001' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const futureKey = toIstDateKey(new Date(Date.now() + 3 * 24 * 60 * 60 * 1000));
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-RCED0001')
+      .set(bearer(token))
+      .send({ notes: 'Front desk note', visitDate: futureKey, patientId: 'PAT-TEST0002' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.patientId).toBe('PAT-TEST0002');
+    expect(res.body.data.notes).toContain('Front desk note');
+    const stored = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-RCED0001' });
+    expect(stored!.patientId).toBe('PAT-TEST0002');
+    expect(toIstDateKey(stored!.visitDate)).toBe(futureKey);
+  });
+
+  test('404 — Receptionist cannot move a visit to an unknown patient', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-RCED0002' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-RCED0002')
+      .set(bearer(token))
+      .send({ patientId: 'PAT-MISSING1' });
+
+    expect(res.status).toBe(404);
+  });
+
+  test('403 — Hospital Admin cannot change the patient of a visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedPatient(tid, 'PAT-TEST0002');
+    await seedVisit(tid, { visitId: 'OPD-RCED0003' });
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-RCED0003')
+      .set(bearer(token))
+      .send({ patientId: 'PAT-TEST0002' });
 
     expect(res.status).toBe(403);
   });
@@ -1801,12 +1863,12 @@ describe('PATCH /api/opd/visits/:visitId/complete', () => {
 
 // ─── PATCH /api/opd/visits/:visitId/cancel ────────────────────────────────────
 describe('PATCH /api/opd/visits/:visitId/cancel', () => {
-  test('200 — Receptionist cancels an OPEN visit', async () => {
+  test('200 — Hospital Admin cancels an OPEN visit', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedVisit(tid, { visitId: 'OPD-CANC0010' });
-    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
-    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
 
     const res = await request(app)
       .patch('/api/opd/visits/OPD-CANC0010/cancel')
@@ -1820,14 +1882,195 @@ describe('PATCH /api/opd/visits/:visitId/cancel', () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
     await seedVisit(tid, { visitId: 'OPD-CCANC001', status: OPDVisitStatus.COMPLETED });
-    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
-    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const admin = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
 
     const res = await request(app)
       .patch('/api/opd/visits/OPD-CCANC001/cancel')
       .set(bearer(token));
 
     expect(res.status).toBe(409);
+  });
+
+  test('403 — Receptionist deletes instead of cancelling', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-CANC0011' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-CANC0011/cancel')
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+});
+
+// ─── DELETE /api/opd/visits/:visitId ──────────────────────────────────────────
+describe('DELETE /api/opd/visits/:visitId', () => {
+  test('200 — Receptionist deletes an OPEN visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DEL00001' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/opd/visits/OPD-DEL00001')
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DEL00001' })).toBeNull();
+  });
+
+  test('409 — cannot delete a COMPLETED visit', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DEL00002', status: OPDVisitStatus.COMPLETED });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/opd/visits/OPD-DEL00002')
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DEL00002' })).not.toBeNull();
+  });
+
+  test('404 — unknown visitId', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/opd/visits/OPD-MISSING')
+      .set(bearer(token));
+
+    expect(res.status).toBe(404);
+  });
+
+  test.each([UserRole.HOSPITAL_ADMIN, UserRole.DOCTOR, UserRole.NURSE])('403 — %s cannot delete a visit', async (role) => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DEL00003' });
+    const user  = await seedUser(tid, 'u@h.com', role);
+    const token = tokenFor(user._id.toString(), tid, role);
+
+    const res = await request(app)
+      .delete('/api/opd/visits/OPD-DEL00003')
+      .set(bearer(token));
+
+    expect(res.status).toBe(403);
+  });
+
+  // ── Linked payment handling ────────────────────────────────────────────────
+
+  test('200 — deleting a visit with a payment cancels (never deletes) it, excluding it from revenue and validity', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-DELPAY01' });
+    const paymentId      = await seedOpdPayment(tid, { visitId: 'OPD-DELPAY01' });
+    // Another visit's payment must be left exactly as it was.
+    const otherPaymentId = await seedOpdPayment(tid, { visitId: 'OPD-OTHER001', patientId: 'PAT-OTHER001' });
+    const rc         = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const rcToken    = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const admin      = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const adminToken = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+
+    // Before: the payment counts as revenue and grants validity.
+    const before = await request(app).get('/api/payments/summary').set(bearer(adminToken));
+    expect(before.body.data.total).toBe(1000);
+    const validBefore = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity').set(bearer(rcToken));
+    expect(validBefore.body.data.paymentRequired).toBe(false);
+
+    const res = await request(app).delete('/api/opd/visits/OPD-DELPAY01').set(bearer(rcToken));
+    expect(res.status).toBe(200);
+
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DELPAY01' })).toBeNull();
+    const cancelled = await PaymentModel.findOne({ tenantId: tid, paymentId });
+    expect(cancelled).not.toBeNull();
+    expect(cancelled!.status).toBe(PaymentStatus.CANCELLED);
+    expect(cancelled!.amount).toBe(500);                    // original transaction preserved
+    expect(cancelled!.description).toBe('OPD Consultation');
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId: otherPaymentId }))!.status)
+      .toBe(PaymentStatus.COMPLETED);
+
+    // Excluded from revenue (summary + department-wise).
+    const after = await request(app).get('/api/payments/summary').set(bearer(adminToken));
+    expect(after.body.data.total).toBe(500);
+    const byDept = await request(app).get('/api/payments/summary/by-department').set(bearer(adminToken));
+    expect(byDept.status).toBe(200);
+    expect(byDept.body.data.grandTotal).toBe(500);
+
+    // Excluded from OPD payment validity / follow-up eligibility.
+    const validAfter = await request(app)
+      .get('/api/opd/patients/PAT-TEST0001/payment-validity').set(bearer(rcToken));
+    expect(validAfter.body.data.paymentRequired).toBe(true);
+    expect(validAfter.body.data.reason).toBe('NO_PAYMENT');
+
+    // Still listed in Payments, shown as Cancelled.
+    const list = await request(app)
+      .get('/api/payments?status=CANCELLED').set(bearer(adminToken));
+    expect(list.status).toBe(200);
+    expect(list.body.data.data).toHaveLength(1);
+    expect(list.body.data.data[0].paymentId).toBe(paymentId);
+    expect(list.body.data.data[0].status).toBe(PaymentStatus.CANCELLED);
+  });
+
+  test('200 — a PENDING linked payment is cancelled too; FAILED/CANCELLED ones are left as-is', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DELPAY02' });
+    const pendingId = await seedOpdPayment(tid, { visitId: 'OPD-DELPAY02', status: PaymentStatus.PENDING });
+    const failedId  = await seedOpdPayment(tid, { visitId: 'OPD-DELPAY02', status: PaymentStatus.FAILED });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app).delete('/api/opd/visits/OPD-DELPAY02').set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId: pendingId }))!.status).toBe(PaymentStatus.CANCELLED);
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId: failedId }))!.status).toBe(PaymentStatus.FAILED);
+  });
+
+  test('409 — a COMPLETED visit is not deleted and its payment stays COMPLETED', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DELPAY03', status: OPDVisitStatus.COMPLETED });
+    const paymentId = await seedOpdPayment(tid, { visitId: 'OPD-DELPAY03' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app).delete('/api/opd/visits/OPD-DELPAY03').set(bearer(token));
+
+    expect(res.status).toBe(409);
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId }))!.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('atomic — if the payment cancellation fails, the visit is not deleted and the payment stays active', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DELPAY04' });
+    const paymentId = await seedOpdPayment(tid, { visitId: 'OPD-DELPAY04' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const spy = jest.spyOn(paymentRepository, 'cancelActiveByReference')
+      .mockRejectedValueOnce(new Error('simulated payment write failure'));
+
+    try {
+      const res = await request(app).delete('/api/opd/visits/OPD-DELPAY04').set(bearer(token));
+      expect(res.status).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DELPAY04' })).not.toBeNull();
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId }))!.status).toBe(PaymentStatus.COMPLETED);
   });
 });
 

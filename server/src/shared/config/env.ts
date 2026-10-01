@@ -60,6 +60,16 @@ export interface AppConfig {
     // rules: env only, never in source/DB, never sent to the frontend.
     paymentDataEncryptionKey: string;
   };
+  staffVerification: {
+    // Public origin printed into every Staff ID Card QR code (STAFF_VERIFY_BASE_URL).
+    // Deliberately separate from FRONTEND_URL: printed cards outlive deployments,
+    // so the domain must be an explicit, stable choice. Empty when unset — card
+    // generation then fails closed instead of guessing a domain.
+    baseUrl:     string;
+    // Dedicated, stricter per-IP limit for the unauthenticated verification route.
+    rateLimitWindowMs: number;
+    rateLimitMax:      number;
+  };
 }
 
 function parseEnvList(value?: string): string[] {
@@ -146,6 +156,11 @@ const config: AppConfig = {
     aadhaarEncryptionKey:     process.env.AADHAAR_ENCRYPTION_KEY!,
     medicalDataEncryptionKey: process.env.MEDICAL_DATA_ENCRYPTION_KEY!,
     paymentDataEncryptionKey: process.env.PAYMENT_DATA_ENCRYPTION_KEY!,
+  },
+  staffVerification: {
+    baseUrl:           (process.env.STAFF_VERIFY_BASE_URL ?? '').trim(),
+    rateLimitWindowMs: parseInt(process.env.STAFF_VERIFY_RATE_LIMIT_WINDOW_MS ?? '900000', 10),
+    rateLimitMax:      parseInt(process.env.STAFF_VERIFY_RATE_LIMIT_MAX ?? '30', 10),
   },
 };
 

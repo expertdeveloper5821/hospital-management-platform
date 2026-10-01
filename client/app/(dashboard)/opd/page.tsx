@@ -8,6 +8,7 @@ import {
   useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
+  useDeleteOPDVisitMutation,
   useGetOPDPaymentValidityQuery,
   useGetAvailableOpdNursesQuery,
   useGetDoctorNurseAssignmentsQuery,
@@ -45,6 +46,7 @@ import {
   X,
   CheckCircle,
   XCircle,
+  Trash2,
   PlayCircle,
   Search,
   ClipboardList,
@@ -74,6 +76,12 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
   });
+}
+
+// A stored visitDate (IST midnight as a UTC instant) as the YYYY-MM-DD value
+// an <input type="date"> expects, in IST regardless of the viewer's timezone.
+function toISTDateInput(iso: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 function formatINR(amount: number) {
@@ -188,7 +196,8 @@ interface VisitPanelProps {
   onUpdate: (updated: OPDVisitResponse) => void;
   canEdit: boolean;    // DOCTOR, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
-  canCancel: boolean;  // RECEPTIONIST, DOCTOR, HOSPITAL_ADMIN
+  canCancel: boolean;  // DOCTOR, HOSPITAL_ADMIN
+  canDelete: boolean;  // RECEPTIONIST (replaces Cancel for that role)
   canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
   doctorNames: (ids: string[]) => string;
   allDoctors:  UserResponse[];
@@ -202,7 +211,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 // Roles permitted to view payment details, matching the backend's GET /api/payments requireRole list.
 const PAYMENT_VIEW_ROLES = ['MANAGER', 'FINANCE_MANAGER', 'HOSPITAL_ADMIN', 'RECEPTIONIST'];
 
-function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canViewPayment, doctorNames, allDoctors, nurseNames }: VisitPanelProps) {
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canDelete, canViewPayment, doctorNames, allDoctors, nurseNames }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
   // A Nurse's Edit access is separate from `canEdit` (DOCTOR/HOSPITAL_ADMIN
@@ -214,9 +223,29 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
   const nurseNotesOnly = role === 'NURSE' && (visit.nurseIds ?? []).includes(userId ?? '');
-  // A Receptionist's Edit access is the Department/Doctor/Nurse assignment
-  // only — mirrors RECEPTIONIST_EDITABLE_FIELDS in opd.controller.ts.
+  // A Receptionist's Edit access is the Patient, Visit Date, Notes,
+  // Department/Doctor/Nurse assignment and Vitals — mirrors
+  // RECEPTIONIST_EDITABLE_FIELDS in opd.controller.ts.
   const receptionistAssignOnly = role === 'RECEPTIONIST';
+
+  // Receptionist-only Patient / Visit Date editing.
+  const [editPatient, setEditPatient] = useState<{ patientId: string; fullName?: string | null; mobileNumber?: string }>(
+    { patientId: visit.patientId, fullName: visit.fullName },
+  );
+  const [editPatientSearch,          setEditPatientSearch]          = useState('');
+  const [debouncedEditPatientSearch, setDebouncedEditPatientSearch] = useState('');
+  const [editPatientPicking,         setEditPatientPicking]         = useState(false);
+  const [editVisitDate,              setEditVisitDate]              = useState(toISTDateInput(visit.visitDate));
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedEditPatientSearch(editPatientSearch), 400);
+    return () => clearTimeout(t);
+  }, [editPatientSearch]);
+  const { data: editPatientData, isFetching: fetchingEditPatients } = useSearchPatientsQuery(
+    { q: debouncedEditPatientSearch || undefined, limit: 10 },
+    { skip: !receptionistAssignOnly || !debouncedEditPatientSearch },
+  );
+  const editPatientResults = editPatientData?.data ?? [];
+  const editPatientChanged = editPatient.patientId !== visit.patientId;
 
   // Look up the payment linked directly to this visit (referenceId) rather than
   // guessing from patientId + calendar date — a patient can have other payments
@@ -285,11 +314,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [mode,              setMode]              = useState<'view' | 'edit' | 'complete'>('view');
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
   const [cancelVisit,   { isLoading: cancelling }] = useCancelOPDVisitMutation();
+  const [deleteVisit,   { isLoading: deleting   }] = useDeleteOPDVisitMutation();
 
   // Waiting → In Consultation. Keeps the panel open on the updated visit so the
   // doctor can go straight on to Complete.
@@ -317,19 +348,35 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       return;
     }
     if (receptionistAssignOnly) {
-      // Only changed assignments (plus vitals) are sent — the backend rejects
-      // any other field from a Receptionist (see RECEPTIONIST_EDITABLE_FIELDS).
-      const receptionistVitals = parseVitalsInputs(vitalsForm);
-      if ('error' in receptionistVitals) {
+      // Only changed patient/date/notes/assignments (plus vitals) are sent —
+      // the backend rejects any other field from a Receptionist (see
+      // RECEPTIONIST_EDITABLE_FIELDS). Vitals are shared per patient, so they
+      // are only sent when the patient is unchanged — after a patient change
+      // the visit picks up the new patient's own latest readings server-side.
+      const receptionistVitals = editPatientChanged ? null : parseVitalsInputs(vitalsForm);
+      if (receptionistVitals && 'error' in receptionistVitals) {
         setError(receptionistVitals.error);
+        return;
+      }
+      if (!editVisitDate) {
+        setError('Visit date is required.');
+        return;
+      }
+      const visitDateChanged = editVisitDate !== toISTDateInput(visit.visitDate);
+      if (visitDateChanged && editVisitDate < todayISO()) {
+        setError('Past dates are not allowed for OPD visits.');
         return;
       }
       const changed = (next: string[], prev: string[]) =>
         next.length !== prev.length || next.some((id) => !prev.includes(id));
+      const notesChanged = (form.notes ?? '') !== (visit.notes ?? '');
       const body: UpdateOPDVisitRequest = {
+        ...(editPatientChanged ? { patientId: editPatient.patientId } : {}),
+        ...(visitDateChanged   ? { visitDate: editVisitDate }         : {}),
+        ...(notesChanged       ? { notes:     form.notes ?? '' }      : {}),
         ...(changed(editDoctorIds, visit.doctorIds ?? []) ? { doctorIds: editDoctorIds } : {}),
         ...(changed(editNurseIds,  visit.nurseIds  ?? []) ? { nurseIds:  editNurseIds  } : {}),
-        vitals: receptionistVitals.vitals,
+        ...(receptionistVitals ? { vitals: receptionistVitals.vitals } : {}),
       };
       updatingRef.current = true;
       try {
@@ -453,6 +500,10 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     setEditAddDoctorId('');
     setEditNurseIds(visit.nurseIds ?? []);
     setEditAddNurseId('');
+    setEditPatient({ patientId: visit.patientId, fullName: visit.fullName });
+    setEditPatientSearch('');
+    setEditPatientPicking(false);
+    setEditVisitDate(toISTDateInput(visit.visitDate));
     setMode('edit');
   }
 
@@ -474,6 +525,18 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     } catch (err: any) {
       setShowCancelConfirm(false);
       setError(err?.data?.message ?? 'Failed to cancel visit.');
+    }
+  }
+
+  async function handleDeleteConfirm() {
+    setError('');
+    try {
+      await deleteVisit(visit.visitId).unwrap();
+      setShowDeleteConfirm(false);
+      onClose();
+    } catch (err: any) {
+      setShowDeleteConfirm(false);
+      setError(err?.data?.message ?? 'Failed to delete visit.');
     }
   }
 
@@ -754,20 +817,108 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               {vitalsFields}
             </form>
           )}
-          {/* Edit mode — Receptionist gets an assignment-only form:
-              Department/Doctors/Nurses are editable, everything else is
-              shown read-only and never submitted (see handleUpdate). */}
+          {/* Edit mode — Receptionist form: Patient, Visit Date, Notes,
+              Department/Doctors/Nurses and Vitals are editable; diagnosis and
+              prescription are shown read-only and never submitted (see
+              handleUpdate). */}
           {mode === 'edit' && receptionistAssignOnly && (
             <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
-              <p className="text-xs text-muted-foreground">Only the department, doctor, nurse and vitals fields can be edited.</p>
+              {/* <p className="text-xs text-muted-foreground">Only the patient, visit date, notes, department, doctor, nurse and vitals fields can be edited.</p> */}
+              <div className="space-y-1.5">
+                <Label>Patient</Label>
+                {!editPatientPicking ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0 rounded-md border px-3 py-2">
+                      <p className="text-sm font-medium truncate">{editPatient.fullName ?? editPatient.patientId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {editPatient.patientId}{editPatient.mobileNumber ? ` · ${editPatient.mobileNumber}` : ''}
+                      </p>
+                    </div>
+                    {/* Matches the Add Doctor / Add Nurse button placement. */}
+                    <Button type="button" className="shrink-0 h-10" onClick={() => setEditPatientPicking(true)}>
+                      Change
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        className="pl-9"
+                        placeholder="Search patient by name or mobile…"
+                        value={editPatientSearch}
+                        onChange={(e) => setEditPatientSearch(e.target.value)}
+                        autoFocus
+                      />
+                      {debouncedEditPatientSearch && (
+                        <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                          {fetchingEditPatients && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+                          )}
+                          {!fetchingEditPatients && editPatientResults.length === 0 && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
+                          )}
+                          {editPatientResults.map((p) => (
+                            <button
+                              key={p.patientId}
+                              type="button"
+                              className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                              onClick={() => {
+                                setEditPatient({ patientId: p.patientId, fullName: p.fullName, mobileNumber: p.mobileNumber });
+                                setEditPatientSearch('');
+                                setEditPatientPicking(false);
+                              }}
+                            >
+                              <span className="text-sm font-medium">{p.fullName}</span>
+                              <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0 h-10"
+                      onClick={() => { setEditPatientSearch(''); setEditPatientPicking(false); }}
+                    >
+                      Keep
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-date">Visit Date</Label>
+                <Input
+                  id="ep-date"
+                  type="date"
+                  min={todayISO()}
+                  value={editVisitDate}
+                  onChange={(e) => setEditVisitDate(e.target.value)}
+                  className="relative pr-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-3 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:bottom-0 [&::-webkit-calendar-picker-indicator]:my-auto [&::-webkit-calendar-picker-indicator]:h-5 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                />
+              </div>
               {departmentDoctorFields}
               {nurseAssignFields}
               {f('Diagnosis',    visit.diagnosis)}
               {f('Prescription', visit.prescription ? (
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
-              {f('Notes',        <RichTextDisplay value={visit.notes} />)}
-              {vitalsFields}
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-notes">Notes</Label>
+                <RichTextEditor
+                  id="ep-notes"
+                  rows={2}
+                  value={form.notes ?? ''}
+                  onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
+                  maxLength={2000}
+                />
+              </div>
+              {editPatientChanged ? (
+                <p className="pt-2 border-t text-xs text-muted-foreground">
+                  Vitals will load from the newly selected patient&apos;s records after saving.
+                </p>
+              ) : vitalsFields}
             </form>
           )}
           {mode === 'edit' && !nurseNotesOnly && !receptionistAssignOnly && (
@@ -910,6 +1061,17 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
                 )}
+                {canDelete && (
+                  <Button
+                    variant="destructive"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {deleting ? '…' : 'Delete Visit'}
+                  </Button>
+                )}
               </div>
             )}
             {mode === 'edit' && (
@@ -950,6 +1112,32 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               </Button>
               <Button variant="destructive" onClick={handleCancelConfirm} disabled={cancelling}>
                 {cancelling ? 'Cancelling…' : 'Yes, Cancel Visit'}
+              </Button>
+            </div>
+          </div>
+        </DialogOverlay>
+      )}
+
+      {showDeleteConfirm && (
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+          <div role="alertdialog" aria-labelledby="delete-visit-title" className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <Trash2 className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h2 id="delete-visit-title" className="font-semibold">Delete Visit?</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This will permanently delete OPD visit{' '}
+                  <span className="font-medium text-foreground">{visit.queueNumber > 0 ? `#${visit.queueNumber}` : visit.visitId}</span>{' '}
+                  for <span className="font-medium text-foreground">{visit.fullName ?? visit.patientId}</span>. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+                Keep Visit
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Yes, Delete Visit'}
               </Button>
             </div>
           </div>
@@ -1618,7 +1806,9 @@ export default function OPDPage() {
   const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
   const canEdit        = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canComplete    = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canCancel      = ['RECEPTIONIST', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canCancel      = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  // RECEPTIONIST deletes instead of cancelling (DELETE /api/opd/visits/:visitId).
+  const canDelete      = role === 'RECEPTIONIST';
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role ?? '');
 
   // Queue stats
@@ -1809,6 +1999,7 @@ export default function OPDPage() {
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}
+          canDelete={canDelete}
           canViewPayment={canViewPayment}
           doctorNames={doctorNames}
           allDoctors={doctors}

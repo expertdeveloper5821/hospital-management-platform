@@ -5,7 +5,7 @@ import { ipdService } from '../ipd/ipd.service';
 import { ipdRepository } from '../ipd/ipd.repository';
 import { patientRepository } from '../patient/patient.repository';
 import { paymentRepository } from '../payment/payment.repository';
-import { PaymentReferenceType } from '../payment/payment.types';
+import { PaymentReferenceType, PaymentStatus } from '../payment/payment.types';
 import { departmentService } from '../department/department.service';
 import { departmentRepository } from '../department/department.repository';
 import { tenantService } from '../tenant/tenant.service';
@@ -184,11 +184,12 @@ function buildOpdParchaOverlay(
   return {
     fieldRows,
     vitals,
+    // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
       { heading: 'Diagnosis',    text: visit.diagnosis ?? '',                   weight: 1 },
       { heading: 'Prescription', text: visit.prescription ?? '',                weight: 5 },
       { heading: 'Notes',        text: stripRichTextTags(visit.notes ?? ''),    weight: 3 },
-    ],
+    ].filter((section) => section.text.trim() !== ''),
     footerText: 'This is valid for 15 days.',
   };
 }
@@ -363,6 +364,18 @@ export class OPDService {
     const previousValue: Record<string, unknown> = {};
     const newValue:      Record<string, unknown> = {};
 
+    // Re-pointing the visit at a different patient (Receptionist-only — the
+    // controller rejects patientId from every other role).
+    const patientChanged     = data.patientId !== undefined && data.patientId !== visit.patientId;
+    const effectivePatientId = patientChanged ? data.patientId! : visit.patientId;
+    if (patientChanged) {
+      const newPatient = await patientRepository.findByPatientId(tenantId, effectivePatientId);
+      if (!newPatient) throw new NotFoundError('Patient not found');
+      updateData.patientId    = effectivePatientId;
+      previousValue.patientId = visit.patientId;
+      newValue.patientId      = effectivePatientId;
+    }
+
     const fields: Array<keyof UpdateOPDVisitRequest & keyof IOPDVisit> =
       ['doctorIds', 'diagnosis', 'prescription', 'notes'];
     for (const key of fields) {
@@ -412,12 +425,17 @@ export class OPDService {
       // properties, so `{ ...visit.vitals }` silently picks up Mongoose's
       // internal bookkeeping ($__parent, _doc, …) instead of the actual
       // values. Read each field explicitly instead of spreading it.
+      // Vitals are shared per patient — after a patient change the merge base
+      // is the new patient's latest readings, never the previous patient's.
+      const baseVitals = patientChanged
+        ? (await findLatestPatientVitals(tenantId, effectivePatientId)) ?? DEFAULT_VITALS
+        : visit.vitals;
       const existingVitals: OPDVitals = {
-        weight:          visit.vitals?.weight          ?? null,
-        height:          visit.vitals?.height          ?? null,
-        bloodPressure:   visit.vitals?.bloodPressure   ?? null,
-        sugar:           visit.vitals?.sugar           ?? null,
-        bodyTemperature: visit.vitals?.bodyTemperature ?? null,
+        weight:          baseVitals?.weight          ?? null,
+        height:          baseVitals?.height          ?? null,
+        bloodPressure:   baseVitals?.bloodPressure   ?? null,
+        sugar:           baseVitals?.sugar           ?? null,
+        bodyTemperature: baseVitals?.bodyTemperature ?? null,
       };
       const mergedVitals: OPDVitals = { ...existingVitals, ...data.vitals };
       updateData.vitals = mergedVitals;
@@ -435,6 +453,11 @@ export class OPDService {
         previousValue.vitals = existingVitals;
         newValue.vitals      = mergedVitals;
       }
+    } else if (patientChanged) {
+      // No vitals sent with the patient change — the visit picks up the new
+      // patient's latest readings, same as a freshly created visit would.
+      const latestVitals = await findLatestPatientVitals(tenantId, effectivePatientId);
+      updateData.vitals = latestVitals ?? { ...DEFAULT_VITALS };
     }
 
     // Re-stamp departmentId whenever the doctor assignment actually changes —
@@ -474,11 +497,11 @@ export class OPDService {
 
     // Re-run the duplicate-appointment guard whenever the doctor assignment or
     // date is actually changing — an edit can create the same clash a create can.
-    if (doctorIdsChanged || data.visitDate !== undefined) {
+    if (doctorIdsChanged || data.visitDate !== undefined || patientChanged) {
       const effectiveDoctorIds = data.doctorIds ?? visit.doctorIds;
       const effectiveDate      = (updateData.visitDate as Date | undefined) ?? visit.visitDate;
       const duplicate = await opdRepository.findActiveDuplicate(
-        tenantId, visit.patientId, effectiveDate, effectiveDoctorIds, visitId,
+        tenantId, effectivePatientId, effectiveDate, effectiveDoctorIds, visitId,
       );
       if (duplicate) {
         throw new ConflictError(
@@ -497,9 +520,10 @@ export class OPDService {
     if (!updated) throw new NotFoundError('OPD visit not found');
 
     // Vitals are shared per patient — write the merged readings through to
-    // every OPD visit and IPD admission of this patient.
-    if (updateData.vitals) {
-      await syncPatientVitals(tenantId, visit.patientId, updateData.vitals);
+    // every OPD visit and IPD admission of this patient. Skipped when they
+    // were only re-seeded from the new patient's own latest readings.
+    if (data.vitals !== undefined && updateData.vitals) {
+      await syncPatientVitals(tenantId, effectivePatientId, updateData.vitals);
     }
 
     // Skip the audit write entirely for a genuine no-op save (edit opened
@@ -693,6 +717,58 @@ export class OPDService {
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
     return withFullName(updated, patient?.fullName);
+  }
+
+  // Receptionist-only (route-level requireRole) — replaces Cancel for that
+  // role. Permanently removes a visit that hasn't been finalized yet; a
+  // COMPLETED/CANCELLED/NO_SHOW visit is part of the record and stays.
+  // Any active payment linked to the visit is not deleted but CANCELLED in the
+  // same transaction as the visit delete — kept for history, excluded from
+  // revenue and OPD payment validity.
+  async deleteVisit(tenantId: string, visitId: string, deletedBy: string): Promise<void> {
+    const visit = await opdRepository.findByVisitId(tenantId, visitId);
+    if (!visit) throw new NotFoundError('OPD visit not found');
+
+    if (TERMINAL_STATUSES.has(visit.status)) {
+      throw new ConflictError(`Cannot delete a visit with status ${visit.status}`);
+    }
+
+    const { deleted, cancelledPayments } =
+      await opdRepository.deleteActiveByVisitIdCancellingPayments(tenantId, visitId);
+    if (!deleted) throw new ConflictError('This visit can no longer be deleted.');
+
+    // Status only — never the encrypted description/transactionId.
+    for (const payment of cancelledPayments) {
+      try {
+        await auditService.log({
+          entityType:    AuditEntityType.PAYMENT_RECORD,
+          entityId:      payment.paymentId,
+          action:        'UPDATE',
+          userId:        deletedBy,
+          tenantId,
+          previousValue: { status: payment.status },
+          newValue:      { status: PaymentStatus.CANCELLED, reason: 'OPD_VISIT_DELETED', visitId },
+        });
+      } catch { /* swallow — audit must not undo the committed cancellation */ }
+    }
+
+    // Identifiers/status only — never the encrypted clinical fields.
+    await auditService.log({
+      entityType:    AuditEntityType.OPD_VISIT,
+      entityId:      visitId,
+      action:        'DELETE',
+      userId:        deletedBy,
+      tenantId,
+      previousValue: {
+        visitId,
+        patientId:   visit.patientId,
+        status:      visit.status,
+        visitDate:   visit.visitDate,
+        queueNumber: visit.queueNumber,
+        doctorIds:   visit.doctorIds,
+        nurseIds:    visit.nurseIds,
+      },
+    });
   }
 
   async getQueue(

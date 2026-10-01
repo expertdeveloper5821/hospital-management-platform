@@ -30,6 +30,7 @@ jest.mock('@/store/api/opd.api', () => ({
     { isLoading: false },
   ],
   useCancelOPDVisitMutation: () => [jest.fn(), { isLoading: false }],
+  useDeleteOPDVisitMutation: () => [jest.fn(), { isLoading: false }],
   // Mirrors RTK Query's real `skip` behaviour (data is undefined until a
   // patient is actually selected) so the component's "reset on patient
   // change" and "sync to validity result" effects interact the same way
