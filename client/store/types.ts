@@ -49,8 +49,7 @@ export interface ChangePasswordRequest {
 }
  
 export interface ForgotPasswordRequest {
-  email:    string;
-  tenantId: string; // required by backend schema
+  email: string;
 }
  
 export interface ResetPasswordRequest {
