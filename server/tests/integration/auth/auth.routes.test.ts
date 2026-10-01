@@ -269,12 +269,13 @@ describe('POST /api/auth/forgot-password', () => {
     expect(res.body.status).toBe('success');
   });
 
-  test('400 — missing tenantId', async () => {
+  test('200 — succeeds when tenantId is omitted (finds user across tenants)', async () => {
     const res = await request(app)
       .post('/api/auth/forgot-password')
       .send({ email: 'user@example.com' });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('success');
   });
 
   test('400 — invalid email format', async () => {

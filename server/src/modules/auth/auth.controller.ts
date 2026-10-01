@@ -20,7 +20,7 @@ const changePasswordSchema = z.object({
 
 const forgotPasswordSchema = z.object({
   email:    z.string().email().max(254),
-  tenantId: z.string().min(1),
+  tenantId: z.string().min(1).optional(),
 });
 
 const resetPasswordSchema = z.object({

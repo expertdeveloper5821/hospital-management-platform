@@ -18,13 +18,13 @@ import { LoginRequest, LoginResponse, ChangePasswordResponse } from './auth.type
 import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_WINDOW_MS   = 15 * 60 * 1000; // 15 minutes
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 export class AuthService {
   async login(data: LoginRequest): Promise<LoginResponse> {
     const { email, password, tenantId: inputTenantId, isSuperAdmin = false } = data;
-    
+
     const account = isSuperAdmin
       ? await authRepository.findSuperAdminByEmail(email)
       : null;
@@ -36,7 +36,7 @@ export class AuthService {
       : null;
 
     const record = account ?? user;
-   
+
     if (!record) {
       // FR-05.2: Never reveal whether email or password was incorrect
       throw new UnauthorizedError('Invalid credentials');
@@ -62,10 +62,10 @@ export class AuthService {
           await emailService.sendAccountLockEmail(record.email);
           await auditService.log({
             entityType: AuditEntityType.AUTH,
-            entityId:   record._id.toString(),
-            action:     'LOCKOUT',
-            userId:     record._id.toString(),
-            tenantId:   'tenantId' in record ? (record as { tenantId: string }).tenantId : null,
+            entityId: record._id.toString(),
+            action: 'LOCKOUT',
+            userId: record._id.toString(),
+            tenantId: 'tenantId' in record ? (record as { tenantId: string }).tenantId : null,
           });
           throw new UnauthorizedError('Account locked due to too many failed attempts. Check your email.');
         }
@@ -79,8 +79,8 @@ export class AuthService {
       throw new UnauthorizedError('Account is deactivated');
     }
 
-    const userId   = record._id.toString();
-    const role     = isSuperAdmin ? UserRole.SUPER_ADMIN : (record as { role: UserRole }).role;
+    const userId = record._id.toString();
+    const role = isSuperAdmin ? UserRole.SUPER_ADMIN : (record as { role: UserRole }).role;
     const tenantId = isSuperAdmin ? null : (record as { tenantId: string }).tenantId;
     const isFirstLogin = 'isFirstLogin' in record ? (record as { isFirstLogin: boolean }).isFirstLogin : false;
 
@@ -91,8 +91,8 @@ export class AuthService {
 
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   userId,
-      action:     'LOGIN',
+      entityId: userId,
+      action: 'LOGIN',
       userId,
       tenantId,
     });
@@ -107,10 +107,10 @@ export class AuthService {
       if (expiryMs > 0) addToDenylist(token, expiryMs);
       await auditService.log({
         entityType: AuditEntityType.AUTH,
-        entityId:   decoded.userId,
-        action:     'LOGOUT',
-        userId:     decoded.userId,
-        tenantId:   decoded.tenantId,
+        entityId: decoded.userId,
+        action: 'LOGOUT',
+        userId: decoded.userId,
+        tenantId: decoded.tenantId,
       });
     } catch {
       // Token already invalid — logout is idempotent
@@ -137,8 +137,8 @@ export class AuthService {
 
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   userId,
-      action:     'PASSWORD_RESET',
+      entityId: userId,
+      action: 'PASSWORD_RESET',
       userId,
       tenantId,
     });
@@ -151,12 +151,17 @@ export class AuthService {
     return { token };
   }
 
-  async forgotPassword(email: string, tenantId: string): Promise<void> {
-    const user = await authRepository.findUserByEmail(tenantId, email);
+  async forgotPassword(email: string, tenantId?: string): Promise<void> {
+    const user = tenantId
+      ? await authRepository.findUserByEmail(tenantId, email)
+      : await authRepository.findUserByEmailAnyTenant(email);
 
     if (!user) {
       // Detect setup-not-completed: tenant exists with this adminEmail but no user record yet
-      const tenant = await tenantRepository.findById(tenantId);
+      const tenant = tenantId
+        ? await tenantRepository.findById(tenantId)
+        : await tenantRepository.findByAdminEmail(email);
+
       if (tenant && tenant.adminEmail === email.toLowerCase()) {
         throw new ValidationError(
           'Your account setup is not complete. Please check your email for the setup link, or ask your administrator to resend it.',
@@ -166,11 +171,13 @@ export class AuthService {
       return;
     }
 
-    const token  = crypto.randomBytes(32).toString('hex');
+    const token = crypto.randomBytes(32).toString('hex');
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await authRepository.saveResetToken(user._id.toString(), token, expiry);
 
     const resetLink = `${getFrontendBaseUrl()}/reset-password?token=${token}`;
+    console.log(`\n🔗 [RESET LINK] Generated for ${email}:\n${resetLink}\n`);
+
     await emailService.sendPasswordResetEmail(email, resetLink);
   }
 
@@ -183,10 +190,10 @@ export class AuthService {
 
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   user._id.toString(),
-      action:     'PASSWORD_RESET',
-      userId:     user._id.toString(),
-      tenantId:   user.tenantId,
+      entityId: user._id.toString(),
+      action: 'PASSWORD_RESET',
+      userId: user._id.toString(),
+      tenantId: user.tenantId,
     });
   }
 
@@ -216,11 +223,11 @@ export class AuthService {
 
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   userId,
-      action:     'PASSWORD_RESET',
+      entityId: userId,
+      action: 'PASSWORD_RESET',
       userId,
-      tenantId:   null,
-      newValue:   { field: 'password', changed: true },
+      tenantId: null,
+      newValue: { field: 'password', changed: true },
     });
   }
 
@@ -231,18 +238,18 @@ export class AuthService {
     // Never reveal whether the email maps to a super admin (FR-05.8).
     if (!admin) return;
 
-    const token  = crypto.randomBytes(32).toString('hex');
+    const token = crypto.randomBytes(32).toString('hex');
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await authRepository.saveSuperAdminResetToken(admin._id.toString(), token, expiry);
 
     // Record the request for security traceability (a reset token was persisted).
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   admin._id.toString(),
-      action:     'UPDATE',
-      userId:     admin._id.toString(),
-      tenantId:   null,
-      newValue:   { event: 'super_admin_password_reset_requested' },
+      entityId: admin._id.toString(),
+      action: 'UPDATE',
+      userId: admin._id.toString(),
+      tenantId: null,
+      newValue: { event: 'super_admin_password_reset_requested' },
     });
 
     const resetLink = `${getFrontendBaseUrl()}/super-admin/reset-password?token=${token}`;
@@ -258,10 +265,10 @@ export class AuthService {
 
     await auditService.log({
       entityType: AuditEntityType.AUTH,
-      entityId:   admin._id.toString(),
-      action:     'PASSWORD_RESET',
-      userId:     admin._id.toString(),
-      tenantId:   null,
+      entityId: admin._id.toString(),
+      action: 'PASSWORD_RESET',
+      userId: admin._id.toString(),
+      tenantId: null,
     });
   }
 
