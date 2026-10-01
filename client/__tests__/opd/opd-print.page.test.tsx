@@ -171,13 +171,23 @@ describe('OPD Parcha print page — Diagnosis/Prescription/Notes', () => {
     expect(screen.getByText('Follow up in a week')).toBeInTheDocument();
   });
 
-  test('a visit with no diagnosis/prescription/notes yet still renders the labelled, blank sections', () => {
+  test('a visit with no diagnosis/prescription/notes yet hides all three sections', () => {
     setup(); // all three null on BASE_VISIT
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
-    expect(screen.getByText('Diagnosis')).toBeInTheDocument();
+    expect(screen.queryByText('Diagnosis')).not.toBeInTheDocument();
+    expect(screen.queryByText('Prescription')).not.toBeInTheDocument();
+    expect(screen.queryByText('Notes')).not.toBeInTheDocument();
+  });
+
+  test('only the sections with data render — an empty Diagnosis is skipped and Prescription moves up', () => {
+    setup({ prescription: 'Paracetamol 500mg' });
+    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    expect(screen.queryByText('Diagnosis')).not.toBeInTheDocument();
     expect(screen.getByText('Prescription')).toBeInTheDocument();
-    expect(screen.getByText('Notes')).toBeInTheDocument();
+    expect(screen.getByText('Paracetamol 500mg')).toBeInTheDocument();
+    expect(screen.queryByText('Notes')).not.toBeInTheDocument();
   });
 
   test('re-rendering with an updated visit (e.g. after a fresh fetch post-edit) reflects the new values', () => {

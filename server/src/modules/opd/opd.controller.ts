@@ -49,6 +49,9 @@ const vitalsSchema = z.object({
 }).optional();
 
 const updateVisitSchema = z.object({
+  // Re-pointing a visit at a different patient — Receptionist-only (see
+  // RECEPTIONIST_EDITABLE_FIELDS / updateVisit below).
+  patientId:      z.string().min(1).optional(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   nurseIds:       z.array(z.string().min(1)).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
@@ -224,11 +227,16 @@ export async function getParchaPdf(req: Request, res: Response, next: NextFuncti
 // further per-field check is needed to keep Manager/etc. off vitals.
 const NURSE_EDITABLE_FIELDS = new Set(['notes', 'vitals']);
 
-// A Receptionist's Edit access is the doctor/nurse assignment (department
-// follows the doctors — see OPDService.updateVisit) plus vitals. Reassigning
-// nurses on an existing visit is also open to DOCTOR/HOSPITAL_ADMIN (full edit
-// access); a Nurse is still kept off it by NURSE_EDITABLE_FIELDS.
-const RECEPTIONIST_EDITABLE_FIELDS = new Set(['doctorIds', 'nurseIds', 'vitals']);
+// A Receptionist's Edit access is the patient, visit date, notes, the
+// doctor/nurse assignment (department follows the doctors — see
+// OPDService.updateVisit) plus vitals. Reassigning nurses on an existing visit
+// is also open to DOCTOR/HOSPITAL_ADMIN (full edit access); a Nurse is still
+// kept off it by NURSE_EDITABLE_FIELDS.
+const RECEPTIONIST_EDITABLE_FIELDS = new Set(['patientId', 'visitDate', 'notes', 'doctorIds', 'nurseIds', 'vitals']);
+
+// Changing which patient a visit belongs to is a Receptionist-only correction
+// — every other role's edit access is unchanged and never includes it.
+const PATIENT_EDIT_ROLES: ReadonlySet<UserRole> = new Set([UserRole.RECEPTIONIST]);
 
 export async function updateVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -243,8 +251,11 @@ export async function updateVisit(req: Request, res: Response, next: NextFunctio
     } else if (req.user!.role === UserRole.RECEPTIONIST) {
       const disallowed = Object.keys(body.data).filter((key) => !RECEPTIONIST_EDITABLE_FIELDS.has(key));
       if (disallowed.length > 0) {
-        throw new ForbiddenError('Receptionists may only update the doctor, nurse and department assignment and vitals for an OPD visit.');
+        throw new ForbiddenError('Receptionists may only update the patient, visit date, notes, doctor, nurse and department assignment and vitals for an OPD visit.');
       }
+    }
+    if (body.data.patientId !== undefined && !PATIENT_EDIT_ROLES.has(req.user!.role)) {
+      throw new ForbiddenError('You are not allowed to change the patient of an OPD visit.');
     }
 
     const tenantId = req.user!.tenantId!;
@@ -305,6 +316,16 @@ export async function cancelVisit(req: Request, res: Response, next: NextFunctio
       scopedPatientIds,
     );
     res.status(200).json({ status: 'success', data: toResponse(visit) });
+  } catch (err) { next(err); }
+}
+
+// DELETE /api/opd/visits/:visitId — Receptionist-only (route-level
+// requireRole); replaces Cancel for that role. Permanently removes the visit.
+export async function deleteVisit(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const tenantId = req.user!.tenantId!;
+    await opdService.deleteVisit(tenantId, req.params.visitId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: null });
   } catch (err) { next(err); }
 }
 

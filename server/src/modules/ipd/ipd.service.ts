@@ -213,7 +213,7 @@ function buildIpdParchaOverlay(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
   );
   const notesText = sortedNotes.length === 0
-    ? 'No progress notes recorded.'
+    ? ''
     : sortedNotes.map((n) => {
         const author = staffNameMap.get(n.doctorId) ?? 'Staff';
         return `${formatParchaDateTime(n.timestamp)} — ${author}\n${stripRichTextTags(n.note)}`;
@@ -222,10 +222,11 @@ function buildIpdParchaOverlay(
   return {
     fieldRows,
     vitals,
+    // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
-      { heading: 'Progress Notes', text: notesText, weight: 1 },
-      { heading: 'Prescription',   text: admission.prescription || 'No prescription recorded.', weight: 0.5 },
-    ],
+      { heading: 'Progress Notes', text: notesText,                   weight: 1 },
+      { heading: 'Prescription',   text: admission.prescription ?? '', weight: 0.5 },
+    ].filter((section) => section.text.trim() !== ''),
     footerText: `Generated on ${formatParchaDateTime(new Date())}`,
   };
 }

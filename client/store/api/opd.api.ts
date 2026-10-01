@@ -67,6 +67,14 @@ export const opdApi = baseApi.injectEndpoints({
       invalidatesTags: ['OPD'],
     }),
 
+    // DELETE /api/opd/visits/:visitId — Receptionist-only; replaces Cancel
+    // for that role. Also cancels the visit's linked payment(s) server-side,
+    // so cached payment lists/revenue are refetched too.
+    deleteOPDVisit: build.mutation<void, string>({
+      query: (visitId) => ({ url: `/api/opd/visits/${visitId}`, method: 'DELETE' }),
+      invalidatesTags: ['OPD', 'Payment'],
+    }),
+
     getOPDPatientHistory: build.query<OPDPatientHistory, {
       patientId:  string;
       page?:      number;
@@ -161,6 +169,7 @@ export const {
   useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
+  useDeleteOPDVisitMutation,
   useGetOPDPatientHistoryQuery,
   useGetOPDPaymentValidityQuery,
   useGetAvailableOpdNursesQuery,
