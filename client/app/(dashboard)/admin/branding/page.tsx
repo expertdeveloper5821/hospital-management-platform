@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input }  from '@/components/ui/input';
 import { Label }  from '@/components/ui/label';
 import { Upload } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 export default function BrandingPage() {
   const dispatch = useAppDispatch();
@@ -116,7 +117,7 @@ export default function BrandingPage() {
         </p>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6">
+      <NavForm onSubmit={handleSave} className="space-y-6">
         {/* Logo */}
         <div className="space-y-3">
           <Label>Hospital Logo</Label>
@@ -211,7 +212,7 @@ export default function BrandingPage() {
             {saving ? 'Saving…' : 'Save Branding'}
           </Button>
         </div>
-      </form>
+      </NavForm>
 
       <ParchaTemplateSection tenantId={tenantId} />
       <OpdSettingsSection tenantId={tenantId} />
@@ -471,7 +472,7 @@ function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
-        <form onSubmit={handleSave} className="space-y-4">
+        <NavForm onSubmit={handleSave} autoFocusFirstField={false} className="space-y-4">
           <div className="space-y-2 max-w-xs">
             <Label htmlFor="opd-validity-days">Validity Period (days)</Label>
             <Input
@@ -498,7 +499,7 @@ function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
               {saving ? 'Saving…' : 'Save Validity Period'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       )}
     </div>
   );

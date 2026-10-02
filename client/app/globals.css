@@ -191,4 +191,25 @@
     border-radius: 0;
     break-after: avoid;
   }
+
+  /* Mobile print (`.parcha-mobile` is set only on touch devices by the OPD/
+     IPD print pages). The desktop sheet is exactly 297mm tall (35mm top pad +
+     242mm content + 20mm bottom pad), which only fits when the browser honours
+     `@page { size: A4; margin: 0 }` — mobile print services don't, so the
+     overflow spilled onto a second page. Here the 35mm/20mm padding is kept
+     as-is and only the content area shrinks to its natural height, so the
+     whole slip fits one page with ≥20mm blank below the signature. `slice`
+     stops the padding being cloned onto any continuation page. */
+  .parcha-sheet.parcha-mobile {
+    -webkit-box-decoration-break: slice;
+    box-decoration-break: slice;
+  }
+  .parcha-mobile .parcha-content {
+    min-height: 0;
+  }
+  /* Overrides the OPD clinical column's inline 150mm min-height; each
+     Diagnosis/Prescription/Notes field keeps its own writing space. */
+  .parcha-mobile .parcha-fill {
+    min-height: 0 !important;
+  }
 }

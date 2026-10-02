@@ -115,9 +115,9 @@ export class PdfService {
       doc.fillColor('#111111').fontSize(12).font('Helvetica-Bold')
         .text(data.hospitalName, M, 14, { width: NAME_W, lineBreak: true });
 
-      // ── Patient ID (below hospital name) ─────────────────────────────────────
+      // ── UHID (below hospital name) ───────────────────────────────────────────
       doc.fillColor('#555555').fontSize(8).font('Helvetica')
-        .text(`ID: ${data.patientId}`, M, 34, { width: NAME_W, lineBreak: false });
+        .text(`UHID: ${data.patientId}`, M, 34, { width: NAME_W, lineBreak: false });
 
       // ── Title: Medical Identification Card ───────────────────────────────────
       const TITLE_Y = PH_Y + PH_H + 5;   // 81
@@ -298,7 +298,7 @@ export class PdfService {
       };
 
       row('Patient Name:', data.patientName, y);  y += 18;
-      row('Patient ID:',   data.patientId,   y);
+      row('UHID:',         data.patientId,   y);
 
       // ── Divider ───────────────────────────────────────────────────────────────
       y += 22;

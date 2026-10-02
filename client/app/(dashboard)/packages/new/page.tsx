@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CharCounter } from '@/components/ui/char-counter';
+import { NavForm } from '@/components/ui/form';
 
 export default function NewPackagePage() {
   const router  = useRouter();
@@ -48,7 +49,7 @@ export default function NewPackagePage() {
     <div className="p-6 max-w-lg mx-auto space-y-6">
       <h1 className="text-2xl font-bold">New Package</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <NavForm onSubmit={handleSubmit} className="space-y-4">
         <div>
           <Label htmlFor="name">Name *</Label>
           <Input id="name" value={name} onChange={e => setName(e.target.value)} maxLength={200} required />
@@ -100,7 +101,7 @@ export default function NewPackagePage() {
           <Button type="submit" disabled={isLoading}>{isLoading ? 'Creating…' : 'Create Package'}</Button>
           <Button type="button" variant="outline" onClick={() => router.push('/packages')}>Cancel</Button>
         </div>
-      </form>
+      </NavForm>
     </div>
   );
 }

@@ -54,14 +54,14 @@ describe('cacheQueryResult — write', () => {
     expect(decrypted).toEqual({ aadhaarNumber: '123456789012' });
   });
 
-  test('writes a bare-array result (getOPDQueue), one row per visit', async () => {
+  test('writes a paginated/wrapped result (getOPDQueue), one row per visit', async () => {
     const tenantId = TENANT();
     const userId = USER();
 
-    await cacheQueryResult('getOPDQueue', [
+    await cacheQueryResult('getOPDQueue', { data: [
       { visitId: 'OPD-1', status: 'OPEN', diagnosis: null },
       { visitId: 'OPD-2', status: 'COMPLETED', diagnosis: 'flu' },
-    ], { tenantId, userId });
+    ], total: 2, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
 
     const db = await openOfflineDb(tenantId, userId);
     expect(await db.get('cache_opd_visits', 'OPD-1')).toBeDefined();
@@ -103,7 +103,7 @@ describe('cacheQueryResult — write', () => {
     const tenantId = TENANT();
     const userId = USER();
 
-    await cacheQueryResult('getOPDQueue', [{ status: 'OPEN' }], { tenantId, userId });
+    await cacheQueryResult('getOPDQueue', { data: [{ status: 'OPEN' }], total: 1, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
 
     const db = await openOfflineDb(tenantId, userId);
     expect(await db.getAll('cache_opd_visits')).toEqual([]);
@@ -134,20 +134,21 @@ describe('readCachedQueryResult — fallback read', () => {
     expect(result).toBeNull();
   });
 
-  test('array-shaped fallback (getOPDQueue) returns every cached visit, decrypted', async () => {
+  test('wrapped fallback (getOPDQueue) returns every cached visit, decrypted, as one unpaginated page', async () => {
     const tenantId = TENANT();
     const userId = USER();
 
-    await cacheQueryResult('getOPDQueue', [
+    await cacheQueryResult('getOPDQueue', { data: [
       { visitId: 'OPD-1', diagnosis: 'flu' },
       { visitId: 'OPD-2', diagnosis: null },
-    ], { tenantId, userId });
+    ], total: 2, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
 
-    const result = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits' }, { tenantId, userId });
+    const result = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?page=2&limit=1' }, { tenantId, userId }) as { data: unknown[]; total: number; totalPages: number };
 
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toHaveLength(2);
-    expect(result).toEqual(expect.arrayContaining([
+    expect(result.total).toBe(2);
+    expect(result.totalPages).toBe(1);
+    expect(result.data).toHaveLength(2);
+    expect(result.data).toEqual(expect.arrayContaining([
       expect.objectContaining({ visitId: 'OPD-1', diagnosis: 'flu' }),
       expect.objectContaining({ visitId: 'OPD-2', diagnosis: null }),
     ]));
@@ -549,27 +550,27 @@ describe('filterFromUrl — offline filters replicate the live query\'s own filt
     const tenantId = TENANT();
     const userId = USER();
 
-    await cacheQueryResult('getOPDQueue', [
+    await cacheQueryResult('getOPDQueue', { data: [
       { visitId: 'OPD-1', fullName: 'Jane', patientId: 'PAT-1', doctorIds: ['DOC-1'], visitDate: '2026-03-10T09:00:00.000Z' },
       { visitId: 'OPD-2', fullName: 'John', patientId: 'PAT-2', doctorIds: ['DOC-2'], visitDate: '2026-03-11T09:00:00.000Z' },
       { visitId: 'OPD-3', fullName: 'Jane', patientId: 'PAT-3', doctorIds: ['DOC-2'], visitDate: '2026-03-10T09:00:00.000Z' },
-    ], { tenantId, userId });
+    ], total: 3, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
 
-    const byDate = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-10' }, { tenantId, userId }) as unknown[];
+    const byDate = (await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-10' }, { tenantId, userId }) as { data: unknown[] }).data;
     expect(byDate).toHaveLength(2);
     expect(byDate.map((v) => (v as { visitId: string }).visitId).sort()).toEqual(['OPD-1', 'OPD-3']);
 
-    const byDoctor = await readCachedQueryResult(
+    const byDoctor = (await readCachedQueryResult(
       'getOPDQueue', { url: '/api/opd/visits?date=2026-03-10&doctorId=DOC-2' }, { tenantId, userId },
-    ) as unknown[];
+    ) as { data: unknown[] }).data;
     expect(byDoctor).toEqual([expect.objectContaining({ visitId: 'OPD-3' })]);
 
-    const bySearch = await readCachedQueryResult(
+    const bySearch = (await readCachedQueryResult(
       'getOPDQueue', { url: '/api/opd/visits?date=2026-03-11&search=john' }, { tenantId, userId },
-    ) as unknown[];
+    ) as { data: unknown[] }).data;
     expect(bySearch).toEqual([expect.objectContaining({ visitId: 'OPD-2' })]);
 
-    const wrongDay = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-12' }, { tenantId, userId }) as unknown[];
+    const wrongDay = (await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-12' }, { tenantId, userId }) as { data: unknown[] }).data;
     expect(wrongDay).toEqual([]);
   });
 
@@ -579,14 +580,14 @@ describe('filterFromUrl — offline filters replicate the live query\'s own filt
 
     // 20:00 UTC on the 9th = 01:30 IST on the 10th — an OPD visit created
     // just after midnight, hospital-local time.
-    await cacheQueryResult('getOPDQueue', [
+    await cacheQueryResult('getOPDQueue', { data: [
       { visitId: 'OPD-1', visitDate: '2026-03-09T20:00:00.000Z' },
-    ], { tenantId, userId });
+    ], total: 1, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
 
-    const istToday = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-10' }, { tenantId, userId }) as unknown[];
+    const istToday = (await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-10' }, { tenantId, userId }) as { data: unknown[] }).data;
     expect(istToday).toEqual([expect.objectContaining({ visitId: 'OPD-1' })]);
 
-    const utcDateString = await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-09' }, { tenantId, userId }) as unknown[];
+    const utcDateString = (await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-09' }, { tenantId, userId }) as { data: unknown[] }).data;
     expect(utcDateString).toEqual([]);
   });
 

@@ -258,7 +258,7 @@ const OFFLINE_CREATE_POLICIES: Record<string, CreateMutationPolicy> = {
 export const PENDING_QUEUE_NUMBER = -1;
 
 export const EMPTY_VITALS = {
-  weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null,
+  weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
 };
 
 export interface OfflineCreatePlan {

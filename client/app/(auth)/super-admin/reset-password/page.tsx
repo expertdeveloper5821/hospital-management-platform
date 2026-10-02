@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useSuperAdminResetPasswordMutation } from '@/store/api/auth.api';
 import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
+import { NavForm } from '@/components/ui/form';
 
 // Mirrors the backend resetPasswordSchema for super admins (strong password).
 const schema = z
@@ -87,7 +88,7 @@ function SuperAdminResetPasswordForm() {
       </CardHeader>
 
       {!isSuccess && (
-        <form onSubmit={handleSubmit(onSubmit)}>
+        <NavForm onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="newPassword">New password</Label>
@@ -129,7 +130,7 @@ function SuperAdminResetPasswordForm() {
               {isLoading ? 'Saving…' : 'Reset password'}
             </Button>
           </CardFooter>
-        </form>
+        </NavForm>
       )}
     </Card>
   );

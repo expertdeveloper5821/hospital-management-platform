@@ -28,6 +28,7 @@ import {
   ChevronsUpDown,
   Search,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cu-name">Full Name</Label>
@@ -214,7 +215,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
               {isLoading ? 'Creating…' : 'Create User'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );

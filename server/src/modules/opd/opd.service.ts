@@ -31,6 +31,7 @@ import {
   AvailableOpdNurseResponse,
   DoctorNurseAssignmentsResponse,
   OPDVitals,
+  OPDQueueResult,
 } from './opd.types';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -44,6 +45,8 @@ const DEFAULT_VITALS: OPDVitals = {
   bloodPressure:   null,
   sugar:           null,
   bodyTemperature: null,
+  spo2:            null,
+  pulse:           null,
 };
 
 // Clinical free-text — and vitals, as of the objectFields encryption — is
@@ -161,7 +164,7 @@ function buildOpdParchaOverlay(
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
-    { label: 'Patient ID',   value: patient.patientId },
+    { label: 'UHID',         value: patient.patientId },
     { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAgeFromDob(patient.dateOfBirth) : '—')} years / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
@@ -174,11 +177,13 @@ function buildOpdParchaOverlay(
   }
 
   const vitals: ParchaOverlayInput['vitals'] = [
-    { label: 'Weight', value: visit.vitals?.weight          != null ? String(visit.vitals.weight)          : '' },
-    { label: 'Height', value: visit.vitals?.height          != null ? String(visit.vitals.height)          : '' },
-    { label: 'BP',     value: visit.vitals?.bloodPressure   ?? '' },
-    { label: 'Sugar',  value: visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : '' },
+    { label: 'SpO2',   value: visit.vitals?.spo2            != null ? String(visit.vitals.spo2)            : '' },
     { label: 'Temp',   value: visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : '' },
+    { label: 'BP',     value: visit.vitals?.bloodPressure   ?? '' },
+    { label: 'Pulse',  value: visit.vitals?.pulse           != null ? String(visit.vitals.pulse)           : '' },
+    { label: 'Sugar',  value: visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : '' },
+    { label: 'Height', value: visit.vitals?.height          != null ? String(visit.vitals.height)          : '' },
+    { label: 'Weight', value: visit.vitals?.weight          != null ? String(visit.vitals.weight)          : '' },
   ];
 
   return {
@@ -436,6 +441,8 @@ export class OPDService {
         bloodPressure:   baseVitals?.bloodPressure   ?? null,
         sugar:           baseVitals?.sugar           ?? null,
         bodyTemperature: baseVitals?.bodyTemperature ?? null,
+        spo2:            baseVitals?.spo2            ?? null,
+        pulse:           baseVitals?.pulse           ?? null,
       };
       const mergedVitals: OPDVitals = { ...existingVitals, ...data.vitals };
       updateData.vitals = mergedVitals;
@@ -448,7 +455,9 @@ export class OPDService {
         existingVitals.height          !== mergedVitals.height          ||
         existingVitals.bloodPressure   !== mergedVitals.bloodPressure   ||
         existingVitals.sugar           !== mergedVitals.sugar           ||
-        existingVitals.bodyTemperature !== mergedVitals.bodyTemperature
+        existingVitals.bodyTemperature !== mergedVitals.bodyTemperature ||
+        existingVitals.spo2            !== mergedVitals.spo2            ||
+        existingVitals.pulse           !== mergedVitals.pulse
       ) {
         previousValue.vitals = existingVitals;
         newValue.vitals      = mergedVitals;
@@ -720,8 +729,9 @@ export class OPDService {
   }
 
   // Receptionist-only (route-level requireRole) — replaces Cancel for that
-  // role. Permanently removes a visit that hasn't been finalized yet; a
-  // COMPLETED/CANCELLED/NO_SHOW visit is part of the record and stays.
+  // role. Permanently removes a visit that is still waiting (OPEN); once the
+  // consultation has started (IN_PROGRESS) or the visit is
+  // COMPLETED/CANCELLED/NO_SHOW it is part of the record and stays.
   // Any active payment linked to the visit is not deleted but CANCELLED in the
   // same transaction as the visit delete — kept for history, excluded from
   // revenue and OPD payment validity.
@@ -729,12 +739,12 @@ export class OPDService {
     const visit = await opdRepository.findByVisitId(tenantId, visitId);
     if (!visit) throw new NotFoundError('OPD visit not found');
 
-    if (TERMINAL_STATUSES.has(visit.status)) {
+    if (visit.status !== OPDVisitStatus.OPEN) {
       throw new ConflictError(`Cannot delete a visit with status ${visit.status}`);
     }
 
     const { deleted, cancelledPayments } =
-      await opdRepository.deleteActiveByVisitIdCancellingPayments(tenantId, visitId);
+      await opdRepository.deleteOpenByVisitIdCancellingPayments(tenantId, visitId);
     if (!deleted) throw new ConflictError('This visit can no longer be deleted.');
 
     // Status only — never the encrypted description/transactionId.
@@ -778,7 +788,9 @@ export class OPDService {
     search?:     string,
     patientIds?: string[],
     nurseId?:    string,
-  ): Promise<(IOPDVisit & { fullName?: string })[]> {
+    page         = 1,
+    limit        = 20,
+  ): Promise<OPDQueueResult<IOPDVisit & { fullName?: string }>> {
     const visitDate = date ? new Date(date) : new Date();
 
     // Sweep before reading so a stale visit is never rendered as still waiting.
@@ -787,25 +799,51 @@ export class OPDService {
       await this.expireStaleVisits(tenantId);
     } catch { /* non-blocking — the queue read is the caller's actual request */ }
 
-    let visits = await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds, nurseId);
-
-    const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
-    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
-      ?? new Map<string, string>();
-
-    const result = visits.map((v) =>
-      withFullName(v, nameMap.get(v.patientId) ?? v.fullName ?? v.patientId),
-    );
+    const withNames = async (visits: IOPDVisit[]) => {
+      const visitPatientIds = [...new Set(visits.map((v) => v.patientId))];
+      const nameMap = await patientRepository.findNamesByPatientIds(tenantId, visitPatientIds)
+        ?? new Map<string, string>();
+      return visits.map((v) =>
+        withFullName(v, nameMap.get(v.patientId) ?? v.fullName ?? v.patientId),
+      );
+    };
 
     if (search) {
+      // The search matches the patient's *resolved* name (Patient.fullName,
+      // falling back to the visit's own), so it can't be pushed into the visit
+      // query — filter the day's visits in memory, then paginate the matches.
+      // Bounded to one calendar day's queue.
+      const all = await withNames(
+        await opdRepository.findByDate(tenantId, visitDate, doctorId, patientIds, nurseId),
+      );
       const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const re   = new RegExp(safe, 'i');
-      return result.filter((v) =>
+      const matched = all.filter((v) =>
         re.test(v.fullName ?? '') || re.test(v.patientId),
       );
+      return {
+        data:           matched.slice((page - 1) * limit, page * limit),
+        total:          matched.length,
+        page,
+        limit,
+        totalPages:     Math.ceil(matched.length / limit),
+        openCount:      matched.filter((v) => v.status === OPDVisitStatus.OPEN).length,
+        completedCount: matched.filter((v) => v.status === OPDVisitStatus.COMPLETED).length,
+      };
     }
 
-    return result;
+    const result = await opdRepository.findPageByDate(
+      tenantId, visitDate, doctorId, patientIds, nurseId, page, limit,
+    );
+    return {
+      data:           await withNames(result.data),
+      total:          result.total,
+      page,
+      limit,
+      totalPages:     Math.ceil(result.total / limit),
+      openCount:      result.openCount,
+      completedCount: result.completedCount,
+    };
   }
 
   async getVisitById(tenantId: string, visitId: string): Promise<IOPDVisit & { fullName?: string }> {

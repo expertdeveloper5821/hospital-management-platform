@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildUpdateInventoryItemPayload } from './update-item-payload';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,7 +128,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -222,7 +223,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               {isLoading ? 'Adding…' : 'Add Item'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -276,7 +277,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -358,7 +359,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
               {isLoading ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -581,7 +582,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -664,7 +665,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
               {isLoading ? 'Saving…' : 'Update Stock'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -709,7 +710,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <NavForm onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
             <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
           )}
@@ -737,7 +738,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
               {isLoading ? 'Saving…' : 'Save Threshold'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );

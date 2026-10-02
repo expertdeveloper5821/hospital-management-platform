@@ -442,7 +442,7 @@ export default function PatientsPage() {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           className="pl-9"
-          placeholder="Search by name, mobile, or patient ID…"
+          placeholder="Search by name, mobile, or UHID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -470,7 +470,7 @@ export default function PatientsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient ID</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">UHID</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Registration Date</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Age / Gender</th>

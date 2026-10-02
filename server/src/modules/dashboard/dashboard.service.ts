@@ -10,6 +10,12 @@ import {
   RevenueTrendPoint,
 } from './dashboard.types';
 import { UserRole }              from '../../shared/types/common.types';
+import {
+  getIstDateParts,
+  istMidnightFor,
+  toIstMidnight,
+  toIstDateKey,
+} from '../attendance/attendance.timezone';
 
 // ─── In-memory TTL cache (keyed by tenantId+role) ────────────────────────────
 
@@ -70,26 +76,28 @@ export function clearDashboardCache(): void {
 }
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
+// All Today/This Month/Last 30 Days ranges are hospital-local (IST) calendar
+// days, independent of the server OS timezone — matching how OPD stores
+// visitDate (toIstMidnight). See attendance.timezone.ts.
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 function todayRange(): { start: Date; end: Date } {
-  const now   = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const end   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const start = toIstMidnight(new Date());
+  const end   = new Date(start.getTime() + MS_PER_DAY - 1);
   return { start, end };
 }
 
 function monthRange(): { start: Date; end: Date } {
-  const now   = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const end   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  const { year, month } = getIstDateParts(new Date());
+  const start = istMidnightFor(year, month, 1);
+  // month + 1 = 13 rolls over to January of next year (Date.UTC normalises it).
+  const end   = new Date(istMidnightFor(year, month + 1, 1).getTime() - 1);
   return { start, end };
 }
 
 function last30DaysStart(): Date {
-  const d = new Date();
-  d.setDate(d.getDate() - 29);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  return new Date(toIstMidnight(new Date()).getTime() - 29 * MS_PER_DAY);
 }
 
 // ─── Aggregation functions ────────────────────────────────────────────────────
@@ -265,31 +273,23 @@ async function getBedStats(tenantId: string): Promise<{ total: number; occupied:
   return dashboardRepository.bedStats(tenantId);
 }
 
-// The server's timezone. Visit/payment dates are stored at local-midnight
-// (see opd.service), and "today"/"last-30-days" ranges are computed in local time,
-// so the trend charts must bucket days in the SAME timezone — otherwise a visit
-// added "today" in, e.g., IST lands on the previous UTC day and shows as 0.
-const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+// Hospital-local timezone. Visit dates are stored at IST midnight (see
+// opd.service's toIstMidnight) and the date ranges above are IST, so the trend
+// charts must bucket days in IST too — never the server OS timezone, which is
+// typically UTC in production and would shift today's visits onto yesterday.
+const DASHBOARD_TZ = 'Asia/Kolkata';
 
-// Local-timezone YYYY-MM-DD key (matches Mongo's $dateToString with SERVER_TZ).
-function localDayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-// Turn a sparse day→value map into a continuous 30-day series ending today (in the
-// server timezone), filling days with no activity as 0 — so "Last 30 Days" charts
+// Turn a sparse day→value map into a continuous 30-day series ending today (in
+// IST), filling days with no activity as 0 — so "Last 30 Days" charts
 // always span the full window and include today. Returns [] when there is no data
 // at all, so the UI can still show a clean "No data yet" state for new hospitals.
+// Keys are toIstDateKey, matching Mongo's $dateToString with DASHBOARD_TZ.
 function buildDailySeries(byDate: Map<string, number>): { date: string; value: number }[] {
   if (byDate.size === 0) return [];
-  const today = new Date();
+  const todayStart = toIstMidnight(new Date()).getTime();
   const out: { date: string; value: number }[] = [];
   for (let i = 29; i >= 0; i -= 1) {
-    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-    const key = localDayKey(d);
+    const key = toIstDateKey(new Date(todayStart - i * MS_PER_DAY));
     out.push({ date: key, value: byDate.get(key) ?? 0 });
   }
   return out;
@@ -298,14 +298,14 @@ function buildDailySeries(byDate: Map<string, number>): { date: string; value: n
 async function getMonthlyOpdTrend(tenantId: string): Promise<TrendPoint[]> {
   const since = last30DaysStart();
   // Cap at "now" so a Last-30-Days trend never includes future-scheduled visits.
-  const results = await dashboardRepository.opdVisitsGroupedByDay(tenantId, since, new Date(), SERVER_TZ);
+  const results = await dashboardRepository.opdVisitsGroupedByDay(tenantId, since, new Date(), DASHBOARD_TZ);
   const byDate = new Map<string, number>(results.map((r) => [r._id, r.count]));
   return buildDailySeries(byDate).map((e) => ({ date: e.date, count: e.value }));
 }
 
 async function getMonthlyRevenueTrend(tenantId: string): Promise<RevenueTrendPoint[]> {
   const since = last30DaysStart();
-  const results = await dashboardRepository.paymentsGroupedByDay(tenantId, since, SERVER_TZ);
+  const results = await dashboardRepository.paymentsGroupedByDay(tenantId, since, DASHBOARD_TZ);
   const byDate = new Map<string, number>(results.map((r) => [r._id, r.amount]));
   return buildDailySeries(byDate).map((e) => ({ date: e.date, amount: e.value }));
 }

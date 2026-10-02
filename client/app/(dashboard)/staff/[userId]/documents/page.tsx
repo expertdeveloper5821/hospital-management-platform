@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { NavForm } from '@/components/ui/form';
 
 const CATEGORIES: DocumentCategory[] = [
   'IDENTITY_PROOF', 'ADDRESS_PROOF', 'EDUCATIONAL_CERTIFICATE',
@@ -95,7 +96,7 @@ export default function StaffDocumentsPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Upload Document</CardTitle></CardHeader>
         <CardContent>
-          <form onSubmit={handleUpload} className="space-y-3">
+          <NavForm onSubmit={handleUpload} autoFocusFirstField={false} className="space-y-3">
             <div>
               <Label>Category *</Label>
               <select
@@ -118,7 +119,7 @@ export default function StaffDocumentsPage() {
             </div>
             {uploadError && <p className="text-red-600 text-sm">{uploadError}</p>}
             <Button type="submit" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload'}</Button>
-          </form>
+          </NavForm>
         </CardContent>
       </Card>
 

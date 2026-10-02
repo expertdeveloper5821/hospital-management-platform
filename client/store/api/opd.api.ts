@@ -4,6 +4,7 @@ import type { RootState } from '../index';
 import type {
   ApiSuccess,
   OPDVisitResponse,
+  OPDQueueResult,
   OPDPatientHistory,
   CreateOPDVisitRequest,
   UpdateOPDVisitRequest,
@@ -18,16 +19,18 @@ const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').re
 export const opdApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
-    getOPDQueue: build.query<OPDVisitResponse[], { date?: string; doctorId?: string; search?: string }>({
-      query: ({ date, doctorId, search } = {}) => {
+    getOPDQueue: build.query<OPDQueueResult, { date?: string; doctorId?: string; search?: string; page?: number; limit?: number }>({
+      query: ({ date, doctorId, search, page, limit } = {}) => {
         const params = new URLSearchParams();
         if (date)     params.set('date',     date);
         if (doctorId) params.set('doctorId', doctorId);
         if (search)   params.set('search',   search);
+        if (page)     params.set('page',     String(page));
+        if (limit)    params.set('limit',    String(limit));
         const qs = params.toString();
         return `/api/opd/visits${qs ? `?${qs}` : ''}`;
       },
-      transformResponse: (raw: ApiSuccess<OPDVisitResponse[]>) => raw.data,
+      transformResponse: (raw: ApiSuccess<OPDQueueResult>) => raw.data,
       providesTags: ['OPD'],
     }),
 

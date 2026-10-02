@@ -413,7 +413,7 @@ describe('buildCreateOptimisticRecord', () => {
     expect(record.status).toBe('OPEN');
     expect(record.departmentId).toBeNull();
     expect(record.doctorIds).toEqual(['doc-1']);
-    expect(record.vitals).toEqual({ weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null });
+    expect(record.vitals).toEqual({ weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null });
   });
 
   test('IPD_ADMISSION: status ADMITTED, empty progressNotes/vitals, never guesses departmentId', () => {

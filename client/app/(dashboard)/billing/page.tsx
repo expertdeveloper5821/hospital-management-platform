@@ -13,6 +13,7 @@ import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { todayLocalISO, clampToToday } from '@/lib/date';
 import { cn, toTitleCase } from '@/lib/utils';
 import { Plus, X } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
@@ -68,7 +69,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
     setError(null);
 
     const parsedAmount = Number(amount);
-    if (!patientId.trim())    { setError('Patient ID is required.'); return; }
+    if (!patientId.trim())    { setError('UHID is required.'); return; }
     if (!description.trim())  { setError('Description is required.'); return; }
     if (!Number.isFinite(parsedAmount) || parsedAmount < 0.01) {
       setError('Amount must be at least ₹0.01.'); return;
@@ -91,7 +92,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
       // The billing list refreshes automatically via invalidated cache tags.
       onClose();
     } catch {
-      setError('Failed to add charge. Check the Patient ID and try again.');
+      setError('Failed to add charge. Check the UHID and try again.');
     }
   }
 
@@ -115,10 +116,10 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <NavForm onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="add-patient">Patient ID</Label>
+              <Label htmlFor="add-patient">UHID</Label>
               <Input
                 id="add-patient"
                 value={patientId}
@@ -190,7 +191,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
               {isLoading ? 'Adding…' : 'Add Charge'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -247,7 +248,7 @@ export default function BillingPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div>
-          <Label>Patient ID</Label>
+          <Label>UHID</Label>
           <Input value={patientId} onChange={e => { setPatientId(e.target.value); setPage(1); }} placeholder="PAT-XXXXXXXX" />
         </div>
         <div>

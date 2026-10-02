@@ -267,7 +267,7 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
     sensitiveFields: OPD_SENSITIVE_FIELDS,
   },
   getOPDQueue: {
-    cacheStore: 'cache_opd_visits', idField: 'visitId', responseShape: 'array',
+    cacheStore: 'cache_opd_visits', idField: 'visitId', responseShape: 'wrapped',
     sensitiveFields: OPD_SENSITIVE_FIELDS,
     filterFromUrl: [
       { kind: 'sameDay', param: 'date', field: 'visitDate' },

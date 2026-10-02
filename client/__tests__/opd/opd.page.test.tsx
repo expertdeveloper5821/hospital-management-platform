@@ -10,12 +10,17 @@ const mockUsers                    = jest.fn().mockReturnValue({ data: { data: [
 const mockGetAvailableOpdNurses    = jest.fn().mockReturnValue({ data: [] });
 const mockGetDoctorNurseAssignments = jest.fn().mockReturnValue({ data: undefined });
 const mockCreateVisit              = jest.fn().mockResolvedValue({ visitId: 'OPD-TEST0001', queueNumber: 1, nurseIds: [] });
-const mockGetOPDQueue               = jest.fn().mockReturnValue({ data: [], isFetching: false, refetch: jest.fn() });
+// GET /api/opd/visits is paginated — wraps rows in the PaginatedResult shape.
+function queuePage(data: unknown[]) {
+  return { data, total: data.length, page: 1, limit: 20, totalPages: 1 };
+}
+
+const mockGetOPDQueue               = jest.fn().mockReturnValue({ data: queuePage([]), isFetching: false, refetch: jest.fn() });
 const mockUpdateVisit               = jest.fn().mockResolvedValue({});
 const mockCompleteVisit             = jest.fn().mockResolvedValue({});
 
 jest.mock('@/store/api/opd.api', () => ({
-  useGetOPDQueueQuery: () => mockGetOPDQueue(),
+  useGetOPDQueueQuery: (args: unknown) => mockGetOPDQueue(args),
   useCreateOPDVisitMutation: () => [
     (body: unknown) => ({ unwrap: () => mockCreateVisit(body) }),
     { isLoading: false },
@@ -511,7 +516,7 @@ describe('OPDPage — Visit Details panel shows assigned nurses', () => {
       args?.role === 'NURSE'
         ? { data: { data: [NURSE_1, NURSE_2] }, isFetching: false }
         : { data: { data: [DOCTOR_1] }, isFetching: false });
-    mockGetOPDQueue.mockReturnValue({ data: [VISIT], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
     mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
     mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
   });
@@ -531,7 +536,7 @@ describe('OPDPage — Visit Details panel shows assigned nurses', () => {
   });
 
   test('shows "Unassigned" when no nurse is on the visit', async () => {
-    mockGetOPDQueue.mockReturnValue({ data: [{ ...VISIT, nurseIds: [] }], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([{ ...VISIT, nurseIds: [] }]), isFetching: false, refetch: jest.fn() });
     const user = userEvent.setup();
     render(<OPDPage />);
 
@@ -544,6 +549,44 @@ describe('OPDPage — Visit Details panel shows assigned nurses', () => {
   });
 });
 
+describe('OPDPage — Receptionist Delete Visit gating by status', () => {
+  const VISIT = {
+    visitId: 'OPD-DEL0001', tenantId: 't1', patientId: 'PAT-1', fullName: 'Ravi Kumar',
+    doctorIds: [], nurseIds: [], departmentId: null,
+    visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
+    diagnosis: null, prescription: null, notes: null,
+    createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    jest.clearAllMocks();
+    mockUsers.mockReturnValue({ data: { data: [] }, isFetching: false });
+    mockSearchPatients.mockReturnValue({ data: { data: [] }, isFetching: false });
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+    mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
+    mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
+  });
+
+  async function openPanel(status: string) {
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([{ ...VISIT, status }]), isFetching: false, refetch: jest.fn() });
+    const user = userEvent.setup();
+    render(<OPDPage />);
+    await user.click(screen.getByText('Ravi Kumar'));
+    await screen.findByText('OPD-DEL0001');
+  }
+
+  test('shows Delete Visit for a Waiting (OPEN) visit', async () => {
+    await openPanel('OPEN');
+    expect(screen.getByRole('button', { name: /delete visit/i })).toBeInTheDocument();
+  });
+
+  test.each(['IN_PROGRESS', 'COMPLETED'])('hides Delete Visit for a %s visit', async (status) => {
+    await openPanel(status);
+    expect(screen.queryByRole('button', { name: /delete visit/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('OPDPage — New Visit duplicate submission guard', () => {
   const PATIENT = { patientId: 'PAT-1', fullName: 'Ravi Kumar', mobileNumber: '9876543210' };
 
@@ -553,7 +596,7 @@ describe('OPDPage — New Visit duplicate submission guard', () => {
     // Reset to a clean, empty queue — a prior describe block's last test may
     // have left mockGetOPDQueue returning rows (e.g. a "Ravi Kumar" row),
     // which would otherwise collide with this test's own same-named patient.
-    mockGetOPDQueue.mockReturnValue({ data: [], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([]), isFetching: false, refetch: jest.fn() });
     mockUsers.mockReturnValue({ data: { data: [] }, isFetching: false });
     mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
     mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
@@ -614,7 +657,7 @@ describe('OPDPage — Nurse notes-only Visit edit', () => {
       args?.role === 'NURSE'
         ? { data: { data: [NURSE_1] }, isFetching: false }
         : { data: { data: [DOCTOR_1] }, isFetching: false });
-    mockGetOPDQueue.mockReturnValue({ data: [VISIT], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
     mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
     mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
     mockUpdateVisit.mockResolvedValue({ ...VISIT, notes: 'Updated note' });
@@ -715,7 +758,7 @@ describe('OPDPage — Diagnosis/Prescription persistence across Edit and Complet
     mockRole = 'DOCTOR';
     mockUserId = 'doc-1';
     mockUsers.mockReturnValue({ data: { data: [DOCTOR_1] }, isFetching: false });
-    mockGetOPDQueue.mockReturnValue({ data: [VISIT], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
     mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
     mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
   });
@@ -776,7 +819,7 @@ describe('OPD Vitals — View/Edit', () => {
     doctorIds: ['doc-1'], nurseIds: [], departmentId: null,
     visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
     diagnosis: null, prescription: null, notes: null,
-    vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6 },
+    vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72 },
     createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
   };
 
@@ -785,7 +828,7 @@ describe('OPD Vitals — View/Edit', () => {
     mockRole = 'DOCTOR';
     mockUserId = 'doc-1';
     mockUsers.mockReturnValue({ data: { data: [DOCTOR_1] }, isFetching: false });
-    mockGetOPDQueue.mockReturnValue({ data: [VISIT_WITH_VITALS], isFetching: false, refetch: jest.fn() });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT_WITH_VITALS]), isFetching: false, refetch: jest.fn() });
     mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
     mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
   });
@@ -833,7 +876,7 @@ describe('OPD Vitals — View/Edit', () => {
     await waitFor(() => expect(mockUpdateVisit).toHaveBeenCalled());
     const sentBody = mockUpdateVisit.mock.calls[0][0] as { vitals: Record<string, unknown> };
     expect(sentBody.vitals).toEqual({
-      weight: 70.2, height: 172, bloodPressure: null, sugar: 95, bodyTemperature: 98.6,
+      weight: 70.2, height: 172, bloodPressure: null, sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
     });
   });
 
@@ -881,5 +924,51 @@ describe('OPD Vitals — View/Edit', () => {
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     expect(await screen.findByText('73 kg')).toBeInTheDocument();
+  });
+});
+
+describe('OPDPage — queue pagination', () => {
+  const VISIT = {
+    visitId: 'OPD-PAGE0001', tenantId: 't1', patientId: 'PAT-1', fullName: 'Ravi Kumar',
+    doctorIds: [], nurseIds: [], departmentId: null,
+    visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
+    diagnosis: null, prescription: null, notes: null,
+    createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    jest.clearAllMocks();
+    mockGetOPDQueue.mockReturnValue({
+      data: { data: [VISIT], total: 45, page: 1, limit: 20, totalPages: 3, openCount: 30, completedCount: 12 },
+      isFetching: false, refetch: jest.fn(),
+    });
+  });
+
+  test('requests page 1 with the page size, and stat cards use the server-side totals', () => {
+    render(<OPDPage />);
+
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, limit: 20 }));
+    expect(screen.getByText('Page 1 of 3 — 45 visits')).toBeInTheDocument();
+    expect(screen.getByText('45')).toBeInTheDocument();
+    expect(screen.getByText('30')).toBeInTheDocument();
+    expect(screen.getByText('12')).toBeInTheDocument();
+  });
+
+  test('Next requests the following page; Previous is disabled on page 1', async () => {
+    const user = userEvent.setup();
+    render(<OPDPage />);
+
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+  });
+
+  test('pager is hidden when everything fits on one page', () => {
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
+    render(<OPDPage />);
+
+    expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
   });
 });

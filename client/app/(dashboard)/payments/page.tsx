@@ -42,6 +42,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NavForm } from "@/components/ui/form";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -192,7 +193,7 @@ function PatientSearchInput({ value, onChange }: PatientSearchInputProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => { if (query.trim()) setOpen(true); }}
-          placeholder="Search by name or patient ID…"
+          placeholder="Search by name or UHID…"
           autoComplete="off"
         />
       )}
@@ -255,7 +256,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
     e.preventDefault();
     setError("");
     if (!form.patientId.trim()) {
-      setError("Patient ID is required.");
+      setError("UHID is required.");
       return;
     }
     if (form.amount <= 0) {
@@ -301,7 +302,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -388,7 +389,7 @@ function ManualPaymentModal({ onClose }: ManualPaymentModalProps) {
               {isLoading ? "Recording…" : "Record Payment"}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -426,7 +427,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
     e.preventDefault();
     setError("");
     if (!form.patientId.trim()) {
-      setError("Patient ID is required.");
+      setError("UHID is required.");
       return;
     }
     if (form.amount <= 0) {
@@ -533,7 +534,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleLaunch} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleLaunch} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -625,7 +626,7 @@ function RazorpayModal({ onClose, onSuccess }: RazorpayModalProps) {
               {isLaunching ? "Launching checkout…" : "Open Razorpay Checkout"}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -753,7 +754,7 @@ function PaymentDetailPanel({ payment, onClose }: PaymentDetailPanelProps) {
 
         <div className="flex-1 overflow-y-auto p-5">
           {row(
-            "Patient ID",
+            "UHID",
             <span className="font-mono text-xs">{payment.patientId}</span>,
           )}
           {row("Method", METHOD_LABELS[payment.paymentMethod])}

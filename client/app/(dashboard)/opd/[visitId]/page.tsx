@@ -74,7 +74,7 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
       </div>
 
       <div className="rounded-xl border bg-card divide-y">
-        <DetailRow icon={<User className="h-4 w-4" />}          label="Patient ID"       value={visit.patientId} />
+        <DetailRow icon={<User className="h-4 w-4" />}          label="UHID"             value={visit.patientId} />
         <DetailRow icon={<Calendar className="h-4 w-4" />}       label="Visit Date"       value={formatDate(visit.visitDate)} />
         <DetailRow icon={<Activity className="h-4 w-4" />}       label="Queue Number"     value={`#${visit.queueNumber}`} />
         <DetailRow icon={<Stethoscope className="h-4 w-4" />}    label="Doctor(s)"        value={visit.doctorIds?.join(', ') || '—'} />
@@ -90,11 +90,13 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
         {(() => {
           const v = visit.vitals;
           const parts = [
-            v?.weight          != null ? `Weight: ${v.weight} kg`         : null,
-            v?.height          != null ? `Height: ${v.height} cm`         : null,
-            v?.bloodPressure         ? `BP: ${v.bloodPressure} mmHg`      : null,
-            v?.sugar           != null ? `Sugar: ${v.sugar} mg/dL`        : null,
+            v?.spo2            != null ? `SpO2: ${v.spo2} %`              : null,
             v?.bodyTemperature != null ? `Temp: ${v.bodyTemperature} °F` : null,
+            v?.bloodPressure         ? `BP: ${v.bloodPressure} mmHg`      : null,
+            v?.pulse           != null ? `Pulse: ${v.pulse} bpm`          : null,
+            v?.sugar           != null ? `Sugar: ${v.sugar} mg/dL`        : null,
+            v?.height          != null ? `Height: ${v.height} cm`         : null,
+            v?.weight          != null ? `Weight: ${v.weight} kg`         : null,
           ].filter(Boolean);
           return parts.length > 0
             ? <DetailRow icon={<Activity className="h-4 w-4" />} label="Vitals" value={parts.join(' · ')} />

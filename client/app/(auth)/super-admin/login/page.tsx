@@ -20,6 +20,7 @@ import { ShieldCheck } from 'lucide-react';
 import { useSuperAdminLoginMutation } from '@/store/api/auth.api';
 import { useAppSelector } from '@/store/hooks';
 import { UserRole } from '@/store/types';
+import { NavForm } from '@/components/ui/form';
 
 const schema = z.object({
   email:    z.string().email('Invalid email address'),
@@ -69,7 +70,7 @@ export default function SuperAdminLoginPage() {
         <CardDescription>Super Admin access only</CardDescription>
       </CardHeader>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <NavForm onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -116,7 +117,7 @@ export default function SuperAdminLoginPage() {
             Hospital staff? Sign in here
           </a>
         </CardFooter>
-      </form>
+      </NavForm>
     </Card>
   );
 }

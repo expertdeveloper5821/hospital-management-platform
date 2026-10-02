@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { NavForm } from '@/components/ui/form';
 
 export default function PackageDetailPage() {
   const params  = useParams<{ packageId: string }>();
@@ -43,7 +44,7 @@ export default function PackageDetailPage() {
     e.preventDefault();
     setAssignError('');
     setAssignSuccess('');
-    if (!patientId.trim()) { setAssignError('Patient ID is required'); return; }
+    if (!patientId.trim()) { setAssignError('UHID is required'); return; }
     try {
       const result = await assignPackage({
         packageId: params.packageId,
@@ -107,9 +108,9 @@ export default function PackageDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Assign to Patient</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={handleAssign} className="space-y-3">
+            <NavForm onSubmit={handleAssign} autoFocusFirstField={false} className="space-y-3">
               <div>
-                <Label htmlFor="pid">Patient ID *</Label>
+                <Label htmlFor="pid">UHID *</Label>
                 <Input id="pid" value={patientId} onChange={e => setPatientId(e.target.value)} placeholder="PAT-XXXXXXXX" />
               </div>
               <div>
@@ -119,7 +120,7 @@ export default function PackageDetailPage() {
               {assignError   && <p className="text-red-600 text-sm">{assignError}</p>}
               {assignSuccess && <p className="text-green-600 text-sm">{assignSuccess}</p>}
               <Button type="submit" disabled={assigning}>{assigning ? 'Assigning…' : 'Assign Package'}</Button>
-            </form>
+            </NavForm>
           </CardContent>
         </Card>
       )}

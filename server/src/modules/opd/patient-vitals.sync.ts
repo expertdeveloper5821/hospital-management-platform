@@ -18,6 +18,8 @@ function readVitals(vitals: Partial<OPDVitals> | null | undefined): OPDVitals | 
     bloodPressure:   vitals.bloodPressure   ?? null,
     sugar:           vitals.sugar           ?? null,
     bodyTemperature: vitals.bodyTemperature ?? null,
+    spo2:            vitals.spo2            ?? null,
+    pulse:           vitals.pulse           ?? null,
   };
   return Object.values(shaped).some((v) => v !== null) ? shaped : null;
 }

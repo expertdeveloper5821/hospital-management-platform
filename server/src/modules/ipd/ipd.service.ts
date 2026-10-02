@@ -55,6 +55,8 @@ const DEFAULT_VITALS: IPDVitals = {
   bloodPressure:   null,
   sugar:           null,
   bodyTemperature: null,
+  spo2:            null,
+  pulse:           null,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -185,7 +187,7 @@ function buildIpdParchaOverlay(
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
-    { label: 'Patient ID',   value: patient.patientId },
+    { label: 'UHID',         value: patient.patientId },
     { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : '—')} years / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
@@ -202,11 +204,13 @@ function buildIpdParchaOverlay(
   }
 
   const vitals: ParchaOverlayInput['vitals'] = [
-    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
-    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
-    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
-    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
+    { label: 'SpO2',   value: admission.vitals?.spo2            != null ? String(admission.vitals.spo2)            : '' },
     { label: 'Temp',   value: admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : '' },
+    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
+    { label: 'Pulse',  value: admission.vitals?.pulse           != null ? String(admission.vitals.pulse)           : '' },
+    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
+    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
+    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
   ];
 
   const sortedNotes = [...admission.progressNotes].sort(
@@ -368,6 +372,8 @@ async function toResponse(
       bloodPressure:   doc.vitals?.bloodPressure   ?? null,
       sugar:           doc.vitals?.sugar           ?? null,
       bodyTemperature: doc.vitals?.bodyTemperature ?? null,
+      spo2:            doc.vitals?.spo2            ?? null,
+      pulse:           doc.vitals?.pulse           ?? null,
     },
     prescription:          doc.prescription ?? null,
     dischargeSummaryNotes: doc.dischargeSummaryNotes ?? null,
@@ -627,6 +633,8 @@ export class IPDService {
         bloodPressure:   admission.vitals?.bloodPressure   ?? DEFAULT_VITALS.bloodPressure,
         sugar:           admission.vitals?.sugar           ?? DEFAULT_VITALS.sugar,
         bodyTemperature: admission.vitals?.bodyTemperature ?? DEFAULT_VITALS.bodyTemperature,
+        spo2:            admission.vitals?.spo2            ?? DEFAULT_VITALS.spo2,
+        pulse:           admission.vitals?.pulse           ?? DEFAULT_VITALS.pulse,
       };
       const mergedVitals: IPDVitals = { ...existingVitals, ...input.vitals };
       prevValue.vitals = existingVitals;

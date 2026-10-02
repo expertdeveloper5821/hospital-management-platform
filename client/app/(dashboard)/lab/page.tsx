@@ -48,6 +48,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -218,7 +219,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -278,7 +279,7 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
               {isLoading ? 'Submitting…' : 'Submit Request'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -340,7 +341,7 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
           </button>
         </div>
 
-        <form onSubmit={handleUpload} className="p-5 space-y-4">
+        <NavForm onSubmit={handleUpload} className="p-5 space-y-4">
           {error && (
             <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
           )}
@@ -374,7 +375,7 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
               {isLoading ? 'Uploading…' : 'Upload Report'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -456,7 +457,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -517,7 +518,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
               {isLoading ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -640,7 +641,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
 
           <div className="flex-1 overflow-y-auto p-5">
             {row('Patient Name',  request.fullName ?? '—')}
-            {row('Patient ID',   <span className="font-mono text-xs">{request.patientId}</span>)}
+            {row('UHID',         <span className="font-mono text-xs">{request.patientId}</span>)}
             {row('Requested By', request.requestedByName ?? '—')}
             {row('Referred By',  <span className="block truncate" title={request.referredByName}>{request.referredByName}</span>)}
             {row('Requested At', formatDate(request.requestedAt))}
@@ -776,7 +777,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
           <Label className="text-xs">Search</Label>
           <div className="flex gap-2">
             <Input
-              placeholder="Patient name or ID…"
+              placeholder="Patient name or UHID…"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}

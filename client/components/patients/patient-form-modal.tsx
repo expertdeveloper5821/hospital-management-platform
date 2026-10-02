@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { X, AlertTriangle } from 'lucide-react';
 import { INDIAN_STATES } from '@/lib/constants';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,7 +293,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} noValidate className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} noValidate className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
             {/* Duplicate warning */}
             {duplicateInfo && (
@@ -300,7 +301,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <div className="space-y-2">
                   <p>
-                    Patient already exists — a patient with this name and mobile number already exists (ID:{' '}
+                    Patient already exists — a patient with this name and mobile number already exists (UHID:{' '}
                     <strong>{duplicateInfo.existingPatientId}</strong>). Do you want to register anyway?
                   </p>
                   <div className="flex gap-2">
@@ -320,8 +321,9 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
             )}
 
             {/* Required fields */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2 space-y-1">
+            <div className="space-y-4">
+              {/* Row 1: Full Name */}
+              <div className="space-y-1">
                 <Label htmlFor="fullName">Full Name *</Label>
                 <Input
                   id="fullName"
@@ -335,87 +337,94 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                 {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="dob">Date of Birth</Label>
-                <Input
-                  id="dob"
-                  type="date"
-                  value={form.dateOfBirth}
-                  max={new Date().toISOString().substring(0, 10)}
-                  onChange={(e) => set('dateOfBirth', e.target.value)}
-                  onBlur={() => touch('dateOfBirth')}
-                  aria-invalid={!!fe('dateOfBirth')}
-                  className={inputClass('dateOfBirth')}
-                />
-                {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="age">Age *</Label>
-                <Input
-                  id="age"
-                  inputMode="numeric"
-                  value={form.age}
-                  onChange={(e) => set('age', e.target.value.replace(/\D/g, '').slice(0, 3))}
-                  onBlur={() => touch('age')}
-                  placeholder="Age in years"
-                  maxLength={3}
-                  aria-invalid={!!fe('age')}
-                  className={inputClass('age')}
-                />
-                {fe('age') && <p className="text-xs text-destructive">{fe('age')}</p>}
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="gender">Gender *</Label>
-                <select
-                  id="gender"
-                  value={form.gender}
-                  onChange={(e) => set('gender', e.target.value as Gender)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {GENDERS.map((g) => (
-                    <option key={g} value={g}>{genderLabel(g)}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="mobile">Mobile Number *</Label>
-                <div className="flex">
-                  <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+              {/* Row 2: Date of Birth | Mobile Number */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="dob">Date of Birth</Label>
                   <Input
-                    id="mobile"
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={10}
-                    value={form.mobileNumber}
-                    onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
-                    onBlur={() => touch('mobileNumber')}
-                    placeholder="XXXXXXXXXX"
-                    aria-invalid={!!fe('mobileNumber')}
-                    className={`${inputClass('mobileNumber')} rounded-l-none`}
+                    id="dob"
+                    type="date"
+                    value={form.dateOfBirth}
+                    max={new Date().toISOString().substring(0, 10)}
+                    onChange={(e) => set('dateOfBirth', e.target.value)}
+                    onBlur={() => touch('dateOfBirth')}
+                    aria-invalid={!!fe('dateOfBirth')}
+                    className={inputClass('dateOfBirth')}
                   />
+                  {fe('dateOfBirth') && <p className="text-xs text-destructive">{fe('dateOfBirth')}</p>}
                 </div>
-                {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
+
+                <div className="space-y-1">
+                  <Label htmlFor="mobile">Mobile Number *</Label>
+                  <div className="flex">
+                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm text-muted-foreground select-none">+91</span>
+                    <Input
+                      id="mobile"
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      value={form.mobileNumber}
+                      onChange={(e) => set('mobileNumber', sanitizeMobile(e.target.value))}
+                      onBlur={() => touch('mobileNumber')}
+                      placeholder="XXXXXXXXXX"
+                      aria-invalid={!!fe('mobileNumber')}
+                      className={`${inputClass('mobileNumber')} rounded-l-none`}
+                    />
+                  </div>
+                  {fe('mobileNumber') && <p className="text-xs text-destructive">{fe('mobileNumber')}</p>}
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="bloodGroup">Blood Group</Label>
-                <select
-                  id="bloodGroup"
-                  value={form.bloodGroup ?? ''}
-                  onChange={(e) => set('bloodGroup', e.target.value as BloodGroup || undefined)}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">— Select —</option>
-                  {BLOOD_GROUPS.map((bg) => (
-                    <option key={bg} value={bg}>{bg}</option>
-                  ))}
-                </select>
+              {/* Row 3: Age | Gender | Blood Group */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="age">Age *</Label>
+                  <Input
+                    id="age"
+                    inputMode="numeric"
+                    value={form.age}
+                    onChange={(e) => set('age', e.target.value.replace(/\D/g, '').slice(0, 3))}
+                    onBlur={() => touch('age')}
+                    placeholder="Age in years"
+                    maxLength={3}
+                    aria-invalid={!!fe('age')}
+                    className={inputClass('age')}
+                  />
+                  {fe('age') && <p className="text-xs text-destructive">{fe('age')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="gender">Gender *</Label>
+                  <select
+                    id="gender"
+                    value={form.gender}
+                    onChange={(e) => set('gender', e.target.value as Gender)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {GENDERS.map((g) => (
+                      <option key={g} value={g}>{genderLabel(g)}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="bloodGroup">Blood Group</Label>
+                  <select
+                    id="bloodGroup"
+                    value={form.bloodGroup ?? ''}
+                    onChange={(e) => set('bloodGroup', e.target.value as BloodGroup || undefined)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">— Select —</option>
+                    {BLOOD_GROUPS.map((bg) => (
+                      <option key={bg} value={bg}>{bg}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              <div className="sm:col-span-2 space-y-3">
+              {/* Row 4: Address Line 1 | Address Line 2 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="addressLine1">Address Line 1 *</Label>
                   <Input
@@ -442,39 +451,10 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                     className={inputClass('addressLine2')}
                   />
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label htmlFor="pincode">Pincode</Label>
-                    <Input
-                      id="pincode"
-                      inputMode="numeric"
-                      value={form.pincode ?? ''}
-                      onChange={(e) => set('pincode', e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      onBlur={() => touch('pincode')}
-                      placeholder="6-digit PIN"
-                      maxLength={6}
-                      aria-invalid={!!fe('pincode')}
-                      className={inputClass('pincode')}
-                    />
-                    {fe('pincode') && <p className="text-xs text-destructive">{fe('pincode')}</p>}
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="city">City *</Label>
-                    <Input
-                      id="city"
-                      value={form.city ?? ''}
-                      onChange={(e) => set('city', e.target.value)}
-                      onBlur={() => touch('city')}
-                      placeholder="City"
-                      maxLength={100}
-                      aria-invalid={!!fe('city')}
-                      className={inputClass('city')}
-                    />
-                    {fe('city') && <p className="text-xs text-destructive">{fe('city')}</p>}
-                  </div>
-                </div>
-
+              {/* Row 5: State | City | Pincode */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="state">State *</Label>
                   <select
@@ -491,6 +471,37 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                     ))}
                   </select>
                   {fe('state') && <p className="text-xs text-destructive">{fe('state')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="city">City *</Label>
+                  <Input
+                    id="city"
+                    value={form.city ?? ''}
+                    onChange={(e) => set('city', e.target.value)}
+                    onBlur={() => touch('city')}
+                    placeholder="City"
+                    maxLength={100}
+                    aria-invalid={!!fe('city')}
+                    className={inputClass('city')}
+                  />
+                  {fe('city') && <p className="text-xs text-destructive">{fe('city')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="pincode">Pincode</Label>
+                  <Input
+                    id="pincode"
+                    inputMode="numeric"
+                    value={form.pincode ?? ''}
+                    onChange={(e) => set('pincode', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    onBlur={() => touch('pincode')}
+                    placeholder="6-digit PIN"
+                    maxLength={6}
+                    aria-invalid={!!fe('pincode')}
+                    className={inputClass('pincode')}
+                  />
+                  {fe('pincode') && <p className="text-xs text-destructive">{fe('pincode')}</p>}
                 </div>
               </div>
             </div>
@@ -562,7 +573,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
               {isLoading ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Register Patient'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
