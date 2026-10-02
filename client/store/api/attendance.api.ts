@@ -1,5 +1,5 @@
 import { baseApi } from './base.api';
-import type { ApiSuccess, AttendanceMonthResponse, AttendanceRecord, EmployeeRosterEntry } from '../types';
+import type { ApiSuccess, AttendanceMonthResponse, AttendanceRecord, EmployeeRosterEntry, GeoCoordinates } from '../types';
 
 export const attendanceApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -13,14 +13,15 @@ export const attendanceApi = baseApi.injectEndpoints({
       providesTags: ['Attendance'],
     }),
 
-    checkIn: build.mutation<AttendanceRecord, void>({
-      query: () => ({ url: '/api/attendance/check-in', method: 'POST' }),
+    // Both require the device's current GPS fix (see lib/geolocation.ts).
+    checkIn: build.mutation<AttendanceRecord, GeoCoordinates>({
+      query: (location) => ({ url: '/api/attendance/check-in', method: 'POST', body: location }),
       transformResponse: (raw: ApiSuccess<AttendanceRecord>) => raw.data,
       invalidatesTags: ['Attendance'],
     }),
 
-    checkOut: build.mutation<AttendanceRecord, void>({
-      query: () => ({ url: '/api/attendance/check-out', method: 'POST' }),
+    checkOut: build.mutation<AttendanceRecord, GeoCoordinates>({
+      query: (location) => ({ url: '/api/attendance/check-out', method: 'POST', body: location }),
       transformResponse: (raw: ApiSuccess<AttendanceRecord>) => raw.data,
       invalidatesTags: ['Attendance'],
     }),

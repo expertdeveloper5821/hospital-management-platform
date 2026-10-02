@@ -113,7 +113,7 @@ export async function buildMedicalCardPdf(
       iy += 14;
 
       doc.fillColor(NAVY).fontSize(5.8).font('Helvetica-Bold')
-        .text('Patient ID:', IX, iy, { width: 34, lineBreak: false });
+        .text('UHID:', IX, iy, { width: 34, lineBreak: false });
       doc.fillColor(NAVY).fontSize(5.8).font('Helvetica')
         .text(patient.patientId, IX + 35, iy, { width: W - IX - 41, lineBreak: false });
       iy += 9;

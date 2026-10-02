@@ -89,6 +89,8 @@ export interface IPDVitals {
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export const ListAdmissionsQuerySchema = z.object({

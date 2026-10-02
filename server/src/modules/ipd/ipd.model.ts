@@ -17,6 +17,8 @@ export interface IIPDVitals {
   bloodPressure:   string | null; // "<systolic>/<diastolic>" mmHg
   sugar:           number | null; // mg/dL
   bodyTemperature: number | null; // °F
+  spo2:            number | null; // %
+  pulse:           number | null; // bpm
 }
 
 const IPDVitalsSchema = new Schema<IIPDVitals>(
@@ -32,6 +34,8 @@ const IPDVitalsSchema = new Schema<IIPDVitals>(
     bloodPressure:   { type: String, default: null },
     sugar:           { type: Schema.Types.Mixed, default: null },
     bodyTemperature: { type: Schema.Types.Mixed, default: null },
+    spo2:            { type: Schema.Types.Mixed, default: null },
+    pulse:           { type: Schema.Types.Mixed, default: null },
   },
   { _id: false },
 );
@@ -160,7 +164,7 @@ ipdAdmissionSchema.index(
 // prescription and dischargeSummaryNotes are top-level clinical free-text,
 // encrypted like OPDVisit.prescription via plain `fields`.
 //
-// vitals' bloodPressure/weight/height/sugar/bodyTemperature are structured
+// vitals' bloodPressure/weight/height/sugar/bodyTemperature/spo2/pulse are structured
 // clinical readings, encrypted the same way via objectFields (single nested
 // subdocument — see EncryptedObjectFieldSpec).
 //
@@ -176,7 +180,7 @@ const ENCRYPTED_IPD_FIELDS = {
     {
       path:         'vitals',
       stringFields: ['bloodPressure'],
-      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature'],
+      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature', 'spo2', 'pulse'],
     },
   ],
   purpose:     EncryptionKeyPurpose.MEDICAL,

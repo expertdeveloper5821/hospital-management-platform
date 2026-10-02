@@ -39,6 +39,8 @@ import {
   UserPlus,
   Printer,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
+import { autoFocusFirstFieldRef, handleEnterNavigation } from '@/lib/form-navigation';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,7 +59,7 @@ const PAYMENT_VIEW_ROLES: UserRole[] = [
 // Mirrors OPD's Vitals form (client/app/(dashboard)/opd/page.tsx) and
 // IPDService.updateAdmission's merge contract on the backend field-for-field:
 // weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>" mmHg),
-// sugar (mg/dL), body temperature (°F). Kept as controlled-input strings here
+// sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input strings here
 // (empty string = not entered) and converted to number|null only on submit —
 // see parseVitalsInputs.
 interface VitalsInputState {
@@ -66,10 +68,12 @@ interface VitalsInputState {
   bloodPressure:   string;
   sugar:           string;
   bodyTemperature: string;
+  spo2:            string;
+  pulse:           string;
 }
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
 };
 
 function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
@@ -80,6 +84,8 @@ function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
     bloodPressure:   vitals.bloodPressure   ?? '',
     sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+    spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
+    pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
   };
 }
 
@@ -132,6 +138,22 @@ function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<IPDVital
     const n = Number(temp);
     if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
     vitals.bodyTemperature = n;
+  }
+
+  const sp = inputs.spo2.trim();
+  if (sp === '') vitals.spo2 = null;
+  else {
+    const n = Number(sp);
+    if (isNaN(n) || n < 50 || n > 100) return { error: 'SpO2 must be between 50 and 100 %.' };
+    vitals.spo2 = n;
+  }
+
+  const pl = inputs.pulse.trim();
+  if (pl === '') vitals.pulse = null;
+  else {
+    const n = Number(pl);
+    if (isNaN(n) || n < 20 || n > 250) return { error: 'Pulse must be between 20 and 250 bpm.' };
+    vitals.pulse = n;
   }
 
   return { vitals };
@@ -573,11 +595,13 @@ function AdmissionPanel({
               ))}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
-                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
-                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
-                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
+                {row('SpO2',             admission.vitals?.spo2            != null ? `${admission.vitals.spo2} %`    : null)}
                 {row('Body Temperature', admission.vitals?.bodyTemperature != null ? `${admission.vitals.bodyTemperature} °F` : null)}
+                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
+                {row('Pulse',            admission.vitals?.pulse           != null ? `${admission.vitals.pulse} bpm` : null)}
+                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
+                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
+                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
               </div>
               {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
               {canViewPayment && (
@@ -597,7 +621,9 @@ function AdmissionPanel({
           )}
 
           {mode === 'edit' && (
-            <div className="space-y-4">
+            // Formless edit section (saved via the footer button): same Enter-to-next
+            // and focus-on-open behaviour as <NavForm>.
+            <div className="space-y-4" ref={autoFocusFirstFieldRef} onKeyDown={handleEnterNavigation}>
               {/* Department filter */}
               <div className="space-y-1.5">
                 <Label htmlFor="ap-dept">Department (filter doctors)</Label>
@@ -746,19 +772,19 @@ function AdmissionPanel({
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="ap-weight">Weight (kg)</Label>
+                      <Label htmlFor="ap-spo2">SpO2 (%)</Label>
                       <Input
-                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-                        value={vitalsForm.weight}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+                        id="ap-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
+                        value={vitalsForm.spo2}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, spo2: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="ap-height">Height (cm)</Label>
+                      <Label htmlFor="ap-temp">Body Temperature (°F)</Label>
                       <Input
-                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-                        value={vitalsForm.height}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+                        id="ap-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
+                        value={vitalsForm.bodyTemperature}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -770,6 +796,14 @@ function AdmissionPanel({
                       />
                     </div>
                     <div className="space-y-1.5">
+                      <Label htmlFor="ap-pulse">Pulse (bpm)</Label>
+                      <Input
+                        id="ap-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
+                        value={vitalsForm.pulse}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, pulse: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="ap-sugar">Sugar (mg/dL)</Label>
                       <Input
                         id="ap-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
@@ -778,11 +812,19 @@ function AdmissionPanel({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label htmlFor="ap-temp">Body Temperature (°F)</Label>
+                      <Label htmlFor="ap-height">Height (cm)</Label>
                       <Input
-                        id="ap-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
-                        value={vitalsForm.bodyTemperature}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+                        value={vitalsForm.height}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-weight">Weight (kg)</Label>
+                      <Input
+                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+                        value={vitalsForm.weight}
+                        onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
                       />
                     </div>
                   </div>
@@ -948,7 +990,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
 
             {/* Step 1 — Patient */}
@@ -1154,7 +1196,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
               {isLoading ? 'Admitting…' : 'Admit Patient'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
     {showAddPatient && (
@@ -1235,7 +1277,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
 
         {/* Add note — doctors only */}
         {canAdd && admission.status === 'ADMITTED' && (
-          <form onSubmit={handleSubmit} className="border-t px-6 py-4 space-y-3 shrink-0">
+          <NavForm onSubmit={handleSubmit} className="border-t px-6 py-4 space-y-3 shrink-0">
             <Label htmlFor="pn-note">New Note</Label>
             <RichTextEditor
               id="pn-note"
@@ -1251,7 +1293,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
                 {isLoading ? 'Saving…' : 'Add Note'}
               </Button>
             </div>
-          </form>
+          </NavForm>
         )}
       </div>
     </DialogOverlay>
@@ -1470,11 +1512,11 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Patient ID search */}
+          {/* UHID search */}
           <div className="relative flex-1 min-w-[160px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search by patient name or ID…"
+              placeholder="Search by patient name or UHID…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
               className="h-9 pl-8 text-sm w-full"
@@ -1708,7 +1750,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && !searchQ && (
+      {totalPages > 1 && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
           <span>Page {page} of {totalPages} — {total} admissions</span>
           <div className="flex gap-2">

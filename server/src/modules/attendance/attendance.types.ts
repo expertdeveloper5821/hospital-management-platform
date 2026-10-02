@@ -1,4 +1,7 @@
-import { AttendanceStatus } from './attendance.model';
+import { AttendanceStatus, IAttendanceLocation } from './attendance.model';
+
+// Body of POST /check-in and POST /check-out — the device's current GPS fix.
+export type AttendanceLocationRequest = IAttendanceLocation;
 
 export interface UpdateAttendanceRequest {
   checkIn?:  string | null;

@@ -196,7 +196,7 @@ export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' 
 // OPD Vitals — recorded via the OPD View → Edit form only (see
 // server opd.types.ts's OPDVitals for the field/unit contract): weight in kg,
 // height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F. Every field is independently
+// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
 // nullable — a visit with nothing recorded yet still reports the full shape
 // with every value null, never an undefined/missing field.
 export interface OPDVitals {
@@ -205,6 +205,8 @@ export interface OPDVitals {
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export interface OPDVisitResponse {
@@ -427,7 +429,7 @@ export interface ProgressNote {
 // IPD Vitals — recorded via the IPD Admission View → Edit form only (see
 // server ipd.types.ts's IPDVitals for the field/unit contract): weight in kg,
 // height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F. Every field is independently
+// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
 // nullable — an admission with nothing recorded yet still reports the full
 // shape with every value null, never an undefined/missing field. Mirrors
 // OPDVitals field-for-field.
@@ -437,6 +439,8 @@ export interface IPDVitals {
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export interface AdmissionResponse {
@@ -698,6 +702,14 @@ export interface PaginatedResult<T> {
   totalPages: number;
 }
 
+// GET /api/opd/visits — one page of the queue, plus Open/Completed counts
+// across every visit matching the filters. The counts are absent when the
+// response is served from the offline cache (one unpaginated page).
+export interface OPDQueueResult extends PaginatedResult<OPDVisitResponse> {
+  openCount?:      number;
+  completedCount?: number;
+}
+
 // ─── Staff ID Card ────────────────────────────────────────────────────────────
 
 export interface StaffIdCardResponse {
@@ -901,6 +913,12 @@ export interface UpdateDepartmentRequest {
 // ─── Attendance ─────────────────────────────────────────────────────────────
 
 export type AttendanceStatus = 'PRESENT' | 'IN_PROGRESS' | 'ABSENT';
+
+// Device GPS fix sent with self check-in / check-out (WGS-84 decimal degrees).
+export interface GeoCoordinates {
+  latitude:  number;
+  longitude: number;
+}
 
 export interface AttendanceRecord {
   attendanceId:   string | null;

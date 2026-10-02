@@ -150,6 +150,8 @@ const ipdVitalsSchema = z.object({
   bloodPressure:   ipdBloodPressureSchema,
   sugar:           z.number().min(10, 'Sugar must be between 10 and 1000 mg/dL.').max(1000, 'Sugar must be between 10 and 1000 mg/dL.').nullable().optional(),
   bodyTemperature: z.number().min(80, 'Body temperature must be between 80 and 115 °F.').max(115, 'Body temperature must be between 80 and 115 °F.').nullable().optional(),
+  spo2:            z.number().min(50, 'SpO2 must be between 50 and 100 %.').max(100, 'SpO2 must be between 50 and 100 %.').nullable().optional(),
+  pulse:           z.number().min(20, 'Pulse must be between 20 and 250 bpm.').max(250, 'Pulse must be between 20 and 250 bpm.').nullable().optional(),
 }).optional();
 
 const updateAdmissionSchema = z.object({

@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { CharCounter } from '@/components/ui/char-counter';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { Building2, Plus, Pencil, Trash2, X, RefreshCw, Search } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Create / Edit Modal ──────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="dept-name">Name <span className="text-destructive">*</span></Label>
@@ -183,7 +184,7 @@ function DepartmentModal({ existing, allDoctors = [], onClose }: DepartmentModal
               {isLoading ? 'Saving…' : existing ? 'Save Changes' : 'Create'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );

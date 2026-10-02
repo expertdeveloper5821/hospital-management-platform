@@ -191,7 +191,7 @@ describe('IPDPage — Prescription & Discharge permissions', () => {
     admissionDate:     '2026-01-01T00:00:00.000Z',
     dischargeDate:     null,
     progressNotes:     [],
-    vitals:            { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null },
+    vitals:            { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null },
     prescription:          'Tab. Paracetamol 500mg BD',
     dischargeSummaryNotes: null,
   };
@@ -290,5 +290,28 @@ describe('IPDPage — Prescription & Discharge permissions', () => {
 
     await waitFor(() => expect(mockDischarge).toHaveBeenCalledWith({ admissionId: 'adm-rx-1', dischargeSummaryNotes: 'Stable.' }));
     expect(await screen.findByText('Patient Discharged')).toBeInTheDocument();
+  });
+});
+
+describe('IPDPage — admissions pagination while searching', () => {
+  test('pager stays visible with an active search and Next requests the next page of matches', async () => {
+    mockRole = 'RECEPTIONIST';
+    mockUseListAdmissionsQuery.mockReturnValue({
+      data: { data: [], total: 25, totalPages: 3 },
+      isLoading: false, isFetching: false, refetch: jest.fn(),
+    });
+
+    render(<IPDPage />);
+    fireEvent.change(screen.getByPlaceholderText(/search by patient name/i), { target: { value: 'ravi' } });
+
+    // After the 400ms debounce the search is sent to the server, page reset to 1.
+    await waitFor(() =>
+      expect(mockUseListAdmissionsQuery).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'ravi', page: 1 })),
+    );
+    expect(screen.getByText('Page 1 of 3 — 25 admissions')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(mockUseListAdmissionsQuery).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'ravi', page: 2 }));
   });
 });

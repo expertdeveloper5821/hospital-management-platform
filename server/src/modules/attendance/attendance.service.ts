@@ -5,7 +5,7 @@ import { IAttendance, AttendanceStatus } from './attendance.model';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType } from '../../shared/types/common.types';
 import { ConflictError, NotFoundError, AppError } from '../../shared/middleware/error-handler';
-import { UpdateAttendanceRequest, AttendanceMonthResponse, AttendanceRecordResponse, AttendanceSummary, EmployeeRosterEntry } from './attendance.types';
+import { UpdateAttendanceRequest, AttendanceLocationRequest, AttendanceMonthResponse, AttendanceRecordResponse, AttendanceSummary, EmployeeRosterEntry } from './attendance.types';
 import { getIstDateParts, istMidnightFor, toIstMidnight, toIstDateKey } from './attendance.timezone';
 
 function roundHours(ms: number): number {
@@ -86,7 +86,9 @@ function buildDayGrid(
 }
 
 export class AttendanceService {
-  async checkIn(tenantId: string, userId: string): Promise<IAttendance> {
+  // Coordinates are persisted on the record but deliberately kept out of the
+  // audit log (precise location is personal data, like the redacted PII elsewhere).
+  async checkIn(tenantId: string, userId: string, location: AttendanceLocationRequest): Promise<IAttendance> {
     const today = toIstMidnight(new Date());
     const existing = await attendanceRepository.findByUserAndDate(tenantId, userId, today);
     if (existing && existing.checkIn) throw new ConflictError('Already checked in today.');
@@ -99,6 +101,8 @@ export class AttendanceService {
       attendanceDate: today,
       checkIn:        now,
       checkOut:       null,
+      checkInLocation:  { latitude: location.latitude, longitude: location.longitude },
+      checkOutLocation: null,
       totalHours:     null,
       status:         'IN_PROGRESS',
     });
@@ -115,7 +119,7 @@ export class AttendanceService {
     return record;
   }
 
-  async checkOut(tenantId: string, userId: string): Promise<IAttendance> {
+  async checkOut(tenantId: string, userId: string, location: AttendanceLocationRequest): Promise<IAttendance> {
     const today = toIstMidnight(new Date());
     const existing = await attendanceRepository.findByUserAndDate(tenantId, userId, today);
     if (!existing || !existing.checkIn) throw new AppError('You must check in before checking out.', 400);
@@ -126,6 +130,7 @@ export class AttendanceService {
 
     const updated = await attendanceRepository.update(tenantId, existing.attendanceId, {
       checkOut: now,
+      checkOutLocation: { latitude: location.latitude, longitude: location.longitude },
       totalHours,
       status:   'PRESENT',
     });

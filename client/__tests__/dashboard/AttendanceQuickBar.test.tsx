@@ -14,7 +14,34 @@ jest.mock('@/store/api/attendance.api', () => ({
   useCheckOutMutation: () => [mockCheckOut, { isLoading: false }],
 }));
 
+const mockToastError = jest.fn();
+jest.mock('@/lib/toast', () => ({
+  toastError: (...args: unknown[]) => mockToastError(...args),
+}));
+
 const NOW = new Date('2026-09-30T10:00:00.000Z').getTime();
+const COORDS = { latitude: 19.076, longitude: 72.8777 };
+
+const mockGetCurrentPosition = jest.fn();
+Object.defineProperty(global.navigator, 'geolocation', {
+  configurable: true,
+  value: { getCurrentPosition: mockGetCurrentPosition },
+});
+
+function grantLocation() {
+  mockGetCurrentPosition.mockImplementation((success: PositionCallback) =>
+    success({ coords: COORDS } as GeolocationPosition));
+}
+
+function failLocation(code: number) {
+  mockGetCurrentPosition.mockImplementation((_s: PositionCallback, error: PositionErrorCallback) =>
+    error({ code } as GeolocationPositionError));
+}
+
+// Location capture resolves asynchronously after the confirm click.
+async function flush() {
+  await act(async () => { await Promise.resolve(); });
+}
 
 describe('AttendanceQuickBar', () => {
   beforeEach(() => {
@@ -22,11 +49,14 @@ describe('AttendanceQuickBar', () => {
     jest.setSystemTime(NOW);
     mockCheckIn.mockClear();
     mockCheckOut.mockClear();
+    mockToastError.mockClear();
+    mockGetCurrentPosition.mockReset();
+    grantLocation();
     mockRecord = undefined;
   });
   afterEach(() => jest.useRealTimers());
 
-  it('before check-in shows "Not Checked In" (never "Today") and a Check In action', () => {
+  it('before check-in shows "Not Checked In" (never "Today") and a Check In action', async () => {
     mockRecord = { checkIn: null, checkOut: null };
     render(<AttendanceQuickBar />);
     expect(screen.getByText('Not Checked In')).toBeInTheDocument();
@@ -34,10 +64,12 @@ describe('AttendanceQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /check in/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Yes, Check In' }));
+    await flush();
     expect(mockCheckIn).toHaveBeenCalledTimes(1);
+    expect(mockCheckIn).toHaveBeenCalledWith(COORDS);
   });
 
-  it('while checked in counts from the saved check-in time and keeps ticking', () => {
+  it('while checked in counts from the saved check-in time and keeps ticking', async () => {
     mockRecord = { checkIn: new Date(NOW - (4 * 60 + 25) * 60_000).toISOString(), checkOut: null };
     render(<AttendanceQuickBar />);
     expect(screen.getByText('04h 25m 00s')).toBeInTheDocument();
@@ -50,7 +82,53 @@ describe('AttendanceQuickBar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /check out/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Yes, Check Out' }));
+    await flush();
     expect(mockCheckOut).toHaveBeenCalledTimes(1);
+    expect(mockCheckOut).toHaveBeenCalledWith(COORDS);
+  });
+
+  it.each([
+    [1, /Location access is blocked/],
+    [2, /could not be determined/],
+    [3, /took too long/],
+  ])('does not check in when location capture fails (error code %i) and explains why', async (code, message) => {
+    failLocation(code);
+    mockRecord = { checkIn: null, checkOut: null };
+    render(<AttendanceQuickBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: /check in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, Check In' }));
+    await flush();
+
+    expect(mockCheckIn).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith('Could not check in', expect.stringMatching(message));
+    expect(screen.getByRole('button', { name: /check in/i })).toBeEnabled();
+  });
+
+  it('does not check out when location permission is denied', async () => {
+    failLocation(1);
+    mockRecord = { checkIn: new Date(NOW - 60 * 60_000).toISOString(), checkOut: null };
+    render(<AttendanceQuickBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: /check out/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, Check Out' }));
+    await flush();
+
+    expect(mockCheckOut).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith('Could not check out', expect.stringMatching(/Location access is blocked/));
+  });
+
+  it('shows a "Getting location…" busy state while waiting for a GPS fix', async () => {
+    mockGetCurrentPosition.mockImplementation(() => { /* never resolves */ });
+    mockRecord = { checkIn: null, checkOut: null };
+    render(<AttendanceQuickBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: /check in/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, Check In' }));
+    await flush();
+
+    expect(screen.getByRole('button', { name: /Getting location/ })).toBeDisabled();
+    expect(mockCheckIn).not.toHaveBeenCalled();
   });
 
   it('after check-out shows the final total and check-out time, frozen, with no action', () => {

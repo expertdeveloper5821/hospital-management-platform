@@ -16,6 +16,8 @@ export interface IOPDVitals {
   bloodPressure:   string | null; // "<systolic>/<diastolic>" mmHg
   sugar:           number | null; // mg/dL
   bodyTemperature: number | null; // °F
+  spo2:            number | null; // %
+  pulse:           number | null; // bpm
 }
 
 const OPDVitalsSchema = new Schema<IOPDVitals>(
@@ -31,6 +33,8 @@ const OPDVitalsSchema = new Schema<IOPDVitals>(
     bloodPressure:   { type: String, default: null },
     sugar:           { type: Schema.Types.Mixed, default: null },
     bodyTemperature: { type: Schema.Types.Mixed, default: null },
+    spo2:            { type: Schema.Types.Mixed, default: null },
+    pulse:           { type: Schema.Types.Mixed, default: null },
   },
   { _id: false },
 );
@@ -104,7 +108,7 @@ OPDVisitSchema.index(
 // ─── Clinical free-text encryption at rest (AES-256-GCM) ─────────────────────
 // diagnosis, prescription and notes are the free-text clinical fields on a
 // visit (notes is sanitized rich-text HTML — see opd.controller.ts). vitals'
-// bloodPressure/weight/height/sugar/bodyTemperature are structured clinical
+// bloodPressure/weight/height/sugar/bodyTemperature/spo2/pulse are structured clinical
 // readings, encrypted the same way via objectFields (see
 // EncryptedObjectFieldSpec in encrypted-fields.plugin.ts). All of them are
 // encrypted transparently at the model layer, so every write path persists
@@ -124,7 +128,7 @@ const ENCRYPTED_CLINICAL_FIELDS = {
     {
       path:         'vitals',
       stringFields: ['bloodPressure'],
-      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature'],
+      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature', 'spo2', 'pulse'],
     },
   ],
 };

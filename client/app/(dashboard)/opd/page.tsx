@@ -55,6 +55,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ const DEPARTMENT_DOCTOR_MESSAGE = 'Changing the department requires selecting a 
 // ─── Vitals (OPD Edit form) ─────────────────────────────────────────────────
 // Mirrors OPDService.updateVisit's DEFAULT_VITALS/merge contract on the
 // backend: weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>"
-// mmHg), sugar (mg/dL), body temperature (°F). Kept as controlled-input
+// mmHg), sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input
 // strings here (empty string = not entered) and converted to number|null only
 // on submit — see parseVitalsInputs.
 interface VitalsInputState {
@@ -117,10 +118,12 @@ interface VitalsInputState {
   bloodPressure:   string;
   sugar:           string;
   bodyTemperature: string;
+  spo2:            string;
+  pulse:           string;
 }
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
 };
 
 function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
@@ -131,6 +134,8 @@ function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
     bloodPressure:   vitals.bloodPressure   ?? '',
     sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+    spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
+    pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
   };
 }
 
@@ -183,6 +188,22 @@ function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<OPDVital
     const n = Number(temp);
     if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
     vitals.bodyTemperature = n;
+  }
+
+  const sp = inputs.spo2.trim();
+  if (sp === '') vitals.spo2 = null;
+  else {
+    const n = Number(sp);
+    if (isNaN(n) || n < 50 || n > 100) return { error: 'SpO2 must be between 50 and 100 %.' };
+    vitals.spo2 = n;
+  }
+
+  const pl = inputs.pulse.trim();
+  if (pl === '') vitals.pulse = null;
+  else {
+    const n = Number(pl);
+    if (isNaN(n) || n < 20 || n > 250) return { error: 'Pulse must be between 20 and 250 bpm.' };
+    vitals.pulse = n;
   }
 
   return { vitals };
@@ -557,19 +578,19 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="ep-weight">Weight (kg)</Label>
+          <Label htmlFor="ep-spo2">SpO2 (%)</Label>
           <Input
-            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-            value={vitalsForm.weight}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+            id="ep-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
+            value={vitalsForm.spo2}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, spo2: e.target.value }))}
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="ep-height">Height (cm)</Label>
+          <Label htmlFor="ep-temp">Body Temperature (°F)</Label>
           <Input
-            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-            value={vitalsForm.height}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+            id="ep-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
+            value={vitalsForm.bodyTemperature}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
           />
         </div>
         <div className="space-y-1.5">
@@ -581,6 +602,14 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           />
         </div>
         <div className="space-y-1.5">
+          <Label htmlFor="ep-pulse">Pulse (bpm)</Label>
+          <Input
+            id="ep-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
+            value={vitalsForm.pulse}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, pulse: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
           <Label htmlFor="ep-sugar">Sugar (mg/dL)</Label>
           <Input
             id="ep-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
@@ -589,11 +618,19 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="ep-temp">Body Temperature (°F)</Label>
+          <Label htmlFor="ep-height">Height (cm)</Label>
           <Input
-            id="ep-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
-            value={vitalsForm.bodyTemperature}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+            value={vitalsForm.height}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-weight">Weight (kg)</Label>
+          <Input
+            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+            value={vitalsForm.weight}
+            onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
           />
         </div>
       </div>
@@ -762,11 +799,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               {f('Notes',           <RichTextDisplay value={visit.notes} />)}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
-                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
-                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
-                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
+                {f('SpO2',             visit.vitals?.spo2            != null ? `${visit.vitals.spo2} %`    : null)}
                 {f('Body Temperature', visit.vitals?.bodyTemperature != null ? `${visit.vitals.bodyTemperature} °F` : null)}
+                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
+                {f('Pulse',            visit.vitals?.pulse           != null ? `${visit.vitals.pulse} bpm` : null)}
+                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
+                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
+                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
               </div>
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
               {canViewPayment && (
@@ -796,7 +835,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             // entirely on an out-of-range value before handleUpdate ever
             // runs, showing a native tooltip instead of our own styled error
             // banner (the same one every other validation error uses).
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               <p className="text-xs text-muted-foreground">Only the notes and vitals fields can be edited.</p>
               {f('Doctor(s)',     doctorNames(visit.doctorIds ?? []))}
               {f('Nurse(s)',      nurseNames(visit.nurseIds ?? []))}
@@ -815,14 +854,14 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 />
               </div>
               {vitalsFields}
-            </form>
+            </NavForm>
           )}
           {/* Edit mode — Receptionist form: Patient, Visit Date, Notes,
               Department/Doctors/Nurses and Vitals are editable; diagnosis and
               prescription are shown read-only and never submitted (see
               handleUpdate). */}
           {mode === 'edit' && receptionistAssignOnly && (
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               {/* <p className="text-xs text-muted-foreground">Only the patient, visit date, notes, department, doctor, nurse and vitals fields can be edited.</p> */}
               <div className="space-y-1.5">
                 <Label>Patient</Label>
@@ -919,7 +958,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   Vitals will load from the newly selected patient&apos;s records after saving.
                 </p>
               ) : vitalsFields}
-            </form>
+            </NavForm>
           )}
           {mode === 'edit' && !nurseNotesOnly && !receptionistAssignOnly && (
             // noValidate: the Vitals number inputs' min/max are UX hints only
@@ -927,7 +966,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             // entirely on an out-of-range value before handleUpdate ever
             // runs, showing a native tooltip instead of our own styled error
             // banner (the same one every other validation error uses).
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               {departmentDoctorFields}
               {nurseAssignFields}
               <div className="space-y-1.5">
@@ -965,12 +1004,12 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 />
               </div>
               {vitalsFields}
-            </form>
+            </NavForm>
           )}
 
           {/* Complete mode */}
           {mode === 'complete' && (
-            <form id="completeForm" onSubmit={handleComplete} className="space-y-4">
+            <NavForm id="completeForm" onSubmit={handleComplete} className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Completing this visit is permanent. Provide the final diagnosis before confirming.
               </p>
@@ -1009,7 +1048,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   maxLength={2000}
                 />
               </div>
-            </form>
+            </NavForm>
           )}
         </div>
 
@@ -1061,7 +1100,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
                 )}
-                {canDelete && (
+                {/* Waiting visits only — once the consultation has started
+                    the visit is part of the record (enforced server-side too). */}
+                {canDelete && visit.status === 'OPEN' && (
                   <Button
                     variant="destructive"
                     className="min-w-[120px] flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
@@ -1397,7 +1438,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -1729,7 +1770,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
               {isLoading ? 'Creating…' : 'Create Visit'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
     {showAddPatient && (
@@ -1747,6 +1788,8 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
 
 type TabType = 'queue' | 'new';
 
+const OPD_QUEUE_PAGE_SIZE = 20;
+
 export default function OPDPage() {
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
@@ -1759,11 +1802,12 @@ export default function OPDPage() {
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page,            setPage]            = useState(1);
   const [selectedVisit, setSelectedVisit] = useState<OPDVisitResponse | null>(null);
   const [showNewVisit,  setShowNewVisit]  = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(filterSearch), 400);
+    const t = setTimeout(() => { setDebouncedSearch(filterSearch); setPage(1); }, 400);
     return () => clearTimeout(t);
   }, [filterSearch]);
 
@@ -1771,7 +1815,15 @@ export default function OPDPage() {
     date:     filterDate,
     doctorId: filterDoctor    || undefined,
     search:   debouncedSearch || undefined,
+    page,
+    limit:    OPD_QUEUE_PAGE_SIZE,
   });
+
+  // A visit removed from the last page (delete/cancel) can leave `page` past
+  // the end — step back so the table never sits on an empty page.
+  useEffect(() => {
+    if (queue && page > 1 && page > queue.totalPages) setPage(Math.max(1, queue.totalPages));
+  }, [queue, page]);
 
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
   const doctors = usersData?.data ?? [];
@@ -1797,7 +1849,9 @@ export default function OPDPage() {
     }).join(', ');
   }, [nurses]);
 
-  const visits = queue ?? [];
+  const visits     = queue?.data ?? [];
+  const total      = queue?.total ?? visits.length;
+  const totalPages = queue?.totalPages ?? 1;
 
   // DOCTOR is deliberately excluded — doctors may view/act on visits assigned to
   // them but must not be able to create new OPD visits (also enforced server-side).
@@ -1812,8 +1866,10 @@ export default function OPDPage() {
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role ?? '');
 
   // Queue stats
-  const open      = visits.filter((v) => v.status === 'OPEN').length;
-  const completed = visits.filter((v) => v.status === 'COMPLETED').length;
+  // Server-side counts span every page; the offline-cache fallback (one
+  // unpaginated page, no counts) derives them from the rows it has.
+  const open      = queue?.openCount      ?? visits.filter((v) => v.status === 'OPEN').length;
+  const completed = queue?.completedCount ?? visits.filter((v) => v.status === 'COMPLETED').length;
 
   return (
     <div className="space-y-6">
@@ -1836,7 +1892,7 @@ export default function OPDPage() {
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Total Today</p>
-            <p className="text-2xl font-bold">{visits.length}</p>
+            <p className="text-2xl font-bold">{total}</p>
           </CardContent>
         </Card>
         <Card>
@@ -1864,7 +1920,7 @@ export default function OPDPage() {
                 id="filterDate"
                 type="date"
                 value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
+                onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
                 className="flex-1 sm:w-40 sm:flex-none"
               />
             </div>
@@ -1875,7 +1931,7 @@ export default function OPDPage() {
               <select
                 id="filterDoc"
                 value={filterDoctor}
-                onChange={(e) => setFilterDoctor(e.target.value)}
+                onChange={(e) => { setFilterDoctor(e.target.value); setPage(1); }}
                 className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">All Doctors</option>
@@ -1892,7 +1948,7 @@ export default function OPDPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                 <Input
                   id="filterSearch"
-                  placeholder="Patient name or ID…"
+                  placeholder="Patient name or UHID…"
                   value={filterSearch}
                   onChange={(e) => setFilterSearch(e.target.value)}
                   className="h-10 pl-8 text-sm"
@@ -1989,6 +2045,21 @@ export default function OPDPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>Page {page} of {totalPages} — {total} visits</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Visit detail panel */}
       {selectedVisit && (

@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { INDIAN_STATES } from '@/lib/constants';
+import { NavForm } from '@/components/ui/form';
 
 interface FormState {
   name:                    string;
@@ -186,7 +187,7 @@ export default function NewTenantPage() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} noValidate className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
+      <NavForm onSubmit={handleSubmit} noValidate className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
         {/* Basic info */}
         <div className="space-y-4">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -372,7 +373,7 @@ export default function NewTenantPage() {
             {isLoading ? 'Creating…' : 'Create Tenant'}
           </Button>
         </div>
-      </form>
+      </NavForm>
     </div>
   );
 }

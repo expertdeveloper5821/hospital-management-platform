@@ -28,6 +28,7 @@ import {
   BarChart3,
   UserCheck,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Add Beds Modal ───────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <NavForm onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ab-numbers">Bed Numbers</Label>
             <Input
@@ -84,7 +85,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
               {isLoading ? 'Adding…' : 'Add Beds'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -119,7 +120,7 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <NavForm onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="cw-name">Ward Name</Label>
             <Input id="cw-name" placeholder="General Ward" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -133,7 +134,7 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>{isLoading ? 'Creating…' : 'Create Ward'}</Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
