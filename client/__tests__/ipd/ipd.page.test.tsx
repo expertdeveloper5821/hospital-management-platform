@@ -40,8 +40,16 @@ jest.mock('@/store/api/user.api', () => ({
   useListUsersQuery: () => (mockDoctorsLoading ? { data: undefined, isLoading: true } : { data: { data: mockDoctors } }),
 }));
 
+// Patients returned for any search; responses are cached per query so `data`
+// keeps a stable identity across re-renders (like RTK Query's cache).
+let mockSearchPatients: unknown[] = [];
+const mockSearchResponses = new Map<string, unknown>();
 jest.mock('@/store/api/patient.api', () => ({
-  useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
+  useSearchPatientsQuery: ({ q }: { q: string }, opts?: { skip?: boolean }) => {
+    if (opts?.skip) return { data: undefined, isFetching: false };
+    if (!mockSearchResponses.has(q)) mockSearchResponses.set(q, { data: mockSearchPatients });
+    return { data: mockSearchResponses.get(q), isFetching: false };
+  },
 }));
 
 jest.mock('@/store/api/department.api', () => ({
@@ -90,6 +98,8 @@ beforeEach(() => {
   mockDoctors = [];
   mockDoctorsLoading = false;
   mockDepartments = undefined;
+  mockSearchPatients = [];
+  mockSearchResponses.clear();
   mockUserId = undefined;
   mockCreateAdmission.mockReset();
   mockCreateManualPayment.mockReset();
@@ -156,6 +166,100 @@ describe('IPDPage — New Admission Add Patient flow', () => {
     expect(screen.queryByTestId('patient-form-modal')).not.toBeInTheDocument();
     expect(screen.getByText('Newly Registered Patient')).toBeInTheDocument();
     expect(screen.getByText(/PAT-NEW-1/)).toBeInTheDocument();
+  });
+});
+
+describe('IPDPage — New Admission patient search keyboard navigation', () => {
+  const P1 = { patientId: 'PAT-1', fullName: 'Asha Rao',   mobileNumber: '9000000001' };
+  const P2 = { patientId: 'PAT-2', fullName: 'Asha Mehta', mobileNumber: '9000000002' };
+  const P3 = { patientId: 'PAT-3', fullName: 'Asha Iyer',  mobileNumber: '9000000003' };
+  const scrollIntoView = jest.fn();
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    mockSearchPatients = [P1, P2, P3];
+    scrollIntoView.mockReset();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+
+  const searchBox = () => screen.getByPlaceholderText(/search by name or mobile/i);
+  const option    = (name: string) => within(screen.getByRole('listbox')).getByRole('option', { name: new RegExp(name) });
+
+  async function openAndSearch(user: ReturnType<typeof userEvent.setup>, q = 'asha') {
+    render(<IPDPage />);
+    await user.click(screen.getByRole('button', { name: /new admission/i }));
+    await user.type(searchBox(), q);
+    // Wait out the 300 ms debounce so the results are live.
+    await waitFor(() => expect(option('Asha Rao')).toBeInTheDocument());
+  }
+
+  test('ArrowDown/ArrowUp move the highlight with wrap-around and scroll it into view', async () => {
+    const user = userEvent.setup();
+    await openAndSearch(user);
+    expect(searchBox()).not.toHaveAttribute('aria-activedescendant');
+
+    await user.keyboard('{ArrowDown}');
+    expect(option('Asha Rao')).toHaveAttribute('aria-selected', 'true');
+    expect(searchBox()).toHaveAttribute('aria-activedescendant', option('Asha Rao').id);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: 'nearest' });
+
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(option('Asha Iyer')).toHaveAttribute('aria-selected', 'true');
+    expect(option('Asha Rao')).toHaveAttribute('aria-selected', 'false');
+
+    // Down from the last wraps to the first; Up from the first wraps to the last.
+    await user.keyboard('{ArrowDown}');
+    expect(option('Asha Rao')).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowUp}');
+    expect(option('Asha Iyer')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('ArrowUp with nothing highlighted jumps to the last patient', async () => {
+    const user = userEvent.setup();
+    await openAndSearch(user);
+
+    await user.keyboard('{ArrowUp}');
+    expect(option('Asha Iyer')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('Enter selects the highlighted patient without submitting the admission form', async () => {
+    const user = userEvent.setup();
+    await openAndSearch(user);
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+    expect(screen.getByText('Asha Mehta')).toBeInTheDocument();
+    expect(screen.getByText(/PAT-2/)).toBeInTheDocument();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear patient selection/i })).toBeInTheDocument();
+    // The form did not submit (no validation error, no create call).
+    expect(screen.queryByText(/select a ward/i)).not.toBeInTheDocument();
+    expect(mockCreateAdmission).not.toHaveBeenCalled();
+  });
+
+  test('a new search resets the highlight', async () => {
+    const user = userEvent.setup();
+    await openAndSearch(user);
+
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(option('Asha Mehta')).toHaveAttribute('aria-selected', 'true');
+
+    await user.type(searchBox(), ' m');
+    await waitFor(() => expect(searchBox()).not.toHaveAttribute('aria-activedescendant'));
+    expect(option('Asha Mehta')).toHaveAttribute('aria-selected', 'false');
+
+    // Navigation starts over from the top of the new results.
+    await user.keyboard('{ArrowDown}');
+    expect(option('Asha Rao')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('mouse selection still works', async () => {
+    const user = userEvent.setup();
+    await openAndSearch(user);
+
+    await user.click(option('Asha Iyer'));
+    expect(screen.getByText('Asha Iyer')).toBeInTheDocument();
+    expect(screen.getByText(/PAT-3/)).toBeInTheDocument();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 });
 
@@ -644,6 +748,95 @@ describe('IPDPage — Doctor multi-select (New Admission and Edit)', () => {
         bedId:             'bed-1',
         assignedDoctorIds: ['doc-2', 'doc-1'],
       }));
+    });
+
+    describe('department changed after selecting doctors', () => {
+      const CARDIO = { departmentId: 'dept-cardio', name: 'Cardiology' };
+      const NEURO  = { departmentId: 'dept-neuro',  name: 'Neurology' };
+      const DR_HEART = { userId: 'doc-1', name: 'Dr. ABC', email: 'abc@h.com', departmentIds: ['dept-cardio'] };
+      const DR_BOTH  = { userId: 'doc-2', name: 'Dr. DEF', email: 'def@h.com', departmentIds: ['dept-cardio', 'dept-neuro'] };
+      const deptSelect = () => screen.getByLabelText(/department\s*\(optional\)/i) as HTMLSelectElement;
+
+      beforeEach(() => {
+        mockDepartments = [CARDIO, NEURO];
+        mockDoctors = [DR_HEART, DR_BOTH];
+      });
+
+      async function openWithBothSelected(user: ReturnType<typeof userEvent.setup>) {
+        const result = render(<IPDPage />);
+        await user.click(screen.getByRole('button', { name: /new admission/i }));
+        await user.click(doctorBox());
+        await user.click(within(listbox()).getByRole('option', { name: 'Dr. ABC' }));
+        await user.click(within(listbox()).getByRole('option', { name: 'Dr. DEF' }));
+        await user.keyboard('{Escape}');
+        return result;
+      }
+
+      test('keeps doctors valid for the new department and removes only invalid ones', async () => {
+        const user = userEvent.setup();
+        await openWithBothSelected(user);
+
+        await user.selectOptions(deptSelect(), 'dept-neuro');
+        await waitFor(() => expect(within(doctorBox()).queryByTitle('Dr. ABC')).not.toBeInTheDocument());
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('keeps every selected doctor when all are valid for the new department', async () => {
+        const user = userEvent.setup();
+        await openWithBothSelected(user);
+
+        await user.selectOptions(deptSelect(), 'dept-cardio');
+        expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('switching back to All Departments does not remove any selected doctor', async () => {
+        const user = userEvent.setup();
+        await openWithBothSelected(user);
+
+        await user.selectOptions(deptSelect(), 'dept-cardio');
+        await user.selectOptions(deptSelect(), '');
+        expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('keeps selections while the doctor list is loading, then prunes invalid ones once it arrives', async () => {
+        const user = userEvent.setup();
+        const { rerender } = await openWithBothSelected(user);
+
+        mockDoctorsLoading = true;
+        rerender(<IPDPage />);
+        await user.selectOptions(deptSelect(), 'dept-neuro');
+        // Not pruned against the empty, still-loading list.
+        expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+
+        mockDoctorsLoading = false;
+        rerender(<IPDPage />);
+        await waitFor(() => expect(within(doctorBox()).queryByTitle('Dr. ABC')).not.toBeInTheDocument());
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('submits only the doctors retained after the department change', async () => {
+        mockCreateAdmission.mockReturnValue({ unwrap: () => Promise.resolve({ ...admitted, admissionId: 'adm-new-2' }) });
+        mockCreateManualPayment.mockReturnValue({ unwrap: () => Promise.resolve({}) });
+        const user = userEvent.setup();
+        await openWithBothSelected(user);
+
+        await user.selectOptions(deptSelect(), 'dept-neuro');
+        await user.click(screen.getByRole('button', { name: /add patient/i }));
+        await user.click(screen.getByRole('button', { name: /mock register patient/i }));
+        await user.selectOptions(screen.getByLabelText('Ward'), 'ward-1');
+        await user.click(screen.getByRole('button', { name: /G-01/ }));
+        await user.type(screen.getByLabelText(/amount/i), '500');
+        await user.click(screen.getByRole('button', { name: /^cash$/i }));
+        await user.click(screen.getByRole('button', { name: /admit patient/i }));
+
+        await waitFor(() => expect(mockCreateAdmission).toHaveBeenCalledTimes(1));
+        expect(mockCreateAdmission.mock.calls[0][0]).toEqual(expect.objectContaining({
+          assignedDoctorIds: ['doc-2'],
+        }));
+      });
     });
   });
 

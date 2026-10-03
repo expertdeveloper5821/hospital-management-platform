@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import {
   useListWardsQuery,
   useListBedsQuery,
@@ -163,6 +163,43 @@ function PatientSearch({ value, onChange, onAddPatient }: PatientSearchProps) {
 
   const results = data?.data ?? [];
 
+  // Keyboard navigation for the patient suggestions (same as OPD's New Visit
+  // search): -1 = nothing highlighted. Reset whenever the result set changes
+  // so a stale index never points at a different patient than the one the
+  // user saw highlighted.
+  const listboxId = useId();
+  const optionId  = (idx: number) => `${listboxId}-option-${idx}`;
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const suggestionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => { setHighlightedIndex(-1); }, [debouncedQ, data]);
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    suggestionRefs.current[highlightedIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlightedIndex]);
+
+  const listOpen = open && query.trim().length >= 2;
+
+  function selectPatient(p: PatientResponse) {
+    onChange(p);
+    setOpen(false);
+    setQuery('');
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!listOpen || debouncedQ.trim().length < 2 || isFetching || results.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i + 1) % results.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
+    } else if (e.key === 'Enter' && highlightedIndex >= 0 && highlightedIndex < results.length) {
+      // Prevent the surrounding admission form from submitting.
+      e.preventDefault();
+      selectPatient(results[highlightedIndex]);
+    }
+  }
+
   // Close dropdown on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
@@ -203,24 +240,41 @@ function PatientSearch({ value, onChange, onAddPatient }: PatientSearchProps) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
+            onKeyDown={handleKeyDown}
+            role="combobox"
+            aria-expanded={listOpen}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={highlightedIndex >= 0 ? optionId(highlightedIndex) : undefined}
             className="pl-9"
           />
         </div>
 
-        {open && (query.trim().length >= 2) && (
-          <div className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto">
+        {listOpen && (
+          <div
+            id={listboxId}
+            role="listbox"
+            className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto"
+          >
             {isFetching ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>
             ) : results.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">No patients found.</div>
             ) : (
-              results.map((p) => (
+              results.map((p, idx) => (
                 <button
                   key={p.patientId}
+                  id={optionId(idx)}
+                  ref={(el) => { suggestionRefs.current[idx] = el; }}
                   type="button"
-                  className="w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left"
+                  role="option"
+                  aria-selected={idx === highlightedIndex}
+                  className={`w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left ${
+                    idx === highlightedIndex ? 'bg-primary/10 ring-1 ring-inset ring-primary' : ''
+                  }`}
                   onMouseDown={(e) => e.preventDefault()} // prevent input blur before click
-                  onClick={() => { onChange(p); setOpen(false); setQuery(''); }}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  onClick={() => selectPatient(p)}
                 >
                   <span className="font-medium">{p.fullName}</span>
                   <span className="text-xs text-muted-foreground font-mono">
@@ -1050,6 +1104,21 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const doctorList    = selectedDepartmentId
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
+
+  // Picking a specific department drops any selected doctor who doesn't
+  // belong to it and keeps the rest; "All Departments" keeps everyone.
+  // Pruning runs in an effect (same as AdmissionPanel's Edit form) so it waits
+  // for the doctor list — pruning against a still-loading, empty list would
+  // otherwise wrongly drop every selected doctor.
+  useEffect(() => {
+    if (!selectedDepartmentId || !doctorsPage) return;
+    const doctors = doctorsPage.data ?? [];
+    setSelectedDoctors((prev) => {
+      const next = prev.filter((sel) =>
+        doctors.find((d) => d.userId === sel.userId)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedDepartmentId, doctorsPage]);
 
   const [createAdmission,     { isLoading: admitting }]       = useCreateAdmissionMutation();
   const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
