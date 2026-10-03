@@ -61,6 +61,13 @@ class ChargeRepository {
     return { data: data as ICharge[], total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  // Only used to undo a just-created LAB_TEST charge whose Lab request could
+  // not be created (ChargeService.addCharge) — charges are never deleted otherwise.
+  async deleteById(tenantId: string, chargeId: string): Promise<void> {
+    assertDbConnected();
+    await ChargeModel.deleteOne({ tenantId, chargeId });
+  }
+
   async update(tenantId: string, chargeId: string, data: Partial<ICharge>): Promise<ICharge | null> {
     assertDbConnected();
     return ChargeModel.findOneAndUpdate({ tenantId, chargeId }, data, { new: true });

@@ -14,6 +14,9 @@ const mockCreateManualPayment = jest.fn();
 let mockWards: unknown[] = [];
 let mockBeds: unknown[] = [];
 let mockDoctors: unknown[] = [];
+// Simulates the doctor list still being fetched (RTK Query: no data yet).
+let mockDoctorsLoading = false;
+let mockDepartments: unknown[] | undefined;
 
 jest.mock('@/store/api/ipd.api', () => ({
   useListWardsQuery: () => ({ data: mockWards, isLoading: false }),
@@ -34,7 +37,7 @@ jest.mock('@/store/api/payment.api', () => ({
 }));
 
 jest.mock('@/store/api/user.api', () => ({
-  useListUsersQuery: () => ({ data: { data: mockDoctors } }),
+  useListUsersQuery: () => (mockDoctorsLoading ? { data: undefined, isLoading: true } : { data: { data: mockDoctors } }),
 }));
 
 jest.mock('@/store/api/patient.api', () => ({
@@ -42,7 +45,7 @@ jest.mock('@/store/api/patient.api', () => ({
 }));
 
 jest.mock('@/store/api/department.api', () => ({
-  useListDepartmentsQuery: () => ({ data: undefined }),
+  useListDepartmentsQuery: () => ({ data: mockDepartments }),
 }));
 
 jest.mock('@/store/api/packages.api', () => ({
@@ -85,6 +88,8 @@ beforeEach(() => {
   mockWards = [];
   mockBeds = [];
   mockDoctors = [];
+  mockDoctorsLoading = false;
+  mockDepartments = undefined;
   mockUserId = undefined;
   mockCreateAdmission.mockReset();
   mockCreateManualPayment.mockReset();
@@ -650,10 +655,89 @@ describe('IPDPage — Doctor multi-select (New Admission and Edit)', () => {
         data: { data: [row], total: 1, totalPages: 1 },
         isLoading: false, isFetching: false, refetch: jest.fn(),
       });
-      render(<IPDPage />);
+      const result = render(<IPDPage />);
       fireEvent.click(screen.getAllByRole('button', { name: /^view$/i })[0]);
       fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+      return result;
     }
+
+    test('after searching, ArrowDown/ArrowUp move the highlight and Enter toggles it; mouse still works', async () => {
+      const user = userEvent.setup();
+      openEdit();
+
+      await user.click(doctorBox());
+      const search = screen.getByLabelText(/search doctors/i);
+      await user.type(search, 'dr');
+      await user.keyboard('{ArrowDown}{ArrowDown}');
+      const def = within(listbox()).getByRole('option', { name: 'Dr. DEF' });
+      expect(search).toHaveAttribute('aria-activedescendant', def.id);
+
+      await user.keyboard('{Enter}');
+      expect(def).toHaveAttribute('aria-selected', 'true');
+      expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      expect(doctorBox()).toHaveAttribute('aria-expanded', 'true');
+
+      // Up → Dr. ABC (pre-selected); Enter deselects it.
+      await user.keyboard('{ArrowUp}{Enter}');
+      expect(within(doctorBox()).queryByTitle('Dr. ABC')).not.toBeInTheDocument();
+      expect(mockUpdateAdmission).not.toHaveBeenCalled();
+
+      // Mouse selection unaffected.
+      await user.click(within(listbox()).getByRole('option', { name: 'Dr. ABC' }));
+      expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+    });
+
+    describe('department picked while the doctor list is still loading', () => {
+      const CARDIO = { departmentId: 'dept-cardio', name: 'Cardiology' };
+      const NEURO  = { departmentId: 'dept-neuro',  name: 'Neurology' };
+      const DR_HEART = { userId: 'doc-1', name: 'Dr. ABC', email: 'abc@h.com', departmentIds: ['dept-cardio'] };
+      const DR_BOTH  = { userId: 'doc-2', name: 'Dr. DEF', email: 'def@h.com', departmentIds: ['dept-cardio', 'dept-neuro'] };
+      const deptSelect = () => screen.getByLabelText(/department \(filter doctors\)/i) as HTMLSelectElement;
+
+      beforeEach(() => {
+        mockDepartments = [CARDIO, NEURO];
+        mockDoctors = [DR_HEART, DR_BOTH];
+      });
+
+      test('keeps the existing assigned doctors while loading, then keeps those in the new department once loaded', async () => {
+        mockDoctorsLoading = true;
+        const user = userEvent.setup();
+        const { rerender } = openEdit({ ...admitted, assignedDoctorIds: ['doc-2'], departmentId: 'dept-cardio' });
+
+        await user.selectOptions(deptSelect(), 'dept-neuro');
+        // Not pruned against the empty, still-loading list.
+        expect(within(doctorBox()).getByTitle('doc-2')).toBeInTheDocument();
+
+        mockDoctorsLoading = false;
+        rerender(<IPDPage />);
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('prunes doctors outside the picked department only once the list arrives', async () => {
+        mockDoctorsLoading = true;
+        const user = userEvent.setup();
+        const { rerender } = openEdit({ ...admitted, assignedDoctorIds: ['doc-1', 'doc-2'], departmentId: 'dept-cardio' });
+
+        await user.selectOptions(deptSelect(), 'dept-neuro');
+        expect(within(doctorBox()).getByTitle('doc-1')).toBeInTheDocument();
+        expect(within(doctorBox()).getByTitle('doc-2')).toBeInTheDocument();
+
+        mockDoctorsLoading = false;
+        rerender(<IPDPage />);
+        await waitFor(() => expect(within(doctorBox()).queryByTitle('Dr. ABC')).not.toBeInTheDocument());
+        expect(within(doctorBox()).getByTitle('Dr. DEF')).toBeInTheDocument();
+      });
+
+      test('opening Edit with the doctor list still loading leaves the pre-selected doctors untouched', () => {
+        mockDoctorsLoading = true;
+        const { rerender } = openEdit({ ...admitted, assignedDoctorIds: ['doc-1'], departmentId: 'dept-neuro' });
+
+        mockDoctorsLoading = false;
+        rerender(<IPDPage />);
+        // Saved department doesn't match Dr. ABC, but no user change → no pruning.
+        expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+      });
+    });
 
     test('pre-selects the currently assigned doctors as tags and selected options', async () => {
       const user = userEvent.setup();

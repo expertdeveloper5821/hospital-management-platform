@@ -111,7 +111,8 @@ function toDisplay(str: string): string {
 // server's own timezone (same zone the dashboard uses).
 const RECEIPT_TZ = 'Asia/Kolkata';
 
-const PAYMENT_METHOD_LABEL: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque' };
+// FREE is receipt-only (a ₹0 Billing LAB_TEST charge) — never a stored PaymentMethod.
+const PAYMENT_METHOD_LABEL: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque', FREE: 'Free' };
 
 function toDisplayPaymentMethod(method: string): string {
   return PAYMENT_METHOD_LABEL[method] ?? method;

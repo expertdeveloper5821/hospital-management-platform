@@ -329,6 +329,9 @@ export interface PathologyRequestResponse {
   // The request's COMPLETED payment; null/absent = Unpaid (absent on
   // offline-created requests not yet synced).
   payment?:    LabPaymentSummary | null;
+  // Billing charge this request was created from — its payment is collected
+  // in Billing (Mark Paid), never via Lab's Collect Payment.
+  chargeId?:   string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -350,6 +353,9 @@ export interface RadiologyRequestResponse {
   // The request's COMPLETED payment; null/absent = Unpaid (absent on
   // offline-created requests not yet synced).
   payment?:    LabPaymentSummary | null;
+  // Billing charge this request was created from — its payment is collected
+  // in Billing (Mark Paid), never via Lab's Collect Payment.
+  chargeId?:   string | null;
 }
 
 export interface LabPaymentSummary {
@@ -852,9 +858,15 @@ export interface ChargeResponse {
   // Only populated when category === 'LAB_TEST'.
   testTypeId:         string | null;
   testTypeName:       string | null;
+  // LAB_TEST only: the Lab request created alongside the charge.
+  labRequestId?:      string | null;
+  labRequestKind?:    'PATHOLOGY' | 'RADIOLOGY' | null;
   addedBy:            string;
-  // Only the charge-list endpoint enriches this; add/pay/cancel/bill responses omit it.
+  // Only the charge-list endpoint enriches these; add/pay/cancel/bill responses omit them.
   addedByName?:       string | null;
+  // A PAID charge's COMPLETED payment, for the receipt download.
+  paymentId?:         string | null;
+  receiptAvailable?:  boolean;
   status:             ChargeStatus;
   paidBy:             string | null;
   paidAt:             string | null;

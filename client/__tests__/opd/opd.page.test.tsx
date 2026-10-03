@@ -465,6 +465,62 @@ describe('OPDPage — Assign Nurse (New Visit, multi-nurse)', () => {
     expect(screen.queryByTitle('Dr. DEF')).not.toBeInTheDocument();
   });
 
+  test('doctor multi-select: after searching, ArrowDown/ArrowUp move the highlight and Enter selects it without submitting', async () => {
+    mockUsers.mockImplementation(() => ({
+      data: { data: [DOCTOR_1, { userId: 'doc-2', name: 'Dr. DEF', departmentIds: [] }, { userId: 'doc-3', name: 'Nobody', departmentIds: [] }] },
+      isFetching: false,
+    }));
+    const user = userEvent.setup();
+    await openModal(user);
+
+    await user.click(doctorCombobox());
+    const search = screen.getByLabelText(/search doctors/i);
+    await user.type(search, 'dr');
+    expect(search).not.toHaveAttribute('aria-activedescendant');
+
+    // Down → Dr. ABC, Down → Dr. DEF, Down wraps → Dr. ABC, Up wraps → Dr. DEF.
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowUp}');
+    const def = within(modalForm()).getByRole('option', { name: 'Dr. DEF' });
+    expect(search).toHaveAttribute('aria-activedescendant', def.id);
+
+    await user.keyboard('{Enter}');
+    expect(def).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTitle('Dr. DEF')).toBeInTheDocument();
+    expect(doctorCombobox()).toHaveAttribute('aria-expanded', 'true');
+    expect(mockCreateVisit).not.toHaveBeenCalled();
+
+    // Enter again on the same highlighted option toggles it off.
+    await user.keyboard('{Enter}');
+    expect(screen.queryByTitle('Dr. DEF')).not.toBeInTheDocument();
+  });
+
+  test('doctor multi-select: Enter with nothing highlighted selects nothing; mouse selection still works', async () => {
+    const user = userEvent.setup();
+    await openModal(user);
+
+    await user.click(doctorCombobox());
+    await user.type(screen.getByLabelText(/search doctors/i), 'abc{Enter}');
+    expect(screen.queryByTitle('Dr. ABC')).not.toBeInTheDocument();
+    expect(mockCreateVisit).not.toHaveBeenCalled();
+
+    await user.click(within(modalForm()).getByRole('option', { name: 'Dr. ABC' }));
+    expect(screen.getByTitle('Dr. ABC')).toBeInTheDocument();
+  });
+
+  test('nurse multi-select: after searching, arrow keys + Enter select the highlighted nurse', async () => {
+    const user = userEvent.setup();
+    await openModal(user);
+
+    await user.click(nurseCombobox());
+    await user.type(screen.getByLabelText(/search nurses/i), 'nurse');
+    await user.keyboard('{ArrowUp}{Enter}');
+
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse PQR' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByTitle('Nurse PQR')).toBeInTheDocument();
+    expect(mockCreateVisit).not.toHaveBeenCalled();
+  });
+
   test('renders below Assign Doctors and is clearly marked optional', async () => {
     const user = userEvent.setup();
     await openModal(user);

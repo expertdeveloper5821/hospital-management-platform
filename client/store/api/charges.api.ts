@@ -13,19 +13,19 @@ export const chargesApi = baseApi.injectEndpoints({
     addCharge: build.mutation<ChargeResponse, AddChargeRequest>({
       query: (body) => ({ url: '/api/charges', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<ChargeResponse>) => raw.data,
-      invalidatesTags: ['Charge', 'Bill', 'Payment'],
+      invalidatesTags: ['Charge', 'Bill', 'Payment', 'Lab'],
     }),
 
     cancelCharge: build.mutation<ChargeResponse, string>({
       query: (chargeId) => ({ url: `/api/charges/${chargeId}/cancel`, method: 'PATCH' }),
       transformResponse: (raw: ApiSuccess<ChargeResponse>) => raw.data,
-      invalidatesTags: ['Charge', 'Bill', 'Payment'],
+      invalidatesTags: ['Charge', 'Bill', 'Payment', 'Lab'],
     }),
 
     markChargePaid: build.mutation<ChargeResponse, string>({
       query: (chargeId) => ({ url: `/api/charges/${chargeId}/pay`, method: 'PATCH' }),
       transformResponse: (raw: ApiSuccess<ChargeResponse>) => raw.data,
-      invalidatesTags: ['Charge', 'Bill', 'Payment'],
+      invalidatesTags: ['Charge', 'Bill', 'Payment', 'Lab'],
     }),
 
     getPatientBill: build.query<BillResponse, string>({

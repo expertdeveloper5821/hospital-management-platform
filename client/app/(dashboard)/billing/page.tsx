@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useListChargesQuery, useAddChargeMutation, useCancelChargeMutation, useMarkChargePaidMutation } from '@/store/api/charges.api';
 import { useListLabTestTypesQuery } from '@/store/api/lab.api';
+import { useLazyGetReceiptUrlQuery } from '@/store/api/payment.api';
 import { useAppSelector } from '@/store/hooks';
 import type { ChargeCategory, ChargeStatus } from '@/store/types';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,36 @@ const STATUS_STYLES: Record<ChargeStatus, string> = {
   UNPAID:    'bg-amber-100 text-amber-800 ring-amber-600/20',
   CANCELLED: 'bg-red-100 text-red-800 ring-red-600/20',
 };
+
+// Same flow as the Lab/Payments receipt buttons: fetch a short-lived
+// pre-signed URL for the charge payment's stored receipt PDF and open it.
+function ChargeReceiptButton({ paymentId }: { paymentId: string }) {
+  const [trigger, { isFetching }] = useLazyGetReceiptUrlQuery();
+  const [err, setErr] = useState(false);
+
+  async function handleDownload() {
+    setErr(false);
+    try {
+      const url = await trigger(paymentId).unwrap();
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setErr(true);
+    }
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7 px-2 text-xs"
+      disabled={isFetching}
+      onClick={handleDownload}
+      title={err ? 'Receipt not available.' : undefined}
+    >
+      {isFetching ? 'Loading…' : err ? 'Receipt unavailable' : 'Receipt'}
+    </Button>
+  );
+}
 
 function ChargeStatusBadge({ status }: { status: ChargeStatus }) {
   return (
@@ -74,7 +105,11 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
     const parsedAmount = Number(amount);
     if (!patientId.trim())    { setError('UHID is required.'); return; }
     if (!description.trim())  { setError('Description is required.'); return; }
-    if (!Number.isFinite(parsedAmount) || parsedAmount < 0.01) {
+    // A Lab Test may be free (₹0) — it is then marked Paid with a ₹0 receipt.
+    if (isLabTest && (!amount.trim() || !Number.isFinite(parsedAmount) || parsedAmount < 0)) {
+      setError('Amount must be ₹0 or more.'); return;
+    }
+    if (!isLabTest && (!Number.isFinite(parsedAmount) || parsedAmount < 0.01)) {
       setError('Amount must be at least ₹0.01.'); return;
     }
     const selectedTestType = testTypes?.find((t) => t.id === testTypeId);
@@ -167,7 +202,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
               <Input
                 id="add-amount"
                 type="number"
-                min="0.01"
+                min={isLabTest ? '0' : '0.01'}
                 step="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -327,10 +362,18 @@ export default function BillingPage() {
               <p className="text-muted-foreground">
                 {new Date(charge.createdAt).toLocaleDateString()} · Added by {charge.addedByName ?? 'Unknown'}
               </p>
+              {charge.labRequestKind && (
+                <p className="text-muted-foreground">
+                  {toTitleCase(charge.labRequestKind)} request sent to Lab{charge.testTypeName ? ` · ${charge.testTypeName}` : ''}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="font-medium">₹{charge.amount.toFixed(2)}</span>
               <ChargeStatusBadge status={charge.status} />
+              {charge.status === 'PAID' && charge.paymentId && charge.receiptAvailable && (
+                <ChargeReceiptButton paymentId={charge.paymentId} />
+              )}
               {canManageCharge && charge.status === 'UNPAID' && (
                 <>
                   <Button

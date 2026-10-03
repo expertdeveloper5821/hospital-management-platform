@@ -90,7 +90,7 @@ export class PaymentRepository {
     if (referenceIds.length === 0) return [];
     return PaymentModel.find(
       { tenantId, referenceType, referenceId: { $in: referenceIds }, status: PaymentStatus.COMPLETED },
-      { paymentId: 1, referenceId: 1, amount: 1, paymentMethod: 1, receiptS3Key: 1, createdAt: 1 },
+      { paymentId: 1, referenceType: 1, referenceId: 1, amount: 1, paymentMethod: 1, receiptS3Key: 1, createdAt: 1, updatedAt: 1 },
     );
   }
 

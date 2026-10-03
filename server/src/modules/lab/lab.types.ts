@@ -139,6 +139,9 @@ export interface PathologyRequestResponse {
   requestedAt: string;
   updatedAt:   string;
   payment:     LabPaymentSummary | null;
+  // Billing charge this request was created from (its payment is collected in
+  // Billing, never via the Lab collect endpoint); null for Lab-created requests.
+  chargeId:    string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -158,6 +161,9 @@ export interface RadiologyRequestResponse {
   requestedAt: string;
   updatedAt:   string;
   payment:     LabPaymentSummary | null;
+  // Billing charge this request was created from (its payment is collected in
+  // Billing, never via the Lab collect endpoint); null for Lab-created requests.
+  chargeId:    string | null;
 }
 
 // ─── File size limits (bytes) ─────────────────────────────────────────────────

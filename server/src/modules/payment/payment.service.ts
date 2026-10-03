@@ -248,6 +248,13 @@ export class PaymentService {
     if (labRequest.patientId !== input.patientId) {
       throw new AppError('Lab request does not belong to this patient', 400);
     }
+    // A Billing-created request is paid through its charge (Billing → Mark
+    // Paid) — a second, lab-referenced payment would double-charge it.
+    if (labRequest.chargeId) {
+      throw new ConflictError(
+        `This lab request is billed under Billing charge ${labRequest.chargeId}. Collect the payment from Billing.`,
+      );
+    }
     const existing = await paymentRepository.findCompletedByReference(
       tenantId, input.referenceType as string, input.referenceId,
     );
@@ -310,10 +317,13 @@ export class PaymentService {
 
   // Settle a PENDING charge payment. Returns null when the record was no longer
   // PENDING (already settled by a concurrent request).
+  // `options.buildReceipt` replaces the generic receipt (e.g. a Lab receipt for
+  // a Billing LAB_TEST charge), same contract as createManualPayment's.
   async settleChargePayment(
-    record: IPayment,
-    status: typeof PaymentStatus.COMPLETED | typeof PaymentStatus.CANCELLED,
-    userId: string,
+    record:  IPayment,
+    status:  typeof PaymentStatus.COMPLETED | typeof PaymentStatus.CANCELLED,
+    userId:  string,
+    options: ManualPaymentOptions = {},
   ): Promise<IPayment | null> {
     if (record.status !== PaymentStatus.PENDING) return null;
 
@@ -323,17 +333,20 @@ export class PaymentService {
       const patient = await patientRepository.findByPatientId(record.tenantId, record.patientId);
       if (patient) {
         try {
-          const receiptBuffer = await buildPaymentReceipt({
-            tenantId:      record.tenantId,
-            paymentId:     record.paymentId,
-            paymentDate:   new Date(),
-            patient,
-            amount:        record.amount,
-            paymentMethod: record.paymentMethod,
-            description:   record.description,
-            transactionId: record.transactionId ?? null,
-            createdBy:     userId, // the user marking the charge paid
-          });
+          const paymentDate = new Date();
+          const receiptBuffer = options.buildReceipt
+            ? await options.buildReceipt({ paymentId: record.paymentId, paymentDate })
+            : await buildPaymentReceipt({
+              tenantId:      record.tenantId,
+              paymentId:     record.paymentId,
+              paymentDate,
+              patient,
+              amount:        record.amount,
+              paymentMethod: record.paymentMethod,
+              description:   record.description,
+              transactionId: record.transactionId ?? null,
+              createdBy:     userId, // the user marking the charge paid
+            });
           const key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
           await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
           fields.receiptS3Key = key; // only recorded once the upload actually succeeds

@@ -35,7 +35,10 @@ const PaymentSchema = new Schema<IPayment>(
     tenantId:          { type: String, required: true, index: true },
     patientId:         { type: String, required: true },
     fullName:          { type: String, required: false },
-    amount:            { type: Number, required: true, min: 0.01 },
+    // min 0, not 0.01: a free (₹0) Billing LAB_TEST charge records a ₹0
+    // COMPLETED payment so the test has a receipt. Every client-facing payment
+    // schema (payment.types.ts / lab.types.ts) still requires a positive amount.
+    amount:            { type: Number, required: true, min: 0 },
     paymentMethod:     { type: String, required: true, enum: Object.values(PaymentMethod) },
     description:       { type: String, required: true, trim: true },
     status:            { type: String, required: true, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },

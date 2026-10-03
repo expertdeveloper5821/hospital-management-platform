@@ -24,6 +24,8 @@ export interface PeopleMultiSelectProps {
 export function PeopleMultiSelect({ labelId, options, getLabel, selectedIds, onChange, noun }: PeopleMultiSelectProps) {
   const [open,   setOpen]   = React.useState(false);
   const [search, setSearch] = React.useState('');
+  // Keyboard-highlighted option (index into `visible`); -1 = none.
+  const [activeIndex, setActiveIndex] = React.useState(-1);
   const rootRef   = React.useRef<HTMLDivElement>(null);
   const searchRef = React.useRef<HTMLInputElement>(null);
   const listId    = `${labelId}-listbox`;
@@ -52,6 +54,30 @@ export function PeopleMultiSelect({ labelId, options, getLabel, selectedIds, onC
 
   const q = search.trim().toLowerCase();
   const visible = q ? options.filter((o) => o.name.toLowerCase().includes(q)) : options;
+  const optionId = (userId: string) => `${listId}-opt-${userId}`;
+  const activeOption = activeIndex >= 0 && activeIndex < visible.length ? visible[activeIndex] : null;
+
+  // A new search (or reopening) starts with nothing highlighted.
+  React.useEffect(() => { setActiveIndex(-1); }, [q, open]);
+
+  React.useEffect(() => {
+    if (activeOption) document.getElementById(optionId(activeOption.userId))?.scrollIntoView?.({ block: 'nearest' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOption?.userId]);
+
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (visible.length) setActiveIndex((i) => (i + 1) % visible.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (visible.length) setActiveIndex((i) => (i <= 0 ? visible.length - 1 : i - 1));
+    } else if (e.key === 'Enter') {
+      // Enter must not submit the surrounding form.
+      e.preventDefault();
+      if (activeOption) toggle(activeOption.userId);
+    }
+  }
 
   return (
     <div ref={rootRef} className="relative">
@@ -105,29 +131,35 @@ export function PeopleMultiSelect({ labelId, options, getLabel, selectedIds, onC
               className="h-9 pl-8"
               placeholder={`Search ${noun}…`}
               aria-label={`Search ${noun}`}
+              aria-controls={listId}
+              aria-activedescendant={activeOption ? optionId(activeOption.userId) : undefined}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              // Enter must not submit the surrounding form.
-              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+              onKeyDown={handleSearchKeyDown}
             />
           </div>
           <ul id={listId} role="listbox" aria-multiselectable="true" aria-labelledby={labelId} className="max-h-56 overflow-y-auto py-1">
             {visible.length === 0 && (
               <li className="px-3 py-2 text-sm text-muted-foreground">No {noun} found.</li>
             )}
-            {visible.map((o) => {
+            {visible.map((o, i) => {
               const selected = selectedIds.includes(o.userId);
+              const active   = i === activeIndex;
               return (
                 <li
                   key={o.userId}
+                  id={optionId(o.userId)}
                   role="option"
                   aria-selected={selected}
+                  data-active={active || undefined}
                   // Keep focus in the search box while picking.
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => toggle(o.userId)}
+                  onMouseEnter={() => setActiveIndex(i)}
                   className={cn(
                     'flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm transition-colors hover:bg-muted',
                     selected && 'bg-info/5 font-medium',
+                    active && 'bg-muted',
                   )}
                 >
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center">

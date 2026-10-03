@@ -441,12 +441,25 @@ function AdmissionPanel({
   // requires at least one doctor from the new one before Save is allowed —
   // the backend re-stamps departmentId from the doctors, so this keeps the
   // saved Department/Doctor pair consistent.
+  // Pruning runs in an effect (not the change handler) so it re-applies once
+  // the doctor list arrives — pruning against a still-loading, empty list
+  // would otherwise wrongly drop every assigned doctor. It only runs after a
+  // user-initiated change, so Edit mode opens with the admission's existing
+  // doctors preselected untouched (same as OPD's VisitPanel).
+  const [departmentTouched, setDepartmentTouched] = useState(false);
   function handleEditDepartmentChange(departmentId: string) {
     setSelectedDepartmentId(departmentId);
-    if (departmentId) {
-      setEditDoctorIds((prev) => prev.filter((id) => doctorInDepartment(id, departmentId)));
-    }
+    setDepartmentTouched(true);
   }
+  useEffect(() => {
+    if (!departmentTouched || !selectedDepartmentId || !doctorsPage) return;
+    const doctors = doctorsPage.data ?? [];
+    setEditDoctorIds((prev) => {
+      const next = prev.filter((id) =>
+        doctors.find((d) => d.userId === id)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [departmentTouched, selectedDepartmentId, doctorsPage]);
   const departmentChanged = selectedDepartmentId !== (admission.departmentId ?? '');
   const departmentDoctorInvalid =
     !!selectedDepartmentId && departmentChanged && (
@@ -458,6 +471,7 @@ function AdmissionPanel({
 
   function enterEdit() {
     setSelectedDepartmentId(admission.departmentId ?? '');
+    setDepartmentTouched(false);
     setEditDoctorIds(admission.assignedDoctorIds ?? []);
     setWardId(admission.wardId);
     setBedId(admission.bedId);

@@ -95,6 +95,12 @@ function formatINR(amount: number): string {
   return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// A ₹0 payment is a free test billed from Billing — its stored method is
+// nominal, so it reads "Free" (same as its receipt).
+function paymentModeLabel(payment: { amount: number; paymentMethod: string }): string {
+  return payment.amount === 0 ? 'Free' : (PAYMENT_MODE_LABEL[payment.paymentMethod] ?? payment.paymentMethod);
+}
+
 // Mirrors the backend's CollectLabPaymentSchema amount rules.
 function validateAmount(raw: string): string | null {
   if (!raw.trim()) return 'Amount is required.';
@@ -869,7 +875,9 @@ function RequestDetailPanel({
   const showDeleteButton  = canDelete && !payment;
   // Offline-created requests (temp id) don't exist server-side yet — payment
   // collection is online-only, so it waits until the request has synced.
-  const showCollectButton = canCollectPayment && !payment && !isTempId(request.requestId);
+  // A Billing-created request is paid in Billing (Mark Paid), never here.
+  const billedInBilling   = !!request.chargeId;
+  const showCollectButton = canCollectPayment && !payment && !billedInBilling && !isTempId(request.requestId);
   const showReceiptButton = canDownloadReceipt && !!payment?.receiptAvailable;
   // Reports can only be uploaded after payment is collected (the backend
   // rejects an unpaid upload with 409).
@@ -936,11 +944,18 @@ function RequestDetailPanel({
               <span className="space-y-1 block">
                 <Badge variant="success">Paid</Badge>
                 <span className="block text-xs font-normal text-muted-foreground">
-                  {formatINR(payment.amount)} · {PAYMENT_MODE_LABEL[payment.paymentMethod] ?? payment.paymentMethod} · {formatDate(payment.paidAt)}
+                  {formatINR(payment.amount)} · {paymentModeLabel(payment)} · {formatDate(payment.paidAt)}
                 </span>
               </span>
             ) : (
-              <Badge variant="warning">Unpaid</Badge>
+              <span className="space-y-1 block">
+                <Badge variant="warning">Unpaid</Badge>
+                {billedInBilling && (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    Billed in Billing (charge {request.chargeId}) — collect the payment there.
+                  </span>
+                )}
+              </span>
             ))}
           </div>
 
@@ -963,7 +978,9 @@ function RequestDetailPanel({
               )}
               {canUploadNow && !payment && (
                 <p className="text-xs text-muted-foreground text-center">
-                  The report can be uploaded once payment has been collected.
+                  {billedInBilling
+                    ? 'The report can be uploaded once the payment has been collected in Billing.'
+                    : 'The report can be uploaded once payment has been collected.'}
                 </p>
               )}
               {canEdit && request.status !== 'COMPLETED' && (
@@ -1218,7 +1235,7 @@ function RequestsTable({
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
-                            {canCollectPayment && !r.payment && !isTempId(r.requestId) && (
+                            {canCollectPayment && !r.payment && !r.chargeId && !isTempId(r.requestId) && (
                               <button
                                 className="text-xs text-primary hover:underline"
                                 onClick={(e) => { e.stopPropagation(); setCollectFor({ request: r, justCreated: false }); }}
