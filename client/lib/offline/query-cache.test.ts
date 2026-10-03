@@ -201,6 +201,42 @@ describe('readCachedQueryResult — fallback read', () => {
   });
 });
 
+describe('inventory/packages list — offline search + pagination', () => {
+  test('listInventoryItems honours ?search= over name/category and returns one page with an accurate total', async () => {
+    const tenantId = TENANT();
+    const userId = USER();
+    await cacheQueryResult('listInventoryItems', { data: [
+      { itemId: 'I-1', name: 'Surgical Gloves', category: 'PPE',        isLowStock: false },
+      { itemId: 'I-2', name: 'Saline',          category: 'Fluids',     isLowStock: true  },
+      { itemId: 'I-3', name: 'Paracetamol',     category: 'Medication', isLowStock: false },
+    ], total: 3, page: 1, limit: 10, totalPages: 1 }, { tenantId, userId });
+
+    const byName = await readCachedQueryResult('listInventoryItems',
+      { url: '/api/inventory?search=glov&page=3&limit=10' }, { tenantId, userId }) as { data: { itemId: string }[]; total: number };
+    expect(byName.data.map((i) => i.itemId)).toEqual(['I-1']);
+    expect(byName).toMatchObject({ total: 1, page: 1, totalPages: 1 });
+
+    const byCategory = await readCachedQueryResult('listInventoryItems',
+      { url: '/api/inventory?search=MEDIC' }, { tenantId, userId }) as { data: { itemId: string }[] };
+    expect(byCategory.data.map((i) => i.itemId)).toEqual(['I-3']);
+  });
+
+  test('listPackages honours ?search= on name alongside ?status=', async () => {
+    const tenantId = TENANT();
+    const userId = USER();
+    await cacheQueryResult('listPackages', { data: [
+      { packageId: 'P-1', name: 'Cardiac Care', status: 'ACTIVE' },
+      { packageId: 'P-2', name: 'Cardiac Plus', status: 'INACTIVE' },
+      { packageId: 'P-3', name: 'Maternity',    status: 'ACTIVE' },
+    ], total: 3, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
+
+    const result = await readCachedQueryResult('listPackages',
+      { url: '/api/packages?status=ACTIVE&search=cardiac&page=2&limit=20' }, { tenantId, userId }) as { data: { packageId: string }[]; total: number };
+    expect(result.data.map((p) => p.packageId)).toEqual(['P-1']);
+    expect(result.total).toBe(1);
+  });
+});
+
 describe('QUERY_CACHE_POLICIES — coverage of the stated safe offline scope', () => {
   test('covers Patients, OPD visits, IPD admissions, Pathology/Radiology requests, the shell lookups, and the remaining dashboard pages\' primary lists', () => {
     expect(Object.keys(QUERY_CACHE_POLICIES).sort()).toEqual([
@@ -208,12 +244,37 @@ describe('QUERY_CACHE_POLICIES — coverage of the stated safe offline scope', (
       'getPatientById', 'getRadiologyRequest', 'listAdmissions', 'listAuditLogs', 'listBeds',
       'listCharges', 'listDepartments', 'listEmployeeRoster', 'listInventoryItems', 'listPackages',
       'listPathologyRequests', 'listPayments', 'listRadiologyRequests', 'listUsers', 'listWards',
-      'searchPatients',
+      'listWardsPaginated', 'searchPatients',
     ].sort());
   });
 });
 
 describe('shell-lookup coverage — wards, beds, departments, users', () => {
+  test('listWardsPaginated reads wards cached by listWards (shared ward: prefix), never beds, and applies search', async () => {
+    const tenantId = TENANT();
+    const userId = USER();
+
+    await cacheQueryResult('listWards', [
+      { wardId: 'WARD-1', name: 'General', floor: 'Ground' },
+      { wardId: 'WARD-2', name: 'ICU',     floor: 'First' },
+    ], { tenantId, userId });
+    await cacheQueryResult('listBeds', [
+      { bedId: 'BED-1', wardId: 'WARD-1', bedNumber: '101' },
+    ], { tenantId, userId });
+
+    const all = await readCachedQueryResult(
+      'listWardsPaginated', { url: '/api/ipd/wards?page=1&limit=20' }, { tenantId, userId },
+    ) as { data: Array<{ wardId: string }>; total: number; page: number; totalPages: number };
+    expect(all.data.map((w) => w.wardId).sort()).toEqual(['WARD-1', 'WARD-2']);
+    expect(all).toMatchObject({ total: 2, page: 1, totalPages: 1 });
+
+    const byFloor = await readCachedQueryResult(
+      'listWardsPaginated', { url: '/api/ipd/wards?search=first&page=1&limit=20' }, { tenantId, userId },
+    ) as { data: Array<{ wardId: string }>; total: number };
+    expect(byFloor.data.map((w) => w.wardId)).toEqual(['WARD-2']);
+    expect(byFloor.total).toBe(1);
+  });
+
   test('listWards / listBeds share cache_wards_beds without colliding (storeKeyPrefix)', async () => {
     const tenantId = TENANT();
     const userId = USER();
@@ -589,6 +650,31 @@ describe('filterFromUrl — offline filters replicate the live query\'s own filt
 
     const utcDateString = (await readCachedQueryResult('getOPDQueue', { url: '/api/opd/visits?date=2026-03-09' }, { tenantId, userId }) as { data: unknown[] }).data;
     expect(utcDateString).toEqual([]);
+  });
+
+  test('getOPDQueue orders oldest-created first with an offline-created visit last (day-wise S. No. order, mirrors QUEUE_SORT)', async () => {
+    const tenantId = TENANT();
+    const userId = USER();
+
+    // Cached out of chronological order (and against visitId key order).
+    await cacheQueryResult('getOPDQueue', { data: [
+      { visitId: 'OPD-A', visitDate: '2026-03-10T04:00:00.000Z', createdAt: '2026-03-10T05:00:00.000Z' },
+      { visitId: 'OPD-B', visitDate: '2026-03-10T04:00:00.000Z', createdAt: '2026-03-10T03:00:00.000Z' },
+    ], total: 2, page: 1, limit: 20, totalPages: 1 }, { tenantId, userId });
+
+    // base.api.ts writes an offline OPD CREATE through getOPDVisitById (same store).
+    await cacheQueryResult(
+      'getOPDVisitById',
+      { visitId: 'temp-opd-1', visitDate: '2026-03-10T04:00:00.000Z', createdAt: '2026-03-10T01:00:00.000Z' },
+      { tenantId, userId }, { pendingSync: true },
+    );
+
+    const result = await readCachedQueryResult(
+      'getOPDQueue', { url: '/api/opd/visits?date=2026-03-10&page=3&limit=20' }, { tenantId, userId },
+    ) as { data: Array<{ visitId: string }>; page: number };
+    expect(result.data.map((v) => v.visitId)).toEqual(['OPD-B', 'OPD-A', 'temp-opd-1']);
+    // Always one page 1 offline, so the S. No. column numbers these 1..3.
+    expect(result.page).toBe(1);
   });
 
   test('listAdmissions (exact status/wardId + contains search): each filter narrows independently and composes', async () => {

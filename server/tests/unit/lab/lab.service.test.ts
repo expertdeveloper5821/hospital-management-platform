@@ -4,7 +4,15 @@ jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/modules/notification/notification.service');
 jest.mock('../../../src/shared/services/s3.service');
 jest.mock('../../../src/shared/services/audit.service');
+// Lab responses carry the request's payment status (null = unpaid).
+jest.mock('../../../src/modules/payment/payment.repository', () => ({
+  paymentRepository: {
+    findCompletedByReference:  jest.fn().mockResolvedValue(null),
+    findCompletedByReferences: jest.fn().mockResolvedValue([]),
+  },
+}));
 import { auditService } from '../../../src/shared/services/audit.service';
+import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 
 import { labRepository }        from '../../../src/modules/lab/lab.repository';
 import { patientRepository }    from '../../../src/modules/patient/patient.repository';
@@ -19,6 +27,10 @@ const mockLabRepo       = labRepository       as jest.Mocked<typeof labRepositor
 const mockPatientRepo   = patientRepository   as jest.Mocked<typeof patientRepository>;
 const mockNotifSvc      = notificationService as jest.Mocked<typeof notificationService>;
 const mockS3            = s3Service           as jest.Mocked<typeof s3Service>;
+const mockPaymentRepo   = paymentRepository   as jest.Mocked<typeof paymentRepository>;
+
+// A COMPLETED payment for the request — report upload is gated on it.
+const PAID = { paymentId: 'PAY-001', amount: 100, paymentMethod: 'CASH', createdAt: new Date(), receiptS3Key: null };
 
 const TENANT = 'tenant-001';
 const DOCTOR = 'doctor-001';
@@ -127,6 +139,37 @@ describe('LabService — uploadPathologyReport', () => {
     mockS3.uploadFile             = jest.fn().mockResolvedValue('s3-key');
     mockS3.getPresignedUrl        = jest.fn().mockResolvedValue('https://s3.test/presigned');
     mockNotifSvc.sendNotification = jest.fn().mockResolvedValue(undefined);
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(PAID as never);
+  });
+
+  afterEach(() => {
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null);
+  });
+
+  test('rejects upload with 409 while the request is unpaid, before touching S3', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology   = jest.fn();
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null);
+
+    await expect(
+      service.uploadPathologyReport('req-path-001', TENANT, DOCTOR, Buffer.alloc(100), 'application/pdf'),
+    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/payment must be collected/i) });
+
+    expect(mockPaymentRepo.findCompletedByReference).toHaveBeenCalledWith(TENANT, 'PATHOLOGY_REQUEST', 'req-path-001');
+    expect(mockS3.uploadFile).not.toHaveBeenCalled();
+    expect(mockLabRepo.updatePathology).not.toHaveBeenCalled();
+  });
+
+  test('uploads once the request has been paid', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc());
+    mockLabRepo.updatePathology   = jest.fn().mockResolvedValue(makePathologyDoc({ status: LabRequestStatus.COMPLETED, reportS3Key: 'key' }));
+
+    const result = await service.uploadPathologyReport('req-path-001', TENANT, DOCTOR, Buffer.alloc(100), 'application/pdf');
+
+    expect(mockPaymentRepo.findCompletedByReference).toHaveBeenCalledWith(TENANT, 'PATHOLOGY_REQUEST', 'req-path-001');
+    expect(mockS3.uploadFile).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(LabRequestStatus.COMPLETED);
+    expect(result.reportUrl).toBe('https://s3.test/presigned');
   });
 
   test('rejects file exceeding 10 MB with descriptive error', async () => {
@@ -219,6 +262,37 @@ describe('LabService — uploadRadiologyReport', () => {
     mockS3.uploadFile             = jest.fn().mockResolvedValue('s3-key');
     mockS3.getPresignedUrl        = jest.fn().mockResolvedValue('https://s3.test/presigned');
     mockNotifSvc.sendNotification = jest.fn().mockResolvedValue(undefined);
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(PAID as never);
+  });
+
+  afterEach(() => {
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null);
+  });
+
+  test('rejects upload with 409 while the request is unpaid, before touching S3', async () => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology   = jest.fn();
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null);
+
+    await expect(
+      service.uploadRadiologyReport('req-radio-001', TENANT, DOCTOR, Buffer.alloc(100), 'image/png'),
+    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringMatching(/payment must be collected/i) });
+
+    expect(mockPaymentRepo.findCompletedByReference).toHaveBeenCalledWith(TENANT, 'RADIOLOGY_REQUEST', 'req-radio-001');
+    expect(mockS3.uploadFile).not.toHaveBeenCalled();
+    expect(mockLabRepo.updateRadiology).not.toHaveBeenCalled();
+  });
+
+  test('uploads once the request has been paid', async () => {
+    mockLabRepo.findRadiologyById = jest.fn().mockResolvedValue(makeRadiologyDoc());
+    mockLabRepo.updateRadiology   = jest.fn().mockResolvedValue(makeRadiologyDoc({ status: LabRequestStatus.COMPLETED, reportS3Key: 'key' }));
+
+    const result = await service.uploadRadiologyReport('req-radio-001', TENANT, DOCTOR, Buffer.alloc(100), 'image/png');
+
+    expect(mockPaymentRepo.findCompletedByReference).toHaveBeenCalledWith(TENANT, 'RADIOLOGY_REQUEST', 'req-radio-001');
+    expect(mockS3.uploadFile).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(LabRequestStatus.COMPLETED);
+    expect(result.reportUrl).toBe('https://s3.test/presigned');
   });
 
   test('rejects file exceeding 20 MB with descriptive error', async () => {

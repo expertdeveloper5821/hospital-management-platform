@@ -326,6 +326,9 @@ export interface PathologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  // The request's COMPLETED payment; null/absent = Unpaid (absent on
+  // offline-created requests not yet synced).
+  payment?:    LabPaymentSummary | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -344,6 +347,25 @@ export interface RadiologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  // The request's COMPLETED payment; null/absent = Unpaid (absent on
+  // offline-created requests not yet synced).
+  payment?:    LabPaymentSummary | null;
+}
+
+export interface LabPaymentSummary {
+  paymentId:        string;
+  amount:           number;
+  paymentMethod:    PaymentMethod;
+  paidAt:           string;
+  receiptAvailable: boolean;
+}
+
+// POST /api/lab/{pathology|radiology}/:requestId/payment — the patient and
+// payment reference are derived server-side from the lab request.
+export interface CollectLabPaymentRequest {
+  amount:         number;
+  paymentMethod:  'CASH' | 'UPI' | 'CARD';
+  transactionId?: string;
 }
 
 // 'SELF' or a referring doctor's userId — 'SELF' is the default/top dropdown option.
@@ -460,6 +482,7 @@ export interface AdmissionResponse {
   vitals:           IPDVitals;
   prescription:          string | null;
   dischargeSummaryNotes: string | null;
+  packageId:             string | null;
 }
  
 export interface WardOccupancySummary {
@@ -476,6 +499,7 @@ export interface CreateAdmissionRequest {
   wardId:           string;
   bedId:            string;
   assignedDoctorIds?: string[];
+  packageId?:       string;
 }
  
 export interface AddProgressNoteRequest {
@@ -749,6 +773,9 @@ export interface PackageResponse {
   price:            number;
   includedServices: string[];
   status:           PackageStatus;
+  // Linked IPD ward; null for packages created before ward linking.
+  wardId:           string | null;
+  wardName:         string | null;
   createdAt:        string;
   updatedAt:        string;
 }
@@ -758,6 +785,9 @@ export interface CreatePackageRequest {
   description?:     string;
   price:            number;
   includedServices: string[];
+  // Either link an existing ward or create one inline (Hospital Admin only).
+  wardId?:          string;
+  newWard?:         { name: string; floor?: string };
 }
 
 export interface UpdatePackageRequest {
@@ -766,6 +796,7 @@ export interface UpdatePackageRequest {
   price?:            number;
   includedServices?: string[];
   status?:           PackageStatus;
+  wardId?:           string | null;
 }
 
 export interface AssignmentResponse {

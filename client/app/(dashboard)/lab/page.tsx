@@ -13,7 +13,10 @@ import {
   useUploadRadiologyReportMutation,
   useEditRadiologyRequestMutation,
   useDeleteRadiologyRequestMutation,
+  useCollectPathologyPaymentMutation,
+  useCollectRadiologyPaymentMutation,
 } from '@/store/api/lab.api';
+import { useLazyGetReceiptUrlQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useAppSelector } from '@/store/hooks';
@@ -41,14 +44,17 @@ import {
   ExternalLink,
   Search,
   RefreshCw,
-  ChevronLeft,
-  ChevronRight,
   FileText,
   Pencil,
   Trash2,
+  IndianRupee,
+  Download,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NavForm } from '@/components/ui/form';
+import { isTempId } from '@/lib/offline/mutation-policy';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +71,38 @@ function statusVariant(s: LabRequestStatus): 'warning' | 'info' | 'success' {
   if (s === 'PENDING')     return 'warning';
   if (s === 'IN_PROGRESS') return 'info';
   return 'success';
+}
+
+type LabRequest = PathologyRequestResponse | RadiologyRequestResponse;
+
+function testLabelOf(request: LabRequest, type: 'pathology' | 'radiology'): string {
+  return type === 'pathology'
+    ? (request as PathologyRequestResponse).testType
+    : (request as RadiologyRequestResponse).imagingType;
+}
+
+const PAYMENT_MODES = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI',  label: 'UPI'  },
+  { value: 'CARD', label: 'Card' },
+] as const;
+
+type LabPaymentMode = typeof PAYMENT_MODES[number]['value'];
+
+const PAYMENT_MODE_LABEL: Record<string, string> = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CHEQUE: 'Cheque' };
+
+function formatINR(amount: number): string {
+  return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Mirrors the backend's CollectLabPaymentSchema amount rules.
+function validateAmount(raw: string): string | null {
+  if (!raw.trim()) return 'Amount is required.';
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 'Amount must be greater than zero.';
+  if (Math.round(value * 100) !== value * 100) return 'Amount cannot have more than 2 decimal places.';
+  if (String(value).replace(/[^0-9]/g, '').length > 10) return 'Amount cannot exceed 10 digits.';
+  return null;
 }
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
@@ -146,11 +184,14 @@ function PatientCombobox({ selected, onSelect, onClear }: PatientComboboxProps) 
 // ─── New Request Modal ────────────────────────────────────────────────────────
 
 interface NewRequestModalProps {
-  type:    'pathology' | 'radiology';
-  onClose: () => void;
+  type:       'pathology' | 'radiology';
+  onClose:    () => void;
+  // Called with the newly created request (before onClose) — lets roles that
+  // collect lab payments move straight on to collecting it.
+  onCreated?: (request: LabRequest) => void;
 }
 
-function NewRequestModal({ type, onClose }: NewRequestModalProps) {
+function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
   const profile = useAppSelector((s) => s.auth.profile);
   // A Doctor referring their own lab request has no "Self" concept — the
   // referring doctor IS the logged-in user, so the Self option is hidden and
@@ -186,21 +227,20 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
     if (!testType.trim())   { setError(`${fieldLabel} is required.`); return; }
 
     try {
-      if (type === 'pathology') {
-        await createPathology({
+      const created: LabRequest = type === 'pathology'
+        ? await createPathology({
           patientId:  patient.patientId,
           testType:   testType.trim(),
           referredBy,
           notes:      notes.trim() || undefined,
-        }).unwrap();
-      } else {
-        await createRadiology({
+        }).unwrap()
+        : await createRadiology({
           patientId:   patient.patientId,
           imagingType: testType.trim(),
           referredBy,
           notes:       notes.trim() || undefined,
         }).unwrap();
-      }
+      onCreated?.(created);
       onClose();
     } catch (err: any) {
       setError(err?.data?.message ?? 'Failed to create request.');
@@ -280,6 +320,214 @@ function NewRequestModal({ type, onClose }: NewRequestModalProps) {
             </Button>
           </div>
         </NavForm>
+      </div>
+    </DialogOverlay>
+  );
+}
+
+// ─── Lab Receipt Download ─────────────────────────────────────────────────────
+// Same flow as the Payments page's ReceiptButton: fetch a short-lived
+// pre-signed URL for the stored A5 receipt PDF and open it in a new tab
+// (download/print from the browser's PDF viewer).
+
+function LabReceiptButton({ paymentId, className }: { paymentId: string; className?: string }) {
+  const [trigger, { isFetching }] = useLazyGetReceiptUrlQuery();
+  const [err, setErr] = useState('');
+
+  async function handleDownload() {
+    setErr('');
+    try {
+      const url = await trigger(paymentId).unwrap();
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setErr('Receipt not available.');
+    }
+  }
+
+  return (
+    <div className={cn('space-y-1', className)}>
+      <Button type="button" variant="outline" className="w-full" onClick={handleDownload} disabled={isFetching}>
+        <Download className="h-4 w-4 mr-2" />
+        {isFetching ? 'Loading…' : 'Download Receipt'}
+      </Button>
+      {err && <p className="text-xs text-destructive text-center">{err}</p>}
+    </div>
+  );
+}
+
+// ─── Collect Payment Modal ────────────────────────────────────────────────────
+
+interface CollectPaymentModalProps {
+  request: LabRequest;
+  type:    'pathology' | 'radiology';
+  // Shown when opened right after creating the request.
+  justCreated?: boolean;
+  onClose: () => void;
+}
+
+function CollectPaymentModal({ request, type, justCreated, onClose }: CollectPaymentModalProps) {
+  const [amount,        setAmount]        = useState('');
+  const [paymentMode,   setPaymentMode]   = useState<LabPaymentMode | ''>('');
+  const [transactionId, setTransactionId] = useState('');
+  const [error,         setError]         = useState('');
+  const [paid,          setPaid]          = useState<{ paymentId: string; amount: number; paymentMethod: string; receiptAvailable: boolean } | null>(null);
+
+  const [collectPathology, { isLoading: collectingPath }] = useCollectPathologyPaymentMutation();
+  const [collectRadiology, { isLoading: collectingRad  }] = useCollectRadiologyPaymentMutation();
+  const isLoading = collectingPath || collectingRad;
+
+  const testLabel = testLabelOf(request, type);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    const amountError = validateAmount(amount);
+    if (amountError)  { setError(amountError); return; }
+    if (!paymentMode) { setError('Please select a payment mode.'); return; }
+    if (transactionId.trim().length > 100) { setError('Transaction ID cannot exceed 100 characters.'); return; }
+
+    const body = {
+      requestId:     request.requestId,
+      amount:        Number(amount),
+      paymentMethod: paymentMode,
+      transactionId: paymentMode !== 'CASH' && transactionId.trim() ? transactionId.trim() : undefined,
+    };
+    try {
+      const payment = type === 'pathology'
+        ? await collectPathology(body).unwrap()
+        : await collectRadiology(body).unwrap();
+      setPaid({
+        paymentId:        payment.paymentId,
+        amount:           payment.amount,
+        paymentMethod:    payment.paymentMethod,
+        receiptAvailable: !!payment.receiptUrl,
+      });
+    } catch (err: any) {
+      if (err?.status === 'FETCH_ERROR') {
+        setError('You appear to be offline. Lab payments can only be collected online.');
+      } else if (err?.status === 409) {
+        setError('Payment has already been collected for this request.');
+      } else if (err?.status === 404) {
+        setError('This request no longer exists.');
+      } else {
+        setError(err?.data?.message ?? 'Failed to collect payment.');
+      }
+    }
+  }
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
+          <h2 className="text-base font-semibold">{paid ? 'Payment Collected' : 'Collect Payment'}</h2>
+          <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors" aria-label="Close">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {paid ? (
+          <div className="p-5 space-y-4">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <CheckCircle2 className="h-10 w-10 text-success" />
+              <p className="text-sm font-medium">
+                {formatINR(paid.amount)} received via {PAYMENT_MODE_LABEL[paid.paymentMethod] ?? paid.paymentMethod}
+              </p>
+              <p className="text-xs text-muted-foreground break-words">{testLabel} · {request.fullName}</p>
+            </div>
+            {paid.receiptAvailable ? (
+              <LabReceiptButton paymentId={paid.paymentId} />
+            ) : (
+              <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground text-center">
+                The payment was recorded, but its receipt is not available.
+              </p>
+            )}
+            <div className="flex justify-end">
+              <Button type="button" onClick={onClose}>Done</Button>
+            </div>
+          </div>
+        ) : (
+          <form noValidate onSubmit={handleSubmit} className="flex flex-col min-h-0">
+            <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+              {justCreated && (
+                <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+                  Request created. Collect the lab payment now, or close to collect it later.
+                </p>
+              )}
+              {error && (
+                <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+              )}
+
+              <div className="rounded-md border px-3 py-2 text-sm space-y-0.5">
+                <p className="font-medium break-words">{testLabel}</p>
+                <p className="text-xs text-muted-foreground">
+                  {request.fullName} · <span className="font-mono">{request.patientId}</span>
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="lp-amount">Amount (₹) *</Label>
+                <Input
+                  id="lp-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Payment Mode *</Label>
+                <div className="flex gap-2">
+                  {PAYMENT_MODES.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={paymentMode === value}
+                      onClick={() => {
+                        setPaymentMode(value);
+                        if (value === 'CASH') setTransactionId('');
+                      }}
+                      className={cn(
+                        'flex-1 rounded-md border px-3 py-2 text-sm font-medium transition-colors',
+                        paymentMode === value
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-input bg-background hover:bg-muted',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(paymentMode === 'UPI' || paymentMode === 'CARD') && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="lp-txn">Transaction ID (optional)</Label>
+                  <Input
+                    id="lp-txn"
+                    type="text"
+                    maxLength={100}
+                    placeholder="e.g. UPI reference / last 4 digits"
+                    value={transactionId}
+                    onChange={(e) => setTransactionId(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
+              <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
+                {justCreated ? 'Later' : 'Cancel'}
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Collecting…' : 'Collect Payment'}
+              </Button>
+            </div>
+          </form>
+        )}
       </div>
     </DialogOverlay>
   );
@@ -551,6 +799,8 @@ function DeleteRequestModal({ requestId, type, onClose }: DeleteRequestModalProp
     } catch (err: any) {
       if (err?.status === 403) {
         setError('Only Hospital Admin or Manager can delete a completed request.');
+      } else if (err?.status === 409) {
+        setError('This request has been paid and cannot be deleted.');
       } else if (err?.status === 404) {
         setError('This request has already been deleted.');
       } else {
@@ -600,17 +850,31 @@ interface RequestDetailPanelProps {
   canUpload: boolean;
   canEdit:   boolean;
   canDelete: boolean;
+  canCollectPayment:  boolean;
+  canDownloadReceipt: boolean;
   onClose:   () => void;
 }
 
-function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onClose }: RequestDetailPanelProps) {
-  const [showUpload, setShowUpload] = useState(false);
-  const [showEdit,   setShowEdit]   = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
+function RequestDetailPanel({
+  request, type, canUpload, canEdit, canDelete, canCollectPayment, canDownloadReceipt, onClose,
+}: RequestDetailPanelProps) {
+  const [showUpload,  setShowUpload]  = useState(false);
+  const [showEdit,    setShowEdit]    = useState(false);
+  const [showDelete,  setShowDelete]  = useState(false);
+  const [showCollect, setShowCollect] = useState(false);
 
-  const testLabel = type === 'pathology'
-    ? (request as PathologyRequestResponse).testType
-    : (request as RadiologyRequestResponse).imagingType;
+  const testLabel = testLabelOf(request, type);
+  const payment   = request.payment ?? null;
+  // A paid request cannot be deleted (the backend also returns 409).
+  const showDeleteButton  = canDelete && !payment;
+  // Offline-created requests (temp id) don't exist server-side yet — payment
+  // collection is online-only, so it waits until the request has synced.
+  const showCollectButton = canCollectPayment && !payment && !isTempId(request.requestId);
+  const showReceiptButton = canDownloadReceipt && !!payment?.receiptAvailable;
+  // Reports can only be uploaded after payment is collected (the backend
+  // rejects an unpaid upload with 409).
+  const canUploadNow      = canUpload && request.status !== 'COMPLETED';
+  const showUploadButton  = canUploadNow && !!payment;
 
   const row = (label: string, value: React.ReactNode) => (
     <div className="grid grid-cols-5 gap-2 py-2 border-b last:border-0">
@@ -667,16 +931,40 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
                 <ExternalLink className="h-3 w-3" />
                 View Report
               </a>
-            ) : 'Not uploaded yet')}
+            ) : 'No report uploaded')}
+            {row('Payment', payment ? (
+              <span className="space-y-1 block">
+                <Badge variant="success">Paid</Badge>
+                <span className="block text-xs font-normal text-muted-foreground">
+                  {formatINR(payment.amount)} · {PAYMENT_MODE_LABEL[payment.paymentMethod] ?? payment.paymentMethod} · {formatDate(payment.paidAt)}
+                </span>
+              </span>
+            ) : (
+              <Badge variant="warning">Unpaid</Badge>
+            ))}
           </div>
 
-          {(canUpload || canEdit || canDelete) && (
+          {(canUploadNow || canEdit || showDeleteButton || showCollectButton || showReceiptButton) && (
             <div className="shrink-0 p-5 border-t space-y-2">
-              {canUpload && request.status !== 'COMPLETED' && (
+              {showCollectButton && (
+                <Button className="w-full" onClick={() => setShowCollect(true)}>
+                  <IndianRupee className="h-4 w-4 mr-2" />
+                  Collect Payment
+                </Button>
+              )}
+              {showReceiptButton && payment && (
+                <LabReceiptButton paymentId={payment.paymentId} />
+              )}
+              {showUploadButton && (
                 <Button className="w-full" onClick={() => setShowUpload(true)}>
                   <Upload className="h-4 w-4 mr-2" />
                   Upload Report
                 </Button>
+              )}
+              {canUploadNow && !payment && (
+                <p className="text-xs text-muted-foreground text-center">
+                  The report can be uploaded once payment has been collected.
+                </p>
               )}
               {canEdit && request.status !== 'COMPLETED' && (
                 <Button variant="outline" className="w-full" onClick={() => setShowEdit(true)}>
@@ -684,7 +972,7 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
                   Edit Request
                 </Button>
               )}
-              {canDelete && (
+              {showDeleteButton && (
                 <Button
                   variant="outline"
                   className="w-full text-destructive hover:bg-destructive/10"
@@ -720,11 +1008,20 @@ function RequestDetailPanel({ request, type, canUpload, canEdit, canDelete, onCl
           onClose={() => { setShowDelete(false); onClose(); }}
         />
       )}
+      {showCollect && (
+        <CollectPaymentModal
+          request={request}
+          type={type}
+          onClose={() => setShowCollect(false)}
+        />
+      )}
     </>
   );
 }
 
 // ─── Requests Table ───────────────────────────────────────────────────────────
+
+const LAB_REQUESTS_PAGE_SIZE = 10;
 
 interface RequestsTableProps {
   type:      'pathology' | 'radiology';
@@ -732,9 +1029,13 @@ interface RequestsTableProps {
   canUpload: boolean;
   canEdit:   boolean;
   canDelete: boolean;
+  canCollectPayment:  boolean;
+  canDownloadReceipt: boolean;
 }
 
-function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: RequestsTableProps) {
+function RequestsTable({
+  type, canCreate, canUpload, canEdit, canDelete, canCollectPayment, canDownloadReceipt,
+}: RequestsTableProps) {
   // Initialize from the URL (e.g. the dashboard "Pending Lab Reports" card links
   // here as /lab?status=PENDING) so the first query already carries the filter.
   // SSR-guarded for static prerendering.
@@ -748,21 +1049,41 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
   const [page,          setPage]          = useState(1);
   const [showNewRequest,setShowNewRequest]= useState(false);
   const [selected,      setSelected]      = useState<PathologyRequestResponse | RadiologyRequestResponse | null>(null);
+  const [collectFor,    setCollectFor]    = useState<{ request: LabRequest; justCreated: boolean } | null>(null);
 
   const pathologyResult = useListPathologyRequestsQuery(
-    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: 10 },
+    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: LAB_REQUESTS_PAGE_SIZE },
     { skip: type !== 'pathology' },
   );
   const radiologyResult = useListRadiologyRequestsQuery(
-    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: 10 },
+    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: LAB_REQUESTS_PAGE_SIZE },
     { skip: type !== 'radiology' },
   );
 
   const result      = type === 'pathology' ? pathologyResult : radiologyResult;
   const requests    = result.data?.data ?? [];
-  const total       = result.data?.total ?? 0;
+  const total       = result.data?.total ?? requests.length;
   const totalPages  = result.data?.totalPages ?? 1;
   const isFetching  = result.isFetching;
+  // Upper bound counts the rows actually returned, so the offline-cache
+  // fallback (all cached matches on one page) still reads "1–N of N".
+  const rangeStart  = total === 0 ? 0 : (page - 1) * LAB_REQUESTS_PAGE_SIZE + 1;
+  const rangeEnd    = total === 0 ? 0 : Math.min((page - 1) * LAB_REQUESTS_PAGE_SIZE + requests.length, total);
+  const serialStart = serialOffset(result.data, page, LAB_REQUESTS_PAGE_SIZE);
+
+  // A request removed from the last page (delete, or a status change under an
+  // active status filter) can leave `page` past the end — step back so the
+  // table never sits on an empty page. Skipped while a fetch is in flight so a
+  // stale previous-args result never drives the clamp.
+  const listData = result.data;
+  useEffect(() => {
+    if (!isFetching && listData && page > 1 && page > listData.totalPages) setPage(Math.max(1, listData.totalPages));
+  }, [isFetching, listData, page]);
+  // The detail panel follows the refreshed list row (e.g. Paid after a
+  // collection) instead of the snapshot taken when it was opened.
+  const liveSelected = selected
+    ? (requests.find((r) => r.requestId === selected.requestId) ?? selected)
+    : null;
 
   function handleSearch() {
     setSearchFilter(searchInput.trim());
@@ -824,9 +1145,6 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
         )}
       </div>
 
-      {/* Stats */}
-      <p className="text-xs text-muted-foreground">{total} request{total !== 1 ? 's' : ''} found</p>
-
       {/* Table */}
       <Card>
         <CardContent className="p-0">
@@ -842,6 +1160,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       {type === 'pathology' ? 'Test Type' : 'Imaging Type'}
                     </th>
@@ -850,11 +1169,12 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden md:table-cell">Requested</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Priority</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Payment</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((r) => {
+                  {requests.map((r, idx) => {
                     const label = type === 'pathology'
                       ? (r as PathologyRequestResponse).testType
                       : (r as RadiologyRequestResponse).imagingType;
@@ -864,6 +1184,7 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                         className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
                         onClick={() => setSelected(r)}
                       >
+                        <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                         <td className="px-4 py-3 font-medium max-w-xs truncate">{label}</td>
                         <td className="px-4 py-3">
                           <p className="text-sm font-medium">{r.fullName}</p>
@@ -890,8 +1211,21 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
                             {r.priority}
                           </span>
                         </td>
+                        <td className="px-4 py-3">
+                          {r.payment
+                            ? <Badge variant="success">Paid</Badge>
+                            : <Badge variant="warning">Unpaid</Badge>}
+                        </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
+                            {canCollectPayment && !r.payment && !isTempId(r.requestId) && (
+                              <button
+                                className="text-xs text-primary hover:underline"
+                                onClick={(e) => { e.stopPropagation(); setCollectFor({ request: r, justCreated: false }); }}
+                              >
+                                Collect
+                              </button>
+                            )}
                             <button
                               className="text-xs text-primary hover:underline"
                               onClick={(e) => { e.stopPropagation(); setSelected(r); }}
@@ -908,18 +1242,27 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
             </div>
           )}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Page {page} of {totalPages}</p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+          {/* Pagination + count */}
+          {result.data && !isFetching && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-t text-sm text-muted-foreground">
+              <span>
+                {total === 0
+                  ? 'No requests'
+                  : `Showing ${rangeStart}–${rangeEnd} of ${total} request${total !== 1 ? 's' : ''}`}
+              </span>
+              {totalPages > 1 && (
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                    Previous
+                  </Button>
+                  <span className="flex items-center px-2 text-xs">
+                    {page} / {totalPages}
+                  </span>
+                  <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                    Next
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>
@@ -927,18 +1270,38 @@ function RequestsTable({ type, canCreate, canUpload, canEdit, canDelete }: Reque
 
       {/* New request modal */}
       {showNewRequest && (
-        <NewRequestModal type={type} onClose={() => setShowNewRequest(false)} />
+        <NewRequestModal
+          type={type}
+          onClose={() => setShowNewRequest(false)}
+          onCreated={(created) => {
+            if (canCollectPayment && !isTempId(created.requestId)) {
+              setCollectFor({ request: created, justCreated: true });
+            }
+          }}
+        />
       )}
 
       {/* Request detail panel */}
-      {selected && (
+      {liveSelected && (
         <RequestDetailPanel
-          request={selected}
+          request={liveSelected}
           type={type}
           canUpload={canUpload}
           canEdit={canEdit}
           canDelete={canDelete}
+          canCollectPayment={canCollectPayment}
+          canDownloadReceipt={canDownloadReceipt}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {/* Collect payment (row action, or straight after creating a request) */}
+      {collectFor && (
+        <CollectPaymentModal
+          request={collectFor.request}
+          type={type}
+          justCreated={collectFor.justCreated}
+          onClose={() => setCollectFor(null)}
         />
       )}
     </div>
@@ -976,6 +1339,12 @@ export default function LabPage() {
   const canEdit   = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
   const canDelete = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
 
+  // Lab payment collection — mirrors POST /api/lab/{type}/:requestId/payment's
+  // requireRole. Receipt download mirrors GET /api/payments/:id/receipt's
+  // roles (intersected with the roles that can open the Lab section).
+  const canCollectPayment  = ['RECEPTIONIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canDownloadReceipt = ['RECEPTIONIST', 'HOSPITAL_ADMIN', 'MANAGER', 'ADMIN'].includes(role ?? '');
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -1011,6 +1380,8 @@ export default function LabPage() {
         canUpload={canUpload}
         canEdit={canEdit}
         canDelete={canDelete}
+        canCollectPayment={canCollectPayment}
+        canDownloadReceipt={canDownloadReceipt}
       />
     </div>
   );

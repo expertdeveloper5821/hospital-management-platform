@@ -70,6 +70,30 @@ export class PaymentRepository {
     return PaymentModel.findOne({ tenantId, referenceType, referenceId });
   }
 
+  async findCompletedByReference(
+    tenantId:      string,
+    referenceType: string,
+    referenceId:   string,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    return PaymentModel.findOne({ tenantId, referenceType, referenceId, status: PaymentStatus.COMPLETED });
+  }
+
+  // Batch lookup for list views (e.g. a page of lab requests). Projects out
+  // the encrypted description/transactionId — callers only need the summary.
+  async findCompletedByReferences(
+    tenantId:      string,
+    referenceType: string,
+    referenceIds:  string[],
+  ): Promise<IPayment[]> {
+    assertDbConnected();
+    if (referenceIds.length === 0) return [];
+    return PaymentModel.find(
+      { tenantId, referenceType, referenceId: { $in: referenceIds }, status: PaymentStatus.COMPLETED },
+      { paymentId: 1, referenceId: 1, amount: 1, paymentMethod: 1, receiptS3Key: 1, createdAt: 1 },
+    );
+  }
+
   async findByFilters(
     tenantId: string,
     query: ListPaymentsQuery,

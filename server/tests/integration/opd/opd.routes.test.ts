@@ -593,12 +593,12 @@ describe('GET /api/opd/visits', () => {
     expect(visitIds).toContain('OPD-CANC0001');
   });
 
-  test('200 — orders visits by newest-created first, regardless of queueNumber/insertion order', async () => {
+  test('200 — orders visits by oldest-created first (new visits at the bottom), regardless of queueNumber/insertion order', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
 
     // Insert out of chronological order, with explicit createdAt timestamps,
-    // so the assertion can only pass if the query sorts by createdAt desc
+    // so the assertion can only pass if the query sorts by createdAt asc
     // rather than relying on insertion/document order.
     await OPDVisitModel.create({
       visitId:        'OPD-MID00001',
@@ -650,7 +650,46 @@ describe('GET /api/opd/visits', () => {
 
     expect(res.status).toBe(200);
     const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
-    expect(visitIds).toEqual(['OPD-NEW00001', 'OPD-MID00001', 'OPD-OLD00001']);
+    expect(visitIds).toEqual(['OPD-OLD00001', 'OPD-MID00001', 'OPD-NEW00001']);
+  });
+
+  test('200 — oldest-first order continues across pages and through the search path (day-wise S. No.)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+
+    const ids = ['OPD-SEQ00003', 'OPD-SEQ00001', 'OPD-SEQ00002'];
+    for (const visitId of ids) {
+      const n = Number(visitId.slice(-1));
+      await OPDVisitModel.create({
+        visitId,
+        tenantId:     tid,
+        patientId:    'PAT-TEST0001',
+        doctorIds:    [],
+        visitDate:    new Date('2026-05-15T00:00:00.000Z'),
+        queueNumber:  n,
+        status:       OPDVisitStatus.OPEN,
+        diagnosis:    null,
+        prescription: null,
+        notes:        null,
+        createdAt:    new Date(`2026-05-15T0${n}:00:00.000Z`),
+      });
+    }
+
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const idsOf = (res: request.Response) =>
+      res.body.data.data.map((v: { visitId: string }) => v.visitId);
+
+    const page1 = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', page: 1, limit: 2 }).set(bearer(token));
+    const page2 = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', page: 2, limit: 2 }).set(bearer(token));
+    expect(idsOf(page1)).toEqual(['OPD-SEQ00001', 'OPD-SEQ00002']);
+    expect(idsOf(page2)).toEqual(['OPD-SEQ00003']);
+
+    const searched = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', search: 'PAT-TEST', page: 2, limit: 2 }).set(bearer(token));
+    expect(idsOf(searched)).toEqual(['OPD-SEQ00003']);
   });
 
   test('200 — filters queue by doctorId', async () => {
@@ -1835,6 +1874,57 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(200);
     const visit = res.body.data.data.find((v: { visitId: string }) => v.visitId === 'OPD-VIT00012');
     expect(visit.vitals).toEqual(VITALS);
+  });
+
+  // ── Visit-wise vitals — never shared across a patient's visits/admissions ──
+  test('201 — a new visit starts with empty vitals even when the patient has earlier recorded vitals', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-VITOLD01', status: OPDVisitStatus.COMPLETED });
+    await OPDVisitModel.updateOne({ tenantId: tid, visitId: 'OPD-VITOLD01' }, { $set: { vitals: VITALS } });
+    const rc    = await seedUser(tid, 'rc-vitnew@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app).post('/api/opd/visits').set(bearer(token)).send(VALID_VISIT_BODY);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.vitals).toEqual({
+      weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+    });
+  });
+
+  test("200 — recording vitals on an open visit leaves the same patient's completed visit and IPD admission untouched", async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const doctor = await seedUser(tid, 'doc-vitiso@h.com', UserRole.DOCTOR);
+    await seedVisit(tid, { visitId: 'OPD-VITHIST1', status: OPDVisitStatus.COMPLETED, doctorIds: [doctor._id.toString()] });
+    await OPDVisitModel.updateOne({ tenantId: tid, visitId: 'OPD-VITHIST1' }, { $set: { vitals: VITALS } });
+    await seedVisit(tid, { visitId: 'OPD-VITCURR1', doctorIds: [doctor._id.toString()] });
+    await IPDAdmissionModel.create({
+      admissionId: 'c3000000-0000-0000-0000-000000000001', tenantId: tid, patientId: 'PAT-TEST0001',
+      wardId: 'w-1', wardName: 'General', bedId: 'b-1', bedNumber: 'G-01',
+      status: 'DISCHARGED', admissionDate: new Date(), dischargeDate: new Date(), progressNotes: [],
+      vitals: VITALS,
+    });
+    const token = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-VITCURR1')
+      .set(bearer(token))
+      .send({ vitals: { weight: 80, pulse: 90 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals).toEqual({
+      weight: 80, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: 90,
+    });
+    const history = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-VITHIST1' });
+    expect(history?.vitals?.weight).toBe(VITALS.weight);
+    expect(history?.vitals?.pulse).toBe(VITALS.pulse);
+    const admission = await IPDAdmissionModel.findOne({ tenantId: tid, admissionId: 'c3000000-0000-0000-0000-000000000001' });
+    expect(admission?.vitals?.weight).toBe(VITALS.weight);
+    expect(admission?.vitals?.pulse).toBe(VITALS.pulse);
   });
 });
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  useListDepartmentsQuery,
+  useListDepartmentsPaginatedQuery,
   useCreateDepartmentMutation,
   useUpdateDepartmentMutation,
   useDeleteDepartmentMutation,
@@ -18,6 +18,7 @@ import { CharCounter } from '@/components/ui/char-counter';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { Building2, Plus, Pencil, Trash2, X, RefreshCw, Search } from 'lucide-react';
 import { NavForm } from '@/components/ui/form';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 
 // ─── Create / Edit Modal ──────────────────────────────────────────────────────
 
@@ -346,7 +347,29 @@ function DoctorsCell({ names }: { names: string[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DepartmentsPage() {
-  const { data: departments, isLoading, refetch } = useListDepartmentsQuery();
+  const [page, setPage]                       = useState(1);
+  const [search, setSearch]                   = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const limit = 10;
+
+  // 300ms debounce for search; a new search always starts from page 1
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value);
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const appliedSearch = debouncedSearch.trim();
+  const { data: result, isLoading, isFetching, refetch } = useListDepartmentsPaginatedQuery({
+    page,
+    limit,
+    ...(appliedSearch ? { search: appliedSearch } : {}),
+  });
   const { data: usersResult, isLoading: doctorsLoading } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
   const [deleteDepartment] = useDeleteDepartmentMutation();
 
@@ -355,7 +378,18 @@ export default function DepartmentsPage() {
   const [deleting, setDeleting]         = useState<DepartmentResponse | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError]   = useState<string | null>(null);
-  const [search, setSearch]             = useState('');
+
+  const departments = result?.data ?? [];
+  const total       = result?.total ?? 0;
+  const totalPages  = result?.totalPages ?? 0;
+  const rangeStart  = total === 0 ? 0 : (page - 1) * limit + 1;
+  const serialStart = serialOffset(result, page, limit);
+  const rangeEnd    = Math.min(page * limit, total);
+
+  // Deleting the last row on the last page would otherwise leave an empty page.
+  useEffect(() => {
+    if (!isFetching && totalPages > 0 && page > totalPages) setPage(totalPages);
+  }, [isFetching, page, totalPages]);
 
   const allDoctors = usersResult?.data ?? [];
   // Map departmentId → list of doctor names for quick lookup in the table
@@ -365,15 +399,6 @@ export default function DepartmentsPage() {
     }
     return acc;
   }, {});
-
-  // Global search — live-filters by department name OR any assigned doctor's name.
-  const query = search.trim().toLowerCase();
-  const filteredDepartments = (departments ?? []).filter((dept) => {
-    if (!query) return true;
-    if (dept.name.toLowerCase().includes(query)) return true;
-    const doctorNames = doctorsByDept[dept.departmentId] ?? [];
-    return doctorNames.some((n) => n.toLowerCase().includes(query));
-  });
 
   async function handleDelete() {
     if (!deleting) return;
@@ -407,7 +432,7 @@ export default function DepartmentsPage() {
             <Input
               placeholder="Search by department ,doctor…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="pl-9 h-9"
               aria-label="Search departments"
             />
@@ -430,6 +455,7 @@ export default function DepartmentsPage() {
         <table className="w-full text-sm">
           <thead className="border-b bg-muted/50">
             <tr>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">Name</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">Description</th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">Doctors</th>
@@ -440,6 +466,7 @@ export default function DepartmentsPage() {
             {isLoading && (
               Array.from({ length: 4 }).map((_, i) => (
                 <tr key={i} className="border-b animate-pulse">
+                  <td className="px-4 py-3"><div className="h-4 bg-muted rounded w-6" /></td>
                   <td className="px-4 py-3"><div className="h-4 bg-muted rounded w-32" /></td>
                   <td className="px-4 py-3 hidden sm:table-cell"><div className="h-4 bg-muted rounded w-48" /></td>
                   <td className="px-4 py-3 hidden md:table-cell"><div className="h-4 bg-muted rounded w-24" /></td>
@@ -447,24 +474,25 @@ export default function DepartmentsPage() {
                 </tr>
               ))
             )}
-            {!isLoading && (!departments || departments.length === 0) && (
+            {!isLoading && total === 0 && !appliedSearch && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
+                <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
                   No departments yet. Create one to get started.
                 </td>
               </tr>
             )}
-            {!isLoading && departments && departments.length > 0 && filteredDepartments.length === 0 && (
+            {!isLoading && total === 0 && appliedSearch && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-center text-muted-foreground">
-                  No departments or doctors match &ldquo;{search.trim()}&rdquo;.
+                <td colSpan={5} className="px-4 py-10 text-center text-muted-foreground">
+                  No departments or doctors match &ldquo;{appliedSearch}&rdquo;.
                 </td>
               </tr>
             )}
-            {!isLoading && filteredDepartments.map((dept) => {
+            {!isLoading && departments.map((dept, idx) => {
               const names = doctorsByDept[dept.departmentId] ?? [];
               return (
                 <tr key={dept.departmentId} className="border-b hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                   <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={dept.name}>{dept.name}</td>
                   <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell max-w-xs truncate" title={dept.description ?? undefined}>
                     {dept.description ?? <span className="italic">—</span>}
@@ -503,6 +531,28 @@ export default function DepartmentsPage() {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination + count */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+        <span>
+          {total === 0
+            ? 'No departments'
+            : `Showing ${rangeStart}–${rangeEnd} of ${total} department${total !== 1 ? 's' : ''}`}
+        </span>
+        {totalPages > 1 && (
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <span className="flex items-center px-2 text-xs">
+              {page} / {totalPages}
+            </span>
+            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Modals */}

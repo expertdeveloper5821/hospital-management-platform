@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppSelector } from '@/store/hooks';
 import { useCreatePackageMutation } from '@/store/api/packages.api';
+import { useListWardsQuery } from '@/store/api/ipd.api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,11 +21,21 @@ export default function NewPackagePage() {
   }
 
   const [create, { isLoading, error }] = useCreatePackageMutation();
+  const { data: wards = [] } = useListWardsQuery();
+
+  // Every package creator may link an existing ward; only a Hospital Admin
+  // may create a new ward inline (the backend enforces the same rule).
+  const canCreateWard = profile?.role === 'HOSPITAL_ADMIN';
 
   const [name, setName]               = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice]             = useState('');
   const [services, setServices]       = useState<string[]>(['']);
+  const [wardMode, setWardMode]       = useState<'existing' | 'new'>('existing');
+  const [wardId, setWardId]           = useState('');
+  const [newWardName, setNewWardName] = useState('');
+  const [newWardFloor, setNewWardFloor] = useState('');
+  const [formError, setFormError]     = useState<string | null>(null);
 
   const addService    = () => setServices(s => [...s, '']);
   const removeService = (i: number) => setServices(s => s.filter((_, idx) => idx !== i));
@@ -32,15 +43,26 @@ export default function NewPackagePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     const validServices = services.filter(s => s.trim().length > 0);
     if (!name.trim() || validServices.length === 0 || !price) return;
+    const creatingWard = canCreateWard && wardMode === 'new';
+    if (creatingWard && !newWardName.trim()) { setFormError('Ward name is required.'); return; }
 
-    await create({
-      name:             name.trim(),
-      description:      description.trim() || undefined,
-      price:            parseFloat(price),
-      includedServices: validServices,
-    }).unwrap();
+    try {
+      await create({
+        name:             name.trim(),
+        description:      description.trim() || undefined,
+        price:            parseFloat(price),
+        includedServices: validServices,
+        ...(creatingWard
+          ? { newWard: { name: newWardName.trim(), ...(newWardFloor.trim() ? { floor: newWardFloor.trim() } : {}) } }
+          : wardId ? { wardId } : {}),
+      }).unwrap();
+    } catch (err: unknown) {
+      setFormError((err as { data?: { message?: string } })?.data?.message ?? 'Failed to create package.');
+      return;
+    }
 
     router.push('/packages');
   };
@@ -95,7 +117,60 @@ export default function NewPackagePage() {
           </div>
         </div>
 
-        {error && <p className="text-red-600 text-sm">Failed to create package.</p>}
+        <div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="ward">Ward</Label>
+            {canCreateWard && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => { setWardMode(wardMode === 'new' ? 'existing' : 'new'); setFormError(null); }}
+              >
+                {wardMode === 'new' ? 'Select existing ward' : '+ Create new ward'}
+              </Button>
+            )}
+          </div>
+          {canCreateWard && wardMode === 'new' ? (
+            <div className="space-y-2 mt-1">
+              <Input
+                id="newWardName"
+                aria-label="New ward name"
+                placeholder="Ward name *"
+                maxLength={100}
+                value={newWardName}
+                onChange={e => setNewWardName(e.target.value)}
+              />
+              <Input
+                id="newWardFloor"
+                aria-label="New ward floor"
+                placeholder="Floor (optional)"
+                maxLength={50}
+                value={newWardFloor}
+                onChange={e => setNewWardFloor(e.target.value)}
+              />
+            </div>
+          ) : (
+            <select
+              id="ward"
+              className="w-full border rounded px-3 py-2 text-sm mt-1"
+              value={wardId}
+              onChange={e => setWardId(e.target.value)}
+            >
+              <option value="">No ward</option>
+              {wards.map(w => (
+                <option key={w.wardId} value={w.wardId}>
+                  {w.name}{w.floor ? ` (Floor ${w.floor})` : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <p className="text-xs text-muted-foreground mt-1">
+            IPD admissions under this package are allocated a bed in this ward.
+          </p>
+        </div>
+
+        {(formError || error) && <p className="text-red-600 text-sm">{formError ?? 'Failed to create package.'}</p>}
 
         <div className="flex gap-3">
           <Button type="submit" disabled={isLoading}>{isLoading ? 'Creating…' : 'Create Package'}</Button>

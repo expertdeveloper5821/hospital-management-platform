@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event';
 const mockGetOPDPaymentValidity    = jest.fn();
 const mockSearchPatients           = jest.fn();
 const mockUsers                    = jest.fn().mockReturnValue({ data: { data: [] }, isFetching: false });
+const mockListDepartments          = jest.fn().mockReturnValue({ data: undefined });
 const mockGetAvailableOpdNurses    = jest.fn().mockReturnValue({ data: [] });
 const mockGetDoctorNurseAssignments = jest.fn().mockReturnValue({ data: undefined });
 const mockCreateVisit              = jest.fn().mockResolvedValue({ visitId: 'OPD-TEST0001', queueNumber: 1, nurseIds: [] });
@@ -61,7 +62,7 @@ jest.mock('@/store/api/user.api', () => ({
 }));
 
 jest.mock('@/store/api/department.api', () => ({
-  useListDepartmentsQuery: () => ({ data: undefined }),
+  useListDepartmentsQuery: () => mockListDepartments(),
 }));
 
 jest.mock('@/store/api/ipd.api', () => ({
@@ -208,6 +209,96 @@ describe('OPDPage — New Visit OPD payment validity check', () => {
   });
 });
 
+describe('OPDPage — New Visit patient search keyboard navigation', () => {
+  const PATIENTS = [
+    { patientId: 'PAT-1', fullName: 'Ravi Kumar',  mobileNumber: '9876543210' },
+    { patientId: 'PAT-2', fullName: 'Ravi Sharma', mobileNumber: '9876500000' },
+    { patientId: 'PAT-3', fullName: 'Ravi Verma',  mobileNumber: '9876511111' },
+  ];
+
+  async function openModalAndSearch(user: ReturnType<typeof userEvent.setup>) {
+    mockSearchPatients.mockReturnValue({ data: { data: PATIENTS }, isFetching: false });
+    render(<OPDPage />);
+    await user.click(screen.getByRole('button', { name: /new visit/i }));
+    const input = screen.getByPlaceholderText(/search patient by name or mobile/i);
+    await user.type(input, 'Ravi');
+    await waitFor(() => expect(screen.getByText('Ravi Kumar')).toBeInTheDocument(), { timeout: 2000 });
+    return input;
+  }
+
+  const suggestions = () => document.getElementById('nv-patient-suggestions');
+  const option = (name: string) =>
+    within(suggestions() as HTMLElement).getByRole('option', { name: new RegExp(name, 'i') });
+
+  beforeEach(() => {
+    mockRole = 'RECEPTIONIST';
+    jest.clearAllMocks();
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+  });
+
+  test('nothing is highlighted until an arrow key is pressed', async () => {
+    const user = userEvent.setup();
+    await openModalAndSearch(user);
+    PATIENTS.forEach((p) => expect(option(p.fullName)).toHaveAttribute('aria-selected', 'false'));
+  });
+
+  test('ArrowDown / ArrowUp move the highlight, wrapping at both ends', async () => {
+    const user = userEvent.setup();
+    const input = await openModalAndSearch(user);
+
+    await user.keyboard('{ArrowDown}');
+    expect(option('Ravi Kumar')).toHaveAttribute('aria-selected', 'true');
+    expect(input).toHaveAttribute('aria-activedescendant', option('Ravi Kumar').id);
+
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+    expect(option('Ravi Verma')).toHaveAttribute('aria-selected', 'true');
+    expect(option('Ravi Kumar')).toHaveAttribute('aria-selected', 'false');
+
+    await user.keyboard('{ArrowDown}');
+    expect(option('Ravi Kumar')).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{ArrowUp}');
+    expect(option('Ravi Verma')).toHaveAttribute('aria-selected', 'true');
+
+    await user.keyboard('{ArrowUp}');
+    expect(option('Ravi Sharma')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('Enter selects the highlighted patient without submitting the form', async () => {
+    const user = userEvent.setup();
+    await openModalAndSearch(user);
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+
+    expect(screen.getByText('Ravi Sharma')).toBeInTheDocument();
+    expect(suggestions()).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/search patient by name or mobile/i)).not.toBeInTheDocument();
+    expect(mockCreateVisit).not.toHaveBeenCalled();
+  });
+
+  test('Enter with nothing highlighted does not select a patient', async () => {
+    const user = userEvent.setup();
+    await openModalAndSearch(user);
+
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByPlaceholderText(/search patient by name or mobile/i)).toBeInTheDocument();
+    expect(within(suggestions() as HTMLElement).getAllByRole('option')).toHaveLength(3);
+  });
+
+  test('mouse click still selects a patient, and hovering moves the highlight', async () => {
+    const user = userEvent.setup();
+    await openModalAndSearch(user);
+
+    await user.hover(option('Ravi Verma'));
+    expect(option('Ravi Verma')).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByText('Ravi Verma'));
+    expect(suggestions()).not.toBeInTheDocument();
+    expect(screen.getByText('Ravi Verma')).toBeInTheDocument();
+  });
+});
+
 describe('OPDPage — New Visit OPD Payment Transaction ID field', () => {
   const PATIENT = { patientId: 'PAT-1', fullName: 'Ravi Kumar', mobileNumber: '9876543210' };
 
@@ -316,23 +407,63 @@ describe('OPDPage — Assign Nurse (New Visit, multi-nurse)', () => {
     return screen.getByRole('button', { name: /create visit/i }).closest('form') as HTMLElement;
   }
 
-  // The 3rd combobox on the New Visit form is Assign Nurse's "Add nurse"
-  // dropdown (after Department and Assign Doctors' "Add doctor" dropdown) —
-  // only present once at least one nurse is available.
-  function nurseSelect(): HTMLElement {
-    return within(modalForm()).getAllByRole('combobox')[2] as HTMLElement;
+  // Assign Nurse's multi-select — only present once at least one nurse is available.
+  function nurseCombobox(): HTMLElement {
+    return within(modalForm()).getByRole('combobox', { name: /assign nurse/i });
   }
 
+  const NURSE_NAMES: Record<string, string> = { 'nurse-1': 'Nurse XYZ', 'nurse-2': 'Nurse PQR' };
+
+  function doctorCombobox(): HTMLElement {
+    return within(modalForm()).getByRole('combobox', { name: /assign doctors/i });
+  }
+
+  const DOCTOR_NAMES: Record<string, string> = { 'doc-1': 'Dr. ABC' };
+
   async function selectDoctor(user: ReturnType<typeof userEvent.setup>, doctorId: string) {
-    const doctorSelect = within(modalForm()).getAllByRole('combobox')[1];
-    await user.selectOptions(doctorSelect, doctorId);
-    await user.click(screen.getByRole('button', { name: /add doctor/i }));
+    await user.click(doctorCombobox());
+    await user.click(within(modalForm()).getByRole('option', { name: DOCTOR_NAMES[doctorId] }));
+    await user.click(doctorCombobox()); // close the list again
   }
 
   async function addNurse(user: ReturnType<typeof userEvent.setup>, nurseId: string) {
-    await user.selectOptions(nurseSelect(), nurseId);
-    await user.click(screen.getByRole('button', { name: /add nurse/i }));
+    await user.click(nurseCombobox());
+    await user.click(within(modalForm()).getByRole('option', { name: NURSE_NAMES[nurseId] }));
+    await user.click(nurseCombobox()); // close the list again
   }
+
+  test('doctor multi-select: toggles options, stays open, shows removable tags, filters by search', async () => {
+    mockUsers.mockImplementation(() => ({
+      data: { data: [DOCTOR_1, { userId: 'doc-2', name: 'Dr. DEF', departmentIds: [] }] },
+      isFetching: false,
+    }));
+    const user = userEvent.setup();
+    await openModal(user);
+
+    await user.click(doctorCombobox());
+    await user.click(within(modalForm()).getByRole('option', { name: 'Dr. ABC' }));
+    await user.click(within(modalForm()).getByRole('option', { name: 'Dr. DEF' }));
+
+    // List stays open after each pick; both are checked and shown as tags.
+    expect(within(modalForm()).getByRole('option', { name: 'Dr. ABC' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(modalForm()).getByRole('option', { name: 'Dr. DEF' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTitle('Dr. ABC')).toBeInTheDocument();
+    expect(screen.getByTitle('Dr. DEF')).toBeInTheDocument();
+
+    // Selecting an already-selected doctor deselects it.
+    await user.click(within(modalForm()).getByRole('option', { name: 'Dr. ABC' }));
+    expect(within(modalForm()).getByRole('option', { name: 'Dr. ABC' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByTitle('Dr. ABC')).not.toBeInTheDocument();
+
+    // Search narrows the list.
+    await user.type(screen.getByLabelText(/search doctors/i), 'abc');
+    expect(within(modalForm()).getByRole('option', { name: 'Dr. ABC' })).toBeInTheDocument();
+    expect(within(modalForm()).queryByRole('option', { name: 'Dr. DEF' })).not.toBeInTheDocument();
+
+    // Tag × removes the doctor.
+    await user.click(screen.getByRole('button', { name: /remove dr\. def/i }));
+    expect(screen.queryByTitle('Dr. DEF')).not.toBeInTheDocument();
+  });
 
   test('renders below Assign Doctors and is clearly marked optional', async () => {
     const user = userEvent.setup();
@@ -345,10 +476,44 @@ describe('OPDPage — Assign Nurse (New Visit, multi-nurse)', () => {
     const user = userEvent.setup();
     await openModal(user);
 
-    expect(within(nurseSelect()).getByText('Nurse XYZ')).toBeInTheDocument();
-    expect(within(nurseSelect()).getByText('Nurse PQR')).toBeInTheDocument();
+    await user.click(nurseCombobox());
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' })).toBeInTheDocument();
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse PQR' })).toBeInTheDocument();
     // A nurse the backend excluded (e.g. currently on IPD ward duty) never appears.
-    expect(within(nurseSelect()).queryByText('Nurse On-Ward')).not.toBeInTheDocument();
+    expect(within(modalForm()).queryByRole('option', { name: 'Nurse On-Ward' })).not.toBeInTheDocument();
+  });
+
+  test('nurse multi-select: toggles without closing, no checkboxes, Escape and outside click close it', async () => {
+    const user = userEvent.setup();
+    await openModal(user);
+
+    await user.click(nurseCombobox());
+    await user.click(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' }));
+    await user.click(within(modalForm()).getByRole('option', { name: 'Nurse PQR' }));
+    expect(nurseCombobox()).toHaveAttribute('aria-expanded', 'true');
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' })).toHaveAttribute('aria-selected', 'true');
+
+    // Re-selecting deselects; the list never renders checkbox inputs.
+    await user.click(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' }));
+    expect(within(modalForm()).getByRole('option', { name: 'Nurse XYZ' })).toHaveAttribute('aria-selected', 'false');
+    expect(within(modalForm()).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Nurse XYZ')).not.toBeInTheDocument();
+    expect(screen.getByTitle('Nurse PQR')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    expect(nurseCombobox()).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(nurseCombobox());
+    await user.click(screen.getByText('Assign Nurse (Optional)'));
+    expect(nurseCombobox()).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('no separate Add Doctor / Add Nurse buttons remain', async () => {
+    const user = userEvent.setup();
+    await openModal(user);
+
+    expect(within(modalForm()).queryByRole('button', { name: /add doctor/i })).not.toBeInTheDocument();
+    expect(within(modalForm()).queryByRole('button', { name: /add nurse/i })).not.toBeInTheDocument();
   });
 
   test('shows "No available nurses" instead of a dropdown when the pool is empty', async () => {
@@ -812,6 +977,95 @@ describe('OPDPage — Diagnosis/Prescription persistence across Edit and Complet
   });
 });
 
+describe('OPDPage — View/Edit doctor & nurse multi-selects', () => {
+  const DOCTOR_1 = { userId: 'doc-1', name: 'Dr. ABC', departmentIds: [] };
+  const DOCTOR_2 = { userId: 'doc-2', name: 'Dr. DEF', departmentIds: [] };
+  const NURSE_1  = { userId: 'nurse-1', name: 'Nurse XYZ', email: 'xyz@h.com' };
+  const NURSE_2  = { userId: 'nurse-2', name: 'Nurse PQR', email: 'pqr@h.com' };
+  const VISIT = {
+    visitId: 'OPD-EDIT0001', tenantId: 't1', patientId: 'PAT-1', fullName: 'Ravi Kumar',
+    doctorIds: ['doc-1'], nurseIds: ['nurse-1'], departmentId: null,
+    visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
+    diagnosis: null, prescription: null, notes: null,
+    createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRole = 'DOCTOR';
+    mockUserId = 'doc-1';
+    mockUsers.mockReturnValue({ data: { data: [DOCTOR_1, DOCTOR_2] }, isFetching: false });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
+    mockGetAvailableOpdNurses.mockReturnValue({ data: [NURSE_1, NURSE_2] });
+    mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
+    mockUpdateVisit.mockImplementation((body: Record<string, unknown>) => Promise.resolve({ ...VISIT, ...body }));
+  });
+
+  async function openEdit(user: ReturnType<typeof userEvent.setup>) {
+    render(<OPDPage />);
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /edit visit/i }));
+  }
+
+  const doctorBox = () => screen.getByRole('combobox', { name: /assigned doctors/i });
+  const nurseBox  = () => screen.getByRole('combobox', { name: /assigned nurses/i });
+
+  test('existing doctor and nurse assignments are pre-selected as tags and selected options', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    expect(within(doctorBox()).getByTitle('Dr. ABC')).toBeInTheDocument();
+    expect(within(nurseBox()).getByTitle('Nurse XYZ')).toBeInTheDocument();
+
+    await user.click(doctorBox());
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. ABC' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. DEF' })).toHaveAttribute('aria-selected', 'false');
+    await user.keyboard('{Escape}');
+
+    await user.click(nurseBox());
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: 'Nurse XYZ' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: 'Nurse PQR' })).toHaveAttribute('aria-selected', 'false');
+
+    expect(screen.queryByRole('button', { name: /add doctor/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add nurse/i })).not.toBeInTheDocument();
+  });
+
+  test('changing doctors and nurses via the dropdowns saves the new id arrays', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    await user.click(doctorBox());
+    await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. DEF' }));
+    await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. ABC' })); // deselect
+    await user.keyboard('{Escape}');
+
+    await user.click(nurseBox());
+    await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Nurse PQR' }));
+    await user.keyboard('{Escape}');
+    await user.click(within(nurseBox()).getByRole('button', { name: /remove nurse xyz/i }));
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockUpdateVisit).toHaveBeenCalled());
+    expect(mockUpdateVisit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      visitId:   'OPD-EDIT0001',
+      doctorIds: ['doc-2'],
+      nurseIds:  ['nurse-2'],
+    }));
+  });
+
+  test('saving without touching assignments sends neither doctorIds nor nurseIds', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockUpdateVisit).toHaveBeenCalled());
+    expect(mockUpdateVisit.mock.calls[0][0]).not.toHaveProperty('doctorIds');
+    expect(mockUpdateVisit.mock.calls[0][0]).not.toHaveProperty('nurseIds');
+  });
+});
+
 describe('OPD Vitals — View/Edit', () => {
   const DOCTOR_1 = { userId: 'doc-1', name: 'Dr. ABC', departmentIds: [] };
   const VISIT_WITH_VITALS = {
@@ -891,8 +1145,38 @@ describe('OPD Vitals — View/Edit', () => {
     await user.type(screen.getByLabelText(/weight/i), '9999');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
-    expect(await screen.findByText(/weight must be between/i)).toBeInTheDocument();
+    // Rendered directly below the Weight input, not in the form-level banner.
+    const weightError = await screen.findByText(/weight must be between/i);
+    const weightInput = screen.getByLabelText(/weight/i);
+    expect(weightInput.parentElement).toContainElement(weightError);
+    expect(weightInput).toHaveAttribute('aria-invalid', 'true');
+    expect(weightInput).toHaveAttribute('aria-describedby', weightError.id);
+    expect(weightError).not.toHaveClass('bg-destructive/10');
     expect(mockUpdateVisit).not.toHaveBeenCalled();
+  });
+
+  test('every invalid vital shows its own error below its field, and editing a field clears only its error', async () => {
+    const user = userEvent.setup();
+    render(<OPDPage />);
+
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /edit visit/i }));
+
+    await user.clear(screen.getByLabelText(/weight/i));
+    await user.type(screen.getByLabelText(/weight/i), '9999');
+    await user.clear(screen.getByLabelText(/pulse/i));
+    await user.type(screen.getByLabelText(/pulse/i), '5');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    const weightError = await screen.findByText(/weight must be between/i);
+    const pulseError  = screen.getByText(/pulse must be between/i);
+    expect(screen.getByLabelText(/weight/i).parentElement).toContainElement(weightError);
+    expect(screen.getByLabelText(/pulse/i).parentElement).toContainElement(pulseError);
+    expect(mockUpdateVisit).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText(/pulse/i), '0');
+    expect(screen.queryByText(/pulse must be between/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/weight must be between/i)).toBeInTheDocument();
   });
 
   test('a malformed blood pressure blocks submission with a validation error', async () => {
@@ -906,7 +1190,8 @@ describe('OPD Vitals — View/Edit', () => {
     await user.type(screen.getByLabelText(/blood pressure/i), 'high');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
-    expect(await screen.findByText(/blood pressure must be in the format/i)).toBeInTheDocument();
+    const bpError = await screen.findByText(/blood pressure must be in the format/i);
+    expect(screen.getByLabelText(/blood pressure/i).parentElement).toContainElement(bpError);
     expect(mockUpdateVisit).not.toHaveBeenCalled();
   });
 
@@ -949,7 +1234,8 @@ describe('OPDPage — queue pagination', () => {
     render(<OPDPage />);
 
     expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, limit: 20 }));
-    expect(screen.getByText('Page 1 of 3 — 45 visits')).toBeInTheDocument();
+    expect(screen.getByText('Showing 1–1 of 45 visits')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
     expect(screen.getByText('45')).toBeInTheDocument();
     expect(screen.getByText('30')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
@@ -965,10 +1251,387 @@ describe('OPDPage — queue pagination', () => {
     expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
   });
 
-  test('pager is hidden when everything fits on one page', () => {
+  test('pager is hidden when everything fits on one page, but the count still shows', () => {
     mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
     render(<OPDPage />);
 
     expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument();
+    expect(screen.getByText('Showing 1–1 of 1 visit')).toBeInTheDocument();
+  });
+
+  test('last page shows the partial range and disables Next', async () => {
+    const rows = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...VISIT, visitId: `OPD-PAGE${String(from + i).padStart(4, '0')}` }));
+    mockGetOPDQueue.mockImplementation((args: { page: number }) => ({
+      data: {
+        data: args.page === 3 ? rows(5, 41) : rows(20, (args.page - 1) * 20 + 1),
+        total: 45, page: args.page, limit: 20, totalPages: 3,
+      },
+      isFetching: false, refetch: jest.fn(),
+    }));
+    const user = userEvent.setup();
+    render(<OPDPage />);
+
+    expect(screen.getByText('Showing 1–20 of 45 visits')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(screen.getByText('Showing 21–40 of 45 visits')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(screen.getByText('Showing 41–45 of 45 visits')).toBeInTheDocument();
+    expect(screen.getByText('3 / 3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled();
+  });
+
+  test('S. No. column is day-wise: starts at 1 and continues across pages via the page offset', async () => {
+    const rows = (n: number, from: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...VISIT, visitId: `OPD-SNO${String(from + i).padStart(5, '0')}` }));
+    mockGetOPDQueue.mockImplementation((args: { page: number }) => ({
+      data: {
+        data: args.page === 3 ? rows(5, 41) : rows(20, (args.page - 1) * 20 + 1),
+        total: 45, page: args.page, limit: 20, totalPages: 3,
+      },
+      isFetching: false, refetch: jest.fn(),
+    }));
+    const serials = () =>
+      within(screen.getByRole('table')).getAllByRole('row').slice(1)
+        .map((r) => within(r).getAllByRole('cell')[0].textContent);
+
+    const user = userEvent.setup();
+    render(<OPDPage />);
+    expect(screen.getByRole('columnheader', { name: 'S. No.' })).toBeInTheDocument();
+    expect(serials()[0]).toBe('1');
+    expect(serials()[19]).toBe('20');
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(serials()[0]).toBe('21');
+    expect(serials()[19]).toBe('40');
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(serials()).toEqual(['41', '42', '43', '44', '45']);
+  });
+
+  test('empty result shows "No visits" and no pager', () => {
+    mockGetOPDQueue.mockReturnValue({
+      data: { data: [], total: 0, page: 1, limit: 20, totalPages: 0, openCount: 0, completedCount: 0 },
+      isFetching: false, refetch: jest.fn(),
+    });
+    render(<OPDPage />);
+
+    expect(screen.getByText('No visits')).toBeInTheDocument();
+    expect(screen.getByText('No visits for the selected filters.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Previous' })).not.toBeInTheDocument();
+  });
+
+  test('steps back to the new last page when the current page empties out', async () => {
+    let totalPages = 3;
+    mockGetOPDQueue.mockImplementation((args: { page: number }) => ({
+      data: { data: [VISIT], total: totalPages * 20, page: args.page, limit: 20, totalPages },
+      isFetching: false, refetch: jest.fn(),
+    }));
+    const user = userEvent.setup();
+    const { rerender } = render(<OPDPage />);
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 3 }));
+
+    // A visit on page 3 was deleted — the server now reports only 2 pages.
+    totalPages = 2;
+    rerender(<OPDPage />);
+
+    await waitFor(() =>
+      expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 })),
+    );
+  });
+
+  afterEach(() => {
+    mockUsers.mockReturnValue({ data: { data: [] }, isFetching: false });
+  });
+
+  test('paging right after mount is not reset by the search debounce', async () => {
+    jest.useFakeTimers();
+    try {
+      const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+      render(<OPDPage />);
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      act(() => { jest.advanceTimersByTime(1000); });
+
+      expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('changing the doctor filter or searching resets to page 1', async () => {
+    mockUsers.mockReturnValue({
+      data: { data: [{ userId: 'doc-1', name: 'Dr. Mehta', role: 'DOCTOR', departmentIds: [] }] },
+      isFetching: false,
+    });
+    const user = userEvent.setup();
+    render(<OPDPage />);
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+
+    fireEvent.change(screen.getByDisplayValue('All Doctors'), { target: { value: 'doc-1' } });
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, doctorId: 'doc-1' }));
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+
+    await user.type(screen.getByLabelText('Search'), 'ravi');
+    await waitFor(() =>
+      expect(mockGetOPDQueue).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, search: 'ravi' })),
+    );
+  });
+});
+
+describe('OPDPage — View/Edit department-filtered doctor multi-select', () => {
+  const CARDIO = { departmentId: 'dept-cardio', name: 'Cardiology' };
+  const NEURO  = { departmentId: 'dept-neuro',  name: 'Neurology' };
+  const DR_CARDIO_1 = { userId: 'doc-c1', name: 'Dr. Heart', departmentIds: ['dept-cardio'] };
+  const DR_CARDIO_2 = { userId: 'doc-c2', name: 'Dr. Pulse', departmentIds: ['dept-cardio'] };
+  const DR_NEURO_1  = { userId: 'doc-n1', name: 'Dr. Brain', departmentIds: ['dept-neuro'] };
+  const DR_BOTH     = { userId: 'doc-b1', name: 'Dr. Both',  departmentIds: ['dept-cardio', 'dept-neuro'] };
+  const ALL_DOCTORS = [DR_CARDIO_1, DR_CARDIO_2, DR_NEURO_1, DR_BOTH];
+  const VISIT = {
+    visitId: 'OPD-DEPT0001', tenantId: 't1', patientId: 'PAT-1', fullName: 'Ravi Kumar',
+    doctorIds: ['doc-c1', 'doc-b1'], nurseIds: [], departmentId: 'dept-cardio',
+    visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
+    diagnosis: null, prescription: null, notes: null,
+    createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRole = 'DOCTOR';
+    mockUserId = 'doc-c1';
+    mockUsers.mockReturnValue({ data: { data: ALL_DOCTORS }, isFetching: false });
+    mockListDepartments.mockReturnValue({ data: [CARDIO, NEURO] });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([VISIT]), isFetching: false, refetch: jest.fn() });
+    mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
+    mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
+    mockUpdateVisit.mockImplementation((body: Record<string, unknown>) => Promise.resolve({ ...VISIT, ...body }));
+  });
+
+  afterAll(() => {
+    mockListDepartments.mockReturnValue({ data: undefined });
+  });
+
+  async function openEdit(user: ReturnType<typeof userEvent.setup>) {
+    render(<OPDPage />);
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /edit visit/i }));
+  }
+
+  const doctorBox   = () => screen.getByRole('combobox', { name: /assigned doctors/i });
+  const deptSelect  = () => screen.getByLabelText('Department') as HTMLSelectElement;
+  const optionNames = () =>
+    within(screen.getByRole('listbox')).queryAllByRole('option').map((o) => o.textContent);
+
+  test("Edit mode preselects the visit department and its existing doctors, listing only that department's doctors", async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    expect(deptSelect().value).toBe('dept-cardio');
+    expect(within(doctorBox()).getByTitle('Dr. Heart')).toBeInTheDocument();
+    expect(within(doctorBox()).getByTitle('Dr. Both')).toBeInTheDocument();
+
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Heart', 'Dr. Pulse', 'Dr. Both']);
+    expect(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. Heart' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('changing department refreshes the doctor list and removes doctors outside the new department', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+
+    // Dr. Heart (Cardiology only) is dropped; Dr. Both (in Neurology too) stays.
+    expect(within(doctorBox()).queryByTitle('Dr. Heart')).not.toBeInTheDocument();
+    expect(within(doctorBox()).getByTitle('Dr. Both')).toBeInTheDocument();
+
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Brain', 'Dr. Both']);
+  });
+
+  test('doctors can be searched and selected within the selected department, and the result is saved', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+    await user.click(doctorBox());
+    await user.type(screen.getByRole('textbox', { name: /search doctors/i }), 'brain');
+    expect(optionNames()).toEqual(['Dr. Brain']);
+    await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. Brain' }));
+    await user.keyboard('{Escape}');
+
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockUpdateVisit).toHaveBeenCalled());
+    expect(mockUpdateVisit.mock.calls[0][0]).toEqual(expect.objectContaining({
+      visitId:   'OPD-DEPT0001',
+      doctorIds: ['doc-b1', 'doc-n1'],
+    }));
+  });
+
+  test('switching to a department with none of the assigned doctors clears them and flags the department/doctor mismatch', async () => {
+    const user = userEvent.setup();
+    mockGetOPDQueue.mockReturnValue({
+      data: queuePage([{ ...VISIT, doctorIds: ['doc-c1'] }]), isFetching: false, refetch: jest.fn(),
+    });
+    await openEdit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+
+    expect(within(doctorBox()).queryByTitle('Dr. Heart')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('alert').some((a) => /requires selecting a doctor/i.test(a.textContent ?? ''))).toBe(true);
+  });
+
+  test('selecting "All Departments" keeps the assigned doctors and lists every doctor', async () => {
+    const user = userEvent.setup();
+    await openEdit(user);
+
+    await user.selectOptions(deptSelect(), '');
+
+    expect(within(doctorBox()).getByTitle('Dr. Heart')).toBeInTheDocument();
+    expect(within(doctorBox()).getByTitle('Dr. Both')).toBeInTheDocument();
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Heart', 'Dr. Pulse', 'Dr. Brain', 'Dr. Both']);
+  });
+
+  test('a department change made before the doctor list loads prunes once the list arrives, not before', async () => {
+    const user = userEvent.setup();
+    mockUsers.mockReturnValue({ data: undefined, isFetching: true });
+    const { rerender } = render(<OPDPage />);
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /edit visit/i }));
+
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+    // Nothing pruned while the list is still loading.
+    expect(within(doctorBox()).getAllByRole('button', { name: /remove/i })).toHaveLength(2);
+
+    mockUsers.mockReturnValue({ data: { data: ALL_DOCTORS }, isFetching: false });
+    rerender(<OPDPage />);
+
+    await waitFor(() => expect(within(doctorBox()).queryByTitle('Dr. Heart')).not.toBeInTheDocument());
+    expect(within(doctorBox()).getByTitle('Dr. Both')).toBeInTheDocument();
+  });
+});
+
+describe('OPDPage — New Visit department-filtered doctor multi-select', () => {
+  const CARDIO = { departmentId: 'dept-cardio', name: 'Cardiology' };
+  const NEURO  = { departmentId: 'dept-neuro',  name: 'Neurology' };
+  const DR_CARDIO_1 = { userId: 'doc-c1', name: 'Dr. Heart', departmentIds: ['dept-cardio'] };
+  const DR_CARDIO_2 = { userId: 'doc-c2', name: 'Dr. Pulse', departmentIds: ['dept-cardio'] };
+  const DR_NEURO_1  = { userId: 'doc-n1', name: 'Dr. Brain', departmentIds: ['dept-neuro'] };
+  const DR_BOTH     = { userId: 'doc-b1', name: 'Dr. Both',  departmentIds: ['dept-cardio', 'dept-neuro'] };
+  const ALL_DOCTORS = [DR_CARDIO_1, DR_CARDIO_2, DR_NEURO_1, DR_BOTH];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRole = 'RECEPTIONIST';
+    mockUserId = undefined;
+    mockUsers.mockReturnValue({ data: { data: ALL_DOCTORS }, isFetching: false });
+    mockListDepartments.mockReturnValue({ data: [CARDIO, NEURO] });
+    mockGetOPDQueue.mockReturnValue({ data: queuePage([]), isFetching: false, refetch: jest.fn() });
+    mockGetAvailableOpdNurses.mockReturnValue({ data: [] });
+    mockGetDoctorNurseAssignments.mockReturnValue({ data: undefined });
+    mockGetOPDPaymentValidity.mockReturnValue({ data: undefined, isFetching: false, refetch: jest.fn() });
+  });
+
+  afterAll(() => {
+    mockListDepartments.mockReturnValue({ data: undefined });
+  });
+
+  const doctorBox   = () => screen.getByRole('combobox', { name: /assign doctors/i });
+  const deptSelect  = () => screen.getByLabelText('Department') as HTMLSelectElement;
+  const optionNames = () =>
+    within(screen.getByRole('listbox')).queryAllByRole('option').map((o) => o.textContent);
+
+  async function openNewVisit(user: ReturnType<typeof userEvent.setup>) {
+    const utils = render(<OPDPage />);
+    await user.click(screen.getByRole('button', { name: /new visit/i }));
+    return utils;
+  }
+
+  async function pickDoctors(user: ReturnType<typeof userEvent.setup>, names: string[]) {
+    await user.click(doctorBox());
+    for (const name of names) {
+      await user.click(within(screen.getByRole('listbox')).getByRole('option', { name }));
+    }
+    await user.keyboard('{Escape}');
+  }
+
+  test('selecting a department immediately lists only that department\'s doctors', async () => {
+    const user = userEvent.setup();
+    await openNewVisit(user);
+
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Heart', 'Dr. Pulse', 'Dr. Brain', 'Dr. Both']);
+    await user.keyboard('{Escape}');
+
+    await user.selectOptions(deptSelect(), 'dept-cardio');
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Heart', 'Dr. Pulse', 'Dr. Both']);
+  });
+
+  test('changing department clears selected doctors from the previous department, keeping shared ones', async () => {
+    const user = userEvent.setup();
+    await openNewVisit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-cardio');
+    await pickDoctors(user, ['Dr. Heart', 'Dr. Both']);
+    expect(within(doctorBox()).getByTitle('Dr. Heart')).toBeInTheDocument();
+
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+
+    expect(within(doctorBox()).queryByTitle('Dr. Heart')).not.toBeInTheDocument();
+    expect(within(doctorBox()).getByTitle('Dr. Both')).toBeInTheDocument();
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Brain', 'Dr. Both']);
+  });
+
+  test('doctors can be searched and selected from the refreshed list', async () => {
+    const user = userEvent.setup();
+    await openNewVisit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-cardio');
+    await pickDoctors(user, ['Dr. Heart']);
+    await user.selectOptions(deptSelect(), 'dept-neuro');
+
+    await user.click(doctorBox());
+    await user.type(screen.getByRole('textbox', { name: /search doctors/i }), 'brain');
+    expect(optionNames()).toEqual(['Dr. Brain']);
+    await user.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Dr. Brain' }));
+    await user.keyboard('{Escape}');
+
+    expect(within(doctorBox()).getByTitle('Dr. Brain')).toBeInTheDocument();
+    expect(within(doctorBox()).queryByTitle('Dr. Heart')).not.toBeInTheDocument();
+  });
+
+  test('switching to "All Departments" keeps the current selection and lists every doctor', async () => {
+    const user = userEvent.setup();
+    await openNewVisit(user);
+
+    await user.selectOptions(deptSelect(), 'dept-cardio');
+    await pickDoctors(user, ['Dr. Heart']);
+    await user.selectOptions(deptSelect(), '');
+
+    expect(within(doctorBox()).getByTitle('Dr. Heart')).toBeInTheDocument();
+    await user.click(doctorBox());
+    expect(optionNames()).toEqual(['Dr. Heart', 'Dr. Pulse', 'Dr. Brain', 'Dr. Both']);
+  });
+
+  test('doctors picked under "All Departments" outside a newly chosen department are cleared', async () => {
+    const user = userEvent.setup();
+    await openNewVisit(user);
+
+    await pickDoctors(user, ['Dr. Brain', 'Dr. Pulse']);
+    await user.selectOptions(deptSelect(), 'dept-cardio');
+
+    expect(within(doctorBox()).queryByTitle('Dr. Brain')).not.toBeInTheDocument();
+    expect(within(doctorBox()).getByTitle('Dr. Pulse')).toBeInTheDocument();
   });
 });

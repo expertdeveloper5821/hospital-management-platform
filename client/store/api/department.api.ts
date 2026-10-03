@@ -4,6 +4,7 @@ import type {
   DepartmentResponse,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
+  PaginatedResult,
 } from '../types';
 
 export const departmentApi = baseApi.injectEndpoints({
@@ -12,6 +13,22 @@ export const departmentApi = baseApi.injectEndpoints({
     listDepartments: build.query<DepartmentResponse[], void>({
       query: () => '/api/departments',
       transformResponse: (raw: ApiSuccess<DepartmentResponse[]>) => raw.data,
+      providesTags: ['Department'],
+    }),
+
+    // Paginated variant for the Departments management table — dropdowns keep
+    // using listDepartments (full array).
+    listDepartmentsPaginated: build.query<PaginatedResult<DepartmentResponse>, {
+      page?:   number;
+      limit?:  number;
+      search?: string;
+    }>({
+      query: ({ page = 1, limit = 10, search } = {}) => {
+        const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+        if (search) params.set('search', search);
+        return `/api/departments?${params}`;
+      },
+      transformResponse: (raw: ApiSuccess<PaginatedResult<DepartmentResponse>>) => raw.data,
       providesTags: ['Department'],
     }),
 
@@ -58,6 +75,7 @@ export const departmentApi = baseApi.injectEndpoints({
 
 export const {
   useListDepartmentsQuery,
+  useListDepartmentsPaginatedQuery,
   useGetDepartmentByIdQuery,
   useCreateDepartmentMutation,
   useUpdateDepartmentMutation,

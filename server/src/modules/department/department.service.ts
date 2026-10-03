@@ -3,7 +3,7 @@ import { departmentRepository } from './department.repository';
 import { IDepartment } from './department.model';
 import { userRepository } from '../user/user.repository';
 import { auditService } from '../../shared/services/audit.service';
-import { AuditEntityType } from '../../shared/types/common.types';
+import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
 import { ConflictError, NotFoundError, AppError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
 import { CreateDepartmentRequest, UpdateDepartmentRequest } from './department.types';
@@ -93,6 +93,19 @@ export class DepartmentService {
 
   async listDepartments(tenantId: string): Promise<IDepartment[]> {
     return departmentRepository.findAll(tenantId);
+  }
+
+  async listDepartmentsPaginated(
+    tenantId: string,
+    filters:  { search?: string },
+    page:     number,
+    limit:    number,
+  ): Promise<PaginatedResult<IDepartment>> {
+    const search = filters.search?.trim() || undefined;
+    const matchedDepartmentIds = search
+      ? await userRepository.findDepartmentIdsByDoctorName(tenantId, search)
+      : undefined;
+    return departmentRepository.findPaginated(tenantId, { search, matchedDepartmentIds }, page, limit);
   }
 
   async getDepartmentById(tenantId: string, departmentId: string): Promise<IDepartment> {

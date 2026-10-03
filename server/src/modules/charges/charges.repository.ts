@@ -35,8 +35,8 @@ class ChargeRepository {
     filters:  ChargeListFilters,
   ): Promise<PaginatedResult<ICharge>> {
     assertDbConnected();
-    const page  = filters.page  ?? 1;
-    const limit = Math.min(filters.limit ?? 20, 20);
+    const page  = Math.max(1, filters.page ?? 1);
+    const limit = Math.max(1, Math.min(filters.limit ?? 20, 20));
     const skip  = (page - 1) * limit;
 
     const query: Record<string, unknown> = { tenantId };
@@ -51,8 +51,10 @@ class ChargeRepository {
       query.createdAt = dateRange;
     }
 
+    // `_id` breaks createdAt ties (charges auto-created in one batch can share a
+    // timestamp) so no charge is skipped or repeated across pages.
     const [data, total] = await Promise.all([
-      ChargeModel.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      ChargeModel.find(query).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
       ChargeModel.countDocuments(query),
     ]);
 

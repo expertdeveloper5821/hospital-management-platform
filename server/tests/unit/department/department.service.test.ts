@@ -3,6 +3,7 @@ jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { userRepository } from '../../../src/modules/user/user.repository';
+import { departmentRepository } from '../../../src/modules/department/department.repository';
 import { DepartmentService } from '../../../src/modules/department/department.service';
 import { UserRole } from '../../../src/shared/types/common.types';
 
@@ -94,5 +95,38 @@ describe('DepartmentService — resolveDepartmentFromDoctorIds', () => {
 
     expect(result).toBe('DEPT-CARDIO');
     expect(mockUserRepo.findById).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('DepartmentService — listDepartmentsPaginated', () => {
+  const mockDeptRepo = departmentRepository as jest.Mocked<typeof departmentRepository>;
+  let service: DepartmentService;
+  const page = { data: [], total: 0, page: 2, limit: 10, totalPages: 0 };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new DepartmentService();
+    mockDeptRepo.findPaginated.mockResolvedValue(page as never);
+  });
+
+  test('passes page/limit through and skips the doctor lookup without a search', async () => {
+    const result = await service.listDepartmentsPaginated('t1', {}, 2, 10);
+
+    expect(result).toBe(page);
+    expect(mockUserRepo.findDepartmentIdsByDoctorName).not.toHaveBeenCalled();
+    expect(mockDeptRepo.findPaginated).toHaveBeenCalledWith(
+      't1', { search: undefined, matchedDepartmentIds: undefined }, 2, 10,
+    );
+  });
+
+  test('resolves departments of matching doctors so search covers doctor names', async () => {
+    mockUserRepo.findDepartmentIdsByDoctorName.mockResolvedValue(['DEPT-CARDIO']);
+
+    await service.listDepartmentsPaginated('t1', { search: '  smith ' }, 1, 10);
+
+    expect(mockUserRepo.findDepartmentIdsByDoctorName).toHaveBeenCalledWith('t1', 'smith');
+    expect(mockDeptRepo.findPaginated).toHaveBeenCalledWith(
+      't1', { search: 'smith', matchedDepartmentIds: ['DEPT-CARDIO'] }, 1, 10,
+    );
   });
 });

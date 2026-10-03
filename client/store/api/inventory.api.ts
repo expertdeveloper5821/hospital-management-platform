@@ -15,11 +15,12 @@ export const inventoryApi = baseApi.injectEndpoints({
 
     listInventoryItems: build.query<
       InventoryListResult,
-      { category?: string; lowStock?: boolean; page?: number; limit?: number }
+      { category?: string; search?: string; lowStock?: boolean; page?: number; limit?: number }
     >({
-      query: ({ category, lowStock, page = 1, limit = 20 } = {}) => {
+      query: ({ category, search, lowStock, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
         if (category !== undefined && category !== '') params.set('category', category);
+        if (search !== undefined && search !== '') params.set('search', search);
         if (lowStock !== undefined) params.set('lowStock', String(lowStock));
         params.set('page',  String(page));
         params.set('limit', String(limit));

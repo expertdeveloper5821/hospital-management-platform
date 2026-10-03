@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { opdStatusLabel, opdStatusVariant } from '@/lib/opd-status';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
@@ -413,6 +414,7 @@ export default function PatientsPage() {
   );
 
   const patients    = data?.data    ?? [];
+  const serialStart = serialOffset(data, page, PATIENTS_PAGE_SIZE);
   // Divide by the page size the response was actually built with — the
   // offline cache fallback returns everything cached as one page (limit = total).
   const totalPages  = data ? Math.max(1, Math.ceil(data.total / (data.limit || PATIENTS_PAGE_SIZE))) : 1;
@@ -470,6 +472,7 @@ export default function PatientsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">UHID</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Registration Date</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
@@ -480,12 +483,13 @@ export default function PatientsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {patients.map((p) => (
+                  {patients.map((p, idx) => (
                     <tr
                       key={p.patientId}
                       className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
                       onClick={() => { setSelected(p); setEditing(false); }}
                     >
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{p.patientId}</td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(p.createdAt)}</td>
                       <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={p.fullName}>{p.fullName}</td>

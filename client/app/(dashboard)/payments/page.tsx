@@ -42,6 +42,7 @@ import {
   BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 import { NavForm } from "@/components/ui/form";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -957,6 +958,7 @@ export default function PaymentsPage() {
   );
 
   const payments = data?.data ?? [];
+  const serialStart = serialOffset(data, page, 10);
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
 
@@ -1134,6 +1136,7 @@ export default function PaymentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Patient
                     </th>
@@ -1155,12 +1158,13 @@ export default function PaymentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {payments.map((p) => (
+                  {payments.map((p, idx) => (
                     <tr
                       key={p.paymentId}
                       className="border-b last:border-0 cursor-pointer hover:bg-muted/30 transition-colors"
                       onClick={() => setSelected(p)}
                     >
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium">
                           {p.fullName ?? p.patientId}

@@ -42,6 +42,15 @@ export const PaymentReferenceType = {
 
 export type PaymentReferenceType = typeof PaymentReferenceType[keyof typeof PaymentReferenceType];
 
+// Lab request reference types — at most one COMPLETED payment may exist per
+// referenced lab request (enforced by a partial unique index in
+// payment.model.ts), and a manual payment carrying one of these must point at
+// an existing, non-deleted lab request of the same patient (payment.service.ts).
+export const LAB_PAYMENT_REFERENCE_TYPES: readonly string[] = [
+  PaymentReferenceType.PATHOLOGY_REQUEST,
+  PaymentReferenceType.RADIOLOGY_REQUEST,
+];
+
 // ─── Zod schemas ──────────────────────────────────────────────────────────────
 
 const MAX_AMOUNT_DIGITS = 10;

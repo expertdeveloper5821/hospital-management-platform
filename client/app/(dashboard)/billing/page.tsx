@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useListChargesQuery, useAddChargeMutation, useCancelChargeMutation, useMarkChargePaidMutation } from '@/store/api/charges.api';
 import { useListLabTestTypesQuery } from '@/store/api/lab.api';
@@ -14,6 +14,9 @@ import { todayLocalISO, clampToToday } from '@/lib/date';
 import { cn, toTitleCase } from '@/lib/utils';
 import { Plus, X } from 'lucide-react';
 import { NavForm } from '@/components/ui/form';
+
+// Backend caps charges list pages at 20.
+const CHARGES_PAGE_SIZE = 20;
 
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
@@ -214,16 +217,47 @@ export default function BillingPage() {
   const [addedBy, setAddedBy]       = useState('');
   const [page, setPage]             = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
+  // Free-text filters are debounced (300ms) so typing doesn't fire a request
+  // per keystroke; a new value always starts from page 1.
+  const [debouncedPatientId, setDebouncedPatientId] = useState('');
+  const [debouncedAddedBy, setDebouncedAddedBy]     = useState('');
+  // One timer per field, so editing one never cancels the other's pending update.
+  const debounceRefs = useRef<Partial<Record<'patientId' | 'addedBy', ReturnType<typeof setTimeout>>>>({});
 
-  const { data, isLoading, isError } = useListChargesQuery({
-    patientId:   patientId || undefined,
+  function handleTextFilterChange(field: 'patientId' | 'addedBy', value: string) {
+    if (field === 'patientId') setPatientId(value); else setAddedBy(value);
+    clearTimeout(debounceRefs.current[field]);
+    debounceRefs.current[field] = setTimeout(() => {
+      if (field === 'patientId') setDebouncedPatientId(value.trim()); else setDebouncedAddedBy(value.trim());
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { Object.values(debounceRefs.current).forEach(clearTimeout); }, []);
+
+  const { data, isLoading, isFetching, isError } = useListChargesQuery({
+    patientId:   debouncedPatientId || undefined,
     category:    category  || undefined,
     startDate:   startDate ? clampToToday(startDate) : undefined,
     endDate:     endDate   ? clampToToday(endDate)   : undefined,
-    addedByName: addedBy   || undefined,
+    addedByName: debouncedAddedBy   || undefined,
     page,
-    limit: 20,
+    limit: CHARGES_PAGE_SIZE,
   });
+
+  const charges    = data?.data ?? [];
+  const total      = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 0;
+  // Derived from the response rather than local state: an offline cache read
+  // returns everything matching as a single page (page 1, totalPages 1).
+  const rangeStart = total === 0 || !data ? 0 : (data.page - 1) * data.limit + 1;
+  const rangeEnd   = rangeStart === 0 ? 0 : rangeStart + charges.length - 1;
+  const hasFilters = !!(debouncedPatientId || category || startDate || endDate || debouncedAddedBy);
+
+  // A shrinking result set would otherwise leave `page` past the end and
+  // render an empty page.
+  useEffect(() => {
+    if (!isFetching && data && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [isFetching, data, page, totalPages]);
 
   const canManageCharge = ['HOSPITAL_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'RECEPTIONIST'].includes(profile?.role ?? '');
   const canAddCharge = canManageCharge;
@@ -249,7 +283,7 @@ export default function BillingPage() {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div>
           <Label>UHID</Label>
-          <Input value={patientId} onChange={e => { setPatientId(e.target.value); setPage(1); }} placeholder="PAT-XXXXXXXX" />
+          <Input value={patientId} onChange={e => handleTextFilterChange('patientId', e.target.value)} placeholder="PAT-XXXXXXXX" />
         </div>
         <div>
           <Label>Category</Label>
@@ -264,7 +298,7 @@ export default function BillingPage() {
         </div>
         <div>
           <Label>Added By</Label>
-          <Input value={addedBy} onChange={e => { setAddedBy(e.target.value); setPage(1); }} placeholder="Staff name" />
+          <Input value={addedBy} onChange={e => handleTextFilterChange('addedBy', e.target.value)} placeholder="Staff name" />
         </div>
         <div>
           <Label>Start Date</Label>
@@ -278,10 +312,14 @@ export default function BillingPage() {
 
       {isLoading && <p className="text-muted-foreground">Loading charges…</p>}
       {isError   && <p className="text-red-600">Failed to load charges.</p>}
-      {data && data.data.length === 0 && <p className="text-muted-foreground">No charges found.</p>}
+      {data && charges.length === 0 && !isFetching && (
+        <p className="text-muted-foreground">
+          {hasFilters ? 'No charges match your filters.' : 'No charges found.'}
+        </p>
+      )}
 
       <div className="space-y-2">
-        {data?.data.map((charge) => (
+        {charges.map((charge) => (
           <div key={charge.chargeId} className="border rounded p-3 flex items-start justify-between text-sm">
             <div className="space-y-0.5">
               <p className="font-medium">{charge.description}</p>
@@ -320,11 +358,31 @@ export default function BillingPage() {
         ))}
       </div>
 
-      {data && data.totalPages > 1 && (
-        <div className="flex gap-2 items-center">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
-          <span className="text-sm">{page} / {data.totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= data.totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+      {/* Pagination + count */}
+      {data && total > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>Showing {rangeStart}–{rangeEnd} of {total} charge{total !== 1 ? 's' : ''}</span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">{page} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

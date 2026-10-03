@@ -4,6 +4,7 @@ jest.mock('../../../src/modules/payment/payment.repository');
 jest.mock('../../../src/modules/patient/patient.repository');
 jest.mock('../../../src/modules/tenant/tenant.repository');
 jest.mock('../../../src/modules/department/department.repository');
+jest.mock('../../../src/modules/user/user.repository');
 jest.mock('../../../src/shared/services/pdf.service');
 jest.mock('../../../src/shared/services/s3.service');
 jest.mock('../../../src/shared/services/audit.service');
@@ -13,6 +14,7 @@ import { paymentRepository }    from '../../../src/modules/payment/payment.repos
 import { patientRepository }    from '../../../src/modules/patient/patient.repository';
 import { tenantRepository }     from '../../../src/modules/tenant/tenant.repository';
 import { departmentRepository } from '../../../src/modules/department/department.repository';
+import { userRepository }       from '../../../src/modules/user/user.repository';
 import { pdfService }        from '../../../src/shared/services/pdf.service';
 import { s3Service }         from '../../../src/shared/services/s3.service';
 import { PaymentService }    from '../../../src/modules/payment/payment.service';
@@ -27,6 +29,10 @@ const mockPayRepo   = paymentRepository as jest.Mocked<typeof paymentRepository>
 const mockPatRepo   = patientRepository as jest.Mocked<typeof patientRepository>;
 const mockTenantRepo = tenantRepository as jest.Mocked<typeof tenantRepository>;
 const mockDeptRepo   = departmentRepository as jest.Mocked<typeof departmentRepository>;
+const mockUserRepo   = userRepository as jest.Mocked<typeof userRepository>;
+
+// The receipt's "Created By" lookup — every suite gets a resolved default.
+beforeEach(() => { mockUserRepo.findById = jest.fn().mockResolvedValue(null); });
 const mockPdf       = pdfService       as jest.Mocked<typeof pdfService>;
 const mockS3        = s3Service        as jest.Mocked<typeof s3Service>;
 
@@ -582,5 +588,151 @@ describe('PaymentService — getDepartmentRevenue', () => {
     await service.getDepartmentRevenue(TENANT, query);
 
     expect(mockPayRepo.sumByResolvedDepartment).toHaveBeenCalledWith(TENANT, query);
+  });
+});
+
+// ─── Receipt content (Billing, manual, Razorpay) ──────────────────────────────
+// Every non-Lab path builds the same A5 receipt, with letterhead resolved from
+// the payment's own tenant and patient details from its patient record.
+
+describe('PaymentService — generic receipt content', () => {
+  let service: PaymentService;
+
+  const tenantWithDetails = {
+    _id:  TENANT,
+    name: 'Legal Name Pvt Ltd',
+    branding: { displayName: 'Sunrise Hospital', primaryColor: '#E53935', logoUrl: null },
+    onboardingDocuments: {
+      registrationCertificate: 'MH-REG-4455', addressLine: '12 Park Road',
+      city: 'Pune', state: 'Maharashtra', pincode: '411001',
+    },
+  } as unknown as ITenant;
+
+  const expectedHospital = {
+    hospitalName:               'Sunrise Hospital',
+    hospitalRegistrationNumber: 'MH-REG-4455',
+    hospitalAddress:            '12 Park Road, Pune, Maharashtra - 411001',
+  };
+
+  const expectedPatient = {
+    patientName:   'Priya Sharma',
+    patientId:     PATIENT_ID,
+    patientAge:    34,
+    patientGender: 'FEMALE',
+    patientMobile: '9876543210',
+  };
+
+  const receiptArg = () => (mockPdf.generateReceipt as jest.Mock).mock.calls[0][0];
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new PaymentService();
+    mockPatRepo.findByPatientId = jest.fn().mockResolvedValue(
+      makePatient({ age: 34, gender: 'FEMALE', mobileNumber: '9876543210' } as Partial<IPatient>),
+    );
+    mockTenantRepo.findById = jest.fn().mockResolvedValue(tenantWithDetails);
+    mockUserRepo.findById   = jest.fn().mockResolvedValue({ name: 'Asha Reception', email: 'asha@x.test' });
+    mockPdf.generateReceipt = jest.fn().mockResolvedValue(Buffer.from('%PDF'));
+    mockS3.uploadFile       = jest.fn().mockResolvedValue('s3-key');
+    mockS3.getPresignedUrl  = jest.fn().mockResolvedValue('https://s3.test/receipt');
+  });
+
+  test('manual payment — tenant letterhead, patient, method, amount, transaction ID and creator', async () => {
+    mockPayRepo.save = jest.fn().mockResolvedValue(makePayment());
+
+    await service.createManualPayment(
+      { patientId: PATIENT_ID, amount: 750, paymentMethod: PaymentMethod.UPI, description: 'Consultation fee', transactionId: 'UTR123' },
+      TENANT, USER,
+    );
+
+    expect(mockTenantRepo.findById).toHaveBeenCalledWith(TENANT);
+    expect(mockUserRepo.findById).toHaveBeenCalledWith(TENANT, USER);
+    expect(receiptArg()).toEqual({
+      receiptNumber: expect.any(String),
+      paymentDate:   expect.any(Date),
+      ...expectedHospital,
+      ...expectedPatient,
+      description:   'Consultation fee',
+      amountInr:     750,
+      paymentMethod: PaymentMethod.UPI,
+      transactionId: 'UTR123',
+      createdBy:     'Asha Reception',
+    });
+    expect(receiptArg().receiptNumber).toBe((mockPayRepo.save as jest.Mock).mock.calls[0][0].paymentId);
+  });
+
+  test('manual payment — no transaction ID → null; unknown creator → null (rows omitted)', async () => {
+    mockPayRepo.save      = jest.fn().mockResolvedValue(makePayment());
+    mockUserRepo.findById = jest.fn().mockRejectedValue(new Error('db down'));
+
+    await service.createManualPayment(
+      { patientId: PATIENT_ID, amount: 500, paymentMethod: PaymentMethod.CASH, description: 'Consultation fee' },
+      TENANT, USER,
+    );
+
+    expect(receiptArg()).toEqual(expect.objectContaining({ transactionId: null, createdBy: null }));
+    expect(mockS3.uploadFile).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to tenant name and drops a document-path registration value / missing address', async () => {
+    mockPayRepo.save        = jest.fn().mockResolvedValue(makePayment());
+    mockTenantRepo.findById = jest.fn().mockResolvedValue({
+      _id: TENANT, name: 'Legal Name Pvt Ltd',
+      branding: { displayName: '', primaryColor: '#1A73E8', logoUrl: null },
+      onboardingDocuments: { registrationCertificate: 'tenants/t1/docs/reg.pdf' },
+    });
+
+    await service.createManualPayment(
+      { patientId: PATIENT_ID, amount: 500, paymentMethod: PaymentMethod.CASH, description: 'Consultation fee' },
+      TENANT, USER,
+    );
+
+    expect(receiptArg()).toEqual(expect.objectContaining({
+      hospitalName: 'Legal Name Pvt Ltd', hospitalRegistrationNumber: null, hospitalAddress: null,
+    }));
+  });
+
+  test('Billing charge marked paid — same receipt, created by the settling user', async () => {
+    const pending = makePayment({ status: PaymentStatus.PENDING, receiptS3Key: null, description: 'Charge: X-Ray', amount: 1200 });
+    mockPayRepo.updateFromStatus = jest.fn().mockResolvedValue(makePayment({ status: PaymentStatus.COMPLETED }));
+
+    await service.settleChargePayment(pending, PaymentStatus.COMPLETED, 'user-billing');
+
+    expect(mockUserRepo.findById).toHaveBeenCalledWith(TENANT, 'user-billing');
+    expect(receiptArg()).toEqual(expect.objectContaining({
+      ...expectedHospital,
+      ...expectedPatient,
+      receiptNumber: pending.paymentId,
+      description:   'Charge: X-Ray',
+      amountInr:     1200,
+      paymentMethod: PaymentMethod.CASH,
+      createdBy:     'Asha Reception',
+    }));
+  });
+
+  test('Razorpay capture — same receipt with the Razorpay payment ID as transaction ID', async () => {
+    const orderId = 'order_rcpt_001';
+    const pending = makePayment({
+      status: PaymentStatus.PENDING, razorpayOrderId: orderId, paymentMethod: PaymentMethod.UPI, receiptS3Key: null,
+    });
+    mockPayRepo.findByRazorpayOrderId = jest.fn().mockResolvedValue(pending);
+    mockPayRepo.update = jest.fn().mockResolvedValue(makePayment({ status: PaymentStatus.COMPLETED }));
+
+    const body = Buffer.from(JSON.stringify({
+      event: 'payment.captured',
+      payload: { payment: { entity: { id: 'pay_rzp_777', order_id: orderId } } },
+    }));
+    const sig = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET!).update(body).digest('hex');
+    await service.handleRazorpayWebhook(body, sig);
+
+    expect(mockUserRepo.findById).toHaveBeenCalledWith(TENANT, USER);
+    expect(receiptArg()).toEqual(expect.objectContaining({
+      ...expectedHospital,
+      ...expectedPatient,
+      receiptNumber: pending.paymentId,
+      paymentMethod: PaymentMethod.UPI,
+      amountInr:     500,
+      transactionId: 'pay_rzp_777',
+    }));
   });
 });

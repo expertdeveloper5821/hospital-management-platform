@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { departmentService } from './department.service';
 import { IDepartment } from './department.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
+import { paginationSchema } from '../../shared/utils/validation';
 
 const createDepartmentSchema = z.object({
   name:         z.string().min(1).max(200).trim(),
@@ -14,6 +15,10 @@ const updateDepartmentSchema = z.object({
   name:         z.string().min(1).max(200).trim().optional(),
   description:  z.string().min(1, 'Description cannot be empty.').max(1000, 'Description cannot exceed 1000 characters.').trim().nullable().optional(),
   headDoctorId: z.string().min(1).nullable().optional(),
+});
+
+const listDepartmentsQuerySchema = paginationSchema.extend({
+  search: z.string().trim().max(100).optional(),
 });
 
 const departmentIdParamSchema = z.object({
@@ -55,6 +60,17 @@ export async function createDepartment(req: Request, res: Response, next: NextFu
 
 export async function listDepartments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    // Paginated only when `page`/`limit` is sent — every dropdown consumer
+    // still gets the full array from a bare GET /api/departments.
+    if (req.query.page !== undefined || req.query.limit !== undefined) {
+      const query = listDepartmentsQuerySchema.safeParse(req.query);
+      if (!query.success) throw new ValidationError('Invalid query parameters', { errors: query.error.flatten() });
+      const { page, limit, search } = query.data;
+      const result = await departmentService.listDepartmentsPaginated(req.user!.tenantId!, { search }, page, limit);
+      res.status(200).json({ status: 'success', data: { ...result, data: result.data.map(toResponse) } });
+      return;
+    }
+
     const departments = await departmentService.listDepartments(req.user!.tenantId!);
     res.status(200).json({ status: 'success', data: departments.map(toResponse) });
   } catch (err) { next(err); }

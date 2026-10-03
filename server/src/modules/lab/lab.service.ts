@@ -14,6 +14,8 @@ import {
   RADIOLOGY_REPORT_MAX_BYTES,
   LabTestTypeResponse,
   LAB_REFERRED_BY_SELF,
+  CollectLabPaymentInput,
+  LabPaymentSummary,
 } from './lab.types';
 import { patientRepository }   from '../patient/patient.repository';
 import { userRepository }      from '../user/user.repository';
@@ -21,8 +23,15 @@ import { notificationService } from '../notification/notification.service';
 import { s3Service }           from '../../shared/services/s3.service';
 import { auditService }        from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
-import { AppError, NotFoundError, ForbiddenError } from '../../shared/middleware/error-handler';
+import { AppError, NotFoundError, ForbiddenError, ConflictError } from '../../shared/middleware/error-handler';
 import { PatientModel } from '../patient/patient.model';
+import { tenantRepository }  from '../tenant/tenant.repository';
+import { paymentRepository } from '../payment/payment.repository';
+import { paymentService }    from '../payment/payment.service';
+import { IPayment }          from '../payment/payment.model';
+import { PaymentReferenceType, PaymentResponse } from '../payment/payment.types';
+import { pdfService }        from '../../shared/services/pdf.service';
+import { resolveReceiptHospitalDetails, resolvePatientAge } from '../../shared/utils/receipt-details';
 
 // Pre-signed URL expiry: 1 hour (3600 s) — short-lived per security baseline.
 const REPORT_URL_EXPIRY_SECONDS = 3600;
@@ -84,15 +93,49 @@ async function getReferredByName(tenantId: string, referredBy: string): Promise<
   return doctor?.name ?? doctor?.email ?? 'Self';
 }
 
+type LabKind = 'pathology' | 'radiology';
+type LabPaymentReferenceType =
+  | typeof PaymentReferenceType.PATHOLOGY_REQUEST
+  | typeof PaymentReferenceType.RADIOLOGY_REQUEST;
+
+function labReferenceType(kind: LabKind): LabPaymentReferenceType {
+  return kind === 'pathology' ? PaymentReferenceType.PATHOLOGY_REQUEST : PaymentReferenceType.RADIOLOGY_REQUEST;
+}
+
+function toPaymentSummary(p: IPayment): LabPaymentSummary {
+  return {
+    paymentId:        p.paymentId,
+    amount:           p.amount,
+    paymentMethod:    p.paymentMethod,
+    paidAt:           p.createdAt.toISOString(),
+    receiptAvailable: !!p.receiptS3Key,
+  };
+}
+
+async function getPaymentSummary(tenantId: string, kind: LabKind, requestId: string): Promise<LabPaymentSummary | null> {
+  const p = await paymentRepository.findCompletedByReference(tenantId, labReferenceType(kind), requestId);
+  return p ? toPaymentSummary(p) : null;
+}
+
+// One query per list page, keyed by requestId.
+async function getPaymentSummaryMap(
+  tenantId: string, kind: LabKind, requestIds: string[],
+): Promise<Map<string, LabPaymentSummary>> {
+  const rows = await paymentRepository.findCompletedByReferences(tenantId, labReferenceType(kind), requestIds);
+  return new Map(rows.map((p) => [p.referenceId as string, toPaymentSummary(p)]));
+}
+
 async function toPathologyResponse(
   doc: IPathologyRequest,
   fullName?: string,
+  payment?: LabPaymentSummary | null,
 ): Promise<PathologyRequestResponse> {
-  const [patientName, requesterName, referredByName, reportUrl] = await Promise.all([
+  const [patientName, requesterName, referredByName, reportUrl, paymentSummary] = await Promise.all([
     fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
     getRequesterName(doc.tenantId, doc.requestedBy),
     getReferredByName(doc.tenantId, doc.referredBy),
     resolveReportUrl(doc.reportS3Key),
+    payment !== undefined ? Promise.resolve(payment) : getPaymentSummary(doc.tenantId, 'pathology', doc.requestId),
   ]);
   return {
     requestId:        doc.requestId,
@@ -110,18 +153,21 @@ async function toPathologyResponse(
     reportUrl,
     requestedAt:      doc.requestedAt.toISOString(),
     updatedAt:        doc.updatedAt.toISOString(),
+    payment:          paymentSummary,
   };
 }
 
 async function toRadiologyResponse(
   doc: IRadiologyRequest,
   fullName?: string,
+  payment?: LabPaymentSummary | null,
 ): Promise<RadiologyRequestResponse> {
-  const [patientName, requesterName, referredByName, reportUrl] = await Promise.all([
+  const [patientName, requesterName, referredByName, reportUrl, paymentSummary] = await Promise.all([
     fullName !== undefined ? Promise.resolve(fullName) : getPatientFullName(doc.tenantId, doc.patientId),
     getRequesterName(doc.tenantId, doc.requestedBy),
     getReferredByName(doc.tenantId, doc.referredBy),
     resolveReportUrl(doc.reportS3Key),
+    payment !== undefined ? Promise.resolve(payment) : getPaymentSummary(doc.tenantId, 'radiology', doc.requestId),
   ]);
   return {
     requestId:        doc.requestId,
@@ -139,6 +185,7 @@ async function toRadiologyResponse(
     reportUrl,
     requestedAt:      doc.requestedAt.toISOString(),
     updatedAt:        doc.updatedAt.toISOString(),
+    payment:          paymentSummary,
   };
 }
 
@@ -208,7 +255,7 @@ export class LabService {
       });
     } catch { /* swallow */ }
 
-    return toPathologyResponse(doc);
+    return toPathologyResponse(doc, undefined, null);
   }
 
   async uploadPathologyReport(
@@ -231,6 +278,8 @@ export class LabService {
     if (request.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Report has already been uploaded for this request', 409);
     }
+
+    await this.assertPaidForUpload(tenantId, 'pathology', requestId);
 
     // Upload to S3; store the key as the permanent reference in the DB.
     const ext   = mimeType.split('/')[1] ?? 'bin';
@@ -298,9 +347,12 @@ export class LabService {
       : undefined;
     const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds, referral);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
-    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
+    const [nameMap, paymentMap] = await Promise.all([
+      patientRepository.findNamesByPatientIds(tenantId, patientIds),
+      getPaymentSummaryMap(tenantId, 'pathology', result.data.map((doc) => doc.requestId)),
+    ]);
     const data = await Promise.all(
-      result.data.map((doc) => toPathologyResponse(doc, nameMap.get(doc.patientId))),
+      result.data.map((doc) => toPathologyResponse(doc, nameMap.get(doc.patientId), paymentMap.get(doc.requestId) ?? null)),
     );
     return { ...result, data };
   }
@@ -357,7 +409,7 @@ export class LabService {
       });
     } catch { /* swallow */ }
 
-    return toRadiologyResponse(doc);
+    return toRadiologyResponse(doc, undefined, null);
   }
 
   async uploadRadiologyReport(
@@ -380,6 +432,8 @@ export class LabService {
     if (request.status === LabRequestStatus.COMPLETED) {
       throw new AppError('Report has already been uploaded for this request', 409);
     }
+
+    await this.assertPaidForUpload(tenantId, 'radiology', requestId);
 
     const ext   = mimeType.split('/')[1] ?? 'bin';
     const s3Key = `org/${tenantId}/lab/radiology/${requestId}/report.${ext}`;
@@ -445,9 +499,12 @@ export class LabService {
       : undefined;
     const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds, referral);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
-    const nameMap = await patientRepository.findNamesByPatientIds(tenantId, patientIds);
+    const [nameMap, paymentMap] = await Promise.all([
+      patientRepository.findNamesByPatientIds(tenantId, patientIds),
+      getPaymentSummaryMap(tenantId, 'radiology', result.data.map((doc) => doc.requestId)),
+    ]);
     const data = await Promise.all(
-      result.data.map((doc) => toRadiologyResponse(doc, nameMap.get(doc.patientId))),
+      result.data.map((doc) => toRadiologyResponse(doc, nameMap.get(doc.patientId), paymentMap.get(doc.requestId) ?? null)),
     );
     return { ...result, data };
   }
@@ -520,6 +577,8 @@ export class LabService {
     if (allowedPatientIds && !allowedPatientIds.includes(doc.patientId)) {
       throw new NotFoundError('Pathology request not found');
     }
+
+    await this.assertNotPaid(tenantId, 'pathology', requestId);
 
     if (doc.status === LabRequestStatus.COMPLETED) {
       if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
@@ -611,6 +670,8 @@ export class LabService {
       throw new NotFoundError('Radiology request not found');
     }
 
+    await this.assertNotPaid(tenantId, 'radiology', requestId);
+
     if (doc.status === LabRequestStatus.COMPLETED) {
       if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
         throw new ForbiddenError('Only Hospital Admin or Manager can delete a completed radiology request');
@@ -630,6 +691,94 @@ export class LabService {
         previousValue: { requestId, imagingType: doc.imagingType, status: doc.status, patientId: doc.patientId },
       });
     } catch { /* swallow */ }
+  }
+
+  // ─── Payment collection ────────────────────────────────────────────────────
+
+  // A paid lab request is part of the billing record and cannot be deleted.
+  private async assertNotPaid(tenantId: string, kind: LabKind, requestId: string): Promise<void> {
+    const paid = await paymentRepository.findCompletedByReference(tenantId, labReferenceType(kind), requestId);
+    if (paid) {
+      throw new ConflictError(`Cannot delete a paid ${kind} request.`);
+    }
+  }
+
+  // A report may only be uploaded once the request's payment has been
+  // collected. Checked before the S3 write so an unpaid upload stores nothing.
+  private async assertPaidForUpload(tenantId: string, kind: LabKind, requestId: string): Promise<void> {
+    const paid = await paymentRepository.findCompletedByReference(tenantId, labReferenceType(kind), requestId);
+    if (!paid) {
+      throw new ConflictError('Payment must be collected before the report can be uploaded.');
+    }
+  }
+
+  // Records the lab charge as a COMPLETED manual payment linked to the
+  // request (referenceType/referenceId) and its patient, with a Lab-specific
+  // A5 receipt. Patient, description and reference all come from the stored
+  // request — never from the client. Duplicate/concurrent collects are
+  // rejected with 409 by PaymentService (pre-check + partial unique index).
+  async collectPayment(
+    kind:      LabKind,
+    requestId: string,
+    tenantId:  string,
+    userId:    string,
+    input:     CollectLabPaymentInput,
+  ): Promise<PaymentResponse> {
+    const labRequest = kind === 'pathology'
+      ? await labRepository.findPathologyById(requestId, tenantId)
+      : await labRepository.findRadiologyById(requestId, tenantId);
+    if (!labRequest) {
+      throw new NotFoundError(`${kind === 'pathology' ? 'Pathology' : 'Radiology'} request not found`);
+    }
+
+    const patient = await patientRepository.findByPatientId(tenantId, labRequest.patientId);
+    if (!patient) throw new NotFoundError('Patient not found');
+
+    const testName = kind === 'pathology'
+      ? (labRequest as IPathologyRequest).testType
+      : (labRequest as IRadiologyRequest).imagingType;
+
+    const [tenant, collector, referredByName] = await Promise.all([
+      tenantRepository.findById(tenantId),
+      userRepository.findById(tenantId, userId),
+      getReferredByName(tenantId, labRequest.referredBy),
+    ]);
+
+    const transactionId = input.transactionId || undefined;
+
+    return paymentService.createManualPayment(
+      {
+        patientId:     labRequest.patientId,
+        amount:        input.amount,
+        paymentMethod: input.paymentMethod,
+        description:   `${kind === 'pathology' ? 'Pathology' : 'Radiology'} – ${testName}`,
+        referenceType: labReferenceType(kind),
+        referenceId:   requestId,
+        transactionId,
+      },
+      tenantId,
+      userId,
+      {
+        buildReceipt: ({ paymentId, paymentDate }) => pdfService.generateLabReceipt({
+          receiptNumber:              paymentId,
+          paymentDate,
+          ...resolveReceiptHospitalDetails(tenant),
+          patientName:                patient.fullName,
+          patientId:                  patient.patientId,
+          patientAge:                 resolvePatientAge(patient),
+          patientGender:              patient.gender ?? null,
+          patientMobile:              patient.mobileNumber ?? null,
+          labCategory:                kind === 'pathology' ? 'PATHOLOGY' : 'RADIOLOGY',
+          labRequestId:               requestId,
+          testName,
+          referredBy:                 referredByName,
+          createdBy:                  collector?.name ?? collector?.email ?? 'Staff',
+          amountInr:                  input.amount,
+          paymentMethod:              input.paymentMethod,
+          transactionId:              transactionId ?? null,
+        }),
+      },
+    );
   }
 
   // ─── Test types ────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn, toTitleCase } from '@/lib/utils';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 import { Building2, RefreshCw, CheckCircle, XCircle, Mail, Plus, Search } from 'lucide-react';
 
 // Semantic status colours — green = healthy, amber = awaiting action, red = disabled
@@ -72,6 +73,7 @@ export default function SuperAdminPage() {
   const [resendInvite,     { isLoading: resending    }] = useResendInviteMutation();
 
   const tenants    = data?.data ?? [];
+  const serialStart = serialOffset(data, page, limit);
   const total      = data?.total ?? 0;
   const totalPages = Math.ceil(total / limit);
 
@@ -211,6 +213,7 @@ export default function SuperAdminPage() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/50">
                   <tr>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Hospital</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Admin Email</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
@@ -223,8 +226,9 @@ export default function SuperAdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {tenants.map((tenant) => (
+                  {tenants.map((tenant, idx) => (
                     <tr key={tenant._id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium">{tenant.name}</div>
                         <div className="text-xs text-muted-foreground font-mono">{tenant._id}</div>

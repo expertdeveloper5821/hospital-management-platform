@@ -7,6 +7,7 @@ import {
   useUpdatePackageMutation,
   useAssignPackageMutation,
 } from '@/store/api/packages.api';
+import { useListWardsQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,14 +31,29 @@ export default function PackageDetailPage() {
   const [assignSuccess, setAssignSuccess] = useState('');
 
   const [editStatus, setEditStatus] = useState<'ACTIVE' | 'INACTIVE' | ''>('');
+  const [editWardId, setEditWardId] = useState<string | null>(null);
+  const [wardError, setWardError]   = useState('');
 
-  const canEdit   = role === 'HOSPITAL_ADMIN' || role === 'ADMIN';
+  const canEdit   = role === 'HOSPITAL_ADMIN' || role === 'ADMIN' || role === 'RECEPTIONIST';
+  const { data: wards = [] } = useListWardsQuery(undefined, { skip: !canEdit });
   const canAssign = ['HOSPITAL_ADMIN', 'ADMIN', 'RECEPTIONIST', 'DOCTOR'].includes(role ?? '');
 
   const handleStatusUpdate = async () => {
     if (!editStatus || !pkg) return;
     await updatePackage({ packageId: pkg.packageId, status: editStatus }).unwrap();
     setEditStatus('');
+  };
+
+  // '' in the select means "unlink" (wardId: null).
+  const handleWardUpdate = async () => {
+    if (editWardId === null || !pkg) return;
+    setWardError('');
+    try {
+      await updatePackage({ packageId: pkg.packageId, wardId: editWardId || null }).unwrap();
+      setEditWardId(null);
+    } catch (err: unknown) {
+      setWardError((err as { data?: { message?: string } })?.data?.message ?? 'Failed to update ward.');
+    }
   };
 
   const handleAssign = async (e: React.FormEvent) => {
@@ -73,6 +89,7 @@ export default function PackageDetailPage() {
       <Card>
         <CardContent className="pt-4 space-y-2 text-sm">
           <p><span className="font-medium">Price:</span> ₹{pkg.price.toFixed(2)}</p>
+          <p><span className="font-medium">Ward:</span> {pkg.wardName ?? (pkg.wardId ? 'Unknown ward' : 'Not linked')}</p>
           {pkg.description && <p><span className="font-medium">Description:</span> {pkg.description}</p>}
           <div>
             <span className="font-medium">Included Services:</span>
@@ -100,6 +117,35 @@ export default function PackageDetailPage() {
             <Button size="sm" disabled={!editStatus || updating} onClick={handleStatusUpdate}>
               {updating ? 'Updating…' : 'Update'}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canEdit && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Linked Ward</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex gap-3 items-end">
+              <select
+                aria-label="Linked ward"
+                className="border rounded px-3 py-2 text-sm"
+                value={editWardId ?? (pkg.wardId ?? '')}
+                onChange={e => setEditWardId(e.target.value)}
+              >
+                <option value="">No ward</option>
+                {wards.map(w => (
+                  <option key={w.wardId} value={w.wardId}>{w.name}</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                disabled={editWardId === null || editWardId === (pkg.wardId ?? '') || updating}
+                onClick={handleWardUpdate}
+              >
+                {updating ? 'Updating…' : 'Update Ward'}
+              </Button>
+            </div>
+            {wardError && <p className="text-red-600 text-sm">{wardError}</p>}
           </CardContent>
         </Card>
       )}
