@@ -1,6 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
 import { opdRepository, OpdHistoryFilters } from './opd.repository';
-import { findLatestPatientVitals, syncPatientVitals } from './patient-vitals.sync';
 import { ipdService } from '../ipd/ipd.service';
 import { ipdRepository } from '../ipd/ipd.repository';
 import { patientRepository } from '../patient/patient.repository';
@@ -263,12 +262,9 @@ export class OPDService {
       nurseIds.push(await this.assertNurseAvailableForOpd(tenantId, id));
     }
 
-    // Vitals are shared per patient — a new visit starts from the latest
-    // readings recorded in OPD or IPD.
-    const latestVitals = await findLatestPatientVitals(tenantId, data.patientId);
-
+    // Vitals are per visit — a new visit always starts with no readings (the
+    // schema default), never copied from the patient's earlier visits/admissions.
     const visit = await opdRepository.save({
-      ...(latestVitals ? { vitals: latestVitals } : {}),
       visitId,
       tenantId,
       patientId:      data.patientId,
@@ -430,11 +426,9 @@ export class OPDService {
       // properties, so `{ ...visit.vitals }` silently picks up Mongoose's
       // internal bookkeeping ($__parent, _doc, …) instead of the actual
       // values. Read each field explicitly instead of spreading it.
-      // Vitals are shared per patient — after a patient change the merge base
-      // is the new patient's latest readings, never the previous patient's.
-      const baseVitals = patientChanged
-        ? (await findLatestPatientVitals(tenantId, effectivePatientId)) ?? DEFAULT_VITALS
-        : visit.vitals;
+      // Vitals are per visit — the merge base is always this visit's own
+      // readings, even after a patient correction.
+      const baseVitals = visit.vitals;
       const existingVitals: OPDVitals = {
         weight:          baseVitals?.weight          ?? null,
         height:          baseVitals?.height          ?? null,
@@ -462,11 +456,6 @@ export class OPDService {
         previousValue.vitals = existingVitals;
         newValue.vitals      = mergedVitals;
       }
-    } else if (patientChanged) {
-      // No vitals sent with the patient change — the visit picks up the new
-      // patient's latest readings, same as a freshly created visit would.
-      const latestVitals = await findLatestPatientVitals(tenantId, effectivePatientId);
-      updateData.vitals = latestVitals ?? { ...DEFAULT_VITALS };
     }
 
     // Re-stamp departmentId whenever the doctor assignment actually changes —
@@ -527,13 +516,6 @@ export class OPDService {
     const updateFilterPatientIds = isDirectNurseAssignment ? undefined : scopedPatientIds;
     const updated = await opdRepository.update(tenantId, visitId, updateData, updateFilterPatientIds);
     if (!updated) throw new NotFoundError('OPD visit not found');
-
-    // Vitals are shared per patient — write the merged readings through to
-    // every OPD visit and IPD admission of this patient. Skipped when they
-    // were only re-seeded from the new patient's own latest readings.
-    if (data.vitals !== undefined && updateData.vitals) {
-      await syncPatientVitals(tenantId, effectivePatientId, updateData.vitals);
-    }
 
     // Skip the audit write entirely for a genuine no-op save (edit opened
     // and saved with nothing actually changed) — every field above is only

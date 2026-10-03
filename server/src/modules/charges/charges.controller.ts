@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { chargeService } from './charges.service';
+import { chargeService, parseLabTestKind } from './charges.service';
 import { CHARGE_CATEGORIES, ChargeCategory } from './charges.model';
 import { ValidationError } from '../../shared/middleware/error-handler';
 import { UserRole } from '../../shared/types/common.types';
@@ -9,13 +9,20 @@ const addChargeSchema = z.object({
   patientId:          z.string().min(1),
   category:           z.enum(CHARGE_CATEGORIES),
   description:        z.string().min(1).max(500),
-  amount:             z.number().min(0.01).max(999_999_999.99),
+  // ₹0 is allowed only for a (free) LAB_TEST — see the refine below.
+  amount:             z.number().min(0).max(999_999_999.99),
   encounterReference: z.string().optional(),
   testTypeId:         z.string().min(1).max(300).optional(),
   testTypeName:       z.string().min(1).max(200).optional(),
 }).refine(
   (data) => data.category !== 'LAB_TEST' || (!!data.testTypeId && !!data.testTypeName),
   { message: 'Test Type is required when category is Lab Test.', path: ['testTypeId'] },
+).refine(
+  (data) => data.category !== 'LAB_TEST' || !data.testTypeId || parseLabTestKind(data.testTypeId) !== null,
+  { message: 'Test Type must be a Pathology or Radiology test.', path: ['testTypeId'] },
+).refine(
+  (data) => data.category === 'LAB_TEST' || data.amount >= 0.01,
+  { message: 'Amount must be at least ₹0.01.', path: ['amount'] },
 );
 
 const listChargesSchema = z.object({

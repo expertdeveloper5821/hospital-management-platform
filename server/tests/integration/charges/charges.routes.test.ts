@@ -281,3 +281,64 @@ describe('PATCH /api/charges/:chargeId/pay — auto-creates a Payment record', (
     expect(payments).toHaveLength(1);
   });
 });
+
+describe('GET /api/charges — pagination', () => {
+  async function seedCharges(count: number, overrides: Record<string, unknown> = {}) {
+    await ChargeModel.insertMany(
+      Array.from({ length: count }, (_, i) => ({
+        chargeId:    `CHG-PAGE${String(i).padStart(4, '0')}`,
+        tenantId,
+        patientId,
+        category:    'CONSULTATION',
+        description: `Charge ${i}`,
+        amount:      100,
+        addedBy:     'SYSTEM_AUTO',
+        ...overrides,
+      })),
+    );
+  }
+
+  test('pages through charges sharing one createdAt exactly once (stable _id tiebreak)', async () => {
+    await seedCharges(25);
+    // Same timestamp on every row — the case an auto-created batch produces.
+    await ChargeModel.collection.updateMany({ tenantId }, { $set: { createdAt: new Date('2026-01-01T00:00:00Z') } });
+
+    const seen: string[] = [];
+    for (const page of [1, 2, 3]) {
+      const res = await request(app)
+        .get(`/api/charges?page=${page}&limit=10`)
+        .set('Authorization', `Bearer ${hospitalAdminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ total: 25, page, limit: 10, totalPages: 3 });
+      expect(res.body.data.data).toHaveLength(page === 3 ? 5 : 10);
+      seen.push(...res.body.data.data.map((c: { chargeId: string }) => c.chargeId));
+    }
+    expect(new Set(seen).size).toBe(25);
+  });
+
+  test('a page past the end returns an empty page with the real total', async () => {
+    await seedCharges(3);
+    const res = await request(app)
+      .get('/api/charges?page=4&limit=10')
+      .set('Authorization', `Bearer ${hospitalAdminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ data: [], total: 3, page: 4, totalPages: 1 });
+  });
+
+  test('total counts only rows matching the filters', async () => {
+    await seedCharges(4);
+    await ChargeModel.insertMany(
+      Array.from({ length: 3 }, (_, i) => ({
+        chargeId: `CHG-LAB${i}`, tenantId, patientId, category: 'LAB_TEST',
+        description: 'Lab', amount: 50, addedBy: 'SYSTEM_AUTO',
+      })),
+    );
+
+    const res = await request(app)
+      .get('/api/charges?category=LAB_TEST&page=1&limit=2')
+      .set('Authorization', `Bearer ${hospitalAdminToken}`);
+    expect(res.body.data).toMatchObject({ total: 3, totalPages: 2 });
+    expect(res.body.data.data).toHaveLength(2);
+    expect(res.body.data.data.every((c: { category: string }) => c.category === 'LAB_TEST')).toBe(true);
+  });
+});

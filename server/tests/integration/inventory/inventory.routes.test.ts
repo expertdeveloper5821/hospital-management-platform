@@ -415,6 +415,85 @@ describe('GET /api/inventory — category search', () => {
   });
 });
 
+// ─── Free-text search + server-side pagination ───────────────────────────────
+
+describe('GET /api/inventory — search and pagination', () => {
+  const get = (qs: string) =>
+    request(app).get(`/api/inventory${qs}`).set('Authorization', `Bearer ${adminToken}`);
+
+  beforeEach(async () => {
+    // 12 PPE items (Gloves 01..12) + 3 others; 2 of the gloves are low stock.
+    const gloves = Array.from({ length: 12 }, (_, i) => ({
+      itemId: uuidv4(), tenantId, name: `Gloves ${String(i + 1).padStart(2, '0')}`, category: 'PPE',
+      unit: 'pairs', quantity: i < 2 ? 1 : 100, lowStockThreshold: 10,
+    }));
+    await InventoryItemModel.create([
+      ...gloves,
+      { itemId: uuidv4(), tenantId, name: 'Saline',      category: 'Fluids',     unit: 'bags',   quantity: 50, lowStockThreshold: 5 },
+      { itemId: uuidv4(), tenantId, name: 'Paracetamol', category: 'Medication', unit: 'strips', quantity: 50, lowStockThreshold: 5 },
+      { itemId: uuidv4(), tenantId, name: 'Old Gloves',  category: 'PPE',        unit: 'pairs',  quantity: 50, lowStockThreshold: 5, isDeleted: true },
+    ]);
+  });
+
+  test('search matches name case-insensitively and excludes soft-deleted items from data and total', async () => {
+    const res = await get('?search=gLoVeS&limit=100');
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(12);
+    expect(res.body.data.data).toHaveLength(12);
+  });
+
+  test('search also matches category', async () => {
+    const res = await get('?search=medic');
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].name).toBe('Paracetamol');
+  });
+
+  test('search is treated as a literal substring, not a regex', async () => {
+    const res = await get('?search=' + encodeURIComponent('.*'));
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('blank search is ignored rather than rejected', async () => {
+    const res = await get('?search=' + encodeURIComponent('   '));
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(14);
+  });
+
+  test('pages through search results with accurate total/totalPages and a partial last page', async () => {
+    const p1 = await get('?search=gloves&page=1&limit=5');
+    const p3 = await get('?search=gloves&page=3&limit=5');
+    expect(p1.body.data).toMatchObject({ total: 12, page: 1, limit: 5, totalPages: 3 });
+    expect(p1.body.data.data).toHaveLength(5);
+    expect(p3.body.data.data).toHaveLength(2);
+
+    // No item repeated or skipped across pages.
+    const p2 = await get('?search=gloves&page=2&limit=5');
+    const names = [p1, p2, p3].flatMap((r) => r.body.data.data.map((i: { name: string }) => i.name));
+    expect(new Set(names).size).toBe(12);
+  });
+
+  test('a page past the end returns no rows but still the real total', async () => {
+    const res = await get('?search=gloves&page=9&limit=5');
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(12);
+    expect(res.body.data.totalPages).toBe(3);
+  });
+
+  test('lowStock combined with search counts only matching low-stock items', async () => {
+    const res = await get('?search=gloves&lowStock=true&page=1&limit=1');
+    expect(res.body.data.total).toBe(2);
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].isLowStock).toBe(true);
+  });
+
+  test('rejects an invalid page (400)', async () => {
+    const res = await get('?page=0');
+    expect(res.status).toBe(400);
+  });
+});
+
 // ─── Get by ID ────────────────────────────────────────────────────────────────
 
 describe('GET /api/inventory/:itemId', () => {

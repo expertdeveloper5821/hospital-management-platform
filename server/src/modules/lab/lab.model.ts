@@ -37,6 +37,9 @@ export interface IPathologyRequest extends Document {
   priority:     LabRequestPriority;
   notes:        string | null;
   reportS3Key:  string | null;
+  // Set when the request was created from a Billing LAB_TEST charge — its
+  // payment is the charge's Payment (referenceType CHARGE), not a Lab collect.
+  chargeId:     string | null;
   isDeleted:    boolean;
   deletedAt:    Date | null;
   requestedAt:  Date;
@@ -72,6 +75,7 @@ const pathologyRequestSchema = new Schema<IPathologyRequest>(
     // ever reaches the model.
     notes:       { type: String, default: null, trim: true },
     reportS3Key: { type: String, default: null },
+    chargeId:    { type: String, default: null },
     isDeleted:   { type: Boolean, default: false },
     deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },
@@ -87,6 +91,11 @@ pathologyRequestSchema.index({ tenantId: 1, status: 1 });
 pathologyRequestSchema.index({ tenantId: 1, patientId: 1 });
 pathologyRequestSchema.index({ tenantId: 1, isDeleted: 1 });
 pathologyRequestSchema.index({ tenantId: 1, departmentId: 1, isDeleted: 1 });
+// At most one lab request per Billing charge (duplicate-request backstop).
+pathologyRequestSchema.index(
+  { tenantId: 1, chargeId: 1 },
+  { unique: true, partialFilterExpression: { chargeId: { $type: 'string' } } },
+);
 
 pathologyRequestSchema.plugin(encryptedFieldsPlugin, ENCRYPTED_LAB_NOTES);
 
@@ -112,6 +121,9 @@ export interface IRadiologyRequest extends Document {
   priority:     LabRequestPriority;
   notes:        string | null;
   reportS3Key:  string | null;
+  // Set when the request was created from a Billing LAB_TEST charge — its
+  // payment is the charge's Payment (referenceType CHARGE), not a Lab collect.
+  chargeId:     string | null;
   isDeleted:    boolean;
   deletedAt:    Date | null;
   requestedAt:  Date;
@@ -147,6 +159,7 @@ const radiologyRequestSchema = new Schema<IRadiologyRequest>(
     // ever reaches the model.
     notes:       { type: String, default: null, trim: true },
     reportS3Key: { type: String, default: null },
+    chargeId:    { type: String, default: null },
     isDeleted:   { type: Boolean, default: false },
     deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },
@@ -161,6 +174,11 @@ radiologyRequestSchema.index({ tenantId: 1, status: 1 });
 radiologyRequestSchema.index({ tenantId: 1, patientId: 1 });
 radiologyRequestSchema.index({ tenantId: 1, isDeleted: 1 });
 radiologyRequestSchema.index({ tenantId: 1, departmentId: 1, isDeleted: 1 });
+// At most one lab request per Billing charge (duplicate-request backstop).
+radiologyRequestSchema.index(
+  { tenantId: 1, chargeId: 1 },
+  { unique: true, partialFilterExpression: { chargeId: { $type: 'string' } } },
+);
 
 radiologyRequestSchema.plugin(encryptedFieldsPlugin, ENCRYPTED_LAB_NOTES);
 

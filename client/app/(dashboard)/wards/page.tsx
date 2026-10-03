@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  useListWardsQuery,
+  useListWardsPaginatedQuery,
   useCreateWardMutation,
   useListBedsQuery,
   useAddBedsMutation,
@@ -341,22 +341,57 @@ function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) 
 
 // ─── Wards Section ────────────────────────────────────────────────────────────
 
+const WARDS_PAGE_SIZE = 20;
+
 function WardsSection({
-  wards,
   canManage,
   canAssignNurses,
 }: {
-  wards:            WardResponse[];
   canManage:        boolean;
   canAssignNurses:  boolean;
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [addBedsFor, setAddBedsFor] = useState<WardResponse | null>(null);
+  const [page, setPage]                       = useState(1);
+  const [search, setSearch]                   = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 300ms debounce for search; a new search always starts from page 1
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value.trim());
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const { data, isLoading, isFetching, isError } = useListWardsPaginatedQuery({
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    page,
+    limit: WARDS_PAGE_SIZE,
+  });
+
+  const wards      = data?.data ?? [];
+  const total      = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 0;
+  // Derived from the response rather than local state: an offline cache read
+  // returns everything matching as a single page (page 1, totalPages 1).
+  const rangeStart = total === 0 || !data ? 0 : (data.page - 1) * data.limit + 1;
+  const rangeEnd   = rangeStart === 0 ? 0 : rangeStart + wards.length - 1;
+
+  // A shrinking result set would otherwise leave `page` past the end and
+  // render an empty page.
+  useEffect(() => {
+    if (!isFetching && data && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [isFetching, data, page, totalPages]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{wards.length} ward{wards.length !== 1 ? 's' : ''}</p>
+        <p className="text-sm text-muted-foreground">{total} ward{total !== 1 ? 's' : ''}</p>
         {canManage && (
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Building2 className="h-4 w-4 mr-2" />
@@ -365,11 +400,25 @@ function WardsSection({
         )}
       </div>
 
-      {wards.length === 0 ? (
-        <div className="py-16 text-center text-sm text-muted-foreground border rounded-lg">
-          <Building2 className="mx-auto h-8 w-8 mb-3 opacity-40" />
-          No wards created yet.
-        </div>
+      <div className="max-w-sm">
+        <Input
+          placeholder="Search wards by name or floor…"
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : isError && !data ? (
+        <div className="py-16 text-center text-sm text-destructive border rounded-lg">Failed to load wards.</div>
+      ) : wards.length === 0 ? (
+        !isFetching && (
+          <div className="py-16 text-center text-sm text-muted-foreground border rounded-lg">
+            <Building2 className="mx-auto h-8 w-8 mb-3 opacity-40" />
+            {debouncedSearch ? 'No wards match your search.' : 'No wards created yet.'}
+          </div>
+        )
       ) : (
         <div className="space-y-2">
           {wards.map((w) => (
@@ -381,6 +430,34 @@ function WardsSection({
               onAddBeds={setAddBedsFor}
             />
           ))}
+        </div>
+      )}
+
+      {/* Pagination + count */}
+      {data && total > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>Showing {rangeStart}–{rangeEnd} of {total} ward{total !== 1 ? 's' : ''}</span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">{page} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -455,8 +532,6 @@ export default function WardsPage() {
   const role = useAppSelector((s) => s.auth.profile?.role) as UserRole | undefined;
   const [activeTab, setActiveTab] = useState<ActiveTab>('wards');
 
-  const { data: wards = [], isLoading } = useListWardsQuery();
-
   if (!role) return null;
 
   const canManage        = role === UserRole.HOSPITAL_ADMIN || role === UserRole.ADMIN;
@@ -498,14 +573,8 @@ export default function WardsPage() {
         ))}
       </div>
 
-      {isLoading && activeTab === 'wards' ? (
-        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
-      ) : (
-        <>
-          {activeTab === 'wards'     && <WardsSection wards={wards} canManage={canManage} canAssignNurses={canAssignNurses} />}
-          {activeTab === 'occupancy' && <OccupancySection />}
-        </>
-      )}
+      {activeTab === 'wards'     && <WardsSection canManage={canManage} canAssignNurses={canAssignNurses} />}
+      {activeTab === 'occupancy' && <OccupancySection />}
     </div>
   );
 }

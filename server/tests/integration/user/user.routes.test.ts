@@ -466,6 +466,45 @@ describe('GET /api/users', () => {
     expect(res2.body.data.page).toBe(2);
   });
 
+  test('200 — search filter matches by role, including a spaced role name', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'boss@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    await seedUser(tenant._id.toString(), 'erin@h.com', UserRole.NURSE);
+    await seedUser(tenant._id.toString(), 'frank@h.com', UserRole.DOCTOR);
+
+    const res = await request(app).get('/api/users?search=nurse').set(bearer(token));
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(1);
+    expect(res.body.data.data[0].email).toBe('erin@h.com');
+
+    const res2 = await request(app).get('/api/users?search=hospital%20admin').set(bearer(token));
+    expect(res2.status).toBe(200);
+    expect(res2.body.data.total).toBe(1);
+    expect(res2.body.data.data[0].email).toBe('boss@h.com');
+  });
+
+  test('200 — search + pagination: total/totalPages reflect every match, last page holds the remainder', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+    for (let i = 0; i < 5; i++) {
+      await seedUser(tenant._id.toString(), `staffer${i}@h.com`, UserRole.NURSE);
+    }
+    await seedUser(tenant._id.toString(), 'other@h.com', UserRole.DOCTOR);
+
+    const res = await request(app).get('/api/users?search=staffer&page=3&limit=2').set(bearer(token));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ total: 5, page: 3, limit: 2, totalPages: 3 });
+    expect(res.body.data.data.length).toBe(1);
+
+    // Past the last page: empty rows, but the count stays accurate.
+    const res2 = await request(app).get('/api/users?search=staffer&page=4&limit=2').set(bearer(token));
+    expect(res2.status).toBe(200);
+    expect(res2.body.data).toMatchObject({ total: 5, totalPages: 3 });
+    expect(res2.body.data.data.length).toBe(0);
+  });
+
   test('200 — search with special regex characters is escaped safely', async () => {
     const tenant = await seedTenant();
     const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);

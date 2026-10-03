@@ -57,14 +57,14 @@ describe('getNavItems — RBAC nav filtering', () => {
     expect(hrefs).not.toContain('/lab');
   });
 
-  it('RECEPTIONIST sees patient, OPD, IPD, payments — not lab or inventory', () => {
+  it('RECEPTIONIST sees patient, OPD, IPD, lab, payments — not inventory', () => {
     const items = getNavItems('RECEPTIONIST');
     const hrefs = items.map((i) => i.href);
     expect(hrefs).toContain('/patients');
     expect(hrefs).toContain('/opd');
     expect(hrefs).toContain('/ipd');
+    expect(hrefs).toContain('/lab');
     expect(hrefs).toContain('/payments');
-    expect(hrefs).not.toContain('/lab');
     expect(hrefs).not.toContain('/inventory');
   });
 

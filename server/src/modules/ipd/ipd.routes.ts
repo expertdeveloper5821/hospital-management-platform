@@ -10,6 +10,7 @@ import {
   listAdmissions,
   getAdmissionById,
   updateAdmission,
+  deleteAdmission,
   addProgressNote,
   updatePrescription,
   dischargePatient,
@@ -93,7 +94,9 @@ router.get(
   getParchaPdf,
 );
 
-// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse)
+// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse).
+// RECEPTIONIST additionally may correct the patient and update vitals — field
+// gates for patientId/vitals are enforced in the controller.
 router.patch(
   '/admissions/:admissionId',
   ...protect,
@@ -107,6 +110,17 @@ router.patch(
   requireFirstPasswordChange,
   idempotencyGuard('ipd.admission.update'),
   updateAdmission,
+);
+
+// DELETE /api/ipd/admissions/:admissionId — Receptionist-only permanent delete
+// of a still-ADMITTED admission (releases the bed and cancels its payments).
+// A DISCHARGED admission can never be deleted — enforced in IPDService.
+router.delete(
+  '/admissions/:admissionId',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST),
+  requireFirstPasswordChange,
+  deleteAdmission,
 );
 
 // POST /api/ipd/admissions/:admissionId/progress-notes — Doctor/Nurse records daily note

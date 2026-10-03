@@ -23,6 +23,15 @@ const createWardSchema = z.object({
   floor: z.string().min(1).max(50).trim().optional(),
 });
 
+// Wards list query. Pagination is opt-in: a request with neither `page` nor
+// `limit` keeps the legacy bare-array response every ward dropdown relies on.
+const listWardsQuerySchema = z.object({
+  // A blank value (e.g. a cleared search box) means "no search", not a 400.
+  search: z.string().trim().max(100).optional().transform((v) => v || undefined),
+  page:   z.coerce.number().int().min(1).optional(),
+  limit:  z.coerce.number().int().min(1).max(100).optional(),
+});
+
 const addBedsSchema = z.object({
   bedNumbers: z
     .array(z.string().min(1).max(20).trim())
@@ -155,21 +164,28 @@ const ipdVitalsSchema = z.object({
 }).optional();
 
 const updateAdmissionSchema = z.object({
+  // Re-pointing an admission at a different patient — Receptionist-only (see
+  // PATIENT_EDIT_ROLES below).
+  patientId:         z.string().min(1).optional(),
   assignedDoctorIds: z.array(z.string().min(1)).optional(),
   wardId:            z.string().min(1).optional(),
   bedId:             z.string().min(1).optional(),
   vitals:            ipdVitalsSchema,
-}).refine((d) => d.assignedDoctorIds || d.wardId || d.bedId || d.vitals, {
+}).refine((d) => d.patientId || d.assignedDoctorIds || d.wardId || d.bedId || d.vitals, {
   message: 'Provide at least one field to update',
 });
 
 // Vitals are otherwise gated purely by this field-level check — the route's
 // role list (RECEPTIONIST, DOCTOR, NURSE, ADMIN, HOSPITAL_ADMIN) is broader
-// than who may touch vitals specifically: only Doctor, Nurse and Hospital
-// Admin may add/update vitals, mirroring OPD's clinical-role restriction.
+// than who may touch vitals specifically: only Doctor, Nurse, Hospital Admin
+// and Receptionist may add/update vitals, mirroring OPD.
 const VITALS_EDITABLE_ROLES: ReadonlySet<UserRole> = new Set([
-  UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN,
+  UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN, UserRole.RECEPTIONIST,
 ]);
+
+// Changing which patient an admission belongs to is a Receptionist-only
+// correction — every other role's edit access is unchanged and never includes it.
+const PATIENT_EDIT_ROLES: ReadonlySet<UserRole> = new Set([UserRole.RECEPTIONIST]);
 
 export async function updateAdmission(
   req: Request,
@@ -186,8 +202,11 @@ export async function updateAdmission(
     const body = updateAdmissionSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
 
+    if (body.data.patientId !== undefined && !PATIENT_EDIT_ROLES.has(req.user!.role)) {
+      throw new ForbiddenError('You are not allowed to change the patient of an IPD admission.');
+    }
     if (body.data.vitals !== undefined && !VITALS_EDITABLE_ROLES.has(req.user!.role)) {
-      throw new ForbiddenError('Only Doctors, Nurses, and Hospital Admin can update vitals.');
+      throw new ForbiddenError('Only Doctors, Nurses, Receptionists and Hospital Admin can update vitals.');
     }
 
     const tenantId = req.user!.tenantId as string;
@@ -198,6 +217,26 @@ export async function updateAdmission(
       req.user!.userId,
     );
     res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// DELETE /api/ipd/admissions/:admissionId — Receptionist-only (route gate);
+// IPDService.deleteAdmission refuses anything that is not still ADMITTED.
+export async function deleteAdmission(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const idResult = admissionIdSchema.safeParse(req.params['admissionId']);
+    if (!idResult.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid admission ID format' });
+      return;
+    }
+
+    const tenantId = req.user!.tenantId as string;
+    await ipdService.deleteAdmission(idResult.data, tenantId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: null });
   } catch (err) { next(err); }
 }
 
@@ -434,8 +473,26 @@ export async function createWard(req: Request, res: Response, next: NextFunction
 
 export async function listWards(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const wards = await ipdService.listWards(req.user!.tenantId!);
-    res.status(200).json({ status: 'success', data: wards.map(toWardResponse) });
+    const query = listWardsQuerySchema.safeParse(req.query);
+    if (!query.success) throw new ValidationError('Invalid query', { errors: query.error.flatten() });
+    const { search, page, limit } = query.data;
+
+    if (page === undefined && limit === undefined) {
+      const wards = await ipdService.listWards(req.user!.tenantId!);
+      // Legacy shape; `search` is ignored here (no caller sends it unpaginated).
+      res.status(200).json({ status: 'success', data: wards.map(toWardResponse) });
+      return;
+    }
+
+    const result = await ipdService.listWardsPaginated(req.user!.tenantId!, {
+      search,
+      page:  page  ?? 1,
+      limit: limit ?? 20,
+    });
+    res.status(200).json({
+      status: 'success',
+      data:   { ...result, data: result.data.map(toWardResponse) },
+    });
   } catch (err) { next(err); }
 }
 

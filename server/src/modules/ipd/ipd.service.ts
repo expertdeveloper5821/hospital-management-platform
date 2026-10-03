@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { ipdRepository } from './ipd.repository';
 import { opdRepository } from '../opd/opd.repository';
-import { findLatestPatientVitals, syncPatientVitals } from '../opd/patient-vitals.sync';
 import { IIPDAdmission } from './ipd.model';
 import { IWard }          from './ward.model';
 import { IBed }           from './bed.model';
@@ -30,6 +29,8 @@ import { departmentRepository } from '../department/department.repository';
 import { tenantRepository }     from '../tenant/tenant.repository';
 import { labRepository }        from '../lab/lab.repository';
 import { paymentRepository }    from '../payment/payment.repository';
+import { packageRepository }    from '../packages/packages.repository';
+import { PaymentStatus }        from '../payment/payment.types';
 import { auditService }         from '../../shared/services/audit.service';
 import { s3Service }            from '../../shared/services/s3.service';
 import { AuditLogModel }        from '../audit/audit.model';
@@ -377,6 +378,7 @@ async function toResponse(
     },
     prescription:          doc.prescription ?? null,
     dischargeSummaryNotes: doc.dischargeSummaryNotes ?? null,
+    packageId:             doc.packageId ?? null,
   };
 }
 
@@ -401,6 +403,23 @@ export class IPDService {
       throw new ConflictError(
         `Patient is already admitted (admission ID: ${activeAdmission.admissionId}). Discharge the patient before creating a new admission.`,
       );
+    }
+
+    // [1c] Optional package: it must be an active package of this tenant with
+    // a linked ward, and the requested ward must be that ward. The bed checks
+    // below then guarantee the bed belongs to the package's ward.
+    if (input.packageId) {
+      const pkg = await packageRepository.findById(tenantId, input.packageId);
+      if (!pkg) throw new NotFoundError('Package not found');
+      if (pkg.status !== 'ACTIVE') {
+        throw new AppError('Selected package is inactive', 400);
+      }
+      if (!pkg.wardId) {
+        throw new AppError('Selected package has no linked ward', 400);
+      }
+      if (pkg.wardId !== input.wardId) {
+        throw new AppError('Ward must be the ward linked to the selected package', 400);
+      }
     }
 
     // [2] Verify ward exists — uses ipdRepository (U3-A owns Ward model)
@@ -443,13 +462,10 @@ export class IPDService {
     // race-condition arbiter under concurrent or offline-replayed creates —
     // steps [1b]/[5] above are a fast, friendly pre-check only; a
     // duplicate-key hit here is mapped to a 409 by the repository.
-    // Vitals are shared per patient — a new admission starts from the latest
-    // readings recorded in OPD or IPD.
-    const latestVitals = await findLatestPatientVitals(tenantId, input.patientId);
-
+    // Vitals are per admission — a new admission always starts with no
+    // readings (the schema default), never copied from earlier visits.
     const admission = await ipdRepository.createAdmissionWithBedOccupancy(
       {
-        ...(latestVitals ? { vitals: latestVitals } : {}),
         admissionId:       uuidv4(),
         patientId:         input.patientId,
         wardId:            input.wardId,
@@ -462,6 +478,7 @@ export class IPDService {
         admissionDate:    new Date(),
         dischargeDate:    null,
         progressNotes:    [],
+        packageId:        input.packageId ?? null,
         tenantId,
       },
       input.bedId,
@@ -475,7 +492,7 @@ export class IPDService {
         action:     'CREATE',
         userId,
         tenantId,
-        newValue:   { patientId: input.patientId, wardId: input.wardId, bedId: input.bedId, status: AdmissionStatus.ADMITTED },
+        newValue:   { patientId: input.patientId, wardId: input.wardId, bedId: input.bedId, packageId: input.packageId ?? null, status: AdmissionStatus.ADMITTED },
       });
     } catch { /* swallow — audit failure must not block primary response */ }
 
@@ -543,6 +560,7 @@ export class IPDService {
     admissionId: string,
     tenantId:    string,
     input: {
+      patientId?:         string;
       assignedDoctorIds?: string[];
       wardId?:            string;
       bedId?:             string;
@@ -558,6 +576,25 @@ export class IPDService {
 
     const fields: Parameters<typeof ipdRepository.updateAdmissionFields>[2] = {};
     const prevValue: Record<string, unknown> = {};
+
+    // ── Patient correction (Receptionist-only — the controller rejects
+    // patientId from every other role) ─────────────────────────────────────
+    // Re-points the admission at the right patient, same as OPD's Receptionist
+    // patient correction. The new patient must exist in this tenant and must
+    // not already hold another active admission (the partial unique index is
+    // the final race arbiter — see IPDRepository.updateAdmissionFields).
+    if (input.patientId !== undefined && input.patientId !== admission.patientId) {
+      const newPatient = await patientRepository.findByPatientId(tenantId, input.patientId);
+      if (!newPatient) throw new NotFoundError('Patient not found');
+      const active = await ipdRepository.findActiveAdmissionByPatient(input.patientId, tenantId);
+      if (active && active.admissionId !== admissionId) {
+        throw new ConflictError(
+          `Patient is already admitted (admission ID: ${active.admissionId}).`,
+        );
+      }
+      prevValue.patientId = admission.patientId;
+      fields.patientId    = input.patientId;
+    }
 
     // ── Doctor / department change ──────────────────────────────────────────
     if (input.assignedDoctorIds) {
@@ -578,6 +615,11 @@ export class IPDService {
     }
 
     // ── Bed / ward change ───────────────────────────────────────────────────
+    // A package-linked admission's ward is fixed; only the bed may change,
+    // and only within that same ward.
+    if (admission.packageId && input.wardId && input.wardId !== admission.wardId) {
+      throw new AppError('Ward cannot be changed for an admission linked to a package', 400);
+    }
     const bedChanging = input.bedId && input.bedId !== admission.bedId;
     if (bedChanging) {
       const newWardId = input.wardId ?? admission.wardId;
@@ -619,9 +661,10 @@ export class IPDService {
     // whole sub-document — input.vitals only carries the sub-fields the
     // caller actually sent, so recording just one reading (e.g. weight)
     // never wipes out the others already on file. Mirrors
-    // OPDService.updateVisit's vitals merge exactly. Role is not re-checked
-    // here — the controller's VITALS_EDITABLE_ROLES gate is the sole check
-    // on who may send this field.
+    // OPDService.updateVisit's vitals merge exactly. Vitals are per admission
+    // — only this admission's own readings are read and written. Role is not
+    // re-checked here — the controller's VITALS_EDITABLE_ROLES gate is the
+    // sole check on who may send this field.
     if (input.vitals !== undefined) {
       // admission.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable
@@ -650,12 +693,6 @@ export class IPDService {
     const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
     if (!updated) throw new NotFoundError('Admission not found');
 
-    // Vitals are shared per patient — write the merged readings through to
-    // every OPD visit and IPD admission of this patient.
-    if (fields.vitals) {
-      await syncPatientVitals(tenantId, admission.patientId, fields.vitals);
-    }
-
     try {
       await auditService.log({
         entityType:    AuditEntityType.IPD_ADMISSION,
@@ -670,6 +707,59 @@ export class IPDService {
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
     return toResponse(updated, tenantId, patient?.fullName ?? null);
+  }
+
+  // Permanent delete of a still-ADMITTED admission (Receptionist-only, route
+  // gate). A DISCHARGED admission is part of the clinical/billing record and
+  // can never be deleted. The bed is released and every active payment that
+  // references this admission is cancelled in the same transaction — see
+  // IPDRepository.deleteAdmittedReleasingBedCancellingPayments.
+  async deleteAdmission(admissionId: string, tenantId: string, deletedBy: string): Promise<void> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+
+    if (admission.status !== AdmissionStatus.ADMITTED) {
+      throw new ConflictError(`Cannot delete an admission with status ${admission.status}`);
+    }
+
+    const { deleted, cancelledPayments } =
+      await ipdRepository.deleteAdmittedReleasingBedCancellingPayments(tenantId, admissionId);
+    if (!deleted) throw new ConflictError('This admission can no longer be deleted.');
+
+    // Status only — never the encrypted description/transactionId.
+    for (const payment of cancelledPayments) {
+      try {
+        await auditService.log({
+          entityType:    AuditEntityType.PAYMENT_RECORD,
+          entityId:      payment.paymentId,
+          action:        'UPDATE',
+          userId:        deletedBy,
+          tenantId,
+          previousValue: { status: payment.status },
+          newValue:      { status: PaymentStatus.CANCELLED, reason: 'IPD_ADMISSION_DELETED', admissionId },
+        });
+      } catch { /* swallow — audit must not undo the committed cancellation */ }
+    }
+
+    // Identifiers/status only — never the encrypted clinical fields.
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      admissionId,
+        action:        'DELETE',
+        userId:        deletedBy,
+        tenantId,
+        previousValue: {
+          admissionId,
+          patientId:         admission.patientId,
+          status:            admission.status,
+          wardId:            admission.wardId,
+          bedId:             admission.bedId,
+          assignedDoctorIds: admission.assignedDoctorIds,
+          admissionDate:     admission.admissionDate,
+        },
+      });
+    } catch { /* swallow — audit failure must not block primary response */ }
   }
 
   async addProgressNote(
@@ -1115,6 +1205,13 @@ export class IPDService {
 
   async listWards(tenantId: string): Promise<IWard[]> {
     return ipdRepository.listWards(tenantId);
+  }
+
+  async listWardsPaginated(
+    tenantId: string,
+    query:    { search?: string; page: number; limit: number },
+  ): Promise<PaginatedResult<IWard>> {
+    return ipdRepository.listWardsPaginated(tenantId, query);
   }
 
   async assignNursesToWard(

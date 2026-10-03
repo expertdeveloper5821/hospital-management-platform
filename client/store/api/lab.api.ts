@@ -9,6 +9,8 @@ import type {
   EditRadiologyRequest,
   LabListResult,
   LabTestTypeResponse,
+  CollectLabPaymentRequest,
+  PaymentResponse,
 } from '../types';
 
 export const labApi = baseApi.injectEndpoints({
@@ -134,6 +136,26 @@ export const labApi = baseApi.injectEndpoints({
       invalidatesTags: ['Lab'],
     }),
 
+    // ─── Payment collection (online-only — no offline outbox policy) ─────────
+
+    collectPathologyPayment: build.mutation<
+      PaymentResponse,
+      { requestId: string } & CollectLabPaymentRequest
+    >({
+      query: ({ requestId, ...body }) => ({ url: `/api/lab/pathology/${requestId}/payment`, method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
+      invalidatesTags: ['Lab', 'Payment'],
+    }),
+
+    collectRadiologyPayment: build.mutation<
+      PaymentResponse,
+      { requestId: string } & CollectLabPaymentRequest
+    >({
+      query: ({ requestId, ...body }) => ({ url: `/api/lab/radiology/${requestId}/payment`, method: 'POST', body }),
+      transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
+      invalidatesTags: ['Lab', 'Payment'],
+    }),
+
     // ─── Test types ───────────────────────────────────────────────────────────
     // Feeds the Billing → Add Charge form's Test Type dropdown when category is LAB_TEST.
     listLabTestTypes: build.query<LabTestTypeResponse[], void>({
@@ -158,4 +180,6 @@ export const {
   useEditRadiologyRequestMutation,
   useDeleteRadiologyRequestMutation,
   useListLabTestTypesQuery,
+  useCollectPathologyPaymentMutation,
+  useCollectRadiologyPaymentMutation,
 } = labApi;

@@ -15,6 +15,7 @@ export const CHARGE_CATEGORIES = [
 
 export type ChargeCategory = typeof CHARGE_CATEGORIES[number];
 export type ChargeStatus   = 'UNPAID' | 'PAID' | 'CANCELLED';
+export type LabRequestKind = 'PATHOLOGY' | 'RADIOLOGY';
 
 export interface ICharge extends Document {
   chargeId:           string;
@@ -28,6 +29,11 @@ export interface ICharge extends Document {
   // type selected from the Lab module's dynamic list on the Add Charge form.
   testTypeId:         string | null;
   testTypeName:       string | null;
+  // The Lab request created alongside a LAB_TEST charge (charges.service.ts) —
+  // it carries this charge's id back as `chargeId`, and its payment status is
+  // this charge's Payment. Null for every other category and legacy charges.
+  labRequestId:       string | null;
+  labRequestKind:     LabRequestKind | null;
   addedBy:            string;
   status:             ChargeStatus;
   paidBy:             string | null;
@@ -49,10 +55,14 @@ const ChargeSchema = new Schema<ICharge>(
     // length limit (1–500 chars) lives in the controller's Zod schema, which
     // runs on plaintext before it ever reaches the model.
     description:        { type: String, required: true },
-    amount:             { type: Number, required: true, min: 0.01 },
+    // min 0: only a LAB_TEST charge may be free (₹0) — the controller's Zod
+    // schema and ChargeService.addCharge keep every other category ≥ ₹0.01.
+    amount:             { type: Number, required: true, min: 0 },
     encounterReference: { type: String, default: null },
     testTypeId:         { type: String, default: null },
     testTypeName:       { type: String, default: null },
+    labRequestId:       { type: String, default: null },
+    labRequestKind:     { type: String, default: null, enum: ['PATHOLOGY', 'RADIOLOGY', null] },
     addedBy:            { type: String, required: true },
     status:             { type: String, required: true, enum: ['UNPAID', 'PAID', 'CANCELLED'], default: 'UNPAID' },
     paidBy:             { type: String, default: null },

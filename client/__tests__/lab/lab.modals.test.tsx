@@ -29,6 +29,10 @@ jest.mock('@/store/api/patient.api', () => ({
   useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
 }));
 
+jest.mock('@/store/api/payment.api', () => ({
+  useLazyGetReceiptUrlQuery: () => [jest.fn(), { isFetching: false }],
+}));
+
 jest.mock('@/store/api/user.api', () => ({
   useListUsersQuery: () => ({ data: { data: [] }, isFetching: false }),
 }));

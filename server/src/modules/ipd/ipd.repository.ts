@@ -7,6 +7,9 @@ import { WardModel, IWard } from './ward.model';
 import { BedModel,  IBed  } from './bed.model';
 import { WardOccupancySummary } from './ipd.types';
 import { AppError, ConflictError } from '../../shared/middleware/error-handler';
+import { IPayment } from '../payment/payment.model';
+import { PaymentReferenceType } from '../payment/payment.types';
+import { paymentRepository } from '../payment/payment.repository';
 
 export class IPDRepository {
   async findById(admissionId: string, tenantId: string): Promise<IIPDAdmission | null> {
@@ -79,7 +82,7 @@ export class IPDRepository {
     if (patientIds) filter['patientId'] = { $in: patientIds };
 
     const [data, total] = await Promise.all([
-      IPDAdmissionModel.find(filter).sort({ admissionDate: -1 }).skip(skip).limit(limit).lean(),
+      IPDAdmissionModel.find(filter).sort({ admissionDate: -1, _id: -1 }).skip(skip).limit(limit).lean(),
       IPDAdmissionModel.countDocuments(filter),
     ]);
 
@@ -164,6 +167,7 @@ export class IPDRepository {
     admissionId: string,
     tenantId: string,
     fields: Partial<{
+      patientId:         string;
       assignedDoctorIds: string[];
       departmentId:      string | null;
       wardId:            string;
@@ -175,25 +179,62 @@ export class IPDRepository {
     }>,
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();
-    return IPDAdmissionModel.findOneAndUpdate(
-      { admissionId, tenantId },
-      { $set: fields },
-      { new: true },
-    );
+    try {
+      return await IPDAdmissionModel.findOneAndUpdate(
+        { admissionId, tenantId },
+        { $set: fields },
+        { new: true },
+      );
+    } catch (err) {
+      // A patient correction racing another admission of the same patient
+      // trips the one-active-admission-per-patient partial unique index.
+      const mongoErr = err as { code?: number; keyValue?: Record<string, unknown> };
+      if (mongoErr.code === 11000 && mongoErr.keyValue && 'patientId' in mongoErr.keyValue) {
+        throw new ConflictError('Patient already has an active admission.');
+      }
+      throw err;
+    }
   }
 
-  // Patient's most recently updated admission — the source a new OPD visit /
-  // IPD admission seeds its vitals from (vitals are one shared state per patient).
-  async findLatestByPatient(tenantId: string, patientId: string): Promise<IIPDAdmission | null> {
+  // Permanently deletes a still-ADMITTED admission, releases its bed and
+  // cancels every active payment referencing it — all in one transaction, so
+  // a deleted admission never leaves an occupied bed or an active payment
+  // behind (and a failed step never leaves the admission deleted). The status
+  // condition is part of the delete filter, so a concurrent discharge wins.
+  // Mirrors OPDRepository.deleteOpenByVisitIdCancellingPayments; same
+  // replica-set requirement as createAdmissionWithBedOccupancy.
+  async deleteAdmittedReleasingBedCancellingPayments(
+    tenantId:    string,
+    admissionId: string,
+  ): Promise<{ deleted: IIPDAdmission | null; cancelledPayments: IPayment[] }> {
     assertDbConnected();
-    return IPDAdmissionModel.findOne({ tenantId, patientId }).sort({ updatedAt: -1 });
-  }
-
-  // Write the patient's latest vitals onto every one of their admissions so
-  // OPD and IPD always show the same readings. Filters on plaintext keys only.
-  async setVitalsByPatient(tenantId: string, patientId: string, vitals: IPDVitals): Promise<void> {
-    assertDbConnected();
-    await IPDAdmissionModel.updateMany({ tenantId, patientId }, { $set: { vitals } });
+    const session = await mongoose.startSession();
+    try {
+      let deleted: IIPDAdmission | null = null;
+      let cancelledPayments: IPayment[] = [];
+      await session.withTransaction(async () => {
+        deleted = await IPDAdmissionModel.findOneAndDelete(
+          { tenantId, admissionId, status: 'ADMITTED' },
+          { session },
+        );
+        if (!deleted) {
+          cancelledPayments = [];
+          return;
+        }
+        // Only release the bed if it is still held by this admission.
+        await BedModel.findOneAndUpdate(
+          { tenantId, _id: (deleted as IIPDAdmission).bedId, currentAdmissionId: admissionId },
+          { isOccupied: false, currentAdmissionId: null },
+          { session },
+        );
+        cancelledPayments = await paymentRepository.cancelActiveByReference(
+          tenantId, PaymentReferenceType.IPD_ADMISSION, admissionId, session,
+        );
+      });
+      return { deleted, cancelledPayments };
+    } finally {
+      await session.endSession();
+    }
   }
 
   async appendProgressNote(
@@ -238,6 +279,29 @@ export class IPDRepository {
   async listWards(tenantId: string): Promise<IWard[]> {
     assertDbConnected();
     return WardModel.find({ tenantId }).sort({ name: 1 });
+  }
+
+  // Paginated variant for the Wards page. The same filter drives both the
+  // page and the count, so `total` always matches what paging through returns;
+  // `_id` breaks name ties so no ward is skipped or repeated across pages.
+  async listWardsPaginated(
+    tenantId: string,
+    query:    { search?: string; page: number; limit: number },
+  ): Promise<PaginatedResult<IWard>> {
+    assertDbConnected();
+    const { search, page, limit } = query;
+    const filter: Record<string, unknown> = { tenantId };
+    if (search) {
+      const re = { $regex: search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
+      filter['$or'] = [{ name: re }, { floor: re }];
+    }
+
+    const [data, total] = await Promise.all([
+      WardModel.find(filter).sort({ name: 1, _id: 1 }).skip((page - 1) * limit).limit(limit),
+      WardModel.countDocuments(filter),
+    ]);
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async updateWardNurses(tenantId: string, wardId: string, nurseIds: string[]): Promise<IWard | null> {

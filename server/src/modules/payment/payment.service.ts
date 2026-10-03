@@ -19,20 +19,31 @@ import {
   DepartmentRevenueResponse,
   DepartmentRevenueEntry,
   DepartmentRevenueBreakdown,
+  LAB_PAYMENT_REFERENCE_TYPES,
 } from './payment.types';
 
 import { patientRepository }    from '../patient/patient.repository';
+import { labRepository }        from '../lab/lab.repository';
 import { tenantRepository }     from '../tenant/tenant.repository';
 import { departmentRepository } from '../department/department.repository';
+import { userRepository }       from '../user/user.repository';
+import { IPatient }             from '../patient/patient.model';
 import { pdfService }        from '../../shared/services/pdf.service';
+import { resolveReceiptHospitalDetails, resolvePatientAge } from '../../shared/utils/receipt-details';
 import { s3Service }         from '../../shared/services/s3.service';
 import { auditService }      from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
-import { AppError, NotFoundError }          from '../../shared/middleware/error-handler';
+import { AppError, NotFoundError, ConflictError } from '../../shared/middleware/error-handler';
 import config from '../../shared/config/env';
 
 // Pre-signed URL expiry: 1 hour
 const RECEIPT_URL_EXPIRY_SECONDS = 3600;
+
+// Lets a caller (e.g. Lab payment collection) supply its own receipt PDF in
+// place of the generic one. Omitted → the existing generic receipt, unchanged.
+export interface ManualPaymentOptions {
+  buildReceipt?: (ctx: { paymentId: string; paymentDate: Date }) => Promise<Buffer>;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +52,42 @@ async function resolveReceiptUrl(s3Key: string | null): Promise<string | null> {
   // A presign failure (e.g. transient S3 issue) must not break payment creation/listing —
   // the receipt link is secondary to the payment record itself.
   return s3Service.getPresignedUrl(s3Key, RECEIPT_URL_EXPIRY_SECONDS).catch(() => null);
+}
+
+// Generic A5 receipt for every non-Lab payment (manual, Billing charge,
+// Razorpay). Hospital letterhead comes from the payment's own tenant and the
+// patient block from its patient record — never from the client.
+async function buildPaymentReceipt(input: {
+  tenantId:      string;
+  paymentId:     string;
+  paymentDate:   Date;
+  patient:       IPatient;
+  amount:        number;
+  paymentMethod: string;
+  description:   string;
+  transactionId: string | null;
+  createdBy:     string;
+}): Promise<Buffer> {
+  const [tenant, creator] = await Promise.all([
+    tenantRepository.findById(input.tenantId),
+    // The creator's name is a nice-to-have — a lookup failure only drops the row.
+    userRepository.findById(input.tenantId, input.createdBy).catch(() => null),
+  ]);
+  return pdfService.generateReceipt({
+    receiptNumber: input.paymentId,
+    paymentDate:   input.paymentDate,
+    ...resolveReceiptHospitalDetails(tenant),
+    patientName:   input.patient.fullName,
+    patientId:     input.patient.patientId,
+    patientAge:    resolvePatientAge(input.patient),
+    patientGender: input.patient.gender ?? null,
+    patientMobile: input.patient.mobileNumber ?? null,
+    description:   input.description,
+    amountInr:     input.amount,
+    paymentMethod: input.paymentMethod,
+    transactionId: input.transactionId,
+    createdBy:     creator?.name || creator?.email || null,
+  });
 }
 
 async function toResponse(doc: IPayment): Promise<PaymentResponse> {
@@ -89,29 +136,35 @@ export class PaymentService {
     input:    CreateManualPaymentInput,
     tenantId: string,
     userId:   string,
+    options:  ManualPaymentOptions = {},
   ): Promise<PaymentResponse> {
     const patient = await patientRepository.findByPatientId(tenantId, input.patientId);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const tenant = await tenantRepository.findById(tenantId);
+    if (input.referenceType && LAB_PAYMENT_REFERENCE_TYPES.includes(input.referenceType)) {
+      await this.assertLabReferencePayable(tenantId, input);
+    }
 
-    const paymentId = uuidv4();
+    const paymentId   = uuidv4();
+    const paymentDate = new Date();
 
     // Generate receipt PDF and upload to S3 (SECURITY: receipt linked only to this payment).
     // Receipt failure must not fail the payment — same non-fatal handling as the Razorpay webhook.
     let receiptS3Key: string | null = null;
     try {
-      const receiptBuffer = await pdfService.generateReceipt({
-        receiptNumber:  paymentId,
-        patientName:    patient.fullName,
-        patientId:      patient.patientId,
-        paymentDate:    new Date(),
-        amountInr:      input.amount,
-        paymentMethod:  input.paymentMethod,
-        description:    input.description,
-        hospitalName:   tenant?.branding.displayName || tenant?.name || 'Hospital',
-        primaryColor:   tenant?.branding.primaryColor || '#1A73E8',
-      });
+      const receiptBuffer = options.buildReceipt
+        ? await options.buildReceipt({ paymentId, paymentDate })
+        : await buildPaymentReceipt({
+          tenantId,
+          paymentId,
+          paymentDate,
+          patient,
+          amount:        input.amount,
+          paymentMethod: input.paymentMethod,
+          description:   input.description,
+          transactionId: input.transactionId || null,
+          createdBy:     userId,
+        });
       const key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
       await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
       receiptS3Key = key; // only recorded once the upload actually succeeds
@@ -127,23 +180,36 @@ export class PaymentService {
       }));
     }
 
-    const payment = await paymentRepository.save({
-      paymentId,
-      tenantId,
-      patientId:     input.patientId,
-      fullName:      patient.fullName,
-      amount:        input.amount,
-      paymentMethod: input.paymentMethod,
-      description:   input.description,
-      status:        PaymentStatus.COMPLETED,
-      receiptS3Key,
-      razorpayOrderId:   null,
-      razorpayPaymentId: null,
-      referenceType: input.referenceType ?? null,
-      referenceId:   input.referenceId   ?? null,
-      transactionId: input.transactionId ?? null,
-      createdBy:     userId,
-    });
+    let payment: IPayment;
+    try {
+      payment = await paymentRepository.save({
+        paymentId,
+        tenantId,
+        patientId:     input.patientId,
+        fullName:      patient.fullName,
+        amount:        input.amount,
+        paymentMethod: input.paymentMethod,
+        description:   input.description,
+        status:        PaymentStatus.COMPLETED,
+        receiptS3Key,
+        razorpayOrderId:   null,
+        razorpayPaymentId: null,
+        referenceType: input.referenceType ?? null,
+        referenceId:   input.referenceId   ?? null,
+        transactionId: input.transactionId ?? null,
+        createdBy:     userId,
+      });
+    } catch (err) {
+      // Lost a concurrent collect for the same lab request — the partial
+      // unique index (payment.model.ts) rejected this second COMPLETED row.
+      if ((err as { code?: number }).code === 11000) {
+        if (receiptS3Key) {
+          try { await s3Service.deleteFile(receiptS3Key); } catch { /* best-effort orphan cleanup */ }
+        }
+        throw new ConflictError('Payment has already been collected for this lab request.');
+      }
+      throw err;
+    }
 
     try {
       await auditService.log({
@@ -165,6 +231,36 @@ export class PaymentService {
     } catch { /* swallow — audit must not block payment */ }
 
     return toResponse(payment);
+  }
+
+  // A manual payment referencing a Pathology/Radiology request must point at
+  // an existing, non-deleted request of this tenant belonging to the same
+  // patient, and that request must not already be paid. Guards the generic
+  // POST /api/payments/manual as well as the Lab section's collect endpoint.
+  private async assertLabReferencePayable(tenantId: string, input: CreateManualPaymentInput): Promise<void> {
+    if (!input.referenceId) {
+      throw new AppError('referenceId is required for a lab request payment', 400);
+    }
+    const labRequest = input.referenceType === PaymentReferenceType.PATHOLOGY_REQUEST
+      ? await labRepository.findPathologyById(input.referenceId, tenantId)
+      : await labRepository.findRadiologyById(input.referenceId, tenantId);
+    if (!labRequest) throw new NotFoundError('Lab request not found');
+    if (labRequest.patientId !== input.patientId) {
+      throw new AppError('Lab request does not belong to this patient', 400);
+    }
+    // A Billing-created request is paid through its charge (Billing → Mark
+    // Paid) — a second, lab-referenced payment would double-charge it.
+    if (labRequest.chargeId) {
+      throw new ConflictError(
+        `This lab request is billed under Billing charge ${labRequest.chargeId}. Collect the payment from Billing.`,
+      );
+    }
+    const existing = await paymentRepository.findCompletedByReference(
+      tenantId, input.referenceType as string, input.referenceId,
+    );
+    if (existing) {
+      throw new ConflictError('Payment has already been collected for this lab request.');
+    }
   }
 
   // ─── Billing charge → Payments sync ─────────────────────────────────────────
@@ -221,31 +317,36 @@ export class PaymentService {
 
   // Settle a PENDING charge payment. Returns null when the record was no longer
   // PENDING (already settled by a concurrent request).
+  // `options.buildReceipt` replaces the generic receipt (e.g. a Lab receipt for
+  // a Billing LAB_TEST charge), same contract as createManualPayment's.
   async settleChargePayment(
-    record: IPayment,
-    status: typeof PaymentStatus.COMPLETED | typeof PaymentStatus.CANCELLED,
-    userId: string,
+    record:  IPayment,
+    status:  typeof PaymentStatus.COMPLETED | typeof PaymentStatus.CANCELLED,
+    userId:  string,
+    options: ManualPaymentOptions = {},
   ): Promise<IPayment | null> {
     if (record.status !== PaymentStatus.PENDING) return null;
 
     const fields: Partial<IPayment> = { status };
 
     if (status === PaymentStatus.COMPLETED) {
-      const tenant  = await tenantRepository.findById(record.tenantId);
       const patient = await patientRepository.findByPatientId(record.tenantId, record.patientId);
       if (patient) {
         try {
-          const receiptBuffer = await pdfService.generateReceipt({
-            receiptNumber: record.paymentId,
-            patientName:   patient.fullName,
-            patientId:     patient.patientId,
-            paymentDate:   new Date(),
-            amountInr:     record.amount,
-            paymentMethod: record.paymentMethod,
-            description:   record.description,
-            hospitalName:  tenant?.branding.displayName || tenant?.name || 'Hospital',
-            primaryColor:  tenant?.branding.primaryColor || '#1A73E8',
-          });
+          const paymentDate = new Date();
+          const receiptBuffer = options.buildReceipt
+            ? await options.buildReceipt({ paymentId: record.paymentId, paymentDate })
+            : await buildPaymentReceipt({
+              tenantId:      record.tenantId,
+              paymentId:     record.paymentId,
+              paymentDate,
+              patient,
+              amount:        record.amount,
+              paymentMethod: record.paymentMethod,
+              description:   record.description,
+              transactionId: record.transactionId ?? null,
+              createdBy:     userId, // the user marking the charge paid
+            });
           const key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
           await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
           fields.receiptS3Key = key; // only recorded once the upload actually succeeds
@@ -384,22 +485,21 @@ export class PaymentService {
   // Mark a PENDING record COMPLETED and generate its receipt. Shared by the
   // webhook (payment.captured) and the client-verify path.
   private async completePaymentRecord(record: IPayment, rzpPayId: string): Promise<IPayment | null> {
-    const tenant  = await tenantRepository.findById(record.tenantId);
     const patient = await patientRepository.findByPatientId(record.tenantId, record.patientId);
 
     let receiptS3Key: string | null = null;
     if (patient) {
       try {
-        const receiptBuffer = await pdfService.generateReceipt({
-          receiptNumber: record.paymentId,
-          patientName:   patient.fullName,
-          patientId:     patient.patientId,
+        const receiptBuffer = await buildPaymentReceipt({
+          tenantId:      record.tenantId,
+          paymentId:     record.paymentId,
           paymentDate:   new Date(),
-          amountInr:     record.amount,
+          patient,
+          amount:        record.amount,
           paymentMethod: record.paymentMethod,
           description:   record.description,
-          hospitalName:  tenant?.branding.displayName || tenant?.name || 'Hospital',
-          primaryColor:  tenant?.branding.primaryColor || '#1A73E8',
+          transactionId: rzpPayId, // Razorpay payment ID
+          createdBy:     record.createdBy,
         });
         receiptS3Key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
         await s3Service.uploadFile(receiptS3Key, receiptBuffer, 'application/pdf');

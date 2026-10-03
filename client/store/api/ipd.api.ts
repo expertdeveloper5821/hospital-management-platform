@@ -27,6 +27,23 @@ export const ipdApi = baseApi.injectEndpoints({
       providesTags: ['IPD'],
     }),
 
+    // Paginated + searchable list for the Wards page. listWards above stays the
+    // unpaginated source for every ward dropdown (IPD, OPD, Packages, …).
+    listWardsPaginated: build.query<
+      PaginatedResult<WardResponse>,
+      { search?: string; page?: number; limit?: number }
+    >({
+      query: ({ search, page = 1, limit = 20 }) => {
+        const params = new URLSearchParams();
+        if (search) params.set('search', search);
+        params.set('page',  String(page));
+        params.set('limit', String(limit));
+        return `/api/ipd/wards?${params.toString()}`;
+      },
+      transformResponse: (raw: ApiSuccess<PaginatedResult<WardResponse>>) => raw.data,
+      providesTags: ['IPD'],
+    }),
+
     createWard: build.mutation<WardResponse, { name: string; floor?: string }>({
       query: (body) => ({ url: '/api/ipd/wards', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<WardResponse>) => raw.data,
@@ -102,7 +119,10 @@ export const ipdApi = baseApi.injectEndpoints({
 
     updateAdmission: build.mutation<AdmissionResponse, {
       admissionId:      string;
-      assignedDoctorId?: string;
+      // Receptionist-only patient correction (the backend rejects it from
+      // every other role); a Receptionist may send only patientId + vitals.
+      patientId?:        string;
+      assignedDoctorIds?: string[];
       wardId?:           string;
       bedId?:            string;
       // Partial — only the sub-fields present are merged onto the
@@ -120,7 +140,18 @@ export const ipdApi = baseApi.injectEndpoints({
         };
       },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
-      invalidatesTags: ['IPD', 'OPD'], // OPD too: vitals are shared per patient
+      invalidatesTags: ['IPD'], // vitals are per admission — never written to OPD visits
+    }),
+
+    // Receptionist-only permanent delete of a still-ADMITTED admission; the
+    // backend releases the bed and cancels the admission's payment(s) in the
+    // same transaction, so payment lists must refetch too.
+    deleteAdmission: build.mutation<void, string>({
+      query: (admissionId) => {
+        if (!admissionId) throw new Error('admissionId is required');
+        return { url: `/api/ipd/admissions/${admissionId}`, method: 'DELETE' };
+      },
+      invalidatesTags: ['IPD', 'Payment'],
     }),
 
     // Hospital Admin, the admission's assigned Doctor(s), or a Nurse on its
@@ -245,6 +276,7 @@ export const ipdApi = baseApi.injectEndpoints({
 export const {
   useGetAdmissionByIdQuery,
   useListWardsQuery,
+  useListWardsPaginatedQuery,
   useCreateWardMutation,
   useListBedsQuery,
   useAddBedsMutation,
@@ -252,6 +284,7 @@ export const {
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
+  useDeleteAdmissionMutation,
   useAddProgressNoteMutation,
   useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,

@@ -227,6 +227,11 @@ interface QueryCachePolicy {
   // appear at the top" without waiting for a real sync/refetch. Falls back
   // to createdAt DESC for the rest, mirroring the backend's own default sort.
   sortPendingFirst?: boolean;
+  // Oldest-created first, with pendingSync (offline-created, not yet synced)
+  // rows last in creation order — mirrors the OPD queue's backend sort
+  // (opd.repository.ts QUEUE_SORT, createdAt ASC), whose day-wise S. No.
+  // starts at 1 with the day's first visit and puts new visits at the bottom.
+  sortOldestFirst?: boolean;
 }
 
 const PATIENT_SENSITIVE_FIELDS = [
@@ -268,7 +273,7 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
   },
   getOPDQueue: {
     cacheStore: 'cache_opd_visits', idField: 'visitId', responseShape: 'wrapped',
-    sensitiveFields: OPD_SENSITIVE_FIELDS,
+    sensitiveFields: OPD_SENSITIVE_FIELDS, sortOldestFirst: true,
     filterFromUrl: [
       { kind: 'sameDay', param: 'date', field: 'visitDate' },
       { kind: 'arrayIncludes', param: 'doctorId', field: 'doctorIds' },
@@ -340,6 +345,18 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
     cacheStore: 'cache_wards_beds', idField: 'wardId', responseShape: 'array',
     sensitiveFields: NO_SENSITIVE_FIELDS, storeKeyPrefix: 'ward:', sortPendingFirst: true,
   },
+  // The Wards page's paginated list — same store and 'ward:' prefix as
+  // listWards above, so rows cached by either (including an offline-created
+  // ward, written via listWards) are readable through both. Offline reads
+  // return every match as a single page.
+  listWardsPaginated: {
+    cacheStore: 'cache_wards_beds', idField: 'wardId', responseShape: 'wrapped',
+    sensitiveFields: NO_SENSITIVE_FIELDS, storeKeyPrefix: 'ward:', sortPendingFirst: true,
+    filterFromUrl: [
+      // Mirrors ipd.repository.ts's listWardsPaginated search over name/floor.
+      { kind: 'contains', param: 'search', fields: ['name', 'floor'] },
+    ],
+  },
   listBeds: {
     cacheStore: 'cache_wards_beds', idField: 'bedId', responseShape: 'array',
     sensitiveFields: NO_SENSITIVE_FIELDS, storeKeyPrefix: 'bed:',
@@ -382,6 +399,8 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
       // that; 'exact' would wrongly hide a partial match like "glov" → "Gloves".
       { kind: 'contains', param: 'category', fields: ['category'] },
       { kind: 'boolean', param: 'lowStock', field: 'isLowStock' },
+      // Mirrors inventory.repository.ts's free-text search over name/category.
+      { kind: 'contains', param: 'search', fields: ['name', 'category'] },
     ],
   },
   listPackages: {
@@ -389,6 +408,8 @@ export const QUERY_CACHE_POLICIES: Record<string, QueryCachePolicy> = {
     sensitiveFields: NO_SENSITIVE_FIELDS, sortPendingFirst: true,
     filterFromUrl: [
       { kind: 'exact', param: 'status', field: 'status' },
+      // Mirrors packages.repository.ts's name search.
+      { kind: 'contains', param: 'search', fields: ['name'] },
     ],
   },
   // Shares cache_packages with listPackages above (same idField, no prefix
@@ -546,6 +567,16 @@ function comparePendingFirstRecords(a: CachedRecord, b: CachedRecord): number {
   return recordSortTimestamp(b).localeCompare(recordSortTimestamp(a));
 }
 
+function compareOldestFirstRecords(a: CachedRecord, b: CachedRecord): number {
+  const aPending = !!a.pendingSync;
+  const bPending = !!b.pendingSync;
+  if (aPending !== bPending) return aPending ? 1 : -1;
+  if (aPending) return a.cachedAt - b.cachedAt;
+
+  return recordSortTimestamp(a).localeCompare(recordSortTimestamp(b))
+    || a.id.localeCompare(b.id);
+}
+
 async function decryptRecord(record: CachedRecord, key: CryptoKey): Promise<Record<string, unknown>> {
   if (!record.encryptedFieldsCiphertext) return { ...record.plaintextFields };
   const json = await decryptClientField(record.encryptedFieldsCiphertext, key);
@@ -597,7 +628,9 @@ export async function readCachedQueryResult(
 
   const orderedRecords = policy.sortPendingFirst
     ? [...records].sort(comparePendingFirstRecords)
-    : records;
+    : policy.sortOldestFirst
+      ? [...records].sort(compareOldestFirstRecords)
+      : records;
 
   let entities = await Promise.all(orderedRecords.map((record) => decryptRecord(record, key)));
 

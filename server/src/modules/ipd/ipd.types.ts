@@ -35,6 +35,9 @@ export const CreateAdmissionSchema = z.object({
   wardId:            mongoIdSchema('wardId'),
   bedId:             mongoIdSchema('bedId'),
   assignedDoctorIds: z.array(z.string().min(1)).optional(),
+  // Optional. When sent, wardId must be the package's linked ward
+  // (IPDService.createAdmission).
+  packageId:         z.string().min(1).optional(),
 });
 
 export type CreateAdmissionInput = z.infer<typeof CreateAdmissionSchema>;
@@ -121,6 +124,7 @@ export interface AdmissionResponse {
   vitals:            IPDVitals;
   prescription:          string | null;
   dischargeSummaryNotes: string | null;
+  packageId:             string | null;
 }
 
 // Unified occupancy summary (U3-A name kept; replaces the truncated BedOccupancySummaryItem)

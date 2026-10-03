@@ -13,7 +13,10 @@ const mockWard = {
 };
 
 jest.mock('@/store/api/ipd.api', () => ({
-  useListWardsQuery:          () => ({ data: [mockWard], isLoading: false }),
+  useListWardsPaginatedQuery: () => ({
+    data: { data: [mockWard], total: 1, page: 1, limit: 20, totalPages: 1 },
+    isLoading: false, isFetching: false, isError: false,
+  }),
   useCreateWardMutation:      () => [jest.fn(), { isLoading: false }],
   useListBedsQuery:           () => ({ data: [], isLoading: false }),
   useAddBedsMutation:         () => [jest.fn(), { isLoading: false }],

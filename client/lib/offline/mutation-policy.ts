@@ -510,8 +510,9 @@ export function buildCreateOptimisticRecord(
       // Denormalized display name — base.api.ts fills this in from the
       // current user's own cached profile (see tryQueueOfflineCreate).
       addedByName:        null,
-      // charges.service.ts's addCharge always creates UNPAID.
-      status:             'UNPAID',
+      // charges.service.ts's addCharge creates UNPAID, except a free (₹0)
+      // LAB_TEST charge, which is settled (PAID) on creation.
+      status:             isLabTest && amount === 0 ? 'PAID' : 'UNPAID',
       paidBy:      null, paidAt:      null,
       cancelledBy: null, cancelledAt: null,
       createdAt: now,

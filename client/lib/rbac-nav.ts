@@ -77,6 +77,7 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
     { label: "OPD", href: "/opd", icon: "stethoscope" },
     { label: "IPD", href: "/ipd", icon: "bed" },
     { label: "Wards", href: "/wards", icon: "layout-grid" },
+    { label: "Lab", href: "/lab", icon: "flask-conical" },
     { label: "Packages", href: "/packages", icon: "gift" },
     { label: "Payments", href: "/payments", icon: "credit-card" },
     { label: "Billing", href: "/billing", icon: "receipt" },

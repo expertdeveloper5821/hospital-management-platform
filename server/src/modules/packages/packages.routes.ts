@@ -17,8 +17,9 @@ import {
 const router  = Router();
 const protect = [authenticateJWT, scopeTenant, requireFirstPasswordChange];
 
-const ADMIN_ROLES   = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN];
 const CREATE_ROLES  = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST];
+// Receptionist may edit packages (incl. the linked ward) alongside admins.
+const EDIT_ROLES    = [UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.RECEPTIONIST];
 const READER_ROLES  = [
   UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.MANAGER,
   UserRole.FINANCE_MANAGER, UserRole.RECEPTIONIST, UserRole.DOCTOR,
@@ -47,7 +48,7 @@ router.get('/:packageId',
 
 router.patch('/:packageId',
   ...protect,
-  requireRole(...ADMIN_ROLES),
+  requireRole(...EDIT_ROLES),
   updatePackage,
 );
 

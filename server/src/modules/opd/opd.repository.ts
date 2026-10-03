@@ -6,7 +6,7 @@ import { paymentRepository } from '../payment/payment.repository';
 import { OpdNurseAssignmentModel, IOpdNurseAssignment } from './opd-nurse-assignment.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
-import { OPDVisitStatus, ACTIVE_STATUSES, OPDVitals } from './opd.types';
+import { OPDVisitStatus, ACTIVE_STATUSES } from './opd.types';
 import { ConflictError } from '../../shared/middleware/error-handler';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 
@@ -21,10 +21,11 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // unbounded read.
 const SEARCH_SCAN_LIMIT = 1000;
 
-// Newest-created visit first, so the OPD queue list surfaces a freshly
-// registered visit at the top rather than after same-day earlier tokens.
-// `_id` breaks createdAt ties so skip/limit pages never overlap or skip a row.
-const QUEUE_SORT = { createdAt: -1, _id: -1 } as const;
+// Oldest-created visit first, so the OPD queue's day-wise S. No. starts at 1
+// with the day's first registration and a freshly created visit lands at the
+// bottom of that day's list. `_id` breaks createdAt ties so skip/limit pages
+// never overlap or skip a row.
+const QUEUE_SORT = { createdAt: 1, _id: 1 } as const;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -285,20 +286,6 @@ export class OPDRepository {
     } finally {
       await session.endSession();
     }
-  }
-
-  // Patient's most recently updated visit — the source a new OPD visit / IPD
-  // admission seeds its vitals from (vitals are one shared state per patient).
-  async findLatestByPatient(tenantId: string, patientId: string): Promise<IOPDVisit | null> {
-    assertDbConnected();
-    return OPDVisitModel.findOne({ tenantId, patientId }).sort({ updatedAt: -1 });
-  }
-
-  // Write the patient's latest vitals onto every one of their visits so OPD
-  // and IPD always show the same readings. Filters on plaintext keys only.
-  async setVitalsByPatient(tenantId: string, patientId: string, vitals: OPDVitals): Promise<void> {
-    assertDbConnected();
-    await OPDVisitModel.updateMany({ tenantId, patientId }, { $set: { vitals } });
   }
 
   // Sweep visits left on the queue after their visit date has passed. Bulk

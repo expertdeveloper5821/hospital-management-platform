@@ -72,7 +72,7 @@ export class LabRepository {
     const filter = buildListFilter(tenantId, query, patientIds, referral);
 
     const [data, total] = await Promise.all([
-      PathologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),
+      PathologyRequestModel.find(filter).sort({ requestedAt: -1, _id: -1 }).skip(skip).limit(limit),
       PathologyRequestModel.countDocuments(filter),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
@@ -140,7 +140,7 @@ export class LabRepository {
     const filter = buildListFilter(tenantId, query, patientIds, referral);
 
     const [data, total] = await Promise.all([
-      RadiologyRequestModel.find(filter).sort({ requestedAt: -1 }).skip(skip).limit(limit),
+      RadiologyRequestModel.find(filter).sort({ requestedAt: -1, _id: -1 }).skip(skip).limit(limit),
       RadiologyRequestModel.countDocuments(filter),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
