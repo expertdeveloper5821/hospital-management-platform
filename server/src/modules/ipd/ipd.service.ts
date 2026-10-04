@@ -621,11 +621,17 @@ export class IPDService {
     if (admission.packageId && input.wardId && input.wardId !== admission.wardId) {
       throw new AppError('Ward cannot be changed for an admission linked to a package', 400);
     }
-    const bedChanging = input.bedId && input.bedId !== admission.bedId;
+    const bedChanging  = input.bedId && input.bedId !== admission.bedId;
+    const wardChanging = input.wardId !== undefined && input.wardId !== admission.wardId;
+    // An admission's bed must always sit in its ward — a ward change without a
+    // new bed would leave it pointing at (and occupying) a bed in the old ward.
+    if (wardChanging && !bedChanging) {
+      throw new AppError('A bed in the new ward must be selected when changing ward', 400);
+    }
     // Set when the admission moves bed and/or ward — applied in one
     // transaction by IPDRepository.updateAdmissionWithBedMove (the checks
     // below are a friendly pre-check; the transaction is the race arbiter).
-    let move: { fromBedId: string; toWardId: string; toBedId: string | null } | null = null;
+    let move: { fromBedId: string; toWardId: string; toBedId: string } | null = null;
     if (bedChanging) {
       const newWardId = input.wardId ?? admission.wardId;
 
@@ -650,14 +656,6 @@ export class IPDService {
 
       // Old bed released / new bed occupied inside the move transaction below
       move = { fromBedId: admission.bedId, toWardId: newWardId, toBedId: input.bedId! };
-    } else if (input.wardId && input.wardId !== admission.wardId) {
-      // Ward changed but no new bed specified — just update wardId/wardName
-      const ward = await ipdRepository.findWardById(tenantId, input.wardId);
-      if (!ward) throw new AppError('Ward not found', 404);
-      prevValue.wardId = admission.wardId;
-      fields.wardId    = input.wardId;
-      fields.wardName  = ward.name;
-      move = { fromBedId: admission.bedId, toWardId: input.wardId, toBedId: null };
     }
 
     // ── Vitals ──────────────────────────────────────────────────────────────

@@ -204,7 +204,7 @@ export class IPDRepository {
   async updateAdmissionWithBedMove(
     admissionId: string,
     tenantId:    string,
-    move:        { fromBedId: string; toWardId: string; toBedId: string | null },
+    move:        { fromBedId: string; toWardId: string; toBedId: string },
     fields:      Parameters<IPDRepository['updateAdmissionFields']>[2],
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();
@@ -213,22 +213,24 @@ export class IPDRepository {
       let updated: IIPDAdmission | null = null;
       await session.withTransaction(async () => {
         const ward = await lockActiveWard(tenantId, move.toWardId, session);
-        const set  = { ...fields, wardId: move.toWardId, wardName: ward.name };
-        if (move.toBedId) {
-          const bed = await BedModel.findOneAndUpdate(
-            { tenantId, _id: move.toBedId, wardId: move.toWardId, ...NOT_DELETED },
-            { isOccupied: true, currentAdmissionId: admissionId },
-            { session, new: true },
-          );
-          if (!bed) throw new AppError('Bed is no longer available.', 409);
-          set.bedId     = move.toBedId;
-          set.bedNumber = bed.bedNumber;
-          await BedModel.findOneAndUpdate(
-            { tenantId, _id: move.fromBedId },
-            { isOccupied: false, currentAdmissionId: null },
-            { session },
-          );
-        }
+        const bed = await BedModel.findOneAndUpdate(
+          { tenantId, _id: move.toBedId, wardId: move.toWardId, ...NOT_DELETED },
+          { isOccupied: true, currentAdmissionId: admissionId },
+          { session, new: true },
+        );
+        if (!bed) throw new AppError('Bed is no longer available.', 409);
+        const set = {
+          ...fields,
+          wardId:    move.toWardId,
+          wardName:  ward.name,
+          bedId:     move.toBedId,
+          bedNumber: bed.bedNumber,
+        };
+        await BedModel.findOneAndUpdate(
+          { tenantId, _id: move.fromBedId },
+          { isOccupied: false, currentAdmissionId: null },
+          { session },
+        );
         updated = await IPDAdmissionModel.findOneAndUpdate(
           { admissionId, tenantId, status: 'ADMITTED' },
           { $set: set },
