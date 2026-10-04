@@ -6,7 +6,7 @@ export interface IWard extends Document {
   floor:            string | null;
   assignedNurseIds: string[];
   // Soft delete (Hospital Admin only — IPDService.deleteWard). A deleted ward
-  // is hidden from every active list / picker but kept so discharged
+
   // admissions, discharge summaries and nurse history scoping still resolve it.
   isDeleted:        boolean;
   deletedAt:        Date | null;
