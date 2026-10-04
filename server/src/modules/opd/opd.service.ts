@@ -318,7 +318,7 @@ export class OPDService {
     if (!nurse.isActive) {
       throw new ValidationError('Selected nurse is not active.');
     }
-    const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, nurseId);
+    const wardIds = await ipdRepository.findWardIdsByNurse(tenantId, nurseId, { activeOnly: true });
     if (wardIds.length > 0) {
       throw new ConflictError('This nurse is currently assigned to an IPD ward and is not available for OPD.');
     }

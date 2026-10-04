@@ -333,7 +333,8 @@ async function assertCanManageAdmission(
   if (actor.role === UserRole.HOSPITAL_ADMIN) return;
   if (actor.role === UserRole.DOCTOR && (admission.assignedDoctorIds ?? []).includes(actor.userId)) return;
   if (actor.role === UserRole.NURSE) {
-    const ward = await ipdRepository.findWardById(tenantId, admission.wardId);
+    // Including deleted: a ward deleted after this admission keeps its nurses' access.
+    const ward = await ipdRepository.findWardByIdIncludingDeleted(tenantId, admission.wardId);
     if (ward?.assignedNurseIds?.includes(actor.userId)) return;
   }
   throw new ForbiddenError(
@@ -621,6 +622,10 @@ export class IPDService {
       throw new AppError('Ward cannot be changed for an admission linked to a package', 400);
     }
     const bedChanging = input.bedId && input.bedId !== admission.bedId;
+    // Set when the admission moves bed and/or ward — applied in one
+    // transaction by IPDRepository.updateAdmissionWithBedMove (the checks
+    // below are a friendly pre-check; the transaction is the race arbiter).
+    let move: { fromBedId: string; toWardId: string; toBedId: string | null } | null = null;
     if (bedChanging) {
       const newWardId = input.wardId ?? admission.wardId;
 
@@ -643,10 +648,8 @@ export class IPDService {
       fields.bedId     = input.bedId!;
       fields.bedNumber = bed.bedNumber;
 
-      // Release the old bed
-      await ipdRepository.updateBedOccupancy(tenantId, admission.bedId, false, null);
-      // Occupy the new bed
-      await ipdRepository.updateBedOccupancy(tenantId, input.bedId!, true, admissionId);
+      // Old bed released / new bed occupied inside the move transaction below
+      move = { fromBedId: admission.bedId, toWardId: newWardId, toBedId: input.bedId! };
     } else if (input.wardId && input.wardId !== admission.wardId) {
       // Ward changed but no new bed specified — just update wardId/wardName
       const ward = await ipdRepository.findWardById(tenantId, input.wardId);
@@ -654,6 +657,7 @@ export class IPDService {
       prevValue.wardId = admission.wardId;
       fields.wardId    = input.wardId;
       fields.wardName  = ward.name;
+      move = { fromBedId: admission.bedId, toWardId: input.wardId, toBedId: null };
     }
 
     // ── Vitals ──────────────────────────────────────────────────────────────
@@ -690,7 +694,9 @@ export class IPDService {
       return toResponse(admission, tenantId, patient?.fullName ?? null);
     }
 
-    const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
+    const updated = move
+      ? await ipdRepository.updateAdmissionWithBedMove(admissionId, tenantId, move, fields)
+      : await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
     if (!updated) throw new NotFoundError('Admission not found');
 
     try {
@@ -900,7 +906,7 @@ export class IPDService {
 
     const [tenant, ward, opdVisits, pathologyRequests, radiologyRequests, payments] = await Promise.all([
       tenantRepository.findById(tenantId),
-      ipdRepository.findWardById(tenantId, admission.wardId),
+      ipdRepository.findWardByIdIncludingDeleted(tenantId, admission.wardId),
       fetchAllPages((page, limit) => opdRepository.findByPatient(tenantId, admission.patientId, { page, limit })),
       fetchAllPages((page, limit) => labRepository.findPathologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
       fetchAllPages((page, limit) => labRepository.findRadiologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
@@ -1293,6 +1299,70 @@ export class IPDService {
     const ward = await ipdRepository.findWardById(tenantId, wardId);
     if (!ward) throw new NotFoundError('Ward not found');
     return ipdRepository.listBedsInWard(tenantId, wardId);
+  }
+
+  // ─── Ward / Bed soft delete & bed edit (Hospital Admin only — route gate) ──
+  // All occupancy / active-admission / active-package restrictions are
+  // enforced atomically in the repository transaction (409 on violation).
+  // Audit entries use IPD_ADMISSION like every other ward/bed event above.
+
+  async deleteWard(tenantId: string, wardId: string, actorId: string): Promise<void> {
+    const { ward, retiredBeds } = await ipdRepository.softDeleteWardIfEmpty(tenantId, wardId, actorId);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      wardId,
+        action:        'DELETE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { name: ward.name, floor: ward.floor, isDeleted: false },
+        newValue:      { isDeleted: true, retiredBeds },
+      });
+    } catch { /* swallow */ }
+  }
+
+  async updateBed(
+    tenantId:  string,
+    wardId:    string,
+    bedId:     string,
+    bedNumber: string,
+    actorId:   string,
+  ): Promise<IBed> {
+    const existing = await ipdRepository.findBedById(tenantId, bedId);
+    if (!existing || existing.wardId !== wardId) throw new NotFoundError('Bed not found');
+    if (existing.bedNumber === bedNumber) return existing;
+
+    const duplicate = await ipdRepository.findBedByNumber(tenantId, wardId, bedNumber);
+    if (duplicate) throw new ConflictError(`Bed ${bedNumber} already exists in this ward`);
+
+    const bed = await ipdRepository.renameBedIfFree(tenantId, wardId, bedId, bedNumber);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      bedId,
+        action:        'UPDATE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { wardId, bedNumber: existing.bedNumber },
+        newValue:      { wardId, bedNumber: bed.bedNumber },
+      });
+    } catch { /* swallow */ }
+    return bed;
+  }
+
+  async deleteBed(tenantId: string, wardId: string, bedId: string, actorId: string): Promise<void> {
+    const bed = await ipdRepository.softDeleteBedIfFree(tenantId, wardId, bedId, actorId);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      bedId,
+        action:        'DELETE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { wardId, bedNumber: bed.bedNumber, isDeleted: false },
+        newValue:      { isDeleted: true },
+      });
+    } catch { /* swallow */ }
   }
 
   // ─── U3-A: Occupancy summary (FR-08.8) ─────────────────────────────────────

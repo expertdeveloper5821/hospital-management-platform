@@ -81,6 +81,33 @@ export const ipdApi = baseApi.injectEndpoints({
       invalidatesTags: ['IPD'],
     }),
 
+    // Hospital Admin only. Soft delete; the server answers 409 while the ward
+    // has an admitted patient, an occupied bed or an active linked package.
+    // Online-only (not in the offline mutation allowlists).
+    deleteWard: build.mutation<void, string>({
+      query: (wardId) => {
+        if (!wardId) throw new Error('wardId is required');
+        return { url: `/api/ipd/wards/${wardId}`, method: 'DELETE' };
+      },
+      invalidatesTags: ['IPD'],
+    }),
+
+    // Hospital Admin only. 409 while the bed is occupied / has an active admission.
+    updateBed: build.mutation<BedResponse, { wardId: string; bedId: string; bedNumber: string }>({
+      query: ({ wardId, bedId, bedNumber }) => ({
+        url:    `/api/ipd/wards/${wardId}/beds/${bedId}`,
+        method: 'PATCH',
+        body:   { bedNumber },
+      }),
+      transformResponse: (raw: ApiSuccess<BedResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
+    deleteBed: build.mutation<void, { wardId: string; bedId: string }>({
+      query: ({ wardId, bedId }) => ({ url: `/api/ipd/wards/${wardId}/beds/${bedId}`, method: 'DELETE' }),
+      invalidatesTags: ['IPD'],
+    }),
+
     // ── Admissions ────────────────────────────────────────────────────────────
 
     getAdmissionById: build.query<AdmissionResponse, string>({
@@ -281,6 +308,9 @@ export const {
   useListBedsQuery,
   useAddBedsMutation,
   useAssignNursesToWardMutation,
+  useDeleteWardMutation,
+  useUpdateBedMutation,
+  useDeleteBedMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,

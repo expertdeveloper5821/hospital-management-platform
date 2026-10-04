@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { PackageModel, IPackage } from './packages.model';
 import { WardModel, IWard } from '../ipd/ward.model';
+import { lockActiveWard } from '../ipd/ipd.repository';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { ConflictError } from '../../shared/middleware/error-handler';
@@ -13,9 +14,39 @@ export interface PackageListFilters {
   limit?:  number;
 }
 
+// Runs `write` in a transaction that first writes the linked ward document via
+// lockActiveWard — the same guard IPDRepository.softDeleteWardIfEmpty
+// write-conflicts with. A package link and a ward delete therefore can never
+// both commit: whichever loses is retried by withTransaction and then sees the
+// winner (409 "Ward is no longer available." here, or the delete's
+// active-package 409).
+async function withLockedWard<T>(
+  tenantId: string,
+  wardId:   string,
+  write:    (session: mongoose.ClientSession) => Promise<T>,
+): Promise<T> {
+  const session = await mongoose.startSession();
+  try {
+    let result!: T;
+    await session.withTransaction(async () => {
+      await lockActiveWard(tenantId, wardId, session);
+      result = await write(session);
+    });
+    return result;
+  } finally {
+    await session.endSession();
+  }
+}
+
 class PackageRepository {
   async save(data: Partial<IPackage>): Promise<IPackage> {
     assertDbConnected();
+    if (data.wardId) {
+      return withLockedWard(data.tenantId!, data.wardId, async (session) => {
+        const [pkg] = await PackageModel.create([data], { session });
+        return pkg;
+      });
+    }
     return PackageModel.create(data);
   }
 
@@ -78,8 +109,18 @@ class PackageRepository {
     tenantId:  string,
     packageId: string,
     data:      Partial<IPackage>,
+    // Set when this write links / re-activates a ward link — guarded by
+    // withLockedWard so it can't commit alongside that ward's deletion.
+    lockWardId?: string,
   ): Promise<IPackage | null> {
     assertDbConnected();
+    if (lockWardId) {
+      return withLockedWard(tenantId, lockWardId, (session) => PackageModel.findOneAndUpdate(
+        { tenantId, packageId, isDeleted: { $ne: true } },
+        data,
+        { new: true, session },
+      ));
+    }
     return PackageModel.findOneAndUpdate(
       { tenantId, packageId, isDeleted: { $ne: true } },
       data,

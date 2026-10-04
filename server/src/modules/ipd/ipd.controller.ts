@@ -39,6 +39,11 @@ const addBedsSchema = z.object({
     .max(50, 'Cannot add more than 50 beds at once'),
 });
 
+// Same per-bed constraint as addBedsSchema
+const updateBedSchema = z.object({
+  bedNumber: z.string().trim().min(1).max(20),
+});
+
 // ─── Response shapers ─────────────────────────────────────────────────────────
 
 function toWardResponse(w: IWard) {
@@ -532,6 +537,36 @@ export async function listBeds(req: Request, res: Response, next: NextFunction):
   try {
     const beds = await ipdService.listBedsInWard(req.user!.tenantId!, req.params.wardId);
     res.status(200).json({ status: 'success', data: beds.map(toBedResponse) });
+  } catch (err) { next(err); }
+}
+
+export async function updateBed(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = updateBedSchema.safeParse(req.body);
+    if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
+
+    const bed = await ipdService.updateBed(
+      req.user!.tenantId!,
+      req.params.wardId,
+      req.params.bedId,
+      body.data.bedNumber,
+      req.user!.userId,
+    );
+    res.status(200).json({ status: 'success', data: toBedResponse(bed) });
+  } catch (err) { next(err); }
+}
+
+export async function deleteBed(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await ipdService.deleteBed(req.user!.tenantId!, req.params.wardId, req.params.bedId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: null });
+  } catch (err) { next(err); }
+}
+
+export async function deleteWard(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    await ipdService.deleteWard(req.user!.tenantId!, req.params.wardId, req.user!.userId);
+    res.status(200).json({ status: 'success', data: null });
   } catch (err) { next(err); }
 }
 
