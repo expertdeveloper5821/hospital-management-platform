@@ -24,6 +24,9 @@ import {
   listBeds,
   getOccupancySummary,
   assignNurses,
+  deleteWard,
+  updateBed,
+  deleteBed,
 } from './ipd.controller';
 
 const router  = Router();
@@ -251,6 +254,15 @@ router.patch('/wards/:wardId/nurses',
   assignNurses,
 );
 
+// DELETE /api/ipd/wards/:wardId — Hospital Admin only. Soft delete; 409 while
+// the ward has an admitted patient, an occupied bed or an active package.
+router.delete('/wards/:wardId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  deleteWard,
+);
+
 // ─── Bed routes ───────────────────────────────────────────────────────────────
 router.post('/wards/:wardId/beds',
   ...protect,
@@ -268,6 +280,22 @@ router.get('/wards/:wardId/beds',
   requireRole(...WARD_READERS),
   requireFirstPasswordChange,
   listBeds,
+);
+
+// PATCH / DELETE /api/ipd/wards/:wardId/beds/:bedId — Hospital Admin only.
+// Rename / soft delete; 409 while the bed is occupied or has an active admission.
+router.patch('/wards/:wardId/beds/:bedId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  updateBed,
+);
+
+router.delete('/wards/:wardId/beds/:bedId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  deleteBed,
 );
 
 // ─── Occupancy summary — Manager + Hospital Admin + Nurse (FR-08.8) ──────────

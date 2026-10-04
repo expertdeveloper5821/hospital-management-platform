@@ -167,7 +167,20 @@ class PackageService {
       }
     }
 
-    if (data.wardId) await assertWardInTenant(tenantId, data.wardId);
+    // Ward this write links (or re-activates a link to) — re-checked under the
+    // ward-document lock in the repository so a concurrent ward delete can't
+    // commit alongside it.
+    let lockWardId: string | undefined;
+    if (data.wardId) {
+      await assertWardInTenant(tenantId, data.wardId);
+      lockWardId = data.wardId;
+    }
+    // Re-activating a package whose linked ward has since been deleted would
+    // re-open admissions into that ward — require re-linking a live ward first.
+    else if (data.status === 'ACTIVE' && data.wardId === undefined && pkg.wardId) {
+      await assertWardInTenant(tenantId, pkg.wardId);
+      lockWardId = pkg.wardId;
+    }
 
     const previousValue: Record<string, unknown> = {};
     const newValue:      Record<string, unknown> = {};
@@ -180,7 +193,7 @@ class PackageService {
     if (data.status           !== undefined) { previousValue.status           = pkg.status;           newValue.status           = data.status;                update.status           = data.status; }
     if (data.wardId           !== undefined) { previousValue.wardId           = pkg.wardId ?? null;   newValue.wardId           = data.wardId;                update.wardId           = data.wardId; }
 
-    const updated = await packageRepository.update(tenantId, packageId, update);
+    const updated = await packageRepository.update(tenantId, packageId, update, lockWardId);
     if (!updated) throw new NotFoundError('Package not found');
 
     await auditService.log({

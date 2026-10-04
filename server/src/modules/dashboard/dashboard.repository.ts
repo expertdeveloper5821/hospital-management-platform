@@ -56,10 +56,11 @@ class DashboardRepository {
     return IPDAdmissionModel.countDocuments({ tenantId, status: 'ADMITTED', admissionDate: { $gte: start, $lte: end } });
   }
 
+  // Soft-deleted beds (incl. every bed of a deleted ward) are not counted.
   async bedStats(tenantId: string): Promise<{ total: number; occupied: number }> {
     const [total, occupied] = await Promise.all([
-      BedModel.countDocuments({ tenantId }),
-      BedModel.countDocuments({ tenantId, isOccupied: true }),
+      BedModel.countDocuments({ tenantId, isDeleted: { $ne: true } }),
+      BedModel.countDocuments({ tenantId, isOccupied: true, isDeleted: { $ne: true } }),
     ]);
     return { total, occupied };
   }

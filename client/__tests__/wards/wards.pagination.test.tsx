@@ -18,6 +18,9 @@ jest.mock('@/store/api/ipd.api', () => ({
   useAddBedsMutation:            () => [jest.fn(), { isLoading: false }],
   useAssignNursesToWardMutation: () => [jest.fn(), { isLoading: false }],
   useGetOccupancySummaryQuery:   () => ({ data: [] }),
+  useDeleteWardMutation:         () => [jest.fn()],
+  useUpdateBedMutation:          () => [jest.fn(), { isLoading: false }],
+  useDeleteBedMutation:          () => [jest.fn()],
 }));
 
 jest.mock('@/store/api/user.api', () => ({
