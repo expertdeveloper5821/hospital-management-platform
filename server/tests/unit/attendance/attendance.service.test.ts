@@ -11,6 +11,9 @@ import { ConflictError, AppError, NotFoundError } from '../../../src/shared/midd
 const mockRepo     = attendanceRepository as jest.Mocked<typeof attendanceRepository>;
 const mockUserRepo = userRepository as jest.Mocked<typeof userRepository>;
 
+const CHECK_IN_LOC  = { latitude: 19.076, longitude: 72.8777 };
+const CHECK_OUT_LOC = { latitude: 19.0821, longitude: 72.8411 };
+
 const NOW = new Date('2026-08-15T10:00:00.000Z'); // Saturday, Aug 15 2026
 const TODAY_MIDNIGHT = new Date('2026-08-15T00:00:00.000Z');
 
@@ -22,6 +25,8 @@ function makeRecord(overrides: Partial<IAttendance> = {}): IAttendance {
     attendanceDate: TODAY_MIDNIGHT,
     checkIn:        null,
     checkOut:       null,
+    checkInLocation:  null,
+    checkOutLocation: null,
     totalHours:     null,
     status:         'ABSENT',
     createdAt:      NOW,
@@ -49,14 +54,27 @@ describe('AttendanceService', () => {
       mockRepo.findByUserAndDate.mockResolvedValue(null);
       mockRepo.save.mockResolvedValue(makeRecord({ checkIn: NOW, status: 'IN_PROGRESS' }));
 
-      const result = await service.checkIn('t1', 'user-1');
+      const result = await service.checkIn('t1', 'user-1', CHECK_IN_LOC);
 
       expect(result.status).toBe('IN_PROGRESS');
       expect(mockRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: 't1', userId: 'user-1', checkIn: NOW, checkOut: null, status: 'IN_PROGRESS',
+          checkInLocation: CHECK_IN_LOC, checkOutLocation: null,
         }),
       );
+    });
+
+    test('never writes the GPS coordinates into the audit log', async () => {
+      const { auditService } = jest.requireMock('../../../src/shared/services/audit.service');
+      mockRepo.findByUserAndDate.mockResolvedValue(null);
+      mockRepo.save.mockResolvedValue(makeRecord({ checkIn: NOW, status: 'IN_PROGRESS' }));
+
+      await service.checkIn('t1', 'user-1', CHECK_IN_LOC);
+
+      const logged = JSON.stringify(auditService.log.mock.calls);
+      expect(logged).not.toContain(String(CHECK_IN_LOC.latitude));
+      expect(logged).not.toContain(String(CHECK_IN_LOC.longitude));
     });
 
     test('attendanceId has ATT- prefix with 8 uppercase hex chars', async () => {
@@ -67,7 +85,7 @@ describe('AttendanceService', () => {
         return makeRecord({ attendanceId: savedId });
       });
 
-      await service.checkIn('t1', 'user-1');
+      await service.checkIn('t1', 'user-1', CHECK_IN_LOC);
 
       expect(savedId).toMatch(/^ATT-[A-F0-9]{8}$/);
     });
@@ -75,7 +93,7 @@ describe('AttendanceService', () => {
     test('throws ConflictError when already checked in today', async () => {
       mockRepo.findByUserAndDate.mockResolvedValue(makeRecord({ checkIn: NOW, status: 'IN_PROGRESS' }));
 
-      await expect(service.checkIn('t1', 'user-1')).rejects.toThrow(ConflictError);
+      await expect(service.checkIn('t1', 'user-1', CHECK_IN_LOC)).rejects.toThrow(ConflictError);
       expect(mockRepo.save).not.toHaveBeenCalled();
     });
   });
@@ -88,19 +106,19 @@ describe('AttendanceService', () => {
       mockRepo.findByUserAndDate.mockResolvedValue(existing);
       mockRepo.update.mockResolvedValue(makeRecord({ checkIn: checkInTime, checkOut: NOW, totalHours: 9, status: 'PRESENT' }));
 
-      const result = await service.checkOut('t1', 'user-1');
+      const result = await service.checkOut('t1', 'user-1', CHECK_OUT_LOC);
 
       expect(result.status).toBe('PRESENT');
       expect(mockRepo.update).toHaveBeenCalledWith('t1', existing.attendanceId, {
-        checkOut: NOW, totalHours: 9, status: 'PRESENT',
+        checkOut: NOW, checkOutLocation: CHECK_OUT_LOC, totalHours: 9, status: 'PRESENT',
       });
     });
 
     test('throws AppError(400) when there is no check-in today', async () => {
       mockRepo.findByUserAndDate.mockResolvedValue(null);
 
-      await expect(service.checkOut('t1', 'user-1')).rejects.toThrow(AppError);
-      await expect(service.checkOut('t1', 'user-1')).rejects.toMatchObject({ statusCode: 400 });
+      await expect(service.checkOut('t1', 'user-1', CHECK_OUT_LOC)).rejects.toThrow(AppError);
+      await expect(service.checkOut('t1', 'user-1', CHECK_OUT_LOC)).rejects.toMatchObject({ statusCode: 400 });
     });
 
     test('throws ConflictError when already checked out today', async () => {
@@ -108,7 +126,7 @@ describe('AttendanceService', () => {
         makeRecord({ checkIn: NOW, checkOut: NOW, status: 'PRESENT' }),
       );
 
-      await expect(service.checkOut('t1', 'user-1')).rejects.toThrow(ConflictError);
+      await expect(service.checkOut('t1', 'user-1', CHECK_OUT_LOC)).rejects.toThrow(ConflictError);
       expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });

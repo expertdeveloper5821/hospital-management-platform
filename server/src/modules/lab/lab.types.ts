@@ -89,6 +89,37 @@ export const ListLabRequestsQuerySchema = z.object({
 
 export type ListLabRequestsQuery = z.infer<typeof ListLabRequestsQuerySchema>;
 
+// ─── Payment collection ───────────────────────────────────────────────────────
+// Same amount rules as CreateManualPaymentSchema (positive, ≤ 2 decimals,
+// ≤ 10 digits). The patient, description and payment reference are derived
+// server-side from the lab request — never taken from the client.
+const MAX_AMOUNT_DIGITS = 10;
+
+export const CollectLabPaymentSchema = z.object({
+  amount: z.number({ required_error: 'amount is required', invalid_type_error: 'amount must be a number' })
+    .positive('Amount must be greater than zero')
+    .refine((val) => Math.round(val * 100) === val * 100, 'Amount cannot have more than 2 decimal places')
+    .refine(
+      (val) => String(val).replace(/[^0-9]/g, '').length <= MAX_AMOUNT_DIGITS,
+      'Amount cannot exceed 10 digits.',
+    ),
+  paymentMethod: z.enum(['CASH', 'UPI', 'CARD'], {
+    errorMap: () => ({ message: 'paymentMethod must be CASH, UPI, or CARD' }),
+  }),
+  transactionId: z.string().max(100, 'Transaction ID cannot exceed 100 characters').trim().optional(),
+}).strict();
+
+export type CollectLabPaymentInput = z.infer<typeof CollectLabPaymentSchema>;
+
+// The request's COMPLETED payment, if any — null means Unpaid.
+export interface LabPaymentSummary {
+  paymentId:        string;
+  amount:           number;
+  paymentMethod:    string;
+  paidAt:           string;
+  receiptAvailable: boolean;
+}
+
 // ─── Response shapes ──────────────────────────────────────────────────────────
 // reportUrl is a fresh pre-signed S3 URL generated at response time (null when no report yet).
 export interface PathologyRequestResponse {
@@ -107,6 +138,10 @@ export interface PathologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  payment:     LabPaymentSummary | null;
+  // Billing charge this request was created from (its payment is collected in
+  // Billing, never via the Lab collect endpoint); null for Lab-created requests.
+  chargeId:    string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -125,6 +160,10 @@ export interface RadiologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  payment:     LabPaymentSummary | null;
+  // Billing charge this request was created from (its payment is collected in
+  // Billing, never via the Lab collect endpoint); null for Lab-created requests.
+  chargeId:    string | null;
 }
 
 // ─── File size limits (bytes) ─────────────────────────────────────────────────

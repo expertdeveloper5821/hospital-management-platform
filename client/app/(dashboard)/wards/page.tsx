@@ -1,18 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  useListWardsQuery,
+  useListWardsPaginatedQuery,
   useCreateWardMutation,
   useListBedsQuery,
   useAddBedsMutation,
   useAssignNursesToWardMutation,
   useGetOccupancySummaryQuery,
+  useDeleteWardMutation,
+  useUpdateBedMutation,
+  useDeleteBedMutation,
 } from '@/store/api/ipd.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useAppSelector } from '@/store/hooks';
 import { UserRole }       from '@/store/types';
-import type { WardResponse, UserResponse } from '@/store/types';
+import type { WardResponse, BedResponse, UserResponse } from '@/store/types';
 import { Button }   from '@/components/ui/button';
 import { Input }    from '@/components/ui/input';
 import { Label }    from '@/components/ui/label';
@@ -27,7 +30,10 @@ import {
   ChevronRight,
   BarChart3,
   UserCheck,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Add Beds Modal ───────────────────────────────────────────────────────────
 
@@ -65,7 +71,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <NavForm onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="ab-numbers">Bed Numbers</Label>
             <Input
@@ -84,7 +90,7 @@ function AddBedsModal({ ward, onClose }: AddBedsModalProps) {
               {isLoading ? 'Adding…' : 'Add Beds'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -119,7 +125,7 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <NavForm onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="cw-name">Ward Name</Label>
             <Input id="cw-name" placeholder="General Ward" value={name} onChange={(e) => setName(e.target.value)} required />
@@ -133,7 +139,104 @@ function CreateWardModal({ onClose }: { onClose: () => void }) {
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>{isLoading ? 'Creating…' : 'Create Ward'}</Button>
           </div>
-        </form>
+        </NavForm>
+      </div>
+    </DialogOverlay>
+  );
+}
+
+// ─── Edit Bed Modal (Hospital Admin) ──────────────────────────────────────────
+
+function EditBedModal({ bed, onClose }: { bed: BedResponse; onClose: () => void }) {
+  const [bedNumber, setBedNumber] = useState(bed.bedNumber);
+  const [error, setError] = useState<string | null>(null);
+  const [updateBed, { isLoading }] = useUpdateBedMutation();
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const value = bedNumber.trim();
+    if (!value) { setError('Enter a bed number.'); return; }
+    try {
+      await updateBed({ wardId: bed.wardId, bedId: bed.bedId, bedNumber: value }).unwrap();
+      onClose();
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to update bed.');
+    }
+  }
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Edit Bed {bed.bedNumber}</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <NavForm onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="eb-number">Bed Number</Label>
+            <Input
+              id="eb-number"
+              value={bedNumber}
+              maxLength={20}
+              onChange={(e) => setBedNumber(e.target.value)}
+              required
+            />
+          </div>
+          {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>}
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
+            <Button type="submit" disabled={isLoading}>{isLoading ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </NavForm>
+      </div>
+    </DialogOverlay>
+  );
+}
+
+// ─── Confirm Delete Modal (Hospital Admin) ────────────────────────────────────
+// The server re-checks every restriction (admitted patients, occupied beds,
+// active packages) and its 409 message is shown here as-is.
+
+interface ConfirmDeleteModalProps {
+  title:     string;
+  message:   string;
+  onConfirm: () => Promise<unknown>;
+  onClose:   () => void;
+}
+
+function ConfirmDeleteModal({ title, message, onConfirm, onClose }: ConfirmDeleteModalProps) {
+  const [error,    setError]    = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleConfirm() {
+    setError(null);
+    setDeleting(true);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (err: unknown) {
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Delete failed.');
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50">
+      <div role="alertdialog" className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-5">
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="text-sm text-muted-foreground">{message}</p>
+        {error && <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>}
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onClose} disabled={deleting}>Cancel</Button>
+          <Button type="button" variant="destructive" onClick={handleConfirm} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
+        </div>
       </div>
     </DialogOverlay>
   );
@@ -145,10 +248,12 @@ interface WardRowProps {
   ward:             WardResponse;
   canManage:        boolean;
   canAssignNurses:  boolean;
+  // Hospital Admin only — ward delete and bed edit/delete
+  canEditDelete:    boolean;
   onAddBeds:        (ward: WardResponse) => void;
 }
 
-function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) {
+function WardRow({ ward, canManage, canAssignNurses, canEditDelete, onAddBeds }: WardRowProps) {
   const [expanded,    setExpanded]    = useState(false);
   const [nurseIds,    setNurseIds]    = useState<string[]>(ward.assignedNurseIds ?? []);
   const [addNurseId,  setAddNurseId]  = useState('');
@@ -161,6 +266,11 @@ function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) 
     { skip: !expanded },
   );
   const [assignNurses, { isLoading: saving }] = useAssignNursesToWardMutation();
+  const [deleteWard] = useDeleteWardMutation();
+  const [deleteBed]  = useDeleteBedMutation();
+  const [confirmWardDelete, setConfirmWardDelete] = useState(false);
+  const [editingBed,        setEditingBed]        = useState<BedResponse | null>(null);
+  const [deletingBed,       setDeletingBed]       = useState<BedResponse | null>(null);
 
   const allNurses: UserResponse[] = nursesPage?.data ?? [];
   const unassigned = allNurses.filter((n) => !nurseIds.includes(n.userId));
@@ -225,6 +335,18 @@ function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) 
               Add Beds
             </Button>
           )}
+          {canEditDelete && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+              aria-label={`Delete ward ${ward.name}`}
+              onClick={(e) => { e.stopPropagation(); setConfirmWardDelete(true); }}
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              Delete
+            </Button>
+          )}
         </div>
       </button>
 
@@ -252,6 +374,31 @@ function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) 
                     <Bed className="h-3 w-3" />
                     {b.bedNumber}
                     <span className="opacity-60">{b.isOccupied ? '· Occupied' : '· Free'}</span>
+                    {/* Occupied beds cannot be edited/deleted; the server enforces it too */}
+                    {canEditDelete && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={`Edit bed ${b.bedNumber}`}
+                          title={b.isOccupied ? 'Occupied beds cannot be edited' : 'Edit bed'}
+                          disabled={b.isOccupied}
+                          onClick={() => setEditingBed(b)}
+                          className="ml-1 opacity-70 hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete bed ${b.bedNumber}`}
+                          title={b.isOccupied ? 'Occupied beds cannot be deleted' : 'Delete bed'}
+                          disabled={b.isOccupied}
+                          onClick={() => setDeletingBed(b)}
+                          className="opacity-70 hover:opacity-100 hover:text-destructive disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -334,28 +481,83 @@ function WardRow({ ward, canManage, canAssignNurses, onAddBeds }: WardRowProps) 
           </div>
         </div>
       )}
+
+      {confirmWardDelete && (
+        <ConfirmDeleteModal
+          title={`Delete ward ${ward.name}?`}
+          message="The ward and its beds will be removed from all active lists. Past admissions keep their ward and bed details. A ward with admitted patients, occupied beds or an active package cannot be deleted."
+          onConfirm={() => deleteWard(ward.wardId).unwrap()}
+          onClose={() => setConfirmWardDelete(false)}
+        />
+      )}
+      {editingBed && <EditBedModal bed={editingBed} onClose={() => setEditingBed(null)} />}
+      {deletingBed && (
+        <ConfirmDeleteModal
+          title={`Delete bed ${deletingBed.bedNumber}?`}
+          message="The bed will no longer be available for admissions. Past admissions keep their bed details."
+          onConfirm={() => deleteBed({ wardId: deletingBed.wardId, bedId: deletingBed.bedId }).unwrap()}
+          onClose={() => setDeletingBed(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ─── Wards Section ────────────────────────────────────────────────────────────
 
+const WARDS_PAGE_SIZE = 20;
+
 function WardsSection({
-  wards,
   canManage,
   canAssignNurses,
+  canEditDelete,
 }: {
-  wards:            WardResponse[];
   canManage:        boolean;
   canAssignNurses:  boolean;
+  canEditDelete:    boolean;
 }) {
   const [showCreate, setShowCreate] = useState(false);
   const [addBedsFor, setAddBedsFor] = useState<WardResponse | null>(null);
+  const [page, setPage]                       = useState(1);
+  const [search, setSearch]                   = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 300ms debounce for search; a new search always starts from page 1
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value.trim());
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const { data, isLoading, isFetching, isError } = useListWardsPaginatedQuery({
+    ...(debouncedSearch ? { search: debouncedSearch } : {}),
+    page,
+    limit: WARDS_PAGE_SIZE,
+  });
+
+  const wards      = data?.data ?? [];
+  const total      = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 0;
+  // Derived from the response rather than local state: an offline cache read
+  // returns everything matching as a single page (page 1, totalPages 1).
+  const rangeStart = total === 0 || !data ? 0 : (data.page - 1) * data.limit + 1;
+  const rangeEnd   = rangeStart === 0 ? 0 : rangeStart + wards.length - 1;
+
+  // A shrinking result set would otherwise leave `page` past the end and
+  // render an empty page.
+  useEffect(() => {
+    if (!isFetching && data && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [isFetching, data, page, totalPages]);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{wards.length} ward{wards.length !== 1 ? 's' : ''}</p>
+        <p className="text-sm text-muted-foreground">{total} ward{total !== 1 ? 's' : ''}</p>
         {canManage && (
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Building2 className="h-4 w-4 mr-2" />
@@ -364,11 +566,25 @@ function WardsSection({
         )}
       </div>
 
-      {wards.length === 0 ? (
-        <div className="py-16 text-center text-sm text-muted-foreground border rounded-lg">
-          <Building2 className="mx-auto h-8 w-8 mb-3 opacity-40" />
-          No wards created yet.
-        </div>
+      <div className="max-w-sm">
+        <Input
+          placeholder="Search wards by name or floor…"
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : isError && !data ? (
+        <div className="py-16 text-center text-sm text-destructive border rounded-lg">Failed to load wards.</div>
+      ) : wards.length === 0 ? (
+        !isFetching && (
+          <div className="py-16 text-center text-sm text-muted-foreground border rounded-lg">
+            <Building2 className="mx-auto h-8 w-8 mb-3 opacity-40" />
+            {debouncedSearch ? 'No wards match your search.' : 'No wards created yet.'}
+          </div>
+        )
       ) : (
         <div className="space-y-2">
           {wards.map((w) => (
@@ -377,9 +593,38 @@ function WardsSection({
               ward={w}
               canManage={canManage}
               canAssignNurses={canAssignNurses}
+              canEditDelete={canEditDelete}
               onAddBeds={setAddBedsFor}
             />
           ))}
+        </div>
+      )}
+
+      {/* Pagination + count */}
+      {data && total > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>Showing {rangeStart}–{rangeEnd} of {total} ward{total !== 1 ? 's' : ''}</span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">{page} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -454,12 +699,12 @@ export default function WardsPage() {
   const role = useAppSelector((s) => s.auth.profile?.role) as UserRole | undefined;
   const [activeTab, setActiveTab] = useState<ActiveTab>('wards');
 
-  const { data: wards = [], isLoading } = useListWardsQuery();
-
   if (!role) return null;
 
   const canManage        = role === UserRole.HOSPITAL_ADMIN || role === UserRole.ADMIN;
   const canAssignNurses  = role === UserRole.HOSPITAL_ADMIN || role === UserRole.ADMIN || role === UserRole.DOCTOR;
+  // Ward delete and bed edit/delete: Hospital Admin only (mirrors the API's requireRole)
+  const canEditDelete    = role === UserRole.HOSPITAL_ADMIN;
   const canViewOccupancy =
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN          ||
@@ -497,14 +742,8 @@ export default function WardsPage() {
         ))}
       </div>
 
-      {isLoading && activeTab === 'wards' ? (
-        <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
-      ) : (
-        <>
-          {activeTab === 'wards'     && <WardsSection wards={wards} canManage={canManage} canAssignNurses={canAssignNurses} />}
-          {activeTab === 'occupancy' && <OccupancySection />}
-        </>
-      )}
+      {activeTab === 'wards'     && <WardsSection canManage={canManage} canAssignNurses={canAssignNurses} canEditDelete={canEditDelete} />}
+      {activeTab === 'occupancy' && <OccupancySection />}
     </div>
   );
 }

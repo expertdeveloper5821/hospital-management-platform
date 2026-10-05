@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useForgotPasswordMutation } from '@/store/api/auth.api';
+import { NavForm } from '@/components/ui/form';
 
 const schema = z.object({
   email: z.string().trim().email('Invalid email address'),
@@ -45,7 +46,7 @@ export default function ForgotPasswordPage() {
       </CardHeader>
 
       {!isSuccess && (
-        <form onSubmit={handleSubmit(onSubmit)} noValidate>
+        <NavForm onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -80,7 +81,7 @@ export default function ForgotPasswordPage() {
               Back to sign in
             </Link>
           </CardFooter>
-        </form>
+        </NavForm>
       )}
 
       {isSuccess && (

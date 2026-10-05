@@ -28,6 +28,25 @@ const updateAttendanceSchema = z.object({
   message: 'Provide at least one of checkIn or checkOut',
 });
 
+// Self check-in/check-out must carry the device's GPS fix. `.strict()` rejects
+// any extra key (e.g. a smuggled userId/tenantId) — the acting user and tenant
+// always come from the JWT, never the body.
+const locationSchema = z.object({
+  latitude:  z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+}).strict();
+
+function parseLocation(body: unknown, action: 'check in' | 'check out') {
+  const parsed = locationSchema.safeParse(body ?? {});
+  if (!parsed.success) {
+    throw new ValidationError(
+      `A valid GPS location (latitude, longitude) is required to ${action}.`,
+      { errors: parsed.error.flatten() },
+    );
+  }
+  return parsed.data;
+}
+
 function defaultedMonthYear(parsed: { month?: number; year?: number }) {
   // Defaults to the hospital-local (IST) current month/year, not the server's
   // UTC clock — otherwise a request made just after midnight IST but before
@@ -53,14 +72,16 @@ function toResponse(a: IAttendance) {
 
 export async function checkIn(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const record = await attendanceService.checkIn(req.user!.tenantId!, req.user!.userId);
+    const location = parseLocation(req.body, 'check in');
+    const record = await attendanceService.checkIn(req.user!.tenantId!, req.user!.userId, location);
     res.status(201).json({ status: 'success', data: toResponse(record) });
   } catch (err) { next(err); }
 }
 
 export async function checkOut(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const record = await attendanceService.checkOut(req.user!.tenantId!, req.user!.userId);
+    const location = parseLocation(req.body, 'check out');
+    const record = await attendanceService.checkOut(req.user!.tenantId!, req.user!.userId, location);
     res.status(200).json({ status: 'success', data: toResponse(record) });
   } catch (err) { next(err); }
 }

@@ -93,7 +93,7 @@ describe('IPDService — getDischargeSummaryData', () => {
     service = new IPDService();
 
     mockIpdRepo.findById = jest.fn().mockResolvedValue(BASE_ADMISSION as never);
-    mockIpdRepo.findWardById = jest.fn().mockResolvedValue(BASE_WARD as never);
+    mockIpdRepo.findWardByIdIncludingDeleted = jest.fn().mockResolvedValue(BASE_WARD as never);
     mockPatRepo.findByPatientId = jest.fn().mockResolvedValue(BASE_PATIENT as never);
     mockTenRepo.findById = jest.fn().mockResolvedValue(BASE_TENANT as never);
     mockOpdRepo.findByPatient = jest.fn().mockResolvedValue(paginated([]) as never);

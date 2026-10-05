@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useCompleteSetupMutation } from '@/store/api/auth.api';
 import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
+import { NavForm } from '@/components/ui/form';
 
 const schema = z
   .object({
@@ -76,7 +77,7 @@ function SetupForm() {
       </CardHeader>
 
       {!isSuccess && (
-        <form onSubmit={handleSubmit(onSubmit)}>
+        <NavForm onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Your name</Label>
@@ -131,7 +132,7 @@ function SetupForm() {
               {isLoading ? 'Creating account…' : 'Activate account'}
             </Button>
           </CardFooter>
-        </form>
+        </NavForm>
       )}
     </Card>
   );

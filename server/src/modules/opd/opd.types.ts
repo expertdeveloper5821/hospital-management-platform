@@ -1,3 +1,5 @@
+import { PaginatedResult } from '../../shared/types/common.types';
+
 // Stored values are deliberately unchanged from FR-07.1/07.3 (`OPEN`,
 // `COMPLETED`) — the queue UI relabels them (Waiting / In Consultation) without
 // a data migration. NO_SHOW is the resolution for a visit nobody ever attended:
@@ -41,16 +43,19 @@ export interface CreateOPDVisitRequest {
 // Units are fixed (see OPDService.updateVisit's DEFAULT_VITALS and the
 // frontend's field labels): weight in kg, height in cm, blood pressure as a
 // "<systolic>/<diastolic>" string in mmHg, sugar in mg/dL, body temperature
-// in °F.
+// in °F, SpO2 in %, pulse in bpm.
 export interface OPDVitals {
   weight:          number | null;
   height:          number | null;
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export interface UpdateOPDVisitRequest {
+  patientId?:      string;   // Receptionist-only (see opd.controller.ts)
   doctorIds?:      string[];
   nurseIds?:       string[]; // Receptionist-only (see opd.controller.ts)
   visitDate?:      string; // YYYY-MM-DD — triggers queue number recalculation
@@ -109,6 +114,13 @@ export interface OPDVisitResponse {
   vitals:         OPDVitals;
   createdAt:      Date;
   updatedAt:      Date;
+}
+
+// GET /api/opd/visits — one page of the queue, plus Open/Completed counts
+// across every visit matching the filters (not just this page).
+export interface OPDQueueResult<T> extends PaginatedResult<T> {
+  openCount:      number;
+  completedCount: number;
 }
 
 // ─── OPD Nurse Assignment ───────────────────────────────────────────────────

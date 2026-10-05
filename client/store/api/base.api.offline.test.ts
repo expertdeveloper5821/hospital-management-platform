@@ -590,13 +590,16 @@ describe('base.api offline GET fallback / read-through cache', () => {
     });
   });
 
-  test('array-shaped list fallback (getOPDQueue) serves the previously cached queue while offline', async () => {
+  test('wrapped list fallback (getOPDQueue) serves the previously cached queue while offline', async () => {
     const tenantId = crypto.randomUUID();
     const userId = crypto.randomUUID();
     const store = buildStore(tenantId, userId);
 
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({ status: 'success', data: [{ visitId: 'OPD-1', diagnosis: 'flu' }] }),
+      jsonResponse({ status: 'success', data: {
+        data: [{ visitId: 'OPD-1', diagnosis: 'flu' }], total: 1, page: 1, limit: 20, totalPages: 1,
+        openCount: 1, completedCount: 0,
+      } }),
     );
     await store.dispatch(opdApi.endpoints.getOPDQueue.initiate({}));
     await flush();
@@ -605,7 +608,7 @@ describe('base.api offline GET fallback / read-through cache', () => {
     const result = await store.dispatch(opdApi.endpoints.getOPDQueue.initiate({}, { forceRefetch: true }));
 
     expect('error' in result).toBe(false);
-    expect((result as unknown as { data: unknown[] }).data).toEqual([
+    expect((result as unknown as { data: { data: unknown[] } }).data.data).toEqual([
       expect.objectContaining({ visitId: 'OPD-1', diagnosis: 'flu' }),
     ]);
   });

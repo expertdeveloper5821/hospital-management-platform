@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useListInventoryItemsQuery,
   useCreateInventoryItemMutation,
@@ -40,7 +40,9 @@ import {
   History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 import { buildUpdateInventoryItemPayload } from './update-item-payload';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -127,7 +129,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -222,7 +224,7 @@ function CreateItemModal({ onClose }: CreateItemModalProps) {
               {isLoading ? 'Adding…' : 'Add Item'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -276,7 +278,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -358,7 +360,7 @@ function EditItemModal({ item, onClose }: EditItemModalProps) {
               {isLoading ? 'Saving…' : 'Save Changes'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -581,7 +583,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -664,7 +666,7 @@ function StockUpdateModal({ item, onClose }: StockUpdateModalProps) {
               {isLoading ? 'Saving…' : 'Update Stock'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -709,7 +711,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <NavForm onSubmit={handleSubmit} className="p-5 space-y-4">
           {error && (
             <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
           )}
@@ -737,7 +739,7 @@ function ThresholdUpdateModal({ item, onClose }: ThresholdUpdateModalProps) {
               {isLoading ? 'Saving…' : 'Save Threshold'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -840,8 +842,16 @@ function ItemDetailPanel({ item, canManage, onClose }: ItemDetailPanelProps) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const INVENTORY_PAGE_SIZE = 10;
+
 export default function InventoryPage() {
   const role = useAppSelector((s) => s.auth.profile?.role);
+  const canManage = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER'].includes(role ?? '');
+  const canView   = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
+
+  const [search,          setSearch]          = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [categoryFilter, setCategoryFilter] = useState('');
   const [categoryInput,  setCategoryInput]  = useState('');
@@ -860,21 +870,51 @@ export default function InventoryPage() {
   const [deleteTarget,   setDeleteTarget]   = useState<InventoryItemResponse | null>(null);
   const [historyTarget,  setHistoryTarget]  = useState<InventoryItemResponse | null>(null);
 
-  const { data, isFetching, refetch } = useListInventoryItemsQuery({
+  // 300ms debounce for search; a new search always starts from page 1
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value.trim());
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const filterArgs = {
     category: categoryFilter || undefined,
-    lowStock: lowStockOnly || undefined,
-    page,
-    limit: 10,
-  });
+    search:   debouncedSearch || undefined,
+  };
+
+  const { data, isFetching, refetch } = useListInventoryItemsQuery(
+    { ...filterArgs, lowStock: lowStockOnly || undefined, page, limit: INVENTORY_PAGE_SIZE },
+    { skip: !canView },
+  );
+
+  // Low-stock count across ALL pages of the current filters (not just the
+  // visible page) — a 1-row query whose `total` is the count.
+  const { data: lowStockData } = useListInventoryItemsQuery(
+    { ...filterArgs, lowStock: true, page: 1, limit: 1 },
+    { skip: !canView || lowStockOnly },
+  );
 
   const items      = data?.data ?? [];
   const total      = data?.total ?? 0;
-  const totalPages = data?.totalPages ?? 1;
+  const totalPages = data?.totalPages ?? 0;
+  // Derived from the response rather than local state: an offline cache read
+  // returns everything matching as a single page (page 1, totalPages 1).
+  const rangeStart = total === 0 || !data ? 0 : (data.page - 1) * data.limit + 1;
+  const rangeEnd   = rangeStart === 0 ? 0 : rangeStart + items.length - 1;
+  const serialStart = serialOffset(data, page, INVENTORY_PAGE_SIZE);
 
-  const lowStockCount = items.filter((i) => i.isLowStock).length;
+  const lowStockCount = lowStockData?.total ?? 0;
+  const hasFilters    = Boolean(categoryFilter || debouncedSearch);
 
-  const canManage = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER'].includes(role ?? '');
-  const canView   = ['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE'].includes(role ?? '');
+  // A shrinking result set (e.g. deleting the last item on the last page)
+  // would otherwise leave `page` past the end and render an empty page.
+  useEffect(() => {
+    if (!isFetching && data && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [isFetching, data, page, totalPages]);
 
   function handleCategoryFilter() {
     setCategoryFilter(categoryInput.trim());
@@ -925,6 +965,17 @@ export default function InventoryPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
+        <div className="space-y-1 flex-1 min-w-48">
+          <Label htmlFor="inventorySearch" className="text-xs">Search</Label>
+          <Input
+            id="inventorySearch"
+            placeholder="Search by name or category…"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            className="h-9"
+          />
+        </div>
+
         <div className="space-y-1 flex-1 min-w-48">
           <Label className="text-xs">Filter by Category</Label>
           <div className="flex gap-2">
@@ -982,13 +1033,16 @@ export default function InventoryPage() {
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-sm text-muted-foreground">
               <Package className="h-8 w-8 opacity-30" />
-              {lowStockOnly ? 'No low-stock items.' : 'No inventory items found.'}
+              {lowStockOnly
+                ? 'No low-stock items.'
+                : hasFilters ? 'No inventory items match your search.' : 'No inventory items found.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Name</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">Quantity</th>
@@ -999,7 +1053,7 @@ export default function InventoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {items.map((item, idx) => (
                     <tr
                       key={item.itemId}
                       className={cn(
@@ -1008,6 +1062,7 @@ export default function InventoryPage() {
                       )}
                       onClick={() => setSelected(item)}
                     >
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium">{item.name}</p>
                         <p className="text-xs text-muted-foreground sm:hidden">{item.category}</p>
@@ -1077,18 +1132,33 @@ export default function InventoryPage() {
             </div>
           )}
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <p className="text-xs text-muted-foreground">Page {page} of {totalPages}</p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
+          {/* Pagination + count */}
+          {data && total > 0 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-t text-xs text-muted-foreground">
+              <span>Showing {rangeStart}–{rangeEnd} of {total} item{total !== 1 ? 's' : ''}</span>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page <= 1 || isFetching}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Previous
+                  </Button>
+                  <span className="px-2">{page} / {totalPages}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={page >= totalPages || isFetching}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

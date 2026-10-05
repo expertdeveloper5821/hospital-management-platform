@@ -35,3 +35,29 @@ export async function generateStaffIdCard(
     next(err);
   }
 }
+
+/**
+ * GET /api/public/staff-verification/:token — unauthenticated, read-only.
+ * Always 200 with the allow-listed result shape, so status codes can't be used
+ * as an existence oracle; `no-store` + `noindex` keep results out of caches
+ * and search engines.
+ */
+export async function verifyStaffIdCard(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await staffIdCardService.verify(req.params.token);
+
+    res.set({
+      'Cache-Control':   'no-store, max-age=0',
+      Pragma:            'no-cache',
+      'X-Robots-Tag':    'noindex, nofollow, noarchive',
+      'Referrer-Policy': 'no-referrer',
+    });
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) {
+    next(err);
+  }
+}

@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import {
   useListWardsQuery,
   useListBedsQuery,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
+  useDeleteAdmissionMutation,
   useAddProgressNoteMutation,
   useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,
@@ -15,6 +16,7 @@ import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/ap
 import { useListUsersQuery }    from '@/store/api/user.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
+import { useListPackagesQuery }    from '@/store/api/packages.api';
 import { useAppSelector }       from '@/store/hooks';
 import { UserRole }             from '@/store/types';
 import type { AdmissionResponse, WardResponse, PatientResponse, UserResponse, IPDVitals } from '@/store/types';
@@ -30,7 +32,6 @@ import { PatientFormModal } from '@/components/patients/patient-form-modal';
 import {
   Bed,
   PlusCircle,
-  Plus,
   RefreshCw,
   X,
   Search,
@@ -38,7 +39,12 @@ import {
   CheckCircle2,
   UserPlus,
   Printer,
+  Trash2,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
+import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
+import { autoFocusFirstFieldRef, handleEnterNavigation } from '@/lib/form-navigation';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,7 +63,7 @@ const PAYMENT_VIEW_ROLES: UserRole[] = [
 // Mirrors OPD's Vitals form (client/app/(dashboard)/opd/page.tsx) and
 // IPDService.updateAdmission's merge contract on the backend field-for-field:
 // weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>" mmHg),
-// sugar (mg/dL), body temperature (°F). Kept as controlled-input strings here
+// sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input strings here
 // (empty string = not entered) and converted to number|null only on submit —
 // see parseVitalsInputs.
 interface VitalsInputState {
@@ -66,10 +72,12 @@ interface VitalsInputState {
   bloodPressure:   string;
   sugar:           string;
   bodyTemperature: string;
+  spo2:            string;
+  pulse:           string;
 }
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
 };
 
 function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
@@ -80,61 +88,51 @@ function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
     bloodPressure:   vitals.bloodPressure   ?? '',
     sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+    spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
+    pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
   };
 }
 
 const IPD_BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
 
+// Per-field validation messages, keyed by the input they belong to so each
+// one renders directly below its own field rather than in the form banner.
+type VitalsErrors = Partial<Record<keyof VitalsInputState, string>>;
+
 // Converts the controlled-input strings into the partial vitals payload the
 // PATCH endpoint expects — an empty field becomes `null` (explicitly clears
 // that reading server-side, never leaves it untouched), matching the same
-// ranges the backend's vitals schema validates. Returns an error message
-// instead of a payload the moment any one field fails.
-function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<IPDVitals> } | { error: string } {
+// ranges the backend's vitals schema validates. Returns every failing field's
+// message instead of a payload when any field fails.
+function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<IPDVitals> } | { errors: VitalsErrors } {
   const vitals: Partial<IPDVitals> = {};
+  const errors: VitalsErrors = {};
 
-  const wt = inputs.weight.trim();
-  if (wt === '') vitals.weight = null;
-  else {
-    const n = Number(wt);
-    if (isNaN(n) || n < 0.5 || n > 500) return { error: 'Weight must be between 0.5 and 500 kg.' };
-    vitals.weight = n;
-  }
+  const numeric = (
+    key: 'weight' | 'height' | 'sugar' | 'bodyTemperature' | 'spo2' | 'pulse',
+    min: number, max: number, message: string,
+  ) => {
+    const raw = inputs[key].trim();
+    if (raw === '') { vitals[key] = null; return; }
+    const n = Number(raw);
+    if (isNaN(n) || n < min || n > max) errors[key] = message;
+    else vitals[key] = n;
+  };
 
-  const ht = inputs.height.trim();
-  if (ht === '') vitals.height = null;
-  else {
-    const n = Number(ht);
-    if (isNaN(n) || n < 20 || n > 300) return { error: 'Height must be between 20 and 300 cm.' };
-    vitals.height = n;
-  }
+  numeric('weight', 0.5, 500, 'Weight must be between 0.5 and 500 kg.');
+  numeric('height', 20, 300, 'Height must be between 20 and 300 cm.');
 
   const bp = inputs.bloodPressure.trim();
   if (bp === '') vitals.bloodPressure = null;
-  else {
-    if (!IPD_BLOOD_PRESSURE_PATTERN.test(bp)) {
-      return { error: 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.' };
-    }
-    vitals.bloodPressure = bp;
-  }
+  else if (!IPD_BLOOD_PRESSURE_PATTERN.test(bp)) errors.bloodPressure = 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.';
+  else vitals.bloodPressure = bp;
 
-  const sg = inputs.sugar.trim();
-  if (sg === '') vitals.sugar = null;
-  else {
-    const n = Number(sg);
-    if (isNaN(n) || n < 10 || n > 1000) return { error: 'Sugar must be between 10 and 1000 mg/dL.' };
-    vitals.sugar = n;
-  }
+  numeric('sugar', 10, 1000, 'Sugar must be between 10 and 1000 mg/dL.');
+  numeric('bodyTemperature', 80, 115, 'Body temperature must be between 80 and 115 °F.');
+  numeric('spo2', 50, 100, 'SpO2 must be between 50 and 100 %.');
+  numeric('pulse', 20, 250, 'Pulse must be between 20 and 250 bpm.');
 
-  const temp = inputs.bodyTemperature.trim();
-  if (temp === '') vitals.bodyTemperature = null;
-  else {
-    const n = Number(temp);
-    if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
-    vitals.bodyTemperature = n;
-  }
-
-  return { vitals };
+  return Object.keys(errors).length > 0 ? { errors } : { vitals };
 }
 
 // ─── PatientSearch ────────────────────────────────────────────────────────────
@@ -164,6 +162,43 @@ function PatientSearch({ value, onChange, onAddPatient }: PatientSearchProps) {
   );
 
   const results = data?.data ?? [];
+
+  // Keyboard navigation for the patient suggestions (same as OPD's New Visit
+  // search): -1 = nothing highlighted. Reset whenever the result set changes
+  // so a stale index never points at a different patient than the one the
+  // user saw highlighted.
+  const listboxId = useId();
+  const optionId  = (idx: number) => `${listboxId}-option-${idx}`;
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const suggestionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => { setHighlightedIndex(-1); }, [debouncedQ, data]);
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    suggestionRefs.current[highlightedIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlightedIndex]);
+
+  const listOpen = open && query.trim().length >= 2;
+
+  function selectPatient(p: PatientResponse) {
+    onChange(p);
+    setOpen(false);
+    setQuery('');
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!listOpen || debouncedQ.trim().length < 2 || isFetching || results.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i + 1) % results.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
+    } else if (e.key === 'Enter' && highlightedIndex >= 0 && highlightedIndex < results.length) {
+      // Prevent the surrounding admission form from submitting.
+      e.preventDefault();
+      selectPatient(results[highlightedIndex]);
+    }
+  }
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -205,24 +240,41 @@ function PatientSearch({ value, onChange, onAddPatient }: PatientSearchProps) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
+            onKeyDown={handleKeyDown}
+            role="combobox"
+            aria-expanded={listOpen}
+            aria-controls={listboxId}
+            aria-autocomplete="list"
+            aria-activedescendant={highlightedIndex >= 0 ? optionId(highlightedIndex) : undefined}
             className="pl-9"
           />
         </div>
 
-        {open && (query.trim().length >= 2) && (
-          <div className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto">
+        {listOpen && (
+          <div
+            id={listboxId}
+            role="listbox"
+            className="absolute z-10 w-full mt-1 rounded-md border bg-background shadow-lg max-h-60 overflow-y-auto"
+          >
             {isFetching ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">Searching…</div>
             ) : results.length === 0 ? (
               <div className="px-3 py-2 text-sm text-muted-foreground">No patients found.</div>
             ) : (
-              results.map((p) => (
+              results.map((p, idx) => (
                 <button
                   key={p.patientId}
+                  id={optionId(idx)}
+                  ref={(el) => { suggestionRefs.current[idx] = el; }}
                   type="button"
-                  className="w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left"
+                  role="option"
+                  aria-selected={idx === highlightedIndex}
+                  className={`w-full flex flex-col items-start px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-left ${
+                    idx === highlightedIndex ? 'bg-primary/10 ring-1 ring-inset ring-primary' : ''
+                  }`}
                   onMouseDown={(e) => e.preventDefault()} // prevent input blur before click
-                  onClick={() => { onChange(p); setOpen(false); setQuery(''); }}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  onClick={() => selectPatient(p)}
                 >
                   <span className="font-medium">{p.fullName}</span>
                   <span className="text-xs text-muted-foreground font-mono">
@@ -347,7 +399,13 @@ interface AdmissionPanelProps {
   onClose:       () => void;
   onUpdate:      (a: AdmissionResponse) => void;
   canEdit:       boolean;
-  canEditVitals: boolean; // DOCTOR, NURSE, HOSPITAL_ADMIN only — narrower than canEdit
+  canEditVitals: boolean; // DOCTOR, NURSE, HOSPITAL_ADMIN, RECEPTIONIST — narrower than canEdit
+  // RECEPTIONIST — may additionally correct the admission's Patient;
+  // mirrors PATIENT_EDIT_ROLES in ipd.controller.ts.
+  canEditPatient: boolean;
+  // RECEPTIONIST, ADMITTED admissions only — permanent delete (the backend
+  // releases the bed and cancels the admission's payment).
+  canDelete:     boolean;
   // HOSPITAL_ADMIN, this admission's assigned Doctor(s), or a Nurse on its
   // ward — mirrors the backend's per-admission check (IPDService
   // assertCanManageAdmission). Gates both Prescription edits and Discharge.
@@ -363,36 +421,56 @@ interface AdmissionPanelProps {
 
 function AdmissionPanel({
   admission, onClose, onUpdate,
-  canEdit, canEditVitals, canManageClinical, canDischarge, doctorMap,
+  canEdit, canEditVitals, canEditPatient, canDelete, canManageClinical, canDischarge, doctorMap,
   onDischarge, onNotes, canProgress, canViewPayment, canDownloadSummary,
 }: AdmissionPanelProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const [error, setError] = useState<string | null>(null);
+
+  // Receptionist-only patient correction — null means "unchanged".
+  const [editPatient,    setEditPatient]    = useState<PatientResponse | null>(null);
+  const [pickingPatient, setPickingPatient] = useState(false);
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteAdmission, { isLoading: deleting }] = useDeleteAdmissionMutation();
 
   // Prescription — edited in the Edit form (below Bed) by canManageClinical
   // users only; saved through its own RBAC-enforced endpoint on Save Changes.
   const [rxDraft, setRxDraft] = useState(admission.prescription ?? '');
   const [updatePrescription, { isLoading: savingRx }] = useUpdateAdmissionPrescriptionMutation();
 
-  const admissionDateStr = new Date(admission.admissionDate).toISOString().substring(0, 10);
-  // Skipped entirely for roles without payment visibility so no payment data is fetched for them.
+  // Look up the payment linked directly to this admission (referenceId) rather
+  // than guessing from patientId + admission date — stays correct after a
+  // patient correction and never surfaces another same-day payment. Skipped
+  // entirely for roles without payment visibility so no payment data is fetched for them.
   const { data: paymentData } = useListPaymentsQuery({
-    patientId: admission.patientId,
-    dateFrom:  admissionDateStr,
-    dateTo:    admissionDateStr,
-    limit:     10,
+    referenceType: 'IPD_ADMISSION',
+    referenceId:   admission.admissionId,
+    limit:         1,
   }, { skip: !canViewPayment });
   const admissionPayment = paymentData?.data?.[0] ?? null;
 
   // Edit state — initialised from current admission
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
-  const [editDoctors,    setEditDoctors]    = useState<UserResponse[]>([]);
-  const [editAddDoctorId, setEditAddDoctorId] = useState('');
+  // Pre-selected from the admission's current doctors (re-seeded on every enterEdit).
+  const [editDoctorIds,  setEditDoctorIds]  = useState<string[]>(admission.assignedDoctorIds ?? []);
   const [wardId,  setWardId]  = useState(admission.wardId);
   const [bedId,   setBedId]   = useState(admission.bedId);
-  // Vitals — editable by Doctor, Nurse and Hospital Admin only (canEditVitals);
-  // read-only for Receptionist/Admin even though they can edit ward/bed/doctors.
+  // Vitals — editable by Doctor, Nurse, Hospital Admin and Receptionist
+  // (canEditVitals); read-only for Admin even though they can edit ward/bed/doctors.
   const [vitalsForm, setVitalsForm] = useState<VitalsInputState>(vitalsToInputs(admission.vitals));
+  const [vitalsErrors, setVitalsErrors] = useState<VitalsErrors>({});
+
+  // Editing a field clears its own stale message; the rest stay until the
+  // next save re-validates.
+  const updateVital = (key: keyof VitalsInputState, value: string) => {
+    setVitalsForm((v) => ({ ...v, [key]: value }));
+    setVitalsErrors((errs) => (errs[key] ? { ...errs, [key]: undefined } : errs));
+  };
+  const vitalErrorProps = (key: keyof VitalsInputState, id: string) =>
+    vitalsErrors[key] ? { 'aria-invalid': true, 'aria-describedby': `${id}-error` } : {};
+  const vitalError = (key: keyof VitalsInputState, id: string) =>
+    vitalsErrors[key] ? <p id={`${id}-error`} role="alert" className="text-xs text-destructive">{vitalsErrors[key]}</p> : null;
 
   const { data: departmentsData } = useListDepartmentsQuery();
   const { data: doctorsPage }     = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
@@ -409,41 +487,73 @@ function AdmissionPanel({
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
 
-  // Picking a specific department drops any newly-picked doctor who doesn't
+  const doctorInDepartment = (id: string, departmentId: string) =>
+    !!allDoctors.find((d) => d.userId === id)?.departmentIds.includes(departmentId);
+
+  // Picking a specific department drops any assigned doctor who doesn't
   // belong to it. Changing away from the admission's saved department then
   // requires at least one doctor from the new one before Save is allowed —
   // the backend re-stamps departmentId from the doctors, so this keeps the
   // saved Department/Doctor pair consistent.
+  // Pruning runs in an effect (not the change handler) so it re-applies once
+  // the doctor list arrives — pruning against a still-loading, empty list
+  // would otherwise wrongly drop every assigned doctor. It only runs after a
+  // user-initiated change, so Edit mode opens with the admission's existing
+  // doctors preselected untouched (same as OPD's VisitPanel).
+  const [departmentTouched, setDepartmentTouched] = useState(false);
   function handleEditDepartmentChange(departmentId: string) {
     setSelectedDepartmentId(departmentId);
-    setEditAddDoctorId('');
-    if (departmentId) {
-      setEditDoctors((prev) => prev.filter((d) => d.departmentIds.includes(departmentId)));
-    }
+    setDepartmentTouched(true);
   }
+  useEffect(() => {
+    if (!departmentTouched || !selectedDepartmentId || !doctorsPage) return;
+    const doctors = doctorsPage.data ?? [];
+    setEditDoctorIds((prev) => {
+      const next = prev.filter((id) =>
+        doctors.find((d) => d.userId === id)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [departmentTouched, selectedDepartmentId, doctorsPage]);
   const departmentChanged = selectedDepartmentId !== (admission.departmentId ?? '');
   const departmentDoctorInvalid =
     !!selectedDepartmentId && departmentChanged && (
-      editDoctors.length === 0 ||
-      editDoctors.some((d) => !d.departmentIds.includes(selectedDepartmentId))
+      editDoctorIds.length === 0 ||
+      editDoctorIds.some((id) => !doctorInDepartment(id, selectedDepartmentId))
     );
 
   const [updateAdmission, { isLoading: saving }] = useUpdateAdmissionMutation();
 
   function enterEdit() {
     setSelectedDepartmentId(admission.departmentId ?? '');
-    setEditDoctors([]);
-    setEditAddDoctorId('');
+    setDepartmentTouched(false);
+    setEditDoctorIds(admission.assignedDoctorIds ?? []);
     setWardId(admission.wardId);
     setBedId(admission.bedId);
     setVitalsForm(vitalsToInputs(admission.vitals));
+    setVitalsErrors({});
     setRxDraft(admission.prescription ?? '');
+    setEditPatient(null);
+    setPickingPatient(false);
     setError(null);
     setMode('edit');
   }
 
+  async function handleDeleteConfirm() {
+    setError(null);
+    try {
+      await deleteAdmission(admission.admissionId).unwrap();
+      setShowDeleteConfirm(false);
+      onClose();
+    } catch (err: unknown) {
+      setShowDeleteConfirm(false);
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setError(msg ?? 'Failed to delete admission.');
+    }
+  }
+
   async function handleSave() {
     setError(null);
+    setVitalsErrors({});
 
     if (departmentDoctorInvalid) {
       setError(DEPARTMENT_DOCTOR_MESSAGE);
@@ -457,8 +567,19 @@ function AdmissionPanel({
       return;
     }
 
-    const body: { assignedDoctorIds?: string[]; wardId?: string; bedId?: string; vitals?: Partial<IPDVitals> } = {};
-    if (editDoctors.length > 0)              body.assignedDoctorIds = editDoctors.map((d) => d.userId);
+    const body: { patientId?: string; assignedDoctorIds?: string[]; wardId?: string; bedId?: string; vitals?: Partial<IPDVitals> } = {};
+    // Patient correction — Receptionist-only (the backend rejects it from every other role).
+    if (canEditPatient && editPatient && editPatient.patientId !== admission.patientId) {
+      body.patientId = editPatient.patientId;
+    }
+    // Only sent when the selection actually changed (order included — the
+    // first doctor drives the re-stamped departmentId). An empty selection is
+    // never sent, same as before pre-selection existed.
+    const currentDoctorIds = admission.assignedDoctorIds ?? [];
+    const doctorsChanged =
+      editDoctorIds.length !== currentDoctorIds.length ||
+      editDoctorIds.some((id, i) => id !== currentDoctorIds[i]);
+    if (doctorsChanged && editDoctorIds.length > 0) body.assignedDoctorIds = editDoctorIds;
     if (wardId !== admission.wardId)         body.wardId            = wardId;
     // Only include bedId when it's a non-empty, valid value different from current
     if (bedId && bedId !== admission.bedId)  body.bedId             = bedId;
@@ -468,8 +589,8 @@ function AdmissionPanel({
     // matches OPD's VisitPanel convention.
     if (canEditVitals) {
       const vitalsResult = parseVitalsInputs(vitalsForm);
-      if ('error' in vitalsResult) {
-        setError(vitalsResult.error);
+      if ('errors' in vitalsResult) {
+        setVitalsErrors(vitalsResult.errors);
         return;
       }
       body.vitals = vitalsResult.vitals;
@@ -482,7 +603,7 @@ function AdmissionPanel({
       return;
     }
 
-    const hasAdmissionChanges = !!(body.assignedDoctorIds || body.wardId || body.bedId || body.vitals);
+    const hasAdmissionChanges = !!(body.patientId || body.assignedDoctorIds || body.wardId || body.bedId || body.vitals);
     if (!hasAdmissionChanges && !prescriptionChanged) {
       setMode('view');
       return;
@@ -573,11 +694,13 @@ function AdmissionPanel({
               ))}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
-                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
-                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
-                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
+                {row('SpO2',             admission.vitals?.spo2            != null ? `${admission.vitals.spo2} %`    : null)}
                 {row('Body Temperature', admission.vitals?.bodyTemperature != null ? `${admission.vitals.bodyTemperature} °F` : null)}
+                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
+                {row('Pulse',            admission.vitals?.pulse           != null ? `${admission.vitals.pulse} bpm` : null)}
+                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
+                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
+                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
               </div>
               {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
               {canViewPayment && (
@@ -597,7 +720,39 @@ function AdmissionPanel({
           )}
 
           {mode === 'edit' && (
-            <div className="space-y-4">
+            // Formless edit section (saved via the footer button): same Enter-to-next
+            // and focus-on-open behaviour as <NavForm>.
+            <div className="space-y-4" ref={autoFocusFirstFieldRef} onKeyDown={handleEnterNavigation}>
+              {/* Patient — Receptionist-only correction (re-points the admission
+                  at the right patient). */}
+              {canEditPatient && (
+                <div className="space-y-1.5">
+                  <Label>Patient</Label>
+                  {editPatient ? (
+                    <PatientSearch value={editPatient} onChange={(p) => setEditPatient(p)} />
+                  ) : pickingPatient ? (
+                    <div className="flex gap-2">
+                      <div className="flex-1 min-w-0">
+                        <PatientSearch value={null} onChange={(p) => { setEditPatient(p); setPickingPatient(false); }} />
+                      </div>
+                      <Button type="button" variant="outline" className="shrink-0 h-10" onClick={() => setPickingPatient(false)}>
+                        Keep
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 rounded-md border px-3 py-2">
+                        <p className="text-sm font-medium truncate">{admission.fullName ?? admission.patientId}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{admission.patientId}</p>
+                      </div>
+                      <Button type="button" className="shrink-0 h-10" onClick={() => setPickingPatient(true)}>
+                        Change
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Department filter */}
               <div className="space-y-1.5">
                 <Label htmlFor="ap-dept">Department (filter doctors)</Label>
@@ -619,51 +774,15 @@ function AdmissionPanel({
 
               {/* Doctors */}
               <div className="space-y-1.5">
-                <Label>Assigned Doctors</Label>
-                {editDoctors.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {editDoctors.map((d) => (
-                      <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                        <span className="truncate min-w-0" title={d.name}>{d.name}</span>
-                        <button type="button" onClick={() => setEditDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <select
-                    value={editAddDoctorId}
-                    onChange={(e) => setEditAddDoctorId(e.target.value)}
-                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">— Add doctor —</option>
-                    {doctorList.filter((d) => !editDoctors.some((x) => x.userId === d.userId)).map((d) => (
-                      <option key={d.userId} value={d.userId}>{d.name}</option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    disabled={!editAddDoctorId}
-                    onClick={() => {
-                      const d = allDoctors.find((u) => u.userId === editAddDoctorId);
-                      if (d && !editDoctors.some((x) => x.userId === d.userId)) {
-                        setEditDoctors((prev) => [...prev, d]);
-                        setEditAddDoctorId('');
-                      }
-                    }}
-                    className="shrink-0 h-10"
-                  >
-                    <Plus className="h-4 w-4 mr-1.5" />
-                    Add Doctor
-                  </Button>
-                </div>
-                {admission.assignedDoctorIds?.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Current: {admission.assignedDoctorIds.map((id) => doctorMap[id] ?? id).join(', ')}
-                  </p>
-                )}
+                <Label id="ap-doctors-label">Assigned Doctors</Label>
+                <PeopleMultiSelect
+                  labelId="ap-doctors-label"
+                  noun="doctors"
+                  options={doctorList}
+                  getLabel={(id) => allDoctors.find((u) => u.userId === id)?.name ?? doctorMap[id] ?? id}
+                  selectedIds={editDoctorIds}
+                  onChange={setEditDoctorIds}
+                />
               </div>
 
               {/* Ward */}
@@ -673,6 +792,7 @@ function AdmissionPanel({
                   id="ap-ward"
                   value={wardId}
                   onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
+                  disabled={!!admission.packageId}
                   className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   {wards.map((w) => (
@@ -681,6 +801,11 @@ function AdmissionPanel({
                     </option>
                   ))}
                 </select>
+                {admission.packageId && (
+                  <p className="text-xs text-muted-foreground">
+                    Ward is fixed by the admission&apos;s package; only the bed can be changed.
+                  </p>
+                )}
               </div>
 
               {/* Bed */}
@@ -739,51 +864,81 @@ function AdmissionPanel({
                 </div>
               )}
 
-              {/* Vitals — Doctor, Nurse and Hospital Admin only; Receptionist/Admin
+              {/* Vitals — Doctor, Nurse, Hospital Admin and Receptionist; Admin
                   can edit ward/bed/doctors above but not vitals (canEditVitals). */}
               {canEditVitals && (
                 <div className="space-y-3 pt-2 border-t">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <Label htmlFor="ap-weight">Weight (kg)</Label>
+                      <Label htmlFor="ap-spo2">SpO2 (%)</Label>
                       <Input
-                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-                        value={vitalsForm.weight}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+                        id="ap-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
+                        value={vitalsForm.spo2}
+                        onChange={(e) => updateVital('spo2', e.target.value)}
+                        {...vitalErrorProps('spo2', 'ap-spo2')}
                       />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-height">Height (cm)</Label>
-                      <Input
-                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-                        value={vitalsForm.height}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-bp">Blood Pressure (mmHg)</Label>
-                      <Input
-                        id="ap-bp" type="text" placeholder="e.g. 120/80"
-                        value={vitalsForm.bloodPressure}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, bloodPressure: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-sugar">Sugar (mg/dL)</Label>
-                      <Input
-                        id="ap-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
-                        value={vitalsForm.sugar}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, sugar: e.target.value }))}
-                      />
+                      {vitalError('spo2', 'ap-spo2')}
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="ap-temp">Body Temperature (°F)</Label>
                       <Input
                         id="ap-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
                         value={vitalsForm.bodyTemperature}
-                        onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+                        onChange={(e) => updateVital('bodyTemperature', e.target.value)}
+                        {...vitalErrorProps('bodyTemperature', 'ap-temp')}
                       />
+                      {vitalError('bodyTemperature', 'ap-temp')}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-bp">Blood Pressure (mmHg)</Label>
+                      <Input
+                        id="ap-bp" type="text" placeholder="e.g. 120/80"
+                        value={vitalsForm.bloodPressure}
+                        onChange={(e) => updateVital('bloodPressure', e.target.value)}
+                        {...vitalErrorProps('bloodPressure', 'ap-bp')}
+                      />
+                      {vitalError('bloodPressure', 'ap-bp')}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-pulse">Pulse (bpm)</Label>
+                      <Input
+                        id="ap-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
+                        value={vitalsForm.pulse}
+                        onChange={(e) => updateVital('pulse', e.target.value)}
+                        {...vitalErrorProps('pulse', 'ap-pulse')}
+                      />
+                      {vitalError('pulse', 'ap-pulse')}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-sugar">Sugar (mg/dL)</Label>
+                      <Input
+                        id="ap-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
+                        value={vitalsForm.sugar}
+                        onChange={(e) => updateVital('sugar', e.target.value)}
+                        {...vitalErrorProps('sugar', 'ap-sugar')}
+                      />
+                      {vitalError('sugar', 'ap-sugar')}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-height">Height (cm)</Label>
+                      <Input
+                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+                        value={vitalsForm.height}
+                        onChange={(e) => updateVital('height', e.target.value)}
+                        {...vitalErrorProps('height', 'ap-height')}
+                      />
+                      {vitalError('height', 'ap-height')}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ap-weight">Weight (kg)</Label>
+                      <Input
+                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+                        value={vitalsForm.weight}
+                        onChange={(e) => updateVital('weight', e.target.value)}
+                        {...vitalErrorProps('weight', 'ap-weight')}
+                      />
+                      {vitalError('weight', 'ap-weight')}
                     </div>
                   </div>
                 </div>
@@ -820,6 +975,19 @@ function AdmissionPanel({
                     Discharge
                   </Button>
                 )}
+                {/* ADMITTED only — this footer never renders for a discharged
+                    admission, and the backend refuses it (409) as well. */}
+                {canDelete && (
+                  <Button
+                    variant="destructive"
+                    className="flex-1"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    {deleting ? '…' : 'Delete Admission'}
+                  </Button>
+                )}
               </div>
             )}
             {mode === 'edit' && (
@@ -850,6 +1018,33 @@ function AdmissionPanel({
           </div>
         )}
       </div>
+
+      {showDeleteConfirm && (
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4" onClick={(e) => e.stopPropagation()}>
+          <div role="alertdialog" aria-labelledby="delete-admission-title" className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <Trash2 className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h2 id="delete-admission-title" className="font-semibold">Delete Admission?</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This will permanently delete the IPD admission for{' '}
+                  <span className="font-medium text-foreground">{admission.fullName ?? admission.patientId}</span>{' '}
+                  ({admission.wardName} · Bed {admission.bedNumber}). The bed will be released and the
+                  admission&apos;s payment will be cancelled. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+                Keep Admission
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Yes, Delete Admission'}
+              </Button>
+            </div>
+          </div>
+        </DialogOverlay>
+      )}
     </DialogOverlay>
   );
 }
@@ -871,10 +1066,10 @@ type IPDPaymentMode = 'CASH' | 'UPI' | 'CARD';
 
 function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
   const [patient,              setPatient]              = useState<PatientResponse | null>(null);
+  const [packageId,            setPackageId]            = useState('');
   const [wardId,               setWardId]               = useState('');
   const [bedId,                setBedId]                = useState('');
   const [selectedDoctors,      setSelectedDoctors]      = useState<UserResponse[]>([]);
-  const [addDoctorId,          setAddDoctorId]          = useState('');
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [paymentAmount,        setPaymentAmount]        = useState('');
   const [paymentMode,          setPaymentMode]          = useState<IPDPaymentMode | ''>('');
@@ -884,15 +1079,46 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
 
   const { data: bedsData }      = useListBedsQuery(wardId, { skip: !wardId });
   const { data: departmentsData } = useListDepartmentsQuery();
+  const { data: packagesPage }  = useListPackagesQuery({ status: 'ACTIVE', limit: 20 });
   const { data: doctorsPage }   = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
 
   const availableBeds = bedsData?.filter((b) => !b.isOccupied) ?? [];
   const allBeds       = bedsData ?? [];
   const allDoctors    = doctorsPage?.data ?? [];
+  // Optional package: when chosen, its linked ward is auto-selected and
+  // locked, and only that ward's available beds can be picked.
+  const packages        = packagesPage?.data ?? [];
+  const selectedPackage = packages.find((p) => p.packageId === packageId) ?? null;
+  const packageWardMissing = !!selectedPackage
+    && (!selectedPackage.wardId || !wards.some((w) => w.wardId === selectedPackage.wardId));
+  const bedsToShow = selectedPackage ? availableBeds : allBeds;
+
+  function handlePackageChange(id: string) {
+    const pkg = packages.find((p) => p.packageId === id) ?? null;
+    setPackageId(id);
+    setBedId('');
+    // Clearing the package restores the manual ward/bed flow from scratch.
+    setWardId(pkg?.wardId ?? '');
+  }
   const departments   = departmentsData ?? [];
   const doctorList    = selectedDepartmentId
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
+
+  // Picking a specific department drops any selected doctor who doesn't
+  // belong to it and keeps the rest; "All Departments" keeps everyone.
+  // Pruning runs in an effect (same as AdmissionPanel's Edit form) so it waits
+  // for the doctor list — pruning against a still-loading, empty list would
+  // otherwise wrongly drop every selected doctor.
+  useEffect(() => {
+    if (!selectedDepartmentId || !doctorsPage) return;
+    const doctors = doctorsPage.data ?? [];
+    setSelectedDoctors((prev) => {
+      const next = prev.filter((sel) =>
+        doctors.find((d) => d.userId === sel.userId)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedDepartmentId, doctorsPage]);
 
   const [createAdmission,     { isLoading: admitting }]       = useCreateAdmissionMutation();
   const [createManualPayment, { isLoading: creatingPayment }] = useCreateManualPaymentMutation();
@@ -902,6 +1128,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
     e.preventDefault();
     setError(null);
     if (!patient) { setError('Select a patient.'); return; }
+    if (packageWardMissing) { setError('The selected package has no linked ward. Link a ward to the package or clear the package.'); return; }
     if (!wardId)  { setError('Select a ward.'); return; }
     if (!bedId)   { setError('Select a bed.'); return; }
     const amount = parseFloat(paymentAmount);
@@ -916,6 +1143,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
         wardId,
         bedId,
         ...(selectedDoctors.length ? { assignedDoctorIds: selectedDoctors.map((d) => d.userId) } : {}),
+        ...(selectedPackage ? { packageId: selectedPackage.packageId } : {}),
       }).unwrap();
       await createManualPayment({
         patientId:     patient.patientId,
@@ -948,13 +1176,37 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
 
             {/* Step 1 — Patient */}
             <div className="space-y-1.5">
               <Label>Patient</Label>
               <PatientSearch value={patient} onChange={setPatient} onAddPatient={() => setShowAddPatient(true)} />
+            </div>
+
+            {/* Optional — Package (locks the ward to the package's ward) */}
+            <div className="space-y-1.5">
+              <Label htmlFor="na-package">Package (optional)</Label>
+              <select
+                id="na-package"
+                value={packageId}
+                onChange={(e) => handlePackageChange(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">No package</option>
+                {packages.map((p) => (
+                  <option key={p.packageId} value={p.packageId}>
+                    {p.name}{p.wardName ? ` — ${p.wardName}` : ' (no ward linked)'}
+                  </option>
+                ))}
+              </select>
+              {packageWardMissing && (
+                <p className="flex items-center gap-1 text-xs text-destructive">
+                  <AlertTriangle className="h-3 w-3" />
+                  This package has no linked ward. Link a ward to the package or clear the package.
+                </p>
+              )}
             </div>
 
             {/* Step 2 — Ward */}
@@ -964,6 +1216,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
                 id="na-ward"
                 value={wardId}
                 onChange={(e) => { setWardId(e.target.value); setBedId(''); }}
+                disabled={!!selectedPackage}
                 required
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
@@ -980,12 +1233,17 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             {wardId && (
               <div className="space-y-1.5">
                 <Label>Bed</Label>
-                {allBeds.length === 0 ? (
+                {selectedPackage && bedsData && availableBeds.length === 0 ? (
+                  <p className="flex items-center gap-1 text-sm text-destructive">
+                    <AlertTriangle className="h-3 w-3" />
+                    No available beds in this package&apos;s ward.
+                  </p>
+                ) : allBeds.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No beds in this ward yet.</p>
                 ) : (
                   <>
                     <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-3">
-                      {allBeds.map((b) => {
+                      {bedsToShow.map((b) => {
                         const isSelected = bedId === b.bedId;
                         const isAvailable = !b.isOccupied;
                         return (
@@ -1030,7 +1288,7 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
               <select
                 id="na-dept"
                 value={selectedDepartmentId}
-                onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+                onChange={(e) => setSelectedDepartmentId(e.target.value)}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— All Departments —</option>
@@ -1042,46 +1300,20 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
 
             {/* Step 5 — Doctors (optional) */}
             <div className="space-y-1.5">
-              <Label>Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              {selectedDoctors.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {selectedDoctors.map((d) => (
-                    <span key={d.userId} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                      <span className="truncate min-w-0" title={d.name}>{d.name}</span>
-                      <button type="button" onClick={() => setSelectedDoctors((prev) => prev.filter((x) => x.userId !== d.userId))} className="ml-0.5 shrink-0 hover:text-destructive">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-2">
-                <select
-                  value={addDoctorId}
-                  onChange={(e) => setAddDoctorId(e.target.value)}
-                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">— Add doctor —</option>
-                  {doctorList.filter((d) => !selectedDoctors.some((x) => x.userId === d.userId)).map((d) => (
-                    <option key={d.userId} value={d.userId}>{d.name}</option>
-                  ))}
-                </select>
-                <Button
-                  type="button"
-                  disabled={!addDoctorId}
-                  onClick={() => {
-                    const d = allDoctors.find((u) => u.userId === addDoctorId);
-                    if (d && !selectedDoctors.some((x) => x.userId === d.userId)) {
-                      setSelectedDoctors((prev) => [...prev, d]);
-                      setAddDoctorId('');
-                    }
-                  }}
-                  className="shrink-0 h-10"
-                >
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Add Doctor
-                </Button>
-              </div>
+              <Label id="na-doctors-label">Assigned Doctors <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <PeopleMultiSelect
+                labelId="na-doctors-label"
+                noun="doctors"
+                options={doctorList}
+                getLabel={(id) => selectedDoctors.find((d) => d.userId === id)?.name ?? id}
+                selectedIds={selectedDoctors.map((d) => d.userId)}
+                onChange={(ids) => setSelectedDoctors(
+                  ids.flatMap((id) => {
+                    const d = selectedDoctors.find((x) => x.userId === id) ?? allDoctors.find((x) => x.userId === id);
+                    return d ? [d] : [];
+                  }),
+                )}
+              />
             </div>
 
             {/* Step 6 — Payment */}
@@ -1149,12 +1381,12 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
             </Button>
             <Button
               type="submit"
-              disabled={isLoading || !patient || !wardId || !bedId}
+              disabled={isLoading || !patient || !wardId || !bedId || packageWardMissing}
             >
               {isLoading ? 'Admitting…' : 'Admit Patient'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
     {showAddPatient && (
@@ -1235,7 +1467,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
 
         {/* Add note — doctors only */}
         {canAdd && admission.status === 'ADMITTED' && (
-          <form onSubmit={handleSubmit} className="border-t px-6 py-4 space-y-3 shrink-0">
+          <NavForm onSubmit={handleSubmit} className="border-t px-6 py-4 space-y-3 shrink-0">
             <Label htmlFor="pn-note">New Note</Label>
             <RichTextEditor
               id="pn-note"
@@ -1251,7 +1483,7 @@ function NotesModal({ admission, canAdd, doctorMap, onClose }: NotesModalProps) 
                 {isLoading ? 'Saving…' : 'Add Note'}
               </Button>
             </div>
-          </form>
+          </NavForm>
         )}
       </div>
     </DialogOverlay>
@@ -1362,6 +1594,8 @@ function DischargeNotesModal({ admission, onSubmit, onCancel, loading, error }: 
 
 // ─── Admissions Tab ───────────────────────────────────────────────────────────
 
+const IPD_ADMISSIONS_PAGE_SIZE = 10;
+
 function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] }) {
   const userId = useAppSelector((s) => s.auth.profile?.userId);
   const nurseHasNoWard = role === UserRole.NURSE && !wards.some((w) => w.assignedNurseIds.includes(userId ?? ''));
@@ -1387,10 +1621,18 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const { data, isLoading, isFetching, refetch } = useListAdmissionsQuery({
     status: filterStatus,
     page,
-    limit: 10,
+    limit: IPD_ADMISSIONS_PAGE_SIZE,
     ...(filterWard      ? { wardId: filterWard }          : {}),
     ...(debouncedSearch ? { search: debouncedSearch }     : {}),
   });
+
+  // An admission removed from the last page (discharge/delete) can leave
+  // `page` past the end — step back so the table never sits on an empty page.
+  // Skipped while a fetch is in flight so a stale previous-args result never
+  // drives the clamp.
+  useEffect(() => {
+    if (!isFetching && data && page > 1 && page > data.totalPages) setPage(Math.max(1, data.totalPages));
+  }, [isFetching, data, page]);
 
   // Fetch all doctors once so we can resolve names in the table and notes modal
   const { data: doctorsPage } = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
@@ -1412,11 +1654,16 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
     role === UserRole.HOSPITAL_ADMIN ||
     role === UserRole.ADMIN;
   // Narrower than canEdit — mirrors the backend's VITALS_EDITABLE_ROLES gate
-  // (ipd.controller.ts): Receptionist/Admin can edit ward/bed/doctors but not vitals.
+  // (ipd.controller.ts): Admin can edit ward/bed/doctors but not vitals.
   const canEditVitals =
     role === UserRole.DOCTOR ||
     role === UserRole.NURSE ||
-    role === UserRole.HOSPITAL_ADMIN;
+    role === UserRole.HOSPITAL_ADMIN ||
+    role === UserRole.RECEPTIONIST;
+  // Receptionist: may additionally correct the Patient, and may delete an
+  // ADMITTED admission — mirrors ipd.controller.ts / ipd.routes.ts.
+  const canEditPatient = role === UserRole.RECEPTIONIST;
+  const canDelete      = role === UserRole.RECEPTIONIST;
   // Per-admission — mirrors the backend's assertCanManageAdmission
   // (ipd.service.ts): Hospital Admin, a Doctor in assignedDoctorIds, or a
   // Nurse on the admission ward's roster. Gates Prescription edits and Discharge.
@@ -1433,8 +1680,13 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
   const canDownloadSummary = DISCHARGE_SUMMARY_DOWNLOAD_ROLES.includes(role);
 
   const admissions = data?.data ?? [];
-  const total      = data?.total      ?? 0;
+  const total      = data?.total      ?? admissions.length;
   const totalPages = data?.totalPages ?? 1;
+  // Upper bound counts the rows actually returned, so the offline-cache
+  // fallback (all cached matches on one page) still reads "1–N of N".
+  const rangeStart = total === 0 ? 0 : (page - 1) * IPD_ADMISSIONS_PAGE_SIZE + 1;
+  const rangeEnd   = total === 0 ? 0 : Math.min((page - 1) * IPD_ADMISSIONS_PAGE_SIZE + admissions.length, total);
+  const serialStart = serialOffset(data, page, IPD_ADMISSIONS_PAGE_SIZE);
 
   // Step 1 — Confirm Discharge only advances to the notes step; nothing is
   // saved until the discharge summary notes are submitted.
@@ -1470,11 +1722,11 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Patient ID search */}
+          {/* UHID search */}
           <div className="relative flex-1 min-w-[160px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search by patient name or ID…"
+              placeholder="Search by patient name or UHID…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
               className="h-9 pl-8 text-sm w-full"
@@ -1606,6 +1858,7 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/50">
                   <tr>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Ward / Bed</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Doctor</th>
@@ -1615,8 +1868,9 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {admissions.map((a) => (
+                  {admissions.map((a, idx) => (
                     <tr key={a.admissionId} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3 max-w-[180px]">
                         <div className="font-medium truncate" title={(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}>
                           {(a as AdmissionResponse & { fullName?: string | null }).fullName ?? a.patientId}
@@ -1707,18 +1961,27 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && !searchQ && (
+      {/* Pagination + count */}
+      {data && !isFetching && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
-          <span>Page {page} of {totalPages} — {total} admissions</span>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </Button>
-            <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
-              Next
-            </Button>
-          </div>
+          <span>
+            {total === 0
+              ? 'No admissions'
+              : `Showing ${rangeStart}–${rangeEnd} of ${total} admission${total !== 1 ? 's' : ''}`}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">
+                {page} / {totalPages}
+              </span>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1731,6 +1994,8 @@ function AdmissionsTab({ role, wards }: { role: UserRole; wards: WardResponse[] 
           onUpdate={(updated) => setViewFor(updated)}
           canEdit={canEdit}
           canEditVitals={canEditVitals}
+          canEditPatient={canEditPatient}
+          canDelete={canDelete && viewFor.status === 'ADMITTED'}
           canManageClinical={canManageAdmission(viewFor)}
           canDischarge={canManageAdmission(viewFor)}
           canProgress={canProgress}

@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { cn } from '@/lib/utils';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 import {
   Users,
   RefreshCw,
@@ -28,6 +29,7 @@ import {
   ChevronsUpDown,
   Search,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -125,7 +127,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cu-name">Full Name</Label>
@@ -214,7 +216,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
               {isLoading ? 'Creating…' : 'Create User'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -299,6 +301,7 @@ function UserTableSkeleton() {
     <>
       {Array.from({ length: 5 }).map((_, i) => (
         <tr key={i} className="animate-pulse">
+          <td className="px-4 py-3"><div className="h-4 w-6 bg-muted rounded" /></td>
           <td className="px-4 py-3">
             <div className="h-4 w-32 bg-muted rounded" />
             <div className="h-3 w-24 bg-muted/60 rounded mt-1" />
@@ -369,6 +372,7 @@ function UsersTab() {
   const totalPages = Math.ceil(total / limit);
   const rangeStart = total === 0 ? 0 : (page - 1) * limit + 1;
   const rangeEnd   = Math.min(page * limit, total);
+  const serialStart = serialOffset(data, page, limit);
 
   function handleSortClick(field: SortByField) {
     if (sortBy === field) {
@@ -583,6 +587,7 @@ function UsersTab() {
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/50">
                   <tr>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left">
                       <SortHeader label="Name" field="name" current={sortState} onClick={handleSortClick} />
                     </th>
@@ -600,8 +605,9 @@ function UsersTab() {
                 <tbody className="divide-y">
                   {isLoading
                     ? <UserTableSkeleton />
-                    : users.map((user) => (
+                    : users.map((user, idx) => (
                         <tr key={user.userId} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                           <td className="px-4 py-3 max-w-[200px]">
                             <div className="font-medium truncate" title={user.name}>{user.name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{user.userId}</div>

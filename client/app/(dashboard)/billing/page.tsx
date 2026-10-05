@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useListChargesQuery, useAddChargeMutation, useCancelChargeMutation, useMarkChargePaidMutation } from '@/store/api/charges.api';
 import { useListLabTestTypesQuery } from '@/store/api/lab.api';
+import { useLazyGetReceiptUrlQuery } from '@/store/api/payment.api';
 import { useAppSelector } from '@/store/hooks';
 import type { ChargeCategory, ChargeStatus } from '@/store/types';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,10 @@ import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { todayLocalISO, clampToToday } from '@/lib/date';
 import { cn, toTitleCase } from '@/lib/utils';
 import { Plus, X } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
+
+// Backend caps charges list pages at 20.
+const CHARGES_PAGE_SIZE = 20;
 
 const CATEGORIES: ChargeCategory[] = [
   'CONSULTATION', 'PROCEDURE', 'LAB_TEST', 'MEDICATION', 'ROOM', 'NURSING', 'PACKAGE', 'OTHER',
@@ -24,6 +29,36 @@ const STATUS_STYLES: Record<ChargeStatus, string> = {
   UNPAID:    'bg-amber-100 text-amber-800 ring-amber-600/20',
   CANCELLED: 'bg-red-100 text-red-800 ring-red-600/20',
 };
+
+// Same flow as the Lab/Payments receipt buttons: fetch a short-lived
+// pre-signed URL for the charge payment's stored receipt PDF and open it.
+function ChargeReceiptButton({ paymentId }: { paymentId: string }) {
+  const [trigger, { isFetching }] = useLazyGetReceiptUrlQuery();
+  const [err, setErr] = useState(false);
+
+  async function handleDownload() {
+    setErr(false);
+    try {
+      const url = await trigger(paymentId).unwrap();
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setErr(true);
+    }
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7 px-2 text-xs"
+      disabled={isFetching}
+      onClick={handleDownload}
+      title={err ? 'Receipt not available.' : undefined}
+    >
+      {isFetching ? 'Loading…' : err ? 'Receipt unavailable' : 'Receipt'}
+    </Button>
+  );
+}
 
 function ChargeStatusBadge({ status }: { status: ChargeStatus }) {
   return (
@@ -68,9 +103,13 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
     setError(null);
 
     const parsedAmount = Number(amount);
-    if (!patientId.trim())    { setError('Patient ID is required.'); return; }
+    if (!patientId.trim())    { setError('UHID is required.'); return; }
     if (!description.trim())  { setError('Description is required.'); return; }
-    if (!Number.isFinite(parsedAmount) || parsedAmount < 0.01) {
+    // A Lab Test may be free (₹0) — it is then marked Paid with a ₹0 receipt.
+    if (isLabTest && (!amount.trim() || !Number.isFinite(parsedAmount) || parsedAmount < 0)) {
+      setError('Amount must be ₹0 or more.'); return;
+    }
+    if (!isLabTest && (!Number.isFinite(parsedAmount) || parsedAmount < 0.01)) {
       setError('Amount must be at least ₹0.01.'); return;
     }
     const selectedTestType = testTypes?.find((t) => t.id === testTypeId);
@@ -91,7 +130,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
       // The billing list refreshes automatically via invalidated cache tags.
       onClose();
     } catch {
-      setError('Failed to add charge. Check the Patient ID and try again.');
+      setError('Failed to add charge. Check the UHID and try again.');
     }
   }
 
@@ -115,10 +154,10 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <NavForm onSubmit={handleSubmit} className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="add-patient">Patient ID</Label>
+              <Label htmlFor="add-patient">UHID</Label>
               <Input
                 id="add-patient"
                 value={patientId}
@@ -163,7 +202,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
               <Input
                 id="add-amount"
                 type="number"
-                min="0.01"
+                min={isLabTest ? '0' : '0.01'}
                 step="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
@@ -190,7 +229,7 @@ function AddChargeModal({ onClose }: { onClose: () => void }) {
               {isLoading ? 'Adding…' : 'Add Charge'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -213,16 +252,47 @@ export default function BillingPage() {
   const [addedBy, setAddedBy]       = useState('');
   const [page, setPage]             = useState(1);
   const [showAddModal, setShowAddModal] = useState(false);
+  // Free-text filters are debounced (300ms) so typing doesn't fire a request
+  // per keystroke; a new value always starts from page 1.
+  const [debouncedPatientId, setDebouncedPatientId] = useState('');
+  const [debouncedAddedBy, setDebouncedAddedBy]     = useState('');
+  // One timer per field, so editing one never cancels the other's pending update.
+  const debounceRefs = useRef<Partial<Record<'patientId' | 'addedBy', ReturnType<typeof setTimeout>>>>({});
 
-  const { data, isLoading, isError } = useListChargesQuery({
-    patientId:   patientId || undefined,
+  function handleTextFilterChange(field: 'patientId' | 'addedBy', value: string) {
+    if (field === 'patientId') setPatientId(value); else setAddedBy(value);
+    clearTimeout(debounceRefs.current[field]);
+    debounceRefs.current[field] = setTimeout(() => {
+      if (field === 'patientId') setDebouncedPatientId(value.trim()); else setDebouncedAddedBy(value.trim());
+      setPage(1);
+    }, 300);
+  }
+  useEffect(() => () => { Object.values(debounceRefs.current).forEach(clearTimeout); }, []);
+
+  const { data, isLoading, isFetching, isError } = useListChargesQuery({
+    patientId:   debouncedPatientId || undefined,
     category:    category  || undefined,
     startDate:   startDate ? clampToToday(startDate) : undefined,
     endDate:     endDate   ? clampToToday(endDate)   : undefined,
-    addedByName: addedBy   || undefined,
+    addedByName: debouncedAddedBy   || undefined,
     page,
-    limit: 20,
+    limit: CHARGES_PAGE_SIZE,
   });
+
+  const charges    = data?.data ?? [];
+  const total      = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 0;
+  // Derived from the response rather than local state: an offline cache read
+  // returns everything matching as a single page (page 1, totalPages 1).
+  const rangeStart = total === 0 || !data ? 0 : (data.page - 1) * data.limit + 1;
+  const rangeEnd   = rangeStart === 0 ? 0 : rangeStart + charges.length - 1;
+  const hasFilters = !!(debouncedPatientId || category || startDate || endDate || debouncedAddedBy);
+
+  // A shrinking result set would otherwise leave `page` past the end and
+  // render an empty page.
+  useEffect(() => {
+    if (!isFetching && data && page > Math.max(1, totalPages)) setPage(Math.max(1, totalPages));
+  }, [isFetching, data, page, totalPages]);
 
   const canManageCharge = ['HOSPITAL_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'RECEPTIONIST'].includes(profile?.role ?? '');
   const canAddCharge = canManageCharge;
@@ -247,8 +317,8 @@ export default function BillingPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div>
-          <Label>Patient ID</Label>
-          <Input value={patientId} onChange={e => { setPatientId(e.target.value); setPage(1); }} placeholder="PAT-XXXXXXXX" />
+          <Label>UHID</Label>
+          <Input value={patientId} onChange={e => handleTextFilterChange('patientId', e.target.value)} placeholder="PAT-XXXXXXXX" />
         </div>
         <div>
           <Label>Category</Label>
@@ -263,7 +333,7 @@ export default function BillingPage() {
         </div>
         <div>
           <Label>Added By</Label>
-          <Input value={addedBy} onChange={e => { setAddedBy(e.target.value); setPage(1); }} placeholder="Staff name" />
+          <Input value={addedBy} onChange={e => handleTextFilterChange('addedBy', e.target.value)} placeholder="Staff name" />
         </div>
         <div>
           <Label>Start Date</Label>
@@ -277,10 +347,14 @@ export default function BillingPage() {
 
       {isLoading && <p className="text-muted-foreground">Loading charges…</p>}
       {isError   && <p className="text-red-600">Failed to load charges.</p>}
-      {data && data.data.length === 0 && <p className="text-muted-foreground">No charges found.</p>}
+      {data && charges.length === 0 && !isFetching && (
+        <p className="text-muted-foreground">
+          {hasFilters ? 'No charges match your filters.' : 'No charges found.'}
+        </p>
+      )}
 
       <div className="space-y-2">
-        {data?.data.map((charge) => (
+        {charges.map((charge) => (
           <div key={charge.chargeId} className="border rounded p-3 flex items-start justify-between text-sm">
             <div className="space-y-0.5">
               <p className="font-medium">{charge.description}</p>
@@ -288,10 +362,18 @@ export default function BillingPage() {
               <p className="text-muted-foreground">
                 {new Date(charge.createdAt).toLocaleDateString()} · Added by {charge.addedByName ?? 'Unknown'}
               </p>
+              {charge.labRequestKind && (
+                <p className="text-muted-foreground">
+                  {toTitleCase(charge.labRequestKind)} request sent to Lab{charge.testTypeName ? ` · ${charge.testTypeName}` : ''}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="font-medium">₹{charge.amount.toFixed(2)}</span>
               <ChargeStatusBadge status={charge.status} />
+              {charge.status === 'PAID' && charge.paymentId && charge.receiptAvailable && (
+                <ChargeReceiptButton paymentId={charge.paymentId} />
+              )}
               {canManageCharge && charge.status === 'UNPAID' && (
                 <>
                   <Button
@@ -319,11 +401,31 @@ export default function BillingPage() {
         ))}
       </div>
 
-      {data && data.totalPages > 1 && (
-        <div className="flex gap-2 items-center">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
-          <span className="text-sm">{page} / {data.totalPages}</span>
-          <Button variant="outline" size="sm" disabled={page >= data.totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+      {/* Pagination + count */}
+      {data && total > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>Showing {rangeStart}–{rangeEnd} of {total} charge{total !== 1 ? 's' : ''}</span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">{page} / {totalPages}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || isFetching}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

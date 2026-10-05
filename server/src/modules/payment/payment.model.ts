@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
-import { PaymentMethod, PaymentStatus } from './payment.types';
+import { PaymentMethod, PaymentStatus, LAB_PAYMENT_REFERENCE_TYPES } from './payment.types';
 import { encryptedFieldsPlugin, wrapModelBulkWrite } from '../../shared/utils/encrypted-fields.plugin';
 import { EncryptionKeyPurpose } from '../../shared/utils/field-encryption';
 
@@ -35,7 +35,10 @@ const PaymentSchema = new Schema<IPayment>(
     tenantId:          { type: String, required: true, index: true },
     patientId:         { type: String, required: true },
     fullName:          { type: String, required: false },
-    amount:            { type: Number, required: true, min: 0.01 },
+    // min 0, not 0.01: a free (₹0) Billing LAB_TEST charge records a ₹0
+    // COMPLETED payment so the test has a receipt. Every client-facing payment
+    // schema (payment.types.ts / lab.types.ts) still requires a positive amount.
+    amount:            { type: Number, required: true, min: 0 },
     paymentMethod:     { type: String, required: true, enum: Object.values(PaymentMethod) },
     description:       { type: String, required: true, trim: true },
     status:            { type: String, required: true, enum: Object.values(PaymentStatus), default: PaymentStatus.PENDING },
@@ -56,6 +59,25 @@ PaymentSchema.index({ tenantId: 1, paymentMethod: 1 });
 PaymentSchema.index({ tenantId: 1, createdAt: 1 });
 PaymentSchema.index({ tenantId: 1, referenceType: 1, referenceId: 1 });
 PaymentSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+
+// Race-safety backstop for Lab payment collection: at most one COMPLETED
+// payment per Pathology/Radiology request. PaymentService.createManualPayment's
+// pre-check is the friendly 409; this index is the final arbiter under
+// concurrent collects (its E11000 is mapped to a 409 there too). Key order
+// differs from the non-unique reference index above so the two never share a
+// key pattern. New deployments pick it up via Mongoose's dev-time autoIndex;
+// production (autoIndex disabled) needs `npm run migrate:lab-payment-index`.
+PaymentSchema.index(
+  { tenantId: 1, referenceId: 1, referenceType: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status:        PaymentStatus.COMPLETED,
+      referenceType: { $in: [...LAB_PAYMENT_REFERENCE_TYPES] },
+    },
+    name: 'uniq_completed_lab_payment_per_request',
+  },
+);
 
 // ─── Sensitive free-text / reference encryption at rest (AES-256-GCM) ────────
 // `description` (free text — may embed visit/procedure/charge context) and

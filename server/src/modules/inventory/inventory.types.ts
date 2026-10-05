@@ -64,6 +64,9 @@ export type UpdateThresholdInput = z.infer<typeof UpdateThresholdSchema>;
 // ─── List query ───────────────────────────────────────────────────────────────
 export const ListInventoryQuerySchema = z.object({
   category:  z.string().trim().min(1).optional(),
+  // Free-text search over name/category. A blank value (e.g. a cleared search
+  // box) means "no search" rather than a 400.
+  search:    z.string().trim().max(100).optional().transform((v) => v || undefined),
   lowStock:  z.coerce.boolean().optional(),
   page:      z.coerce.number().int().min(1).default(1),
   limit:     z.coerce.number().int().min(1).max(100).default(20),

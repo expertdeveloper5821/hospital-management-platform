@@ -22,6 +22,8 @@ import {
   editRadiologyRequest,
   deleteRadiologyRequest,
   listTestTypes,
+  collectPathologyPayment,
+  collectRadiologyPayment,
 } from './lab.controller';
 
 const router = express.Router();
@@ -51,13 +53,13 @@ router.post(
 
 router.get(
   '/pathology',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.MANAGER),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.MANAGER, UserRole.RECEPTIONIST),
   listPathologyRequests,
 );
 
 router.get(
   '/pathology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   getPathologyRequest,
 );
 
@@ -94,13 +96,13 @@ router.post(
 
 router.get(
   '/radiology',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   listRadiologyRequests,
 );
 
 router.get(
   '/radiology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   getRadiologyRequest,
 );
 
@@ -124,6 +126,23 @@ router.patch(
   requireRole(UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   radiologyUpload.single('report'),
   uploadRadiologyReport,
+);
+
+// ─── Payment collection (Lab section) ─────────────────────────────────────────
+// Online-only (deliberately no idempotencyGuard / offline outbox policy):
+// duplicate and concurrent collects are rejected with 409 by the payments
+// collection's partial unique index. Receipt download reuses
+// GET /api/payments/:paymentId/receipt.
+router.post(
+  '/pathology/:requestId/payment',
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN),
+  collectPathologyPayment,
+);
+
+router.post(
+  '/radiology/:requestId/payment',
+  requireRole(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN),
+  collectRadiologyPayment,
 );
 
 // ─── Test types (Billing → Add Charge, category LAB_TEST) ─────────────────────

@@ -326,7 +326,7 @@ describe('IPDService — example-based', () => {
 
     test('allows a Nurse assigned to the admission ward', async () => {
       mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
-      mockIpdRepo.findWardById.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['nurse-1'] } as never);
+      mockIpdRepo.findWardByIdIncludingDeleted.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['nurse-1'] } as never);
       mockIpdRepo.updateStatus.mockResolvedValue({ ...BASE_ADMISSION, status: AdmissionStatus.DISCHARGED, dischargeDate: new Date() } as never);
 
       await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'nurse-1', role: UserRole.NURSE }))
@@ -343,7 +343,7 @@ describe('IPDService — example-based', () => {
 
     test('rejects a Nurse not on the admission ward roster', async () => {
       mockIpdRepo.findById.mockResolvedValue(BASE_ADMISSION as never);
-      mockIpdRepo.findWardById.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['someone-else'] } as never);
+      mockIpdRepo.findWardByIdIncludingDeleted.mockResolvedValue({ ...BASE_WARD, assignedNurseIds: ['someone-else'] } as never);
 
       await expect(service.dischargePatient('adm-uuid-001', TENANT_ID, DISCHARGE_INPUT, { userId: 'nurse-1', role: UserRole.NURSE }))
         .rejects.toThrow(ForbiddenError);

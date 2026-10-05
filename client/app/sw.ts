@@ -9,7 +9,7 @@
 // sync path. The Background Sync handler below is a pure relay: it only
 // tells open tabs "connectivity may be back," never runs any sync itself.
 import type { PrecacheEntry, RuntimeCaching, SerwistGlobalConfig } from 'serwist';
-import { CacheFirst, ExpirationPlugin, NetworkFirst, Serwist, StaleWhileRevalidate } from 'serwist';
+import { CacheFirst, ExpirationPlugin, NetworkFirst, NetworkOnly, Serwist, StaleWhileRevalidate } from 'serwist';
 import { APP_SHELL_ROUTES, APP_SHELL_CACHE_NAME } from '../lib/offline/shell-routes';
 
 declare global {
@@ -37,6 +37,14 @@ declare const self: ServiceWorkerGlobalScope;
 const APP_SHELL_ROUTES_SET = new Set<string>(APP_SHELL_ROUTES);
 
 const APP_SHELL_RUNTIME_CACHING: RuntimeCaching[] = [
+  {
+    // Public Staff ID Card QR verification page — explicitly never cached, so
+    // a revoked/rotated card can't be shown from a stale copy. Listed FIRST so
+    // no later rule can ever match it. (Its API call goes cross-origin to
+    // /api/public/staff-verification, which nothing here intercepts either.)
+    matcher: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith('/verify-staff'),
+    handler: new NetworkOnly(),
+  },
   {
     matcher: /\/_next\/static\/.+\.js$/i,
     handler: new CacheFirst({

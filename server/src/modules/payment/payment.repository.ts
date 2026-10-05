@@ -1,3 +1,4 @@
+import { ClientSession } from 'mongoose';
 import { PaymentModel, IPayment } from './payment.model';
 import {
   PaymentMethod, PaymentStatus, PaymentReferenceType,
@@ -67,6 +68,30 @@ export class PaymentRepository {
   ): Promise<IPayment | null> {
     assertDbConnected();
     return PaymentModel.findOne({ tenantId, referenceType, referenceId });
+  }
+
+  async findCompletedByReference(
+    tenantId:      string,
+    referenceType: string,
+    referenceId:   string,
+  ): Promise<IPayment | null> {
+    assertDbConnected();
+    return PaymentModel.findOne({ tenantId, referenceType, referenceId, status: PaymentStatus.COMPLETED });
+  }
+
+  // Batch lookup for list views (e.g. a page of lab requests). Projects out
+  // the encrypted description/transactionId — callers only need the summary.
+  async findCompletedByReferences(
+    tenantId:      string,
+    referenceType: string,
+    referenceIds:  string[],
+  ): Promise<IPayment[]> {
+    assertDbConnected();
+    if (referenceIds.length === 0) return [];
+    return PaymentModel.find(
+      { tenantId, referenceType, referenceId: { $in: referenceIds }, status: PaymentStatus.COMPLETED },
+      { paymentId: 1, referenceType: 1, referenceId: 1, amount: 1, paymentMethod: 1, receiptS3Key: 1, createdAt: 1, updatedAt: 1 },
+    );
   }
 
   async findByFilters(
@@ -195,6 +220,35 @@ export class PaymentRepository {
       { $set: fields },
       { new: true },
     );
+  }
+
+  // Cancels every still-active (COMPLETED / PENDING) payment linked to one
+  // reference — used when that referenced record is removed (OPD visit
+  // delete). The record itself is kept for history; CANCELLED is excluded by
+  // every revenue/validity query (they all filter status COMPLETED). Takes the
+  // caller's session so it commits/aborts together with the caller's write.
+  // Returns the payments as they were before cancellation (for the audit log).
+  async cancelActiveByReference(
+    tenantId:      string,
+    referenceType: PaymentReferenceType,
+    referenceId:   string,
+    session:       ClientSession,
+  ): Promise<IPayment[]> {
+    assertDbConnected();
+    const filter = {
+      tenantId,
+      referenceType,
+      referenceId,
+      status: { $in: [PaymentStatus.COMPLETED, PaymentStatus.PENDING] },
+    };
+    const active = await PaymentModel.find(filter, null, { session });
+    if (active.length === 0) return [];
+    await PaymentModel.updateMany(
+      { ...filter, paymentId: { $in: active.map((p) => p.paymentId) } },
+      { $set: { status: PaymentStatus.CANCELLED } },
+      { session },
+    );
+    return active;
   }
 
   async sumByMethod(

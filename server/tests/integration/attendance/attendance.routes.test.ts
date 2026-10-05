@@ -28,6 +28,9 @@ let adminToken:   string;
 // clock, which can be a different calendar day/month in the hour before
 // midnight IST.
 const now   = new Date();
+
+const CHECK_IN_LOC  = { latitude: 19.076, longitude: 72.8777 };
+const CHECK_OUT_LOC = { latitude: 19.0821, longitude: 72.8411 };
 const { month, year } = getIstDateParts(now);
 
 beforeAll(async () => {
@@ -83,7 +86,7 @@ describe('POST /api/attendance/check-in', () => {
     const res = await request(app)
       .post('/api/attendance/check-in')
       .set('Authorization', `Bearer ${nurseToken}`)
-      .send();
+      .send(CHECK_IN_LOC);
 
     expect(res.status).toBe(201);
     expect(res.body.data.status).toBe('IN_PROGRESS');
@@ -93,11 +96,40 @@ describe('POST /api/attendance/check-in', () => {
     const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
     expect(stored).not.toBeNull();
     expect(stored!.status).toBe('IN_PROGRESS');
+    expect(stored!.checkInLocation).toMatchObject(CHECK_IN_LOC);
+    expect(stored!.checkOutLocation).toBeNull();
+  });
+
+  test.each([
+    ['no body',                {}],
+    ['missing longitude',      { latitude: 19.076 }],
+    ['latitude out of range',  { latitude: 91, longitude: 72.8777 }],
+    ['longitude out of range', { latitude: 19.076, longitude: -180.5 }],
+    ['non-numeric strings',    { latitude: '19.076', longitude: '72.8777' }],
+    ['null coordinates',       { latitude: null, longitude: null }],
+  ])('400 — rejects %s and saves nothing', async (_label, body) => {
+    const res = await request(app)
+      .post('/api/attendance/check-in')
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send(body);
+
+    expect(res.status).toBe(400);
+    expect(await AttendanceModel.countDocuments({ tenantId })).toBe(0);
+  });
+
+  test('400 — a userId/tenantId in the body is rejected, never used to check in someone else', async () => {
+    const res = await request(app)
+      .post('/api/attendance/check-in')
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({ ...CHECK_IN_LOC, userId: adminId, tenantId: 'other-tenant' });
+
+    expect(res.status).toBe(400);
+    expect(await AttendanceModel.countDocuments({})).toBe(0);
   });
 
   test('409 — cannot check in twice on the same day', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
-    const res = await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
+    const res = await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
 
     expect(res.status).toBe(409);
   });
@@ -110,13 +142,13 @@ describe('POST /api/attendance/check-in', () => {
 
 describe('POST /api/attendance/check-out', () => {
   test('400 — cannot check out without checking in first', async () => {
-    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send();
+    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_OUT_LOC);
     expect(res.status).toBe(400);
   });
 
   test('200 — checks out and computes totalHours + PRESENT status', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
-    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
+    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_OUT_LOC);
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('PRESENT');
@@ -124,10 +156,31 @@ describe('POST /api/attendance/check-out', () => {
     expect(typeof res.body.data.totalHours).toBe('number');
   });
 
+  test('200 — persists the check-out location separately, leaving the check-in location intact', async () => {
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
+    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_OUT_LOC);
+
+    expect(res.status).toBe(200);
+    const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
+    expect(stored!.checkInLocation).toMatchObject(CHECK_IN_LOC);
+    expect(stored!.checkOutLocation).toMatchObject(CHECK_OUT_LOC);
+  });
+
+  test('400 — check-out without a valid location does not close the session', async () => {
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
+    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send({ latitude: 19.08 });
+
+    expect(res.status).toBe(400);
+    const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
+    expect(stored!.checkOut).toBeNull();
+    expect(stored!.checkOutLocation).toBeNull();
+    expect(stored!.status).toBe('IN_PROGRESS');
+  });
+
   test('409 — cannot check out twice on the same day', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
-    await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send();
-    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
+    await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_OUT_LOC);
+    const res = await request(app).post('/api/attendance/check-out').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_OUT_LOC);
 
     expect(res.status).toBe(409);
   });
@@ -135,7 +188,7 @@ describe('POST /api/attendance/check-out', () => {
 
 describe('GET /api/attendance/my-attendance', () => {
   test('200 — returns a day grid for the current month including today\'s IN_PROGRESS row', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
 
     const res = await request(app)
       .get(`/api/attendance/my-attendance?month=${month}&year=${year}`)
@@ -159,7 +212,7 @@ describe('GET /api/attendance (admin)', () => {
   });
 
   test('200 — admin can view an employee\'s monthly attendance', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
 
     const res = await request(app)
       .get(`/api/attendance?userId=${nurseId}&month=${month}&year=${year}`)
@@ -171,7 +224,7 @@ describe('GET /api/attendance (admin)', () => {
   });
 
   test('200 — admin request without userId returns a tenant-wide grid for every active employee', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
 
     const res = await request(app)
       .get(`/api/attendance?month=${month}&year=${year}`)
@@ -268,7 +321,7 @@ describe('GET /api/attendance/employees', () => {
 
 describe('PATCH /api/attendance/:attendanceId', () => {
   test('200 — admin corrects check-in/check-out and hours recompute', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
     const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
 
     const checkIn  = new Date(Date.UTC(year, now.getUTCMonth(), now.getUTCDate(), 1, 0, 0)).toISOString();
@@ -289,7 +342,7 @@ describe('PATCH /api/attendance/:attendanceId', () => {
   });
 
   test('400 — checkOut before checkIn is rejected', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
     const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
 
     const res = await request(app)
@@ -301,7 +354,7 @@ describe('PATCH /api/attendance/:attendanceId', () => {
   });
 
   test('403 — non-admin cannot edit attendance', async () => {
-    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send();
+    await request(app).post('/api/attendance/check-in').set('Authorization', `Bearer ${nurseToken}`).send(CHECK_IN_LOC);
     const stored = await AttendanceModel.findOne({ tenantId, userId: nurseId });
 
     const res = await request(app)

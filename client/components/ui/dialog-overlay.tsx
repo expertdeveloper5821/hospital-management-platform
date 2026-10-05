@@ -34,7 +34,7 @@ export function DialogOverlay({ children, className, onClick, ...rest }: DialogO
   if (!mounted) return null;
 
   return createPortal(
-    <div className={cn('fixed inset-0 z-50 flex bg-black/50', className)} onClick={onClick} {...rest}>
+    <div data-dialog-overlay="" className={cn('fixed inset-0 z-50 flex bg-black/50', className)} onClick={onClick} {...rest}>
       {children}
     </div>,
     document.body,

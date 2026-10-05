@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Printer } from 'lucide-react';
-import { useGetOPDVisitByIdQuery, useGetOPDParchaPdfMutation } from '@/store/api/opd.api';
+import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
 import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListUsersQuery } from '@/store/api/user.api';
@@ -13,6 +13,12 @@ import { RichTextDisplay } from '@/components/ui/rich-text-display';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// True when a (possibly rich-text) value has visible text. Empty optional
+// sections are hidden entirely so the ones below move up with no gap.
+function hasText(value: string | null | undefined): boolean {
+  return !!value && value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim() !== '';
 }
 
 // Slip validity: 5 calendar days after the patient's registration date.
@@ -42,25 +48,26 @@ function toDisplay(str: string): string {
 
 function Field({ label, value, span, mono }: { label: string; value: string; span?: boolean; mono?: boolean }) {
   return (
-    <div className={span ? 'col-span-2' : undefined}>
-      <span className="text-gray-500">{label}: </span>
-      <span className={mono ? 'font-mono' : 'font-medium text-gray-900'}>{value}</span>
+    <div className={span ? 'col-span-3 break-words' : 'min-w-0 break-words'}>
+      <span className="text-black">{label}: </span>
+      <span className={mono ? 'font-mono' : 'font-medium text-black'}>{value}</span>
     </div>
   );
 }
 
-// One labelled Vitals line in the left-side column — value on top of a ruled
-// line so a reading the app never collected can still be filled in by hand
-// on the printed sheet, exactly like the blank box this section replaced.
+// One labelled Vitals line in the left-side column — "Label - value" on one
+// row, no underline. A reading the app never collected leaves the space
+// after the "-" blank so it can still be filled in by hand.
 // Spacing between rows comes from the parent's `space-y-*` (see the Vitals
 // column below), not a per-row margin.
 function VitalRow({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <p className="text-[9px] text-gray-500 leading-tight">{label}</p>
-      <p className="min-h-[3.2mm] border-b border-gray-300 text-[11px] font-medium text-gray-900 leading-tight">
+    <div className="flex items-end gap-1 whitespace-nowrap leading-tight">
+      <span className="shrink-0 text-[11px] text-black">{label}</span>
+      <span className="shrink-0 text-[11px] text-black" aria-hidden="true">-</span>
+      <span className="flex-1 min-w-0 min-h-[3.2mm] text-[13px] font-medium text-black">
         {value}
-      </p>
+      </span>
     </div>
   );
 }
@@ -73,10 +80,10 @@ function ClinicalField({
 }: { label: string; value?: string | null; minHeight: string; children?: React.ReactNode }) {
   return (
     <div className="mt-3 first:mt-0">
-      <p className="text-[9px] font-semibold uppercase tracking-wide text-gray-500 mb-0.5">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-black mb-0.5">{label}</p>
       {children ?? (
         <p
-          className="whitespace-pre-wrap text-[11px] text-gray-900 border-b border-gray-300"
+          className="whitespace-pre-wrap text-[13px] text-black border-b border-gray-300"
           style={{ minHeight }}
         >
           {value ?? ''}
@@ -98,13 +105,6 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   const { visitId } = params;
   const branding = useAppSelector((s) => s.auth.branding);
 
-  // A PDF template is rendered server-side (the uploaded PDF page merged
-  // with this visit's data — see server/src/shared/services/parcha-template
-  // .service.ts) and previewed/printed via an <iframe>, not the HTML layout
-  // below. An image template keeps using the existing <img>-background
-  // overlay; no template falls through to the default HTML header/layout.
-  const hasPdfTemplate = !!branding?.parchaTemplateUrl && /\.pdf(\?|$)/i.test(branding.parchaTemplateUrl);
-
   const { data: visit, isLoading: visitLoading, isError: visitError } = useGetOPDVisitByIdQuery(visitId);
   const { data: patient, isLoading: patientLoading, isError: patientError } = useGetPatientByIdQuery(
     visit?.patientId ?? '',
@@ -116,54 +116,31 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
 
   const ready = !visitLoading && !patientLoading && !!visit && !!patient;
   const printedRef = useRef(false);
-  const pdfPrintedRef = useRef(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const [fetchParchaPdf] = useGetOPDParchaPdfMutation();
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  // true once the merged-PDF fetch has failed (404 = no PDF template
-  // actually available server-side despite the URL looking like one, or a
-  // network/render error) — falls back to the default HTML layout rather
-  // than leaving the page stuck on "Preparing…".
-  const [pdfError, setPdfError] = useState(false);
-
+  // Phones/tablets print through the OS print service (iOS adds its own
+  // margins + footer; Android picks the paper size in its dialog), so the
+  // usable page is shorter than the full 297mm this sheet fills on desktop.
+  // On those devices the sheet switches to a content-height print layout —
+  // see `.parcha-mobile` in globals.css. Desktop never gets the class.
+  const [mobilePrint, setMobilePrint] = useState(false);
   useEffect(() => {
-    if (!hasPdfTemplate || !ready || pdfUrl || pdfError) return;
-    let cancelled = false;
-    fetchParchaPdf(visitId).then((result) => {
-      if (cancelled) return;
-      if ('data' in result && result.data) {
-        setPdfUrl(result.data);
-      } else {
-        setPdfError(true);
-      }
-    });
-    return () => { cancelled = true; };
-  }, [hasPdfTemplate, ready, pdfUrl, pdfError, fetchParchaPdf, visitId]);
-
-  useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
-
-  const showPdfTemplate = hasPdfTemplate && !pdfError;
+    setMobilePrint(typeof window.matchMedia === 'function' && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+  }, []);
 
   // Auto-open the browser print dialog once the parcha has real data painted
   // — mirrors clicking "Print" so the OPD list's action truly "opens the
   // printable parcha" without a redundant extra click. The manual button
-  // below remains as a fallback/re-print. Skipped for a PDF template — that
-  // path prints via the iframe's own onLoad below instead.
+  // below remains as a fallback/re-print.
   useEffect(() => {
-    if (ready && !showPdfTemplate && !printedRef.current) {
+    if (ready && !printedRef.current) {
       printedRef.current = true;
       const t = setTimeout(() => window.print(), 300);
       return () => clearTimeout(t);
     }
-  }, [ready, showPdfTemplate]);
+  }, [ready]);
 
   function handlePrintClick() {
-    if (showPdfTemplate) {
-      iframeRef.current?.contentWindow?.print();
-    } else {
-      window.print();
-    }
+    window.print();
   }
 
   if (visitLoading || patientLoading) {
@@ -198,47 +175,130 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
     .filter(Boolean)
     .join(', ');
 
-  // A hospital-supplied image parcha template already carries the hospital
-  // name, logo, address, etc. as a full-page background — skip the app's own
-  // header block on top of it, and reserve extra top space for it instead of
-  // the default header's own vertical footprint. A PDF template is handled
-  // entirely above (showPdfTemplate) and never reaches this HTML layout.
-  const hasImageTemplate = !!branding?.parchaTemplateUrl && !hasPdfTemplate;
-
-  if (showPdfTemplate) {
-    return (
-      <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
-        <div className="max-w-[210mm] mx-auto mb-4 flex items-center justify-between px-2 print:hidden">
-          <Link href="/opd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" /> Back to OPD
-          </Link>
-          <Button size="sm" onClick={handlePrintClick} disabled={!pdfUrl}>
-            <Printer className="h-4 w-4 mr-2" />
-            Print
-          </Button>
-        </div>
-
-        {pdfUrl ? (
-          <iframe
-            ref={iframeRef}
-            src={pdfUrl}
-            title="OPD Parcha"
-            className="parcha-sheet block mx-auto border-0 bg-white w-[210mm] h-[297mm] print:w-full print:h-screen"
-            onLoad={() => {
-              if (!pdfPrintedRef.current) {
-                pdfPrintedRef.current = true;
-                setTimeout(() => iframeRef.current?.contentWindow?.print(), 300);
-              }
-            }}
-          />
-        ) : (
-          <div className="max-w-3xl mx-auto py-12 text-center text-sm text-muted-foreground print:hidden">
-            Preparing printable slip…
+  // The on-screen preview IS the printed slip: the same plain sheet, with the
+  // same 3.5 cm top / 2 cm bottom blank space, on screen and on paper. No
+  // uploaded hospital parcha template (PDF or image) is shown or printed
+  // here, so whatever triggers printing from this page always prints exactly
+  // what the preview shows.
+  const sheet = (
+    <>
+        {/* Plain A4 with no page margin (so the browser adds no
+            date/title/URL/page-number header or footer). The 3.5 cm top /
+            2 cm bottom space is the sheet's own padding, repeated on every
+            printed page via box-decoration-break: clone. */}
+        <div
+          className={`parcha-sheet relative px-[16mm] pt-[35mm] pb-[20mm] print:box-decoration-clone text-[14px] text-black leading-snug${mobilePrint ? ' parcha-mobile' : ''}`}
+        >
+          <div className="parcha-content relative z-10 flex flex-col min-h-[242mm]">
+          {/* Hospital header — never shown on the slip (the 3.5 cm top space
+              is left blank instead), on screen or in print. */}
+          <div className="hidden">
+            <div className="flex items-start gap-4">
+              {branding?.logoUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
+              )}
+              <div className="flex-1 min-w-0 text-center">
+                <h1 className="text-[22px] font-bold tracking-tight">{hospitalName}</h1>
+                {hospitalAddress && <p className="text-[13px] text-black mt-0.5">{hospitalAddress}</p>}
+                {branding?.contactEmail && <p className="text-[13px] text-black">{branding.contactEmail}</p>}
+              </div>
+              {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
+            </div>
+            <div className="mt-3 border-b-2 border-gray-800" />
           </div>
-        )}
-      </div>
-    );
-  }
+
+          {/* Patient + Visit details */}
+          <div className="grid grid-cols-3 gap-x-6 gap-y-1.5 text-[13.5px]">
+            {/* Row 1 */}
+            <Field label="Patient Name" value={patient.fullName} />
+            <Field label="UHID"         value={patient.patientId} mono />
+            <Field label="Visit Date"   value={formatDate(visit.visitDate)} />
+
+            {/* Row 2 */}
+            <Field label="Age / Gender"  value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
+            <Field label="Mobile Number" value={patient.mobileNumber} />
+            <Field label="Valid Till"    value={formatDate(computeValidTill(patient.createdAt))} />
+
+            {/* Row 3 — always rendered (blank when unassigned) so the
+                Address row below keeps its own line. */}
+            <Field label="Doctor"     value={doctorNames} />
+            <Field label="Department" value={departmentName ?? ''} />
+            <div aria-hidden="true" />
+
+            {/* Row 4 */}
+            {patient.address && <Field label="Address" value={patient.address} span />}
+          </div>
+
+          <div className="mt-3 border-b border-gray-300" />
+
+          {/* Vitals (left) + Diagnosis/Prescription/Notes (right) — replaces
+              the previous blank writing box. `visit` comes straight from
+              useGetOPDVisitByIdQuery, which the OPD Edit/Complete mutations
+              invalidate (see opd.api.ts's 'OPD' tag), so this always paints
+              whatever was most recently saved, on every load of this page. A
+              vital never recorded renders as a blank ruled line rather than a
+              placeholder, so the printed sheet can still be filled in by hand
+              for exactly the readings the app never collected. */}
+          {/* Vitals + clinical column, then the signature, in one block that grows
+              to the bottom of the content area — i.e. exactly where the
+              sheet's 2 cm bottom padding begins. The dark vertical line beside
+              Vitals runs the full height of this block, so it always stops
+              2 cm above the bottom of the slip. A border (not a background)
+              so it prints even with "Background graphics" turned off. */}
+          <div className="relative mt-4 flex flex-1 flex-col">
+          <div aria-hidden="true" className="absolute top-0 bottom-0 left-[32mm] border-l border-gray-800" />
+          <div className="flex break-inside-avoid">
+            {/* Vitals stays compact/top-aligned. */}
+            <div className="w-[32mm] shrink-0 pr-3">
+              <p className="text-[15px] font-bold uppercase tracking-wide text-black mb-2">Vitals</p>
+              <div className="space-y-1.5">
+                <VitalRow label="SpO2"   value={visit.vitals?.spo2            != null ? String(visit.vitals.spo2)            : ''} />
+                <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
+                <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
+                <VitalRow label="Pulse"  value={visit.vitals?.pulse           != null ? String(visit.vitals.pulse)           : ''} />
+                <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
+                <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
+                <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
+              </div>
+            </div>
+
+            <div
+              className="parcha-fill flex-1 pl-4"
+              style={{ minHeight: hasText(visit.diagnosis) || hasText(visit.prescription) || hasText(visit.notes) ? '150mm' : undefined }}
+            >
+              {hasText(visit.diagnosis) && (
+                <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
+              )}
+              {hasText(visit.prescription) && (
+                <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
+              )}
+              {hasText(visit.notes) && (
+                <ClinicalField label="Notes" minHeight="40mm">
+                  <div className="min-h-[40mm]">
+                    <RichTextDisplay value={visit.notes} fallback="" className="text-[13px]" />
+                  </div>
+                </ClinicalField>
+              )}
+            </div>
+          </div>
+
+          {/* Signature */}
+          <div className="order-last mt-auto pt-6 flex justify-end break-inside-avoid">
+            <div className="w-56 text-center">
+              <div className="border-t border-gray-500 pt-1 text-[13px] font-bold text-black">Doctor&apos;s Signature</div>
+            </div>
+          </div>
+          </div>
+
+          {/* Footer — not part of the slip, on screen or in print */}
+          <div className="hidden">
+            This is valid for 15 days.
+          </div>
+          </div>
+        </div>
+    </>
+  );
 
   return (
     <div className="bg-muted/30 min-h-screen py-6 print:bg-white print:py-0 print:min-h-0">
@@ -253,115 +313,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
         </Button>
       </div>
 
-      {/* A4 sheet — the only thing meant to reach the printer */}
-      <div
-        className={`parcha-sheet relative px-[16mm] ${hasImageTemplate ? 'pt-[42mm] pb-[14mm]' : 'py-[14mm]'} text-[12px] leading-snug`}
-      >
-        {hasImageTemplate && (
-          // Real <img>, not a CSS background — prints reliably without the
-          // browser's "background graphics" print option being enabled.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={branding!.parchaTemplateUrl!}
-            alt=""
-            aria-hidden="true"
-            className="absolute top-0 left-0 w-[210mm] h-[297mm] object-cover z-0"
-          />
-        )}
-        <div className="relative z-10">
-        {!hasImageTemplate && (
-          <>
-            {/* Hospital header */}
-            <div className="flex items-start gap-4">
-              {branding?.logoUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={branding.logoUrl} alt="" className="h-16 w-16 object-contain shrink-0" />
-              )}
-              <div className="flex-1 min-w-0 text-center">
-                <h1 className="text-xl font-bold tracking-tight">{hospitalName}</h1>
-                {hospitalAddress && <p className="text-[11px] text-gray-600 mt-0.5">{hospitalAddress}</p>}
-                {branding?.contactEmail && <p className="text-[11px] text-gray-600">{branding.contactEmail}</p>}
-              </div>
-              {branding?.logoUrl && <div className="h-16 w-16 shrink-0" aria-hidden="true" />}
-            </div>
-            <div className="mt-3 border-b-2 border-gray-800" />
-          </>
-        )}
-
-        {/* Patient + Visit details */}
-        <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1.5 text-[11.5px]">
-          <Field label="Patient Name" value={patient.fullName} />
-          <Field label="Patient ID"   value={patient.patientId} mono />
-          <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
-          <Field label="Mobile"       value={patient.mobileNumber} />
-          {patient.address && <Field label="Address" value={patient.address} span />}
-          {patient.bloodGroup && <Field label="Blood Group" value={patient.bloodGroup} />}
-
-          <Field label="Visit Date" value={formatDate(visit.visitDate)} />
-          <Field label="Valid Till" value={formatDate(computeValidTill(patient.createdAt))} />
-          {(doctorNames || departmentName) && (
-            <Field
-              label="Doctor / Department"
-              value={[doctorNames, departmentName].filter(Boolean).join(' — ')}
-              span
-            />
-          )}
-        </div>
-
-        <div className="mt-3 border-b border-gray-300" />
-
-        {/* Vitals (left) + Diagnosis/Prescription/Notes (right) — replaces
-            the previous blank writing box. `visit` comes straight from
-            useGetOPDVisitByIdQuery, which the OPD Edit/Complete mutations
-            invalidate (see opd.api.ts's 'OPD' tag), so this always paints
-            whatever was most recently saved, on every load of this page. A
-            vital never recorded renders as a blank ruled line rather than a
-            placeholder, so the printed sheet can still be filled in by hand
-            for exactly the readings the app never collected. */}
-        {/* No box borders — a single vertical divider (border-r on the
-            Vitals column) separates the two columns instead. `items-stretch`
-            (the flex default) makes both columns match the taller side's
-            height, so the divider always runs from the top of this section
-            to the bottom of the clinical column, whatever that height ends
-            up being. */}
-        <div className="mt-4 flex break-inside-avoid">
-          {/* Vitals stays compact/top-aligned — only the divider (not the
-              row spacing) extends down to match the clinical column. */}
-          <div className="w-[42mm] shrink-0 pr-3 border-r border-gray-300">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Vitals</p>
-            <div className="space-y-1.5">
-              <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
-              <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
-              <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
-              <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
-              <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
-            </div>
-          </div>
-
-          <div className="flex-1 pl-4" style={{ minHeight: '150mm' }}>
-            <ClinicalField label="Diagnosis"    value={visit.diagnosis}    minHeight="10mm" />
-            <ClinicalField label="Prescription" value={visit.prescription} minHeight="60mm" />
-            <ClinicalField label="Notes" minHeight="40mm">
-              <div className="min-h-[40mm] border-b border-gray-300">
-                <RichTextDisplay value={visit.notes} fallback="" className="text-[11px]" />
-              </div>
-            </ClinicalField>
-          </div>
-        </div>
-
-        {/* Signature */}
-        <div className="mt-6 flex justify-end break-inside-avoid">
-          <div className="w-56 text-center">
-            <div className="border-t border-gray-500 pt-1 text-[11px] text-gray-600">Doctor&apos;s Signature</div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-6 pt-2 border-t border-gray-200 text-center text-[10px] text-gray-500">
-          This is valid for 15 days.
-        </div>
-        </div>
-      </div>
+      {sheet}
     </div>
   );
 }

@@ -65,7 +65,12 @@ export class UserRepository {
     if (filters.search) {
       const escaped = escapeRegex(filters.search);
       const re = new RegExp(escaped, 'i');
-      query.$or = [{ name: re }, { email: re }];
+      // Roles are stored as enum keys (HOSPITAL_ADMIN) — let "hospital admin"
+      // match them too, as the Staff page's search box advertises.
+      const roleTerm = escaped.trim();
+      const or: Record<string, RegExp>[] = [{ name: re }, { email: re }];
+      if (roleTerm) or.push({ role: new RegExp(roleTerm.replace(/\s+/g, '[ _]+'), 'i') });
+      query.$or = or;
     }
 
     const sortField = SORT_FIELD_MAP[filters.sortBy ?? 'createdAt'];
@@ -146,6 +151,16 @@ export class UserRepository {
       { _id: { $in: userIds }, tenantId },
       { $addToSet: { departmentIds: departmentId } },
     );
+  }
+
+  // Department ids of active doctors whose name matches `search` — lets the
+  // Departments list search by assigned doctor server-side.
+  async findDepartmentIdsByDoctorName(tenantId: string, search: string): Promise<string[]> {
+    assertDbConnected();
+    const re = new RegExp(escapeRegex(search), 'i');
+    return UserModel.distinct('departmentIds', {
+      tenantId, role: UserRole.DOCTOR, isActive: true, name: re,
+    }) as Promise<string[]>;
   }
 
   async removeDepartmentFromUsers(tenantId: string, userIds: string[], departmentId: string): Promise<void> {

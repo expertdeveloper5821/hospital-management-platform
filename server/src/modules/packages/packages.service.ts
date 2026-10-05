@@ -3,12 +3,15 @@ import { packageRepository, PackageListFilters } from './packages.repository';
 import { packageAssignmentRepository } from './package-assignment.repository';
 import { IPackage } from './packages.model';
 import { IPackageAssignment } from './package-assignment.model';
+import mongoose from 'mongoose';
 import { patientRepository } from '../patient/patient.repository';
+import { ipdRepository }     from '../ipd/ipd.repository';
 import { auditService }  from '../../shared/services/audit.service';
-import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
+import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import {
   NotFoundError,
   ConflictError,
+  ForbiddenError,
   ValidationError,
 } from '../../shared/middleware/error-handler';
 
@@ -25,6 +28,10 @@ export interface CreatePackageInput {
   description?:     string;
   price:            number;
   includedServices: string[];
+  // Mutually exclusive (enforced by the controller's Zod schema): link an
+  // existing ward, or create a new one inline (Hospital Admin only).
+  wardId?:          string;
+  newWard?:         { name: string; floor?: string };
 }
 
 export interface UpdatePackageInput {
@@ -33,6 +40,37 @@ export interface UpdatePackageInput {
   price?:            number;
   includedServices?: string[];
   status?:           'ACTIVE' | 'INACTIVE';
+  // null unlinks the ward; existing admissions keep their own wardId.
+  wardId?:           string | null;
+}
+
+// Package as returned by the API: the stored document plus the linked
+// ward's display name (null when unlinked, or the ward no longer resolves).
+export type PackageView = Record<string, unknown> & { wardId: string | null; wardName: string | null };
+
+function toPlain(pkg: IPackage): Record<string, unknown> {
+  return typeof (pkg as unknown as { toObject?: unknown }).toObject === 'function'
+    ? (pkg.toObject() as Record<string, unknown>)
+    : (pkg as unknown as Record<string, unknown>);
+}
+
+async function withWardNames(tenantId: string, pkgs: IPackage[]): Promise<PackageView[]> {
+  const names = await packageRepository.findWardNames(
+    tenantId,
+    pkgs.map((p) => p.wardId).filter((id): id is string => !!id),
+  );
+  return pkgs.map((p) => ({
+    ...toPlain(p),
+    wardId:   p.wardId ?? null,
+    wardName: p.wardId ? (names.get(p.wardId) ?? null) : null,
+  }));
+}
+
+// A linked ward must exist inside the caller's tenant. findWardById is
+// tenant-scoped, so another tenant's ward id resolves to "not found".
+async function assertWardInTenant(tenantId: string, wardId: string): Promise<void> {
+  const ward = await ipdRepository.findWardById(tenantId, wardId);
+  if (!ward) throw new NotFoundError('Ward not found');
 }
 
 export interface AssignPackageInput {
@@ -42,17 +80,26 @@ export interface AssignPackageInput {
 
 class PackageService {
   async createPackage(
-    tenantId:  string,
-    data:      CreatePackageInput,
-    createdBy: string,
-  ): Promise<IPackage> {
+    tenantId:    string,
+    data:        CreatePackageInput,
+    createdBy:   string,
+    creatorRole: UserRole,
+  ): Promise<PackageView> {
+    // Creating a ward inline is Hospital Admin only; every package creator
+    // may still link an existing ward.
+    if (data.newWard && creatorRole !== UserRole.HOSPITAL_ADMIN) {
+      throw new ForbiddenError('Only a Hospital Admin can create a new ward from a package.');
+    }
+
     const normalizedName = data.name.trim().toLowerCase();
     const existing = await packageRepository.findByName(tenantId, normalizedName);
     if (existing) {
       throw new ConflictError('A package with this name already exists in this tenant.');
     }
 
-    const pkg = await packageRepository.save({
+    if (data.wardId) await assertWardInTenant(tenantId, data.wardId);
+
+    const pkgData: Partial<IPackage> = {
       packageId:        generatePackageId(),
       tenantId,
       name:             data.name.trim(),
@@ -60,7 +107,35 @@ class PackageService {
       price:            data.price,
       includedServices: data.includedServices,
       status:           'ACTIVE',
-    });
+      wardId:           data.wardId ?? null,
+    };
+
+    let pkg: IPackage;
+    if (data.newWard) {
+      // Friendly pre-check; the ward's unique index (inside the transaction)
+      // is the final arbiter under a concurrent create.
+      const wardName = data.newWard.name.trim();
+      if (await ipdRepository.findWardByName(tenantId, wardName)) {
+        throw new ConflictError(`Ward "${wardName}" already exists`);
+      }
+      const created = await packageRepository.saveWithNewWard(
+        { tenantId, name: wardName, floor: data.newWard.floor },
+        pkgData,
+      );
+      pkg = created.pkg;
+
+      // Same audit shape as IPDService.createWard.
+      await auditService.log({
+        entityType: AuditEntityType.IPD_ADMISSION,
+        entityId:   (created.ward._id as mongoose.Types.ObjectId).toString(),
+        action:     'CREATE',
+        userId:     createdBy,
+        tenantId,
+        newValue:   { name: created.ward.name, floor: created.ward.floor },
+      });
+    } else {
+      pkg = await packageRepository.save(pkgData);
+    }
 
     await auditService.log({
       entityType: AuditEntityType.PACKAGE,
@@ -68,10 +143,11 @@ class PackageService {
       action:     'CREATE',
       userId:     createdBy,
       tenantId,
-      newValue:   { packageId: pkg.packageId, name: pkg.name, price: pkg.price },
+      newValue:   { packageId: pkg.packageId, name: pkg.name, price: pkg.price, wardId: pkg.wardId ?? null },
     });
 
-    return pkg;
+    const [view] = await withWardNames(tenantId, [pkg]);
+    return view;
   }
 
   async updatePackage(
@@ -79,7 +155,7 @@ class PackageService {
     packageId: string,
     data:      UpdatePackageInput,
     updatedBy: string,
-  ): Promise<IPackage> {
+  ): Promise<PackageView> {
     const pkg = await packageRepository.findById(tenantId, packageId);
     if (!pkg) throw new NotFoundError('Package not found');
 
@@ -91,6 +167,21 @@ class PackageService {
       }
     }
 
+    // Ward this write links (or re-activates a link to) — re-checked under the
+    // ward-document lock in the repository so a concurrent ward delete can't
+    // commit alongside it.
+    let lockWardId: string | undefined;
+    if (data.wardId) {
+      await assertWardInTenant(tenantId, data.wardId);
+      lockWardId = data.wardId;
+    }
+    // Re-activating a package whose linked ward has since been deleted would
+    // re-open admissions into that ward — require re-linking a live ward first.
+    else if (data.status === 'ACTIVE' && data.wardId === undefined && pkg.wardId) {
+      await assertWardInTenant(tenantId, pkg.wardId);
+      lockWardId = pkg.wardId;
+    }
+
     const previousValue: Record<string, unknown> = {};
     const newValue:      Record<string, unknown> = {};
     const update:        Partial<IPackage>        = {};
@@ -100,8 +191,9 @@ class PackageService {
     if (data.price            !== undefined) { previousValue.price            = pkg.price;            newValue.price            = data.price;                 update.price            = data.price; }
     if (data.includedServices !== undefined) { previousValue.includedServices = pkg.includedServices; newValue.includedServices = data.includedServices;      update.includedServices = data.includedServices; }
     if (data.status           !== undefined) { previousValue.status           = pkg.status;           newValue.status           = data.status;                update.status           = data.status; }
+    if (data.wardId           !== undefined) { previousValue.wardId           = pkg.wardId ?? null;   newValue.wardId           = data.wardId;                update.wardId           = data.wardId; }
 
-    const updated = await packageRepository.update(tenantId, packageId, update);
+    const updated = await packageRepository.update(tenantId, packageId, update, lockWardId);
     if (!updated) throw new NotFoundError('Package not found');
 
     await auditService.log({
@@ -114,20 +206,23 @@ class PackageService {
       newValue,
     });
 
-    return updated;
+    const [view] = await withWardNames(tenantId, [updated]);
+    return view;
   }
 
-  async getPackageById(tenantId: string, packageId: string): Promise<IPackage> {
+  async getPackageById(tenantId: string, packageId: string): Promise<PackageView> {
     const pkg = await packageRepository.findById(tenantId, packageId);
     if (!pkg) throw new NotFoundError('Package not found');
-    return pkg;
+    const [view] = await withWardNames(tenantId, [pkg]);
+    return view;
   }
 
   async listPackages(
     tenantId: string,
     filters:  PackageListFilters,
-  ): Promise<PaginatedResult<IPackage>> {
-    return packageRepository.list(tenantId, filters);
+  ): Promise<PaginatedResult<PackageView>> {
+    const result = await packageRepository.list(tenantId, filters);
+    return { ...result, data: await withWardNames(tenantId, result.data) };
   }
 
   async assignPackage(

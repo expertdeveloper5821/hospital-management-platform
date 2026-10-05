@@ -8,6 +8,15 @@ const createPackageSchema = z.object({
   description:      z.string().max(500, 'Description cannot exceed 500 characters.').trim().optional(),
   price:            z.number().min(0),
   includedServices: z.array(z.string().min(1).max(300)).min(1).max(50),
+  // Link an existing ward OR create one inline, never both.
+  wardId:           z.string().min(1).optional(),
+  newWard:          z.object({
+    name:  z.string().min(1).max(100).trim(),
+    floor: z.string().min(1).max(50).trim().optional(),
+  }).optional(),
+}).refine((d) => !(d.wardId && d.newWard), {
+  message: 'Provide either wardId or newWard, not both',
+  path:    ['newWard'],
 });
 
 const updatePackageSchema = z.object({
@@ -16,6 +25,7 @@ const updatePackageSchema = z.object({
   price:            z.number().min(0).optional(),
   includedServices: z.array(z.string().min(1).max(300)).min(1).max(50).optional(),
   status:           z.enum(['ACTIVE', 'INACTIVE']).optional(),
+  wardId:           z.string().min(1).nullable().optional(),
 });
 
 const assignPackageSchema = z.object({
@@ -27,17 +37,27 @@ export async function createPackage(req: Request, res: Response, next: NextFunct
   try {
     const body = createPackageSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
-    const pkg = await packageService.createPackage(req.user!.tenantId!, body.data, req.user!.userId);
+    const pkg = await packageService.createPackage(
+      req.user!.tenantId!,
+      body.data,
+      req.user!.userId,
+      req.user!.role,
+    );
     res.status(201).json({ status: 'success', data: pkg });
   } catch (err) { next(err); }
 }
 
 export async function listPackages(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const page   = Number(req.query.page)  || 1;
-    const limit  = Number(req.query.limit) || 20;
+    // Lenient parsing (garbage falls back to defaults rather than a 400) keeps
+    // existing callers working; clamping to >= 1 keeps `skip` non-negative.
+    const page   = Math.max(1, Math.floor(Number(req.query.page))  || 1);
+    const limit  = Math.max(1, Math.floor(Number(req.query.limit)) || 20);
     const status = req.query.status as 'ACTIVE' | 'INACTIVE' | undefined;
-    const result = await packageService.listPackages(req.user!.tenantId!, { status, page, limit });
+    const search = typeof req.query.search === 'string'
+      ? req.query.search.trim().slice(0, 100) || undefined
+      : undefined;
+    const result = await packageService.listPackages(req.user!.tenantId!, { status, search, page, limit });
     res.status(200).json({ status: 'success', data: result });
   } catch (err) { next(err); }
 }

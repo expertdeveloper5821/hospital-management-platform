@@ -19,6 +19,12 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
+  useCollectPathologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+}));
+
+jest.mock('@/store/api/payment.api', () => ({
+  useLazyGetReceiptUrlQuery: () => [jest.fn(), { isFetching: false }],
 }));
 
 jest.mock('@/store/api/patient.api', () => ({

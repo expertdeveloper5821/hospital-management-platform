@@ -200,8 +200,8 @@ describe('POST /api/packages — role authorization', () => {
   });
 });
 
-describe('PATCH /api/packages/:packageId — role authorization unchanged', () => {
-  test('RECEPTIONIST cannot update a package', async () => {
+describe('PATCH /api/packages/:packageId — role authorization', () => {
+  test('RECEPTIONIST can update a package (package-wise ward allocation)', async () => {
     const created = await request(app)
       .post('/api/packages')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -212,6 +212,111 @@ describe('PATCH /api/packages/:packageId — role authorization unchanged', () =
       .set('Authorization', `Bearer ${receptionistToken}`)
       .send({ price: 2999 });
 
+    expect(res.status).toBe(200);
+    expect(res.body.data.price).toBe(2999);
+  });
+
+  test('NURSE cannot update a package', async () => {
+    const created = await request(app)
+      .post('/api/packages')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Cardiac Screening', price: 2499, includedServices: ['ECG', 'Echo'] });
+
+    const res = await request(app)
+      .patch(`/api/packages/${created.body.data.packageId}`)
+      .set('Authorization', `Bearer ${nurseToken}`)
+      .send({ price: 2999 });
+
     expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/packages — read access', () => {
+  test('RECEPTIONIST lists packages; a ward-less package serialises with null ward fields', async () => {
+    await request(app)
+      .post('/api/packages')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Maternity', price: 15000, includedServices: ['Delivery'] });
+
+    const list = await request(app)
+      .get('/api/packages?status=ACTIVE')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+    expect(list.status).toBe(200);
+    expect(list.body.data.data).toHaveLength(1);
+    expect(list.body.data.data[0].wardId).toBeNull();
+    expect(list.body.data.data[0].wardName).toBeNull();
+  });
+
+  test('NURSE still cannot read packages (Nurse does not create admissions in the UI)', async () => {
+    const res = await request(app)
+      .get('/api/packages')
+      .set('Authorization', `Bearer ${nurseToken}`);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe('GET /api/packages — search and pagination', () => {
+  const get = (qs: string) =>
+    request(app).get(`/api/packages${qs}`).set('Authorization', `Bearer ${adminToken}`);
+
+  beforeEach(async () => {
+    // 23 "Cardiac" packages (2 INACTIVE) + 2 others + 1 soft-deleted Cardiac.
+    const base = Date.UTC(2026, 0, 1);
+    const docs = Array.from({ length: 23 }, (_, i) => ({
+      packageId: `PKG-C${i}`, tenantId, name: `Cardiac Care ${i}`, price: 1000,
+      includedServices: ['ECG'], status: i < 2 ? 'INACTIVE' : 'ACTIVE',
+      // Every package shares one createdAt so ordering relies on the tie-breaker.
+      createdAt: new Date(base),
+    }));
+    await PackageModel.create([
+      ...docs,
+      { packageId: 'PKG-M', tenantId, name: 'Maternity',     price: 1, includedServices: ['x'] },
+      { packageId: 'PKG-O', tenantId, name: 'Orthopedic',    price: 1, includedServices: ['x'] },
+      { packageId: 'PKG-D', tenantId, name: 'Cardiac Old',   price: 1, includedServices: ['x'], isDeleted: true },
+    ]);
+  });
+
+  test('search matches name case-insensitively and excludes soft-deleted packages', async () => {
+    const res = await get('?search=CARDIAC');
+    expect(res.status).toBe(200);
+    expect(res.body.data.total).toBe(23);
+    expect(res.body.data.totalPages).toBe(2);
+    expect(res.body.data.data).toHaveLength(20);
+  });
+
+  test('search is treated as a literal substring, not a regex', async () => {
+    const res = await get('?search=' + encodeURIComponent('.*'));
+    expect(res.body.data.total).toBe(0);
+  });
+
+  test('search combines with the status filter', async () => {
+    const res = await get('?search=cardiac&status=INACTIVE');
+    expect(res.body.data.total).toBe(2);
+  });
+
+  test('pages through results with a partial last page and no repeats despite equal createdAt', async () => {
+    const p1 = await get('?search=cardiac&page=1');
+    const p2 = await get('?search=cardiac&page=2');
+    expect(p2.body.data).toMatchObject({ total: 23, page: 2, limit: 20, totalPages: 2 });
+    expect(p2.body.data.data).toHaveLength(3);
+    const ids = [...p1.body.data.data, ...p2.body.data.data].map((p: { packageId: string }) => p.packageId);
+    expect(new Set(ids).size).toBe(23);
+  });
+
+  test('a page past the end returns no rows but still the real total', async () => {
+    const res = await get('?page=5');
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data.total).toBe(25);
+  });
+
+  test('negative/garbage page and limit fall back to safe defaults; limit stays capped at 20', async () => {
+    const neg = await get('?page=-3&limit=-1');
+    expect(neg.status).toBe(200);
+    expect(neg.body.data).toMatchObject({ page: 1, limit: 1 });
+
+    const junk = await get('?page=abc&limit=500');
+    expect(junk.status).toBe(200);
+    expect(junk.body.data).toMatchObject({ page: 1, limit: 20, total: 25, totalPages: 2 });
   });
 });

@@ -10,6 +10,7 @@ import {
   listAdmissions,
   getAdmissionById,
   updateAdmission,
+  deleteAdmission,
   addProgressNote,
   updatePrescription,
   dischargePatient,
@@ -23,6 +24,9 @@ import {
   listBeds,
   getOccupancySummary,
   assignNurses,
+  deleteWard,
+  updateBed,
+  deleteBed,
 } from './ipd.controller';
 
 const router  = Router();
@@ -93,7 +97,9 @@ router.get(
   getParchaPdf,
 );
 
-// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse)
+// PATCH /api/ipd/admissions/:admissionId — Update assigned doctor (Admin/Receptionist/Doctor/Nurse).
+// RECEPTIONIST additionally may correct the patient and update vitals — field
+// gates for patientId/vitals are enforced in the controller.
 router.patch(
   '/admissions/:admissionId',
   ...protect,
@@ -107,6 +113,17 @@ router.patch(
   requireFirstPasswordChange,
   idempotencyGuard('ipd.admission.update'),
   updateAdmission,
+);
+
+// DELETE /api/ipd/admissions/:admissionId — Receptionist-only permanent delete
+// of a still-ADMITTED admission (releases the bed and cancels its payments).
+// A DISCHARGED admission can never be deleted — enforced in IPDService.
+router.delete(
+  '/admissions/:admissionId',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST),
+  requireFirstPasswordChange,
+  deleteAdmission,
 );
 
 // POST /api/ipd/admissions/:admissionId/progress-notes — Doctor/Nurse records daily note
@@ -237,6 +254,15 @@ router.patch('/wards/:wardId/nurses',
   assignNurses,
 );
 
+// DELETE /api/ipd/wards/:wardId — Hospital Admin only. Soft delete; 409 while
+// the ward has an admitted patient, an occupied bed or an active package.
+router.delete('/wards/:wardId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  deleteWard,
+);
+
 // ─── Bed routes ───────────────────────────────────────────────────────────────
 router.post('/wards/:wardId/beds',
   ...protect,
@@ -254,6 +280,22 @@ router.get('/wards/:wardId/beds',
   requireRole(...WARD_READERS),
   requireFirstPasswordChange,
   listBeds,
+);
+
+// PATCH / DELETE /api/ipd/wards/:wardId/beds/:bedId — Hospital Admin only.
+// Rename / soft delete; 409 while the bed is occupied or has an active admission.
+router.patch('/wards/:wardId/beds/:bedId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  updateBed,
+);
+
+router.delete('/wards/:wardId/beds/:bedId',
+  ...protect,
+  requireRole(UserRole.HOSPITAL_ADMIN),
+  requireFirstPasswordChange,
+  deleteBed,
 );
 
 // ─── Occupancy summary — Manager + Hospital Admin + Nurse (FR-08.8) ──────────

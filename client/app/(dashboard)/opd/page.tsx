@@ -8,6 +8,7 @@ import {
   useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
+  useDeleteOPDVisitMutation,
   useGetOPDPaymentValidityQuery,
   useGetAvailableOpdNursesQuery,
   useGetDoctorNurseAssignmentsQuery,
@@ -45,6 +46,7 @@ import {
   X,
   CheckCircle,
   XCircle,
+  Trash2,
   PlayCircle,
   Search,
   ClipboardList,
@@ -53,6 +55,9 @@ import {
   Printer,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
+import { NavForm } from '@/components/ui/form';
+import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +79,12 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata',
   });
+}
+
+// A stored visitDate (IST midnight as a UTC instant) as the YYYY-MM-DD value
+// an <input type="date"> expects, in IST regardless of the viewer's timezone.
+function toISTDateInput(iso: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
 function formatINR(amount: number) {
@@ -100,7 +111,7 @@ const DEPARTMENT_DOCTOR_MESSAGE = 'Changing the department requires selecting a 
 // ─── Vitals (OPD Edit form) ─────────────────────────────────────────────────
 // Mirrors OPDService.updateVisit's DEFAULT_VITALS/merge contract on the
 // backend: weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>"
-// mmHg), sugar (mg/dL), body temperature (°F). Kept as controlled-input
+// mmHg), sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input
 // strings here (empty string = not entered) and converted to number|null only
 // on submit — see parseVitalsInputs.
 interface VitalsInputState {
@@ -109,10 +120,12 @@ interface VitalsInputState {
   bloodPressure:   string;
   sugar:           string;
   bodyTemperature: string;
+  spo2:            string;
+  pulse:           string;
 }
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
 };
 
 function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
@@ -123,61 +136,51 @@ function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
     bloodPressure:   vitals.bloodPressure   ?? '',
     sugar:           vitals.sugar           != null ? String(vitals.sugar)           : '',
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
+    spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
+    pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
   };
 }
 
 const BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
 
+// Per-field validation messages, keyed by the input they belong to so each
+// one renders directly below its own field rather than in the form banner.
+type VitalsErrors = Partial<Record<keyof VitalsInputState, string>>;
+
 // Converts the controlled-input strings into the partial vitals payload the
 // PATCH endpoint expects — an empty field becomes `null` (explicitly clears
 // that reading server-side, never leaves it untouched), matching the same
-// ranges OPDController's vitalsSchema validates. Returns an error message
-// instead of a payload the moment any one field fails.
-function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<OPDVitals> } | { error: string } {
+// ranges OPDController's vitalsSchema validates. Returns every failing field's
+// message instead of a payload when any field fails.
+function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<OPDVitals> } | { errors: VitalsErrors } {
   const vitals: Partial<OPDVitals> = {};
+  const errors: VitalsErrors = {};
 
-  const num = inputs.weight.trim();
-  if (num === '') vitals.weight = null;
-  else {
-    const n = Number(num);
-    if (isNaN(n) || n < 0.5 || n > 500) return { error: 'Weight must be between 0.5 and 500 kg.' };
-    vitals.weight = n;
-  }
+  const numeric = (
+    key: 'weight' | 'height' | 'sugar' | 'bodyTemperature' | 'spo2' | 'pulse',
+    min: number, max: number, message: string,
+  ) => {
+    const raw = inputs[key].trim();
+    if (raw === '') { vitals[key] = null; return; }
+    const n = Number(raw);
+    if (isNaN(n) || n < min || n > max) errors[key] = message;
+    else vitals[key] = n;
+  };
 
-  const ht = inputs.height.trim();
-  if (ht === '') vitals.height = null;
-  else {
-    const n = Number(ht);
-    if (isNaN(n) || n < 20 || n > 300) return { error: 'Height must be between 20 and 300 cm.' };
-    vitals.height = n;
-  }
+  numeric('weight', 0.5, 500, 'Weight must be between 0.5 and 500 kg.');
+  numeric('height', 20, 300, 'Height must be between 20 and 300 cm.');
 
   const bp = inputs.bloodPressure.trim();
   if (bp === '') vitals.bloodPressure = null;
-  else {
-    if (!BLOOD_PRESSURE_PATTERN.test(bp)) {
-      return { error: 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.' };
-    }
-    vitals.bloodPressure = bp;
-  }
+  else if (!BLOOD_PRESSURE_PATTERN.test(bp)) errors.bloodPressure = 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.';
+  else vitals.bloodPressure = bp;
 
-  const sg = inputs.sugar.trim();
-  if (sg === '') vitals.sugar = null;
-  else {
-    const n = Number(sg);
-    if (isNaN(n) || n < 10 || n > 1000) return { error: 'Sugar must be between 10 and 1000 mg/dL.' };
-    vitals.sugar = n;
-  }
+  numeric('sugar', 10, 1000, 'Sugar must be between 10 and 1000 mg/dL.');
+  numeric('bodyTemperature', 80, 115, 'Body temperature must be between 80 and 115 °F.');
+  numeric('spo2', 50, 100, 'SpO2 must be between 50 and 100 %.');
+  numeric('pulse', 20, 250, 'Pulse must be between 20 and 250 bpm.');
 
-  const temp = inputs.bodyTemperature.trim();
-  if (temp === '') vitals.bodyTemperature = null;
-  else {
-    const n = Number(temp);
-    if (isNaN(n) || n < 80 || n > 115) return { error: 'Body temperature must be between 80 and 115 °F.' };
-    vitals.bodyTemperature = n;
-  }
-
-  return { vitals };
+  return Object.keys(errors).length > 0 ? { errors } : { vitals };
 }
 
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
@@ -188,7 +191,8 @@ interface VisitPanelProps {
   onUpdate: (updated: OPDVisitResponse) => void;
   canEdit: boolean;    // DOCTOR, HOSPITAL_ADMIN
   canComplete: boolean; // DOCTOR, HOSPITAL_ADMIN
-  canCancel: boolean;  // RECEPTIONIST, DOCTOR, HOSPITAL_ADMIN
+  canCancel: boolean;  // DOCTOR, HOSPITAL_ADMIN
+  canDelete: boolean;  // RECEPTIONIST (replaces Cancel for that role)
   canViewPayment: boolean; // MANAGER, FINANCE_MANAGER, HOSPITAL_ADMIN, RECEPTIONIST — mirrors GET /api/payments requireRole
   doctorNames: (ids: string[]) => string;
   allDoctors:  UserResponse[];
@@ -202,7 +206,7 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 // Roles permitted to view payment details, matching the backend's GET /api/payments requireRole list.
 const PAYMENT_VIEW_ROLES = ['MANAGER', 'FINANCE_MANAGER', 'HOSPITAL_ADMIN', 'RECEPTIONIST'];
 
-function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canViewPayment, doctorNames, allDoctors, nurseNames }: VisitPanelProps) {
+function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel, canDelete, canViewPayment, doctorNames, allDoctors, nurseNames }: VisitPanelProps) {
   const isTerminal = TERMINAL.has(visit.status);
 
   // A Nurse's Edit access is separate from `canEdit` (DOCTOR/HOSPITAL_ADMIN
@@ -214,9 +218,29 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
   const nurseNotesOnly = role === 'NURSE' && (visit.nurseIds ?? []).includes(userId ?? '');
-  // A Receptionist's Edit access is the Department/Doctor/Nurse assignment
-  // only — mirrors RECEPTIONIST_EDITABLE_FIELDS in opd.controller.ts.
+  // A Receptionist's Edit access is the Patient, Visit Date, Notes,
+  // Department/Doctor/Nurse assignment and Vitals — mirrors
+  // RECEPTIONIST_EDITABLE_FIELDS in opd.controller.ts.
   const receptionistAssignOnly = role === 'RECEPTIONIST';
+
+  // Receptionist-only Patient / Visit Date editing.
+  const [editPatient, setEditPatient] = useState<{ patientId: string; fullName?: string | null; mobileNumber?: string }>(
+    { patientId: visit.patientId, fullName: visit.fullName },
+  );
+  const [editPatientSearch,          setEditPatientSearch]          = useState('');
+  const [debouncedEditPatientSearch, setDebouncedEditPatientSearch] = useState('');
+  const [editPatientPicking,         setEditPatientPicking]         = useState(false);
+  const [editVisitDate,              setEditVisitDate]              = useState(toISTDateInput(visit.visitDate));
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedEditPatientSearch(editPatientSearch), 400);
+    return () => clearTimeout(t);
+  }, [editPatientSearch]);
+  const { data: editPatientData, isFetching: fetchingEditPatients } = useSearchPatientsQuery(
+    { q: debouncedEditPatientSearch || undefined, limit: 10 },
+    { skip: !receptionistAssignOnly || !debouncedEditPatientSearch },
+  );
+  const editPatientResults = editPatientData?.data ?? [];
+  const editPatientChanged = editPatient.patientId !== visit.patientId;
 
   // Look up the payment linked directly to this visit (referenceId) rather than
   // guessing from patientId + calendar date — a patient can have other payments
@@ -241,21 +265,31 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     : editAllDoctors;
 
   const [editDoctorIds,    setEditDoctorIds]    = useState<string[]>(visit.doctorIds ?? []);
-  const [editAddDoctorId,  setEditAddDoctorId]  = useState('');
 
   // Picking a specific department drops any assigned doctor who doesn't
   // belong to it. Changing away from the visit's saved department then
   // requires at least one doctor from the new one before Save is allowed —
   // the backend derives departmentId from the doctors, so this keeps the
   // saved Department/Doctor pair consistent.
+  // Pruning runs in an effect (not the change handler) so it re-applies once
+  // the doctor list arrives — pruning against a still-loading, empty list
+  // would otherwise wrongly drop every assigned doctor. It only runs after a
+  // user-initiated change, so Edit mode opens with the visit's existing
+  // doctors preselected untouched.
+  const [departmentTouched, setDepartmentTouched] = useState(false);
   function handleEditDepartmentChange(departmentId: string) {
     setSelectedDepartmentId(departmentId);
-    setEditAddDoctorId('');
-    if (departmentId) {
-      setEditDoctorIds((prev) => prev.filter((id) =>
-        editAllDoctors.find((d) => d.userId === id)?.departmentIds.includes(departmentId)));
-    }
+    setDepartmentTouched(true);
   }
+  useEffect(() => {
+    if (!departmentTouched || !selectedDepartmentId || !editUsersData) return;
+    const doctors = editUsersData.data ?? [];
+    setEditDoctorIds((prev) => {
+      const next = prev.filter((id) =>
+        doctors.find((d) => d.userId === id)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [departmentTouched, selectedDepartmentId, editUsersData]);
   const departmentChanged = selectedDepartmentId !== (visit.departmentId ?? '');
   const departmentDoctorInvalid =
     !!selectedDepartmentId && departmentChanged && (
@@ -266,7 +300,6 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const { data: editNursesData } = useGetAvailableOpdNursesQuery(undefined, { skip: !(receptionistAssignOnly || canEdit) });
   const editAvailableNurses = editNursesData ?? [];
   const [editNurseIds,    setEditNurseIds]    = useState<string[]>(visit.nurseIds ?? []);
-  const [editAddNurseId,  setEditAddNurseId]  = useState('');
 
   const [form, setForm] = useState<UpdateOPDVisitRequest>({
     diagnosis:      visit.diagnosis      ?? '',
@@ -277,6 +310,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   // (see canEdit/nurseNotesOnly/receptionistAssignOnly), unlike
   // diagnosis/prescription which stay read-only for a Nurse.
   const [vitalsForm, setVitalsForm] = useState<VitalsInputState>(vitalsToInputs(visit.vitals));
+  const [vitalsErrors, setVitalsErrors] = useState<VitalsErrors>({});
   const [completeForm, setCompleteForm] = useState<CompleteOPDVisitRequest>({
     diagnosis:    visit.diagnosis    ?? '',
     prescription: visit.prescription ?? '',
@@ -285,11 +319,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [mode,              setMode]              = useState<'view' | 'edit' | 'complete'>('view');
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();
   const [completeVisit, { isLoading: completing }] = useCompleteOPDVisitMutation();
   const [cancelVisit,   { isLoading: cancelling }] = useCancelOPDVisitMutation();
+  const [deleteVisit,   { isLoading: deleting   }] = useDeleteOPDVisitMutation();
 
   // Waiting → In Consultation. Keeps the panel open on the updated visit so the
   // doctor can go straight on to Complete.
@@ -312,21 +348,37 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     e.preventDefault();
     if (updating || updatingRef.current) return;
     setError('');
+    setVitalsErrors({});
     if (!nurseNotesOnly && departmentDoctorInvalid) {
       setError(DEPARTMENT_DOCTOR_MESSAGE);
       return;
     }
     if (receptionistAssignOnly) {
-      // Only changed assignments (plus vitals) are sent — the backend rejects
-      // any other field from a Receptionist (see RECEPTIONIST_EDITABLE_FIELDS).
+      // Only changed patient/date/notes/assignments (plus vitals) are sent —
+      // the backend rejects any other field from a Receptionist (see
+      // RECEPTIONIST_EDITABLE_FIELDS). Vitals are per visit, so they stay with
+      // this visit (and are always sent) even when the patient is corrected.
       const receptionistVitals = parseVitalsInputs(vitalsForm);
-      if ('error' in receptionistVitals) {
-        setError(receptionistVitals.error);
+      if ('errors' in receptionistVitals) {
+        setVitalsErrors(receptionistVitals.errors);
+        return;
+      }
+      if (!editVisitDate) {
+        setError('Visit date is required.');
+        return;
+      }
+      const visitDateChanged = editVisitDate !== toISTDateInput(visit.visitDate);
+      if (visitDateChanged && editVisitDate < todayISO()) {
+        setError('Past dates are not allowed for OPD visits.');
         return;
       }
       const changed = (next: string[], prev: string[]) =>
         next.length !== prev.length || next.some((id) => !prev.includes(id));
+      const notesChanged = (form.notes ?? '') !== (visit.notes ?? '');
       const body: UpdateOPDVisitRequest = {
+        ...(editPatientChanged ? { patientId: editPatient.patientId } : {}),
+        ...(visitDateChanged   ? { visitDate: editVisitDate }         : {}),
+        ...(notesChanged       ? { notes:     form.notes ?? '' }      : {}),
         ...(changed(editDoctorIds, visit.doctorIds ?? []) ? { doctorIds: editDoctorIds } : {}),
         ...(changed(editNurseIds,  visit.nurseIds  ?? []) ? { nurseIds:  editNurseIds  } : {}),
         vitals: receptionistVitals.vitals,
@@ -355,8 +407,8 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     // notes-only form (see the Vitals section rendered in each below), so
     // validate/include them regardless of which form is active.
     const vitalsResult = parseVitalsInputs(vitalsForm);
-    if ('error' in vitalsResult) {
-      setError(vitalsResult.error);
+    if ('errors' in vitalsResult) {
+      setVitalsErrors(vitalsResult.errors);
       return;
     }
     updatingRef.current = true;
@@ -448,11 +500,15 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       notes:        visit.notes        ?? '',
     });
     setVitalsForm(vitalsToInputs(visit.vitals));
+    setVitalsErrors({});
     setSelectedDepartmentId(visit.departmentId ?? '');
+    setDepartmentTouched(false);
     setEditDoctorIds(visit.doctorIds ?? []);
-    setEditAddDoctorId('');
     setEditNurseIds(visit.nurseIds ?? []);
-    setEditAddNurseId('');
+    setEditPatient({ patientId: visit.patientId, fullName: visit.fullName });
+    setEditPatientSearch('');
+    setEditPatientPicking(false);
+    setEditVisitDate(toISTDateInput(visit.visitDate));
     setMode('edit');
   }
 
@@ -477,6 +533,18 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     }
   }
 
+  async function handleDeleteConfirm() {
+    setError('');
+    try {
+      await deleteVisit(visit.visitId).unwrap();
+      setShowDeleteConfirm(false);
+      onClose();
+    } catch (err: any) {
+      setShowDeleteConfirm(false);
+      setError(err?.data?.message ?? 'Failed to delete visit.');
+    }
+  }
+
   const f = (label: string, val: React.ReactNode) => (
     <div className="py-2 border-b last:border-0 grid grid-cols-5 gap-2">
       <span className="col-span-2 text-sm text-muted-foreground">{label}</span>
@@ -489,49 +557,90 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   // record vitals, unlike diagnosis/
   // prescription which stay read-only for a Nurse. Only one of the two forms
   // is ever mounted at a time, so the shared `ep-*` input ids never collide.
+  // Editing a field clears its own stale message; the rest stay until the
+  // next submit re-validates.
+  const updateVital = (key: keyof VitalsInputState, value: string) => {
+    setVitalsForm((v) => ({ ...v, [key]: value }));
+    setVitalsErrors((errs) => (errs[key] ? { ...errs, [key]: undefined } : errs));
+  };
+  const vitalErrorProps = (key: keyof VitalsInputState, id: string) =>
+    vitalsErrors[key] ? { 'aria-invalid': true, 'aria-describedby': `${id}-error` } : {};
+  const vitalError = (key: keyof VitalsInputState, id: string) =>
+    vitalsErrors[key] ? <p id={`${id}-error`} role="alert" className="text-xs text-destructive">{vitalsErrors[key]}</p> : null;
+
   const vitalsFields = (
     <div className="space-y-3 pt-2 border-t">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="ep-weight">Weight (kg)</Label>
+          <Label htmlFor="ep-spo2">SpO2 (%)</Label>
           <Input
-            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-            value={vitalsForm.weight}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, weight: e.target.value }))}
+            id="ep-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
+            value={vitalsForm.spo2}
+            onChange={(e) => updateVital('spo2', e.target.value)}
+            {...vitalErrorProps('spo2', 'ep-spo2')}
           />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-height">Height (cm)</Label>
-          <Input
-            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-            value={vitalsForm.height}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, height: e.target.value }))}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-bp">Blood Pressure (mmHg)</Label>
-          <Input
-            id="ep-bp" type="text" placeholder="e.g. 120/80"
-            value={vitalsForm.bloodPressure}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, bloodPressure: e.target.value }))}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-sugar">Sugar (mg/dL)</Label>
-          <Input
-            id="ep-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
-            value={vitalsForm.sugar}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, sugar: e.target.value }))}
-          />
+          {vitalError('spo2', 'ep-spo2')}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="ep-temp">Body Temperature (°F)</Label>
           <Input
             id="ep-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
             value={vitalsForm.bodyTemperature}
-            onChange={(e) => setVitalsForm((v) => ({ ...v, bodyTemperature: e.target.value }))}
+            onChange={(e) => updateVital('bodyTemperature', e.target.value)}
+            {...vitalErrorProps('bodyTemperature', 'ep-temp')}
           />
+          {vitalError('bodyTemperature', 'ep-temp')}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-bp">Blood Pressure (mmHg)</Label>
+          <Input
+            id="ep-bp" type="text" placeholder="e.g. 120/80"
+            value={vitalsForm.bloodPressure}
+            onChange={(e) => updateVital('bloodPressure', e.target.value)}
+            {...vitalErrorProps('bloodPressure', 'ep-bp')}
+          />
+          {vitalError('bloodPressure', 'ep-bp')}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-pulse">Pulse (bpm)</Label>
+          <Input
+            id="ep-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
+            value={vitalsForm.pulse}
+            onChange={(e) => updateVital('pulse', e.target.value)}
+            {...vitalErrorProps('pulse', 'ep-pulse')}
+          />
+          {vitalError('pulse', 'ep-pulse')}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-sugar">Sugar (mg/dL)</Label>
+          <Input
+            id="ep-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
+            value={vitalsForm.sugar}
+            onChange={(e) => updateVital('sugar', e.target.value)}
+            {...vitalErrorProps('sugar', 'ep-sugar')}
+          />
+          {vitalError('sugar', 'ep-sugar')}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-height">Height (cm)</Label>
+          <Input
+            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
+            value={vitalsForm.height}
+            onChange={(e) => updateVital('height', e.target.value)}
+            {...vitalErrorProps('height', 'ep-height')}
+          />
+          {vitalError('height', 'ep-height')}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ep-weight">Weight (kg)</Label>
+          <Input
+            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
+            value={vitalsForm.weight}
+            onChange={(e) => updateVital('weight', e.target.value)}
+            {...vitalErrorProps('weight', 'ep-weight')}
+          />
+          {vitalError('weight', 'ep-weight')}
         </div>
       </div>
     </div>
@@ -541,48 +650,15 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   // full Doctor/Hospital Admin edit form (a Nurse's form never shows it).
   const nurseAssignFields = (
     <div className="space-y-1.5">
-      <Label>Assigned Nurses</Label>
-      {editNurseIds.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {editNurseIds.map((id) => {
-            const label = editAvailableNurses.find((n) => n.userId === id)?.name ?? nurseNames([id]);
-            return (
-              <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                <span className="truncate min-w-0" title={label}>{label}</span>
-                <button type="button" onClick={() => setEditNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
-      <div className="flex gap-2">
-        <select
-          value={editAddNurseId}
-          onChange={(e) => setEditAddNurseId(e.target.value)}
-          className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <option value="">— Add nurse —</option>
-          {editAvailableNurses.filter((n) => !editNurseIds.includes(n.userId)).map((n) => (
-            <option key={n.userId} value={n.userId}>{n.name}</option>
-          ))}
-        </select>
-        <Button
-          type="button"
-          disabled={!editAddNurseId}
-          onClick={() => {
-            if (editAddNurseId && !editNurseIds.includes(editAddNurseId)) {
-              setEditNurseIds((prev) => [...prev, editAddNurseId]);
-              setEditAddNurseId('');
-            }
-          }}
-          className="shrink-0 h-10"
-        >
-          <Plus className="h-4 w-4 mr-1.5" />
-          Add Nurse
-        </Button>
-      </div>
+      <Label id="ep-nurses-label">Assigned Nurses</Label>
+      <PeopleMultiSelect
+        labelId="ep-nurses-label"
+        noun="nurses"
+        options={editAvailableNurses}
+        getLabel={(id) => editAvailableNurses.find((n) => n.userId === id)?.name ?? nurseNames([id])}
+        selectedIds={editNurseIds}
+        onChange={setEditNurseIds}
+      />
     </div>
   );
 
@@ -608,49 +684,15 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         )}
       </div>
       <div className="space-y-1.5">
-        <Label>Assigned Doctors</Label>
-        {editDoctorIds.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
-            {editDoctorIds.map((id) => {
-              const d = allDoctors.find((u) => u.userId === id);
-              return (
-                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                  <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
-                  <button type="button" onClick={() => setEditDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              );
-            })}
-          </div>
-        )}
-        <div className="flex gap-2">
-          <select
-            value={editAddDoctorId}
-            onChange={(e) => setEditAddDoctorId(e.target.value)}
-            className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">— Add doctor —</option>
-            {editDoctors.filter((d) => !editDoctorIds.includes(d.userId)).map((d) => (
-              <option key={d.userId} value={d.userId}>{d.name}</option>
-            ))}
-          </select>
-          {/* Matches the New OPD Visit dialog's Add Doctor button. */}
-          <Button
-            type="button"
-            disabled={!editAddDoctorId}
-            onClick={() => {
-              if (editAddDoctorId && !editDoctorIds.includes(editAddDoctorId)) {
-                setEditDoctorIds((prev) => [...prev, editAddDoctorId]);
-                setEditAddDoctorId('');
-              }
-            }}
-            className="shrink-0 h-10"
-          >
-            <Plus className="h-4 w-4 mr-1.5" />
-            Add Doctor
-          </Button>
-        </div>
+        <Label id="ep-doctors-label">Assigned Doctors</Label>
+        <PeopleMultiSelect
+          labelId="ep-doctors-label"
+          noun="doctors"
+          options={editDoctors}
+          getLabel={(id) => (allDoctors.find((u) => u.userId === id) ?? editAllDoctors.find((u) => u.userId === id))?.name ?? id}
+          selectedIds={editDoctorIds}
+          onChange={setEditDoctorIds}
+        />
       </div>
     </>
   );
@@ -699,11 +741,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               {f('Notes',           <RichTextDisplay value={visit.notes} />)}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
-                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
-                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
-                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
+                {f('SpO2',             visit.vitals?.spo2            != null ? `${visit.vitals.spo2} %`    : null)}
                 {f('Body Temperature', visit.vitals?.bodyTemperature != null ? `${visit.vitals.bodyTemperature} °F` : null)}
+                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
+                {f('Pulse',            visit.vitals?.pulse           != null ? `${visit.vitals.pulse} bpm` : null)}
+                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
+                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
+                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
               </div>
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
               {canViewPayment && (
@@ -733,7 +777,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             // entirely on an out-of-range value before handleUpdate ever
             // runs, showing a native tooltip instead of our own styled error
             // banner (the same one every other validation error uses).
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               <p className="text-xs text-muted-foreground">Only the notes and vitals fields can be edited.</p>
               {f('Doctor(s)',     doctorNames(visit.doctorIds ?? []))}
               {f('Nurse(s)',      nurseNames(visit.nurseIds ?? []))}
@@ -752,23 +796,106 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 />
               </div>
               {vitalsFields}
-            </form>
+            </NavForm>
           )}
-          {/* Edit mode — Receptionist gets an assignment-only form:
-              Department/Doctors/Nurses are editable, everything else is
-              shown read-only and never submitted (see handleUpdate). */}
+          {/* Edit mode — Receptionist form: Patient, Visit Date, Notes,
+              Department/Doctors/Nurses and Vitals are editable; diagnosis and
+              prescription are shown read-only and never submitted (see
+              handleUpdate). */}
           {mode === 'edit' && receptionistAssignOnly && (
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
-              <p className="text-xs text-muted-foreground">Only the department, doctor, nurse and vitals fields can be edited.</p>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+              {/* <p className="text-xs text-muted-foreground">Only the patient, visit date, notes, department, doctor, nurse and vitals fields can be edited.</p> */}
+              <div className="space-y-1.5">
+                <Label>Patient</Label>
+                {!editPatientPicking ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0 rounded-md border px-3 py-2">
+                      <p className="text-sm font-medium truncate">{editPatient.fullName ?? editPatient.patientId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {editPatient.patientId}{editPatient.mobileNumber ? ` · ${editPatient.mobileNumber}` : ''}
+                      </p>
+                    </div>
+                    <Button type="button" className="shrink-0 h-10" onClick={() => setEditPatientPicking(true)}>
+                      Change
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        className="pl-9"
+                        placeholder="Search patient by name or mobile…"
+                        value={editPatientSearch}
+                        onChange={(e) => setEditPatientSearch(e.target.value)}
+                        autoFocus
+                      />
+                      {debouncedEditPatientSearch && (
+                        <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                          {fetchingEditPatients && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+                          )}
+                          {!fetchingEditPatients && editPatientResults.length === 0 && (
+                            <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
+                          )}
+                          {editPatientResults.map((p) => (
+                            <button
+                              key={p.patientId}
+                              type="button"
+                              className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+                              onClick={() => {
+                                setEditPatient({ patientId: p.patientId, fullName: p.fullName, mobileNumber: p.mobileNumber });
+                                setEditPatientSearch('');
+                                setEditPatientPicking(false);
+                              }}
+                            >
+                              <span className="text-sm font-medium">{p.fullName}</span>
+                              <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0 h-10"
+                      onClick={() => { setEditPatientSearch(''); setEditPatientPicking(false); }}
+                    >
+                      Keep
+                    </Button>
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-date">Visit Date</Label>
+                <Input
+                  id="ep-date"
+                  type="date"
+                  min={todayISO()}
+                  value={editVisitDate}
+                  onChange={(e) => setEditVisitDate(e.target.value)}
+                  className="relative pr-10 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:right-3 [&::-webkit-calendar-picker-indicator]:top-0 [&::-webkit-calendar-picker-indicator]:bottom-0 [&::-webkit-calendar-picker-indicator]:my-auto [&::-webkit-calendar-picker-indicator]:h-5 [&::-webkit-calendar-picker-indicator]:w-5 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:hover:opacity-100"
+                />
+              </div>
               {departmentDoctorFields}
               {nurseAssignFields}
               {f('Diagnosis',    visit.diagnosis)}
               {f('Prescription', visit.prescription ? (
                 <pre className="whitespace-pre-wrap font-sans text-sm">{visit.prescription}</pre>
               ) : null)}
-              {f('Notes',        <RichTextDisplay value={visit.notes} />)}
+              <div className="space-y-1.5">
+                <Label htmlFor="ep-notes">Notes</Label>
+                <RichTextEditor
+                  id="ep-notes"
+                  rows={2}
+                  value={form.notes ?? ''}
+                  onChange={(html) => setForm((f) => ({ ...f, notes: html }))}
+                  maxLength={2000}
+                />
+              </div>
               {vitalsFields}
-            </form>
+            </NavForm>
           )}
           {mode === 'edit' && !nurseNotesOnly && !receptionistAssignOnly && (
             // noValidate: the Vitals number inputs' min/max are UX hints only
@@ -776,7 +903,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             // entirely on an out-of-range value before handleUpdate ever
             // runs, showing a native tooltip instead of our own styled error
             // banner (the same one every other validation error uses).
-            <form id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
+            <NavForm id="editForm" onSubmit={handleUpdate} className="space-y-4" noValidate>
               {departmentDoctorFields}
               {nurseAssignFields}
               <div className="space-y-1.5">
@@ -814,12 +941,12 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                 />
               </div>
               {vitalsFields}
-            </form>
+            </NavForm>
           )}
 
           {/* Complete mode */}
           {mode === 'complete' && (
-            <form id="completeForm" onSubmit={handleComplete} className="space-y-4">
+            <NavForm id="completeForm" onSubmit={handleComplete} className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Completing this visit is permanent. Provide the final diagnosis before confirming.
               </p>
@@ -858,7 +985,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                   maxLength={2000}
                 />
               </div>
-            </form>
+            </NavForm>
           )}
         </div>
 
@@ -910,6 +1037,19 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
                     {cancelling ? '…' : 'Cancel Visit'}
                   </Button>
                 )}
+                {/* Waiting visits only — once the consultation has started
+                    the visit is part of the record (enforced server-side too). */}
+                {canDelete && visit.status === 'OPEN' && (
+                  <Button
+                    variant="destructive"
+                    className="min-w-[120px] flex-1 h-10 rounded-lg border border-red-600 bg-red-600 font-medium text-white transition-colors hover:border-red-700 hover:bg-red-700"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deleting}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {deleting ? '…' : 'Delete Visit'}
+                  </Button>
+                )}
               </div>
             )}
             {mode === 'edit' && (
@@ -955,6 +1095,32 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
           </div>
         </DialogOverlay>
       )}
+
+      {showDeleteConfirm && (
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+          <div role="alertdialog" aria-labelledby="delete-visit-title" className="bg-background rounded-lg border shadow-lg w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <Trash2 className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h2 id="delete-visit-title" className="font-semibold">Delete Visit?</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This will permanently delete OPD visit{' '}
+                  <span className="font-medium text-foreground">{visit.queueNumber > 0 ? `#${visit.queueNumber}` : visit.visitId}</span>{' '}
+                  for <span className="font-medium text-foreground">{visit.fullName ?? visit.patientId}</span>. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
+                Keep Visit
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteConfirm} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Yes, Delete Visit'}
+              </Button>
+            </div>
+          </div>
+        </DialogOverlay>
+      )}
     </DialogOverlay>
   );
 }
@@ -979,9 +1145,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const [selectedPatient, setSelectedPatient] = useState<PatientResponse | null>(null);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState('');
   const [selectedDoctorIds,    setSelectedDoctorIds]    = useState<string[]>([]);
-  const [addDoctorId,          setAddDoctorId]          = useState('');
   const [selectedNurseIds,     setSelectedNurseIds]     = useState<string[]>([]);
-  const [addNurseId,           setAddNurseId]           = useState('');
   const [form, setForm] = useState<Omit<CreateOPDVisitRequest, 'patientId' | 'doctorIds'>>({
     visitDate: todayISO(),
     notes:     '',
@@ -1055,6 +1219,37 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   );
   const patients = patientData?.data ?? [];
 
+  // Keyboard navigation for the patient suggestions: -1 = nothing highlighted.
+  // Reset whenever the result set changes so a stale index never points at a
+  // different patient than the one the user saw highlighted.
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const suggestionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => { setHighlightedIndex(-1); }, [debouncedPSearch, patientData]);
+  useEffect(() => {
+    if (highlightedIndex < 0) return;
+    suggestionRefs.current[highlightedIndex]?.scrollIntoView?.({ block: 'nearest' });
+  }, [highlightedIndex]);
+
+  const selectPatient = (p: PatientResponse) => {
+    setSelectedPatient(p);
+    setPatientSearch('');
+  };
+
+  const handlePatientSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!debouncedPSearch || fetchingPatients || patients.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i + 1) % patients.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i <= 0 ? patients.length - 1 : i - 1));
+    } else if (e.key === 'Enter' && highlightedIndex >= 0 && highlightedIndex < patients.length) {
+      // Prevent the surrounding New Visit form from submitting.
+      e.preventDefault();
+      selectPatient(patients[highlightedIndex]);
+    }
+  };
+
   const { data: departmentsData } = useListDepartmentsQuery();
   const departments = departmentsData ?? [];
 
@@ -1063,6 +1258,21 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
   const doctors = selectedDepartmentId
     ? allDoctors.filter((d) => d.departmentIds.includes(selectedDepartmentId))
     : allDoctors;
+
+  // Picking a specific department drops any selected doctor who doesn't
+  // belong to it (same as the Edit flow's pruning in VisitPanel). Runs in an
+  // effect keyed on the doctor list too, so a department picked while the
+  // list is still loading prunes once it arrives instead of against an empty
+  // list. "All Departments" keeps the current selection.
+  useEffect(() => {
+    if (!selectedDepartmentId || !usersData) return;
+    const list = usersData.data ?? [];
+    setSelectedDoctorIds((prev) => {
+      const next = prev.filter((id) =>
+        list.find((d) => d.userId === id)?.departmentIds.includes(selectedDepartmentId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedDepartmentId, usersData]);
 
   // Assign Nurse — doctor-wise, multi-nurse: nurse pool + the primary (first)
   // selected doctor's existing OPD nurse assignments, if any. Nurse selection
@@ -1209,7 +1419,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {error && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
@@ -1241,21 +1451,40 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                       placeholder="Search patient by name or mobile…"
                       value={patientSearch}
                       onChange={(e) => setPatientSearch(e.target.value)}
+                      onKeyDown={handlePatientSearchKeyDown}
+                      role="combobox"
+                      aria-expanded={!!debouncedPSearch}
+                      aria-controls="nv-patient-suggestions"
+                      aria-autocomplete="list"
+                      aria-activedescendant={
+                        highlightedIndex >= 0 ? `nv-patient-option-${highlightedIndex}` : undefined
+                      }
                     />
                     {debouncedPSearch && (
-                      <div className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto">
+                      <div
+                        id="nv-patient-suggestions"
+                        role="listbox"
+                        className="absolute z-10 mt-1 w-full rounded-md border bg-background shadow-lg max-h-48 overflow-y-auto"
+                      >
                         {fetchingPatients && (
                           <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
                         )}
                         {!fetchingPatients && patients.length === 0 && (
                           <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
                         )}
-                        {patients.map((p) => (
+                        {patients.map((p, idx) => (
                           <button
                             key={p.patientId}
+                            id={`nv-patient-option-${idx}`}
+                            ref={(el) => { suggestionRefs.current[idx] = el; }}
                             type="button"
-                            className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
-                            onClick={() => { setSelectedPatient(p); setPatientSearch(''); }}
+                            role="option"
+                            aria-selected={idx === highlightedIndex}
+                            className={`flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors ${
+                              idx === highlightedIndex ? 'bg-primary/10 ring-1 ring-inset ring-primary' : ''
+                            }`}
+                            onMouseEnter={() => setHighlightedIndex(idx)}
+                            onClick={() => selectPatient(p)}
                           >
                             <span className="text-sm font-medium">{p.fullName}</span>
                             <span className="text-xs text-muted-foreground">{p.patientId} · {p.mobileNumber}</span>
@@ -1279,7 +1508,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                 <select
                   id="nv-dept"
                   value={selectedDepartmentId}
-                  onChange={(e) => { setSelectedDepartmentId(e.target.value); setAddDoctorId(''); }}
+                  onChange={(e) => setSelectedDepartmentId(e.target.value)}
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="">— All Departments —</option>
@@ -1304,55 +1533,22 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
 
             {/* Doctors */}
             <div className="space-y-1.5">
-              <Label>Assign Doctors</Label>
-              {selectedDoctorIds.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {selectedDoctorIds.map((id) => {
-                    const d = allDoctors.find((u) => u.userId === id);
-                    return (
-                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                        <span className="truncate min-w-0" title={d?.name ?? id}>{d?.name ?? id}</span>
-                        <button type="button" onClick={() => setSelectedDoctorIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="flex gap-2">
-                <select
-                  value={addDoctorId}
-                  onChange={(e) => setAddDoctorId(e.target.value)}
-                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  <option value="">— Add doctor —</option>
-                  {doctors.filter((d) => !selectedDoctorIds.includes(d.userId)).map((d) => (
-                    <option key={d.userId} value={d.userId}>{d.name}</option>
-                  ))}
-                </select>
-                <Button
-                  type="button"
-                  disabled={!addDoctorId}
-                  onClick={() => {
-                    if (addDoctorId && !selectedDoctorIds.includes(addDoctorId)) {
-                      setSelectedDoctorIds((prev) => [...prev, addDoctorId]);
-                      setAddDoctorId('');
-                    }
-                  }}
-                  className="shrink-0 h-10"
-                >
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Add Doctor
-                </Button>
-              </div>
+              <Label id="nv-doctors-label">Assign Doctors</Label>
+              <PeopleMultiSelect
+                labelId="nv-doctors-label"
+                noun="doctors"
+                options={doctors}
+                getLabel={(id) => allDoctors.find((u) => u.userId === id)?.name ?? id}
+                selectedIds={selectedDoctorIds}
+                onChange={setSelectedDoctorIds}
+              />
             </div>
 
-            {/* Nurse — doctor-wise, optional, multi-select (same chip pattern as
+            {/* Nurse — doctor-wise, optional, multi-select (same dropdown as
                 Assign Doctors). Keyed off the first assigned doctor, same
                 convention the department resolution already uses. */}
             <div className="space-y-1.5">
-              <Label>Assign Nurse (Optional)</Label>
+              <Label id="nv-nurses-label">Assign Nurse (Optional)</Label>
               {primaryDoctorId && assignedNurses.filter((n) => n.isAvailable).length > 0 && (
                 <p className="rounded-md bg-success/10 px-3 py-2 text-xs text-success">
                   ✓ Already assigned nurse{assignedNurses.filter((n) => n.isAvailable).length > 1 ? 's' : ''}: {assignedNurses.filter((n) => n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')}
@@ -1363,51 +1559,20 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
                   {assignedNurses.filter((n) => !n.isAvailable).map((n) => n.nurseName ?? n.nurseId).join(', ')} {assignedNurses.filter((n) => !n.isAvailable).length > 1 ? 'are' : 'is'} currently on IPD ward duty — select another nurse.
                 </p>
               )}
-              {selectedNurseIds.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {selectedNurseIds.map((id) => {
-                    const n = availableNurses.find((u) => u.userId === id);
-                    const label = n?.name ?? assignedNurses.find((a) => a.nurseId === id)?.nurseName ?? id;
-                    return (
-                      <span key={id} className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2.5 py-0.5 text-xs font-medium text-info max-w-[160px]">
-                        <span className="truncate min-w-0" title={label}>{label}</span>
-                        <button type="button" onClick={() => setSelectedNurseIds((prev) => prev.filter((x) => x !== id))} className="ml-0.5 shrink-0 hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).length === 0 && selectedNurseIds.length === 0 ? (
+              {availableNurses.length === 0 && selectedNurseIds.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No available nurses</p>
               ) : (
-                <div className="flex gap-2">
-                  <select
-                    value={addNurseId}
-                    onChange={(e) => setAddNurseId(e.target.value)}
-                    className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">— Add nurse —</option>
-                    {availableNurses.filter((n) => !selectedNurseIds.includes(n.userId)).map((n) => (
-                      <option key={n.userId} value={n.userId}>{n.name}</option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    disabled={!addNurseId}
-                    onClick={() => {
-                      if (addNurseId && !selectedNurseIds.includes(addNurseId)) {
-                        setSelectedNurseIds((prev) => [...prev, addNurseId]);
-                        setAddNurseId('');
-                      }
-                    }}
-                    className="shrink-0 h-10"
-                  >
-                    <Plus className="h-4 w-4 mr-1.5" />
-                    Add Nurse
-                  </Button>
-                </div>
+                <PeopleMultiSelect
+                  labelId="nv-nurses-label"
+                  noun="nurses"
+                  options={availableNurses}
+                  getLabel={(id) =>
+                    availableNurses.find((u) => u.userId === id)?.name
+                    ?? assignedNurses.find((a) => a.nurseId === id)?.nurseName
+                    ?? id}
+                  selectedIds={selectedNurseIds}
+                  onChange={setSelectedNurseIds}
+                />
               )}
             </div>
 
@@ -1541,7 +1706,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
               {isLoading ? 'Creating…' : 'Create Visit'}
             </Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
     {showAddPatient && (
@@ -1559,6 +1724,8 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
 
 type TabType = 'queue' | 'new';
 
+const OPD_QUEUE_PAGE_SIZE = 20;
+
 export default function OPDPage() {
   const role   = useAppSelector((s) => s.auth.profile?.role);
   const userId = useAppSelector((s) => s.auth.profile?.userId);
@@ -1571,19 +1738,33 @@ export default function OPDPage() {
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page,            setPage]            = useState(1);
   const [selectedVisit, setSelectedVisit] = useState<OPDVisitResponse | null>(null);
   const [showNewVisit,  setShowNewVisit]  = useState(false);
 
+  // Only an actual change of term resets to page 1 — otherwise the mount-time
+  // run would yank the user back to page 1 if they paged within 400ms.
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(filterSearch), 400);
+    if (filterSearch === debouncedSearch) return;
+    const t = setTimeout(() => { setDebouncedSearch(filterSearch); setPage(1); }, 400);
     return () => clearTimeout(t);
-  }, [filterSearch]);
+  }, [filterSearch, debouncedSearch]);
 
   const { data: queue, isFetching, refetch } = useGetOPDQueueQuery({
     date:     filterDate,
     doctorId: filterDoctor    || undefined,
     search:   debouncedSearch || undefined,
+    page,
+    limit:    OPD_QUEUE_PAGE_SIZE,
   });
+
+  // A visit removed from the last page (delete/cancel) can leave `page` past
+  // the end — step back so the table never sits on an empty page.
+  // Skipped while a fetch is in flight so a stale previous-args result never
+  // drives the clamp.
+  useEffect(() => {
+    if (!isFetching && queue && page > 1 && page > queue.totalPages) setPage(Math.max(1, queue.totalPages));
+  }, [isFetching, queue, page]);
 
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
   const doctors = usersData?.data ?? [];
@@ -1609,7 +1790,17 @@ export default function OPDPage() {
     }).join(', ');
   }, [nurses]);
 
-  const visits = queue ?? [];
+  const visits     = queue?.data ?? [];
+  const total      = queue?.total ?? visits.length;
+  const totalPages = queue?.totalPages ?? 1;
+  // Upper bound counts the rows actually returned, so the offline-cache
+  // fallback (all rows on one page) still reads "1–N of N".
+  const rangeStart = total === 0 ? 0 : (page - 1) * OPD_QUEUE_PAGE_SIZE + 1;
+  const rangeEnd   = total === 0 ? 0 : Math.min((page - 1) * OPD_QUEUE_PAGE_SIZE + visits.length, total);
+  // Day-wise S. No.: the queue is always one IST calendar day (filterDate),
+  // ordered oldest-created first (opd.repository.ts QUEUE_SORT), so the page
+  // offset numbering restarts at 1 for each day and new visits land last.
+  const serialStart = serialOffset(queue, page, OPD_QUEUE_PAGE_SIZE);
 
   // DOCTOR is deliberately excluded — doctors may view/act on visits assigned to
   // them but must not be able to create new OPD visits (also enforced server-side).
@@ -1618,12 +1809,16 @@ export default function OPDPage() {
   const canCreateVisit = ['RECEPTIONIST', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
   const canEdit        = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canComplete    = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
-  const canCancel      = ['RECEPTIONIST', 'DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const canCancel      = ['DOCTOR', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  // RECEPTIONIST deletes instead of cancelling (DELETE /api/opd/visits/:visitId).
+  const canDelete      = role === 'RECEPTIONIST';
   const canViewPayment = PAYMENT_VIEW_ROLES.includes(role ?? '');
 
   // Queue stats
-  const open      = visits.filter((v) => v.status === 'OPEN').length;
-  const completed = visits.filter((v) => v.status === 'COMPLETED').length;
+  // Server-side counts span every page; the offline-cache fallback (one
+  // unpaginated page, no counts) derives them from the rows it has.
+  const open      = queue?.openCount      ?? visits.filter((v) => v.status === 'OPEN').length;
+  const completed = queue?.completedCount ?? visits.filter((v) => v.status === 'COMPLETED').length;
 
   return (
     <div className="space-y-6">
@@ -1646,7 +1841,7 @@ export default function OPDPage() {
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Total Today</p>
-            <p className="text-2xl font-bold">{visits.length}</p>
+            <p className="text-2xl font-bold">{total}</p>
           </CardContent>
         </Card>
         <Card>
@@ -1674,7 +1869,7 @@ export default function OPDPage() {
                 id="filterDate"
                 type="date"
                 value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
+                onChange={(e) => { setFilterDate(e.target.value); setPage(1); }}
                 className="flex-1 sm:w-40 sm:flex-none"
               />
             </div>
@@ -1685,7 +1880,7 @@ export default function OPDPage() {
               <select
                 id="filterDoc"
                 value={filterDoctor}
-                onChange={(e) => setFilterDoctor(e.target.value)}
+                onChange={(e) => { setFilterDoctor(e.target.value); setPage(1); }}
                 className="flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">All Doctors</option>
@@ -1702,7 +1897,7 @@ export default function OPDPage() {
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                 <Input
                   id="filterSearch"
-                  placeholder="Patient name or ID…"
+                  placeholder="Patient name or UHID…"
                   value={filterSearch}
                   onChange={(e) => setFilterSearch(e.target.value)}
                   className="h-10 pl-8 text-sm"
@@ -1732,6 +1927,7 @@ export default function OPDPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden lg:table-cell">Doctor</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
@@ -1739,7 +1935,7 @@ export default function OPDPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visits.map((v) => (
+                  {visits.map((v, idx) => (
                     <tr
                       key={v.visitId}
                       // Finished visits are tinted, not faded. Row-level opacity
@@ -1753,6 +1949,7 @@ export default function OPDPage() {
                       )}
                       onClick={() => setSelectedVisit(v)}
                     >
+                      <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                       <td className="px-4 py-3 max-w-[180px]">
                         <p className="font-medium truncate" title={v.fullName ?? v.patientId}>{v.fullName ?? v.patientId}</p>
                         <p className="text-xs text-muted-foreground">
@@ -1800,6 +1997,30 @@ export default function OPDPage() {
         </CardContent>
       </Card>
 
+      {/* Pagination + count */}
+      {queue && !isFetching && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
+          <span>
+            {total === 0
+              ? 'No visits'
+              : `Showing ${rangeStart}–${rangeEnd} of ${total} visit${total !== 1 ? 's' : ''}`}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                Previous
+              </Button>
+              <span className="flex items-center px-2 text-xs">
+                {page} / {totalPages}
+              </span>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                Next
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Visit detail panel */}
       {selectedVisit && (
         <VisitPanel
@@ -1809,6 +2030,7 @@ export default function OPDPage() {
           canEdit={canEdit}
           canComplete={canComplete}
           canCancel={canCancel}
+          canDelete={canDelete}
           canViewPayment={canViewPayment}
           doctorNames={doctorNames}
           allDoctors={doctors}

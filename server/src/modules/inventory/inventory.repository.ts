@@ -20,32 +20,27 @@ export class InventoryRepository {
     query:    ListInventoryQuery,
   ): Promise<PaginatedResult<IInventoryItem>> {
     assertDbConnected();
-    const { category, lowStock, page, limit } = query;
+    const { category, search, lowStock, page, limit } = query;
     const skip   = (page - 1) * limit;
     const filter: Record<string, unknown> = { tenantId, ...NOT_DELETED };
     // Case-insensitive partial match: "glov" must match a category of "Gloves".
     if (category) filter['category'] = { $regex: escapeRegex(category), $options: 'i' };
-
-    let q = InventoryItemModel.find(filter);
+    if (search) {
+      const re = { $regex: escapeRegex(search), $options: 'i' };
+      filter['$or'] = [{ name: re }, { category: re }];
+    }
 
     // lowStock filter: items where quantity < lowStockThreshold and threshold > 0
     if (lowStock === true) {
-      q = InventoryItemModel.find({
-        ...filter,
-        $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
-      });
+      filter['$expr'] = { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] };
     }
 
-    const countFilter = lowStock === true
-      ? {
-          ...filter,
-          $expr: { $and: [{ $gt: ['$lowStockThreshold', 0] }, { $lt: ['$quantity', '$lowStockThreshold'] }] },
-        }
-      : filter;
-
+    // The same filter drives both the page and the count, so `total` always
+    // matches what paging through would return. `_id` breaks ties between
+    // equal names so no item is skipped or repeated across pages.
     const [data, total] = await Promise.all([
-      q.sort({ name: 1 }).skip(skip).limit(limit),
-      InventoryItemModel.countDocuments(countFilter),
+      InventoryItemModel.find(filter).sort({ name: 1, _id: 1 }).skip(skip).limit(limit),
+      InventoryItemModel.countDocuments(filter),
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };

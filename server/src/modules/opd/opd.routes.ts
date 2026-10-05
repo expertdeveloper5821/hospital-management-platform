@@ -13,6 +13,7 @@ import {
   startConsultation,
   completeVisit,
   cancelVisit,
+  deleteVisit,
   getPatientHistory,
   getPaymentValidity,
   getAvailableNurses,
@@ -62,9 +63,10 @@ router.patch('/visits/:visitId/complete',
   completeVisit,
 );
 
+// RECEPTIONIST deletes instead of cancelling — see DELETE /visits/:visitId.
 router.patch('/visits/:visitId/cancel',
   ...protect,
-  requireRole(UserRole.RECEPTIONIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
+  requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN),
   cancelVisit,
 );
 
@@ -82,11 +84,19 @@ router.get('/visits/:visitId/parcha-pdf',
   getParchaPdf,
 );
 
+// Permanent delete of a still-waiting (OPEN) visit — Receptionist-only.
+router.delete('/visits/:visitId',
+  ...protect,
+  requireRole(UserRole.RECEPTIONIST),
+  deleteVisit,
+);
+
 // NURSE is included here (unlike elsewhere in this file) but strictly
 // notes-only and only for a visit she's personally assigned to — both
 // enforced in the controller/service, not just by this role gate.
-// RECEPTIONIST is limited to the doctor/nurse assignment (department is
-// re-resolved from the doctors) — enforced in the controller.
+// RECEPTIONIST is limited to the patient, visit date, notes, vitals and the
+// doctor/nurse assignment (department is re-resolved from the doctors) —
+// enforced in the controller.
 router.patch('/visits/:visitId',
   ...protect,
   requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.RECEPTIONIST),

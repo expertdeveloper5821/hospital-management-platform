@@ -4,6 +4,7 @@ import type { RootState } from '../index';
 import type {
   ApiSuccess,
   OPDVisitResponse,
+  OPDQueueResult,
   OPDPatientHistory,
   CreateOPDVisitRequest,
   UpdateOPDVisitRequest,
@@ -18,16 +19,18 @@ const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').re
 export const opdApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
 
-    getOPDQueue: build.query<OPDVisitResponse[], { date?: string; doctorId?: string; search?: string }>({
-      query: ({ date, doctorId, search } = {}) => {
+    getOPDQueue: build.query<OPDQueueResult, { date?: string; doctorId?: string; search?: string; page?: number; limit?: number }>({
+      query: ({ date, doctorId, search, page, limit } = {}) => {
         const params = new URLSearchParams();
         if (date)     params.set('date',     date);
         if (doctorId) params.set('doctorId', doctorId);
         if (search)   params.set('search',   search);
+        if (page)     params.set('page',     String(page));
+        if (limit)    params.set('limit',    String(limit));
         const qs = params.toString();
         return `/api/opd/visits${qs ? `?${qs}` : ''}`;
       },
-      transformResponse: (raw: ApiSuccess<OPDVisitResponse[]>) => raw.data,
+      transformResponse: (raw: ApiSuccess<OPDQueueResult>) => raw.data,
       providesTags: ['OPD'],
     }),
 
@@ -46,7 +49,7 @@ export const opdApi = baseApi.injectEndpoints({
     updateOPDVisit: build.mutation<OPDVisitResponse, { visitId: string } & UpdateOPDVisitRequest>({
       query: ({ visitId, ...body }) => ({ url: `/api/opd/visits/${visitId}`, method: 'PATCH', body }),
       transformResponse: (raw: ApiSuccess<OPDVisitResponse>) => raw.data,
-      invalidatesTags: ['OPD', 'IPD'], // IPD too: vitals are shared per patient
+      invalidatesTags: ['OPD'], // vitals are per visit — never written to IPD admissions
     }),
 
     startOPDConsultation: build.mutation<OPDVisitResponse, string>({
@@ -65,6 +68,14 @@ export const opdApi = baseApi.injectEndpoints({
       query: (visitId) => ({ url: `/api/opd/visits/${visitId}/cancel`, method: 'PATCH' }),
       transformResponse: (raw: ApiSuccess<OPDVisitResponse>) => raw.data,
       invalidatesTags: ['OPD'],
+    }),
+
+    // DELETE /api/opd/visits/:visitId — Receptionist-only; replaces Cancel
+    // for that role. Also cancels the visit's linked payment(s) server-side,
+    // so cached payment lists/revenue are refetched too.
+    deleteOPDVisit: build.mutation<void, string>({
+      query: (visitId) => ({ url: `/api/opd/visits/${visitId}`, method: 'DELETE' }),
+      invalidatesTags: ['OPD', 'Payment'],
     }),
 
     getOPDPatientHistory: build.query<OPDPatientHistory, {
@@ -161,6 +172,7 @@ export const {
   useStartOPDConsultationMutation,
   useCompleteOPDVisitMutation,
   useCancelOPDVisitMutation,
+  useDeleteOPDVisitMutation,
   useGetOPDPatientHistoryQuery,
   useGetOPDPaymentValidityQuery,
   useGetAvailableOpdNursesQuery,

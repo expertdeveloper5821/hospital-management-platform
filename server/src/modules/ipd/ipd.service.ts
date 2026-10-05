@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { ipdRepository } from './ipd.repository';
 import { opdRepository } from '../opd/opd.repository';
-import { findLatestPatientVitals, syncPatientVitals } from '../opd/patient-vitals.sync';
 import { IIPDAdmission } from './ipd.model';
 import { IWard }          from './ward.model';
 import { IBed }           from './bed.model';
@@ -30,6 +29,8 @@ import { departmentRepository } from '../department/department.repository';
 import { tenantRepository }     from '../tenant/tenant.repository';
 import { labRepository }        from '../lab/lab.repository';
 import { paymentRepository }    from '../payment/payment.repository';
+import { packageRepository }    from '../packages/packages.repository';
+import { PaymentStatus }        from '../payment/payment.types';
 import { auditService }         from '../../shared/services/audit.service';
 import { s3Service }            from '../../shared/services/s3.service';
 import { AuditLogModel }        from '../audit/audit.model';
@@ -55,6 +56,8 @@ const DEFAULT_VITALS: IPDVitals = {
   bloodPressure:   null,
   sugar:           null,
   bodyTemperature: null,
+  spo2:            null,
+  pulse:           null,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -185,7 +188,7 @@ function buildIpdParchaOverlay(
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
-    { label: 'Patient ID',   value: patient.patientId },
+    { label: 'UHID',         value: patient.patientId },
     { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : '—')} years / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
@@ -202,18 +205,20 @@ function buildIpdParchaOverlay(
   }
 
   const vitals: ParchaOverlayInput['vitals'] = [
-    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
-    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
-    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
-    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
+    { label: 'SpO2',   value: admission.vitals?.spo2            != null ? String(admission.vitals.spo2)            : '' },
     { label: 'Temp',   value: admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : '' },
+    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
+    { label: 'Pulse',  value: admission.vitals?.pulse           != null ? String(admission.vitals.pulse)           : '' },
+    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
+    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
+    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
   ];
 
   const sortedNotes = [...admission.progressNotes].sort(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
   );
   const notesText = sortedNotes.length === 0
-    ? 'No progress notes recorded.'
+    ? ''
     : sortedNotes.map((n) => {
         const author = staffNameMap.get(n.doctorId) ?? 'Staff';
         return `${formatParchaDateTime(n.timestamp)} — ${author}\n${stripRichTextTags(n.note)}`;
@@ -222,10 +227,11 @@ function buildIpdParchaOverlay(
   return {
     fieldRows,
     vitals,
+    // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
-      { heading: 'Progress Notes', text: notesText, weight: 1 },
-      { heading: 'Prescription',   text: admission.prescription || 'No prescription recorded.', weight: 0.5 },
-    ],
+      { heading: 'Progress Notes', text: notesText,                   weight: 1 },
+      { heading: 'Prescription',   text: admission.prescription ?? '', weight: 0.5 },
+    ].filter((section) => section.text.trim() !== ''),
     footerText: `Generated on ${formatParchaDateTime(new Date())}`,
   };
 }
@@ -327,7 +333,8 @@ async function assertCanManageAdmission(
   if (actor.role === UserRole.HOSPITAL_ADMIN) return;
   if (actor.role === UserRole.DOCTOR && (admission.assignedDoctorIds ?? []).includes(actor.userId)) return;
   if (actor.role === UserRole.NURSE) {
-    const ward = await ipdRepository.findWardById(tenantId, admission.wardId);
+    // Including deleted: a ward deleted after this admission keeps its nurses' access.
+    const ward = await ipdRepository.findWardByIdIncludingDeleted(tenantId, admission.wardId);
     if (ward?.assignedNurseIds?.includes(actor.userId)) return;
   }
   throw new ForbiddenError(
@@ -367,9 +374,12 @@ async function toResponse(
       bloodPressure:   doc.vitals?.bloodPressure   ?? null,
       sugar:           doc.vitals?.sugar           ?? null,
       bodyTemperature: doc.vitals?.bodyTemperature ?? null,
+      spo2:            doc.vitals?.spo2            ?? null,
+      pulse:           doc.vitals?.pulse           ?? null,
     },
     prescription:          doc.prescription ?? null,
     dischargeSummaryNotes: doc.dischargeSummaryNotes ?? null,
+    packageId:             doc.packageId ?? null,
   };
 }
 
@@ -394,6 +404,23 @@ export class IPDService {
       throw new ConflictError(
         `Patient is already admitted (admission ID: ${activeAdmission.admissionId}). Discharge the patient before creating a new admission.`,
       );
+    }
+
+    // [1c] Optional package: it must be an active package of this tenant with
+    // a linked ward, and the requested ward must be that ward. The bed checks
+    // below then guarantee the bed belongs to the package's ward.
+    if (input.packageId) {
+      const pkg = await packageRepository.findById(tenantId, input.packageId);
+      if (!pkg) throw new NotFoundError('Package not found');
+      if (pkg.status !== 'ACTIVE') {
+        throw new AppError('Selected package is inactive', 400);
+      }
+      if (!pkg.wardId) {
+        throw new AppError('Selected package has no linked ward', 400);
+      }
+      if (pkg.wardId !== input.wardId) {
+        throw new AppError('Ward must be the ward linked to the selected package', 400);
+      }
     }
 
     // [2] Verify ward exists — uses ipdRepository (U3-A owns Ward model)
@@ -436,13 +463,10 @@ export class IPDService {
     // race-condition arbiter under concurrent or offline-replayed creates —
     // steps [1b]/[5] above are a fast, friendly pre-check only; a
     // duplicate-key hit here is mapped to a 409 by the repository.
-    // Vitals are shared per patient — a new admission starts from the latest
-    // readings recorded in OPD or IPD.
-    const latestVitals = await findLatestPatientVitals(tenantId, input.patientId);
-
+    // Vitals are per admission — a new admission always starts with no
+    // readings (the schema default), never copied from earlier visits.
     const admission = await ipdRepository.createAdmissionWithBedOccupancy(
       {
-        ...(latestVitals ? { vitals: latestVitals } : {}),
         admissionId:       uuidv4(),
         patientId:         input.patientId,
         wardId:            input.wardId,
@@ -455,6 +479,7 @@ export class IPDService {
         admissionDate:    new Date(),
         dischargeDate:    null,
         progressNotes:    [],
+        packageId:        input.packageId ?? null,
         tenantId,
       },
       input.bedId,
@@ -468,7 +493,7 @@ export class IPDService {
         action:     'CREATE',
         userId,
         tenantId,
-        newValue:   { patientId: input.patientId, wardId: input.wardId, bedId: input.bedId, status: AdmissionStatus.ADMITTED },
+        newValue:   { patientId: input.patientId, wardId: input.wardId, bedId: input.bedId, packageId: input.packageId ?? null, status: AdmissionStatus.ADMITTED },
       });
     } catch { /* swallow — audit failure must not block primary response */ }
 
@@ -536,6 +561,7 @@ export class IPDService {
     admissionId: string,
     tenantId:    string,
     input: {
+      patientId?:         string;
       assignedDoctorIds?: string[];
       wardId?:            string;
       bedId?:             string;
@@ -551,6 +577,25 @@ export class IPDService {
 
     const fields: Parameters<typeof ipdRepository.updateAdmissionFields>[2] = {};
     const prevValue: Record<string, unknown> = {};
+
+    // ── Patient correction (Receptionist-only — the controller rejects
+    // patientId from every other role) ─────────────────────────────────────
+    // Re-points the admission at the right patient, same as OPD's Receptionist
+    // patient correction. The new patient must exist in this tenant and must
+    // not already hold another active admission (the partial unique index is
+    // the final race arbiter — see IPDRepository.updateAdmissionFields).
+    if (input.patientId !== undefined && input.patientId !== admission.patientId) {
+      const newPatient = await patientRepository.findByPatientId(tenantId, input.patientId);
+      if (!newPatient) throw new NotFoundError('Patient not found');
+      const active = await ipdRepository.findActiveAdmissionByPatient(input.patientId, tenantId);
+      if (active && active.admissionId !== admissionId) {
+        throw new ConflictError(
+          `Patient is already admitted (admission ID: ${active.admissionId}).`,
+        );
+      }
+      prevValue.patientId = admission.patientId;
+      fields.patientId    = input.patientId;
+    }
 
     // ── Doctor / department change ──────────────────────────────────────────
     if (input.assignedDoctorIds) {
@@ -571,7 +616,22 @@ export class IPDService {
     }
 
     // ── Bed / ward change ───────────────────────────────────────────────────
-    const bedChanging = input.bedId && input.bedId !== admission.bedId;
+    // A package-linked admission's ward is fixed; only the bed may change,
+    // and only within that same ward.
+    if (admission.packageId && input.wardId && input.wardId !== admission.wardId) {
+      throw new AppError('Ward cannot be changed for an admission linked to a package', 400);
+    }
+    const bedChanging  = input.bedId && input.bedId !== admission.bedId;
+    const wardChanging = input.wardId !== undefined && input.wardId !== admission.wardId;
+    // An admission's bed must always sit in its ward — a ward change without a
+    // new bed would leave it pointing at (and occupying) a bed in the old ward.
+    if (wardChanging && !bedChanging) {
+      throw new AppError('A bed in the new ward must be selected when changing ward', 400);
+    }
+    // Set when the admission moves bed and/or ward — applied in one
+    // transaction by IPDRepository.updateAdmissionWithBedMove (the checks
+    // below are a friendly pre-check; the transaction is the race arbiter).
+    let move: { fromBedId: string; toWardId: string; toBedId: string } | null = null;
     if (bedChanging) {
       const newWardId = input.wardId ?? admission.wardId;
 
@@ -594,17 +654,8 @@ export class IPDService {
       fields.bedId     = input.bedId!;
       fields.bedNumber = bed.bedNumber;
 
-      // Release the old bed
-      await ipdRepository.updateBedOccupancy(tenantId, admission.bedId, false, null);
-      // Occupy the new bed
-      await ipdRepository.updateBedOccupancy(tenantId, input.bedId!, true, admissionId);
-    } else if (input.wardId && input.wardId !== admission.wardId) {
-      // Ward changed but no new bed specified — just update wardId/wardName
-      const ward = await ipdRepository.findWardById(tenantId, input.wardId);
-      if (!ward) throw new AppError('Ward not found', 404);
-      prevValue.wardId = admission.wardId;
-      fields.wardId    = input.wardId;
-      fields.wardName  = ward.name;
+      // Old bed released / new bed occupied inside the move transaction below
+      move = { fromBedId: admission.bedId, toWardId: newWardId, toBedId: input.bedId! };
     }
 
     // ── Vitals ──────────────────────────────────────────────────────────────
@@ -612,9 +663,10 @@ export class IPDService {
     // whole sub-document — input.vitals only carries the sub-fields the
     // caller actually sent, so recording just one reading (e.g. weight)
     // never wipes out the others already on file. Mirrors
-    // OPDService.updateVisit's vitals merge exactly. Role is not re-checked
-    // here — the controller's VITALS_EDITABLE_ROLES gate is the sole check
-    // on who may send this field.
+    // OPDService.updateVisit's vitals merge exactly. Vitals are per admission
+    // — only this admission's own readings are read and written. Role is not
+    // re-checked here — the controller's VITALS_EDITABLE_ROLES gate is the
+    // sole check on who may send this field.
     if (input.vitals !== undefined) {
       // admission.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable
@@ -626,6 +678,8 @@ export class IPDService {
         bloodPressure:   admission.vitals?.bloodPressure   ?? DEFAULT_VITALS.bloodPressure,
         sugar:           admission.vitals?.sugar           ?? DEFAULT_VITALS.sugar,
         bodyTemperature: admission.vitals?.bodyTemperature ?? DEFAULT_VITALS.bodyTemperature,
+        spo2:            admission.vitals?.spo2            ?? DEFAULT_VITALS.spo2,
+        pulse:           admission.vitals?.pulse           ?? DEFAULT_VITALS.pulse,
       };
       const mergedVitals: IPDVitals = { ...existingVitals, ...input.vitals };
       prevValue.vitals = existingVitals;
@@ -638,14 +692,10 @@ export class IPDService {
       return toResponse(admission, tenantId, patient?.fullName ?? null);
     }
 
-    const updated = await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
+    const updated = move
+      ? await ipdRepository.updateAdmissionWithBedMove(admissionId, tenantId, move, fields)
+      : await ipdRepository.updateAdmissionFields(admissionId, tenantId, fields);
     if (!updated) throw new NotFoundError('Admission not found');
-
-    // Vitals are shared per patient — write the merged readings through to
-    // every OPD visit and IPD admission of this patient.
-    if (fields.vitals) {
-      await syncPatientVitals(tenantId, admission.patientId, fields.vitals);
-    }
 
     try {
       await auditService.log({
@@ -661,6 +711,59 @@ export class IPDService {
 
     const patient = await patientRepository.findByPatientId(tenantId, updated.patientId);
     return toResponse(updated, tenantId, patient?.fullName ?? null);
+  }
+
+  // Permanent delete of a still-ADMITTED admission (Receptionist-only, route
+  // gate). A DISCHARGED admission is part of the clinical/billing record and
+  // can never be deleted. The bed is released and every active payment that
+  // references this admission is cancelled in the same transaction — see
+  // IPDRepository.deleteAdmittedReleasingBedCancellingPayments.
+  async deleteAdmission(admissionId: string, tenantId: string, deletedBy: string): Promise<void> {
+    const admission = await ipdRepository.findById(admissionId, tenantId);
+    if (!admission) throw new NotFoundError('Admission not found');
+
+    if (admission.status !== AdmissionStatus.ADMITTED) {
+      throw new ConflictError(`Cannot delete an admission with status ${admission.status}`);
+    }
+
+    const { deleted, cancelledPayments } =
+      await ipdRepository.deleteAdmittedReleasingBedCancellingPayments(tenantId, admissionId);
+    if (!deleted) throw new ConflictError('This admission can no longer be deleted.');
+
+    // Status only — never the encrypted description/transactionId.
+    for (const payment of cancelledPayments) {
+      try {
+        await auditService.log({
+          entityType:    AuditEntityType.PAYMENT_RECORD,
+          entityId:      payment.paymentId,
+          action:        'UPDATE',
+          userId:        deletedBy,
+          tenantId,
+          previousValue: { status: payment.status },
+          newValue:      { status: PaymentStatus.CANCELLED, reason: 'IPD_ADMISSION_DELETED', admissionId },
+        });
+      } catch { /* swallow — audit must not undo the committed cancellation */ }
+    }
+
+    // Identifiers/status only — never the encrypted clinical fields.
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      admissionId,
+        action:        'DELETE',
+        userId:        deletedBy,
+        tenantId,
+        previousValue: {
+          admissionId,
+          patientId:         admission.patientId,
+          status:            admission.status,
+          wardId:            admission.wardId,
+          bedId:             admission.bedId,
+          assignedDoctorIds: admission.assignedDoctorIds,
+          admissionDate:     admission.admissionDate,
+        },
+      });
+    } catch { /* swallow — audit failure must not block primary response */ }
   }
 
   async addProgressNote(
@@ -801,7 +904,7 @@ export class IPDService {
 
     const [tenant, ward, opdVisits, pathologyRequests, radiologyRequests, payments] = await Promise.all([
       tenantRepository.findById(tenantId),
-      ipdRepository.findWardById(tenantId, admission.wardId),
+      ipdRepository.findWardByIdIncludingDeleted(tenantId, admission.wardId),
       fetchAllPages((page, limit) => opdRepository.findByPatient(tenantId, admission.patientId, { page, limit })),
       fetchAllPages((page, limit) => labRepository.findPathologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
       fetchAllPages((page, limit) => labRepository.findRadiologyByPatient(tenantId, { patientId: admission.patientId, page, limit })),
@@ -1108,6 +1211,13 @@ export class IPDService {
     return ipdRepository.listWards(tenantId);
   }
 
+  async listWardsPaginated(
+    tenantId: string,
+    query:    { search?: string; page: number; limit: number },
+  ): Promise<PaginatedResult<IWard>> {
+    return ipdRepository.listWardsPaginated(tenantId, query);
+  }
+
   async assignNursesToWard(
     tenantId: string,
     wardId:   string,
@@ -1187,6 +1297,70 @@ export class IPDService {
     const ward = await ipdRepository.findWardById(tenantId, wardId);
     if (!ward) throw new NotFoundError('Ward not found');
     return ipdRepository.listBedsInWard(tenantId, wardId);
+  }
+
+  // ─── Ward / Bed soft delete & bed edit (Hospital Admin only — route gate) ──
+  // All occupancy / active-admission / active-package restrictions are
+  // enforced atomically in the repository transaction (409 on violation).
+  // Audit entries use IPD_ADMISSION like every other ward/bed event above.
+
+  async deleteWard(tenantId: string, wardId: string, actorId: string): Promise<void> {
+    const { ward, retiredBeds } = await ipdRepository.softDeleteWardIfEmpty(tenantId, wardId, actorId);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      wardId,
+        action:        'DELETE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { name: ward.name, floor: ward.floor, isDeleted: false },
+        newValue:      { isDeleted: true, retiredBeds },
+      });
+    } catch { /* swallow */ }
+  }
+
+  async updateBed(
+    tenantId:  string,
+    wardId:    string,
+    bedId:     string,
+    bedNumber: string,
+    actorId:   string,
+  ): Promise<IBed> {
+    const existing = await ipdRepository.findBedById(tenantId, bedId);
+    if (!existing || existing.wardId !== wardId) throw new NotFoundError('Bed not found');
+    if (existing.bedNumber === bedNumber) return existing;
+
+    const duplicate = await ipdRepository.findBedByNumber(tenantId, wardId, bedNumber);
+    if (duplicate) throw new ConflictError(`Bed ${bedNumber} already exists in this ward`);
+
+    const bed = await ipdRepository.renameBedIfFree(tenantId, wardId, bedId, bedNumber);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      bedId,
+        action:        'UPDATE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { wardId, bedNumber: existing.bedNumber },
+        newValue:      { wardId, bedNumber: bed.bedNumber },
+      });
+    } catch { /* swallow */ }
+    return bed;
+  }
+
+  async deleteBed(tenantId: string, wardId: string, bedId: string, actorId: string): Promise<void> {
+    const bed = await ipdRepository.softDeleteBedIfFree(tenantId, wardId, bedId, actorId);
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.IPD_ADMISSION,
+        entityId:      bedId,
+        action:        'DELETE',
+        userId:        actorId,
+        tenantId,
+        previousValue: { wardId, bedNumber: bed.bedNumber, isDeleted: false },
+        newValue:      { isDeleted: true },
+      });
+    } catch { /* swallow */ }
   }
 
   // ─── U3-A: Occupancy summary (FR-08.8) ─────────────────────────────────────
