@@ -17,6 +17,10 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { NavForm } from '@/components/ui/form';
 
+import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import type { StaffDocumentResponse } from '@/store/types';
+
+
 const CATEGORIES: DocumentCategory[] = [
   'IDENTITY_PROOF', 'ADDRESS_PROOF', 'EDUCATIONAL_CERTIFICATE',
   'EXPERIENCE_LETTER', 'OFFER_LETTER', 'CONTRACT', 'OTHER',
@@ -31,6 +35,10 @@ export default function StaffDocumentsPage() {
     router.replace('/dashboard');
     return null;
   }
+
+  const [pendingDelete, setPendingDelete] = useState<StaffDocumentResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
 
   const { data: checklist } = useGetChecklistQuery(params.userId);
   const { data: documents } = useListDocumentsQuery(params.userId);
@@ -65,10 +73,16 @@ export default function StaffDocumentsPage() {
     }
   };
 
-  const handleDelete = async (documentId: string) => {
-    if (!confirm('Delete this document?')) return;
-    await deleteDoc(documentId);
-  };
+  const confirmDelete = async () => {
+  if (!pendingDelete) return;
+  setDeleting(true);
+  try {
+    await deleteDoc(pendingDelete.documentId);
+    setPendingDelete(null);
+  } finally {
+    setDeleting(false);
+  }
+};
 
   return (
     <div className="p-6 space-y-6 max-w-2xl mx-auto">
@@ -136,7 +150,7 @@ export default function StaffDocumentsPage() {
                   <a href={doc.presignedUrl} target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 underline">Download</a>
                 </div>
-                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => handleDelete(doc.documentId)}>Delete</Button>
+                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setPendingDelete(doc)}>Delete</Button>
               </div>
             ))}
           </CardContent>
@@ -145,6 +159,27 @@ export default function StaffDocumentsPage() {
 
       {documents && documents.length === 0 && (
         <p className="text-muted-foreground">No documents uploaded yet.</p>
+      )}
+
+      {pendingDelete && (
+        <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+          <div className="bg-background rounded-xl border shadow-xl w-full max-w-sm p-6 space-y-5 text-center">
+            <div className="space-y-1">
+              <h2 className="text-lg font-semibold">Delete document?</h2>
+              <p className="text-sm text-muted-foreground">
+                &ldquo;{pendingDelete.documentName}&rdquo; will be permanently removed.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => setPendingDelete(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button className="flex-1 bg-red-600 text-white hover:bg-red-700" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          </div>
+        </DialogOverlay>
       )}
     </div>
   );
