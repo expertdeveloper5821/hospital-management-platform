@@ -105,6 +105,7 @@ export class IPDRepository {
     query:         ListAdmissionsQuery,
     patientIds?:   string[],
     nurseWardIds?: string[],
+    doctorId?:     string,
   ): Promise<PaginatedResult<IIPDAdmission>> {
     assertDbConnected();
     const { wardId, status, page, limit } = query;
@@ -118,6 +119,9 @@ export class IPDRepository {
         : { $in: nurseWardIds };
     } else if (wardId) {
       filter['wardId'] = wardId;
+    }
+    if (doctorId && status === 'ADMITTED') {
+      filter['assignedDoctorIds'] = doctorId;
     }
     if (patientIds) filter['patientId'] = { $in: patientIds };
 

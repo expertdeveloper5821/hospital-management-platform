@@ -5,6 +5,7 @@ import {
   useListUsersQuery,
   useCreateUserMutation,
   useUpdateUserRoleMutation,
+  useUpdateUserEmailMutation,
   useDeactivateUserMutation,
   useReactivateUserMutation,
 } from '@/store/api/user.api';
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
 import {
@@ -28,6 +30,10 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Search,
+  Mail,
+  ShieldCheck,
+  UserX,
+  UserCheck,
 } from 'lucide-react';
 import { NavForm } from '@/components/ui/form';
 
@@ -316,6 +322,79 @@ function UserTableSkeleton() {
   );
 }
 
+// ─── User Actions Menu (kebab) ─────────────────────────────────────────────────────────
+
+interface UserActionsMenuProps {
+  user: UserResponse;
+  currentUserId?: string;
+  canEditEmail: boolean;
+  canDeactivate: boolean;
+  reactivating: boolean;
+  onEditEmail: (user: UserResponse) => void;
+  onEditRole:  (user: UserResponse) => void;
+  onDeactivate: (user: UserResponse) => void;
+  onReactivate: (user: UserResponse) => void;
+}
+
+/**
+ * Kebab menu consolidating the per-row actions that used to be separate inline
+ * buttons (Edit Email / Edit Role / Deactivate / Reactivate). Pure presentation:
+ * every option funnels into the same handlers UsersTab has always owned, so all
+ * existing state flow (openEmailEdit / openRoleEdit / deactivate confirm modal /
+ * reactivate mutation) is unchanged.
+ */
+function UserActionsMenu({
+  user,
+  currentUserId,
+  canEditEmail,
+  canDeactivate,
+  reactivating,
+  onEditEmail,
+  onEditRole,
+  onDeactivate,
+  onReactivate,
+}: UserActionsMenuProps) {
+  // Role editing is available for any user other than the current user (self),
+  // mirroring the old Edit Role button's visibility rule.
+  const canEditRole = user.userId !== currentUserId;
+  const isActive = user.isActive;
+
+  // Hide the kebab entirely when the viewer has no available action for this
+  // row (e.g. ADMIN viewing an inactive user) instead of a dead button.
+  const hasAnyAction = isActive
+    ? (canEditEmail || canEditRole || canDeactivate)
+    : canDeactivate;
+  if (!hasAnyAction) return null;
+
+  return (
+    <DropdownMenu label={`Actions for ${user.name}`} triggerClassName="h-7 w-7">
+      {isActive && canEditEmail && (
+        <DropdownMenuItem icon={Mail} onClick={() => onEditEmail(user)}>
+          Edit Email
+        </DropdownMenuItem>
+      )}
+      {isActive && canEditRole && (
+        <DropdownMenuItem icon={ShieldCheck} onClick={() => onEditRole(user)}>
+          Edit Role
+        </DropdownMenuItem>
+      )}
+      {isActive && (canEditEmail || canEditRole) && canDeactivate && (
+        <DropdownMenuSeparator />
+      )}
+      {isActive && canDeactivate && (
+        <DropdownMenuItem icon={UserX} destructive onClick={() => onDeactivate(user)}>
+          Deactivate
+        </DropdownMenuItem>
+      )}
+      {!isActive && canDeactivate && (
+        <DropdownMenuItem icon={UserCheck} disabled={reactivating} onClick={() => onReactivate(user)}>
+          Reactivate
+        </DropdownMenuItem>
+      )}
+    </DropdownMenu>
+  );
+}
+
 // ─── Users Tab ────────────────────────────────────────────────────────────────
 
 function UsersTab() {
@@ -323,6 +402,9 @@ function UsersTab() {
   const currentUserId   = useAppSelector((s) => s.auth.profile?.userId);
   const canDeactivate   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
   const canCreateUser   = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
+  // PATCH /api/users/:userId (email/name) is HOSPITAL_ADMIN + HR on the backend;
+  // ADMIN/MANAGER can view this page but must not see the Edit Email control.
+  const canEditEmail    = currentUserRole === UserRole.HOSPITAL_ADMIN || currentUserRole === UserRole.HR;
 
   const [page,          setPage]          = useState(1);
   const [filterRole,    setFilterRole]    = useState<UserRole | ''>('');
@@ -335,6 +417,12 @@ function UsersTab() {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [newRole,       setNewRole]       = useState<UserRole>(UserRole.STAFF);
   const [roleError,     setRoleError]     = useState<string | null>(null);
+  // Inline email editing mirrors the Edit Role pattern: one row edits at a
+  // time, Save commits through RTK Query, Cancel discards. Independent state
+  // from role editing so cancelling one never disturbs the other.
+  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
+  const [newEmail,      setNewEmail]      = useState('');
+  const [emailError,    setEmailError]    = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<UserResponse | null>(null);
   const [deactivateError,  setDeactivateError]  = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -364,6 +452,7 @@ function UsersTab() {
   });
 
   const [updateUserRole, { isLoading: updatingRole }] = useUpdateUserRoleMutation();
+  const [updateUserEmail, { isLoading: updatingEmail }] = useUpdateUserEmailMutation();
   const [deactivateUser, { isLoading: deactivating }] = useDeactivateUserMutation();
   const [reactivateUser, { isLoading: reactivating }] = useReactivateUserMutation();
 
@@ -388,11 +477,47 @@ function UsersTab() {
     setRoleError(null);
     setEditingRoleId(user.userId);
     setNewRole(user.role);
+    // One row edits at a time — same convention as the email editor.
+    setEditingEmailId(null);
   }
 
   function cancelRoleEdit() {
     setRoleError(null);
     setEditingRoleId(null);
+  }
+
+  function openEmailEdit(user: UserResponse) {
+    setEmailError(null);
+    setEditingEmailId(user.userId);
+    setNewEmail(user.email);
+    // One row edits at a time — same convention as the role editor.
+    setEditingRoleId(null);
+  }
+
+  function cancelEmailEdit() {
+    setEmailError(null);
+    setEditingEmailId(null);
+  }
+
+  async function handleEmailSave(userId: string) {
+    setEmailError(null);
+    const trimmedEmail = newEmail.trim().toLowerCase();
+
+    // Local validation first, matching the Create User form's EMAIL_RE.
+    if (!EMAIL_RE.test(trimmedEmail)) {
+      setEmailError('Enter a valid email address.');
+      return;
+    }
+
+    try {
+      await updateUserEmail({ userId, email: trimmedEmail }).unwrap();
+      setEditingEmailId(null);
+    } catch (err: unknown) {
+      // Surface backend rejections (e.g. 409 duplicate email in tenant) instead
+      // of silently closing the editor as if the change succeeded.
+      const msg = (err as { data?: { message?: string } })?.data?.message;
+      setEmailError(msg ?? 'Failed to update email.');
+    }
   }
 
   async function handleRoleSave(userId: string) {
@@ -510,7 +635,33 @@ function UsersTab() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="font-medium truncate">{user.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                          {editingEmailId === user.userId ? (
+                            <div className="mt-1 flex flex-col gap-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Input
+                                  type="email"
+                                  value={newEmail}
+                                  onChange={(e) => { setNewEmail(e.target.value); setEmailError(null); }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleEmailSave(user.userId);
+                                    if (e.key === 'Escape') cancelEmailEdit();
+                                  }}
+                                  maxLength={254}
+                                  aria-label="Edit email"
+                                  className="h-7 w-44 text-xs"
+                                />
+                                <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingEmail} onClick={() => handleEmailSave(user.userId)}>
+                                  Save
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelEmailEdit}>
+                                  Cancel
+                                </Button>
+                              </div>
+                              {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                          )}
                           <p className="text-xs text-muted-foreground font-mono truncate">{user.userId}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -544,38 +695,20 @@ function UsersTab() {
                           </div>
                           {roleError && <p className="text-xs text-destructive">{roleError}</p>}
                         </div>
-                      ) : user.isActive ? (
-                        <div className="flex flex-wrap gap-2">
-                          {user.userId !== currentUserId && (
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                              Edit Role
-                            </Button>
-                          )}
-                          {canDeactivate && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                              onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
-                            >
-                              Deactivate
-                            </Button>
-                          )}
-                        </div>
                       ) : (
-                        canDeactivate && (
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              variant="success"
-                              className="h-7 px-2 text-xs"
-                              disabled={reactivating}
-                              onClick={() => handleReactivate(user)}
-                            >
-                              Reactivate
-                            </Button>
-                          </div>
-                        )
+                        <div className="flex justify-end">
+                          <UserActionsMenu
+                            user={user}
+                            currentUserId={currentUserId}
+                            canEditEmail={canEditEmail}
+                            canDeactivate={canDeactivate}
+                            reactivating={reactivating}
+                            onEditEmail={openEmailEdit}
+                            onEditRole={openRoleEdit}
+                            onDeactivate={(u) => { setDeactivateError(null); setDeactivateTarget(u); }}
+                            onReactivate={handleReactivate}
+                          />
+                        </div>
                       )}
                     </div>
                   ))
@@ -612,7 +745,36 @@ function UsersTab() {
                             <div className="font-medium truncate" title={user.name}>{user.name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{user.userId}</div>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground max-w-[220px] truncate" title={user.email}>{user.email}</td>
+                          <td className="px-4 py-3 max-w-[260px]">
+                            {editingEmailId === user.userId ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="email"
+                                    value={newEmail}
+                                    onChange={(e) => { setNewEmail(e.target.value); setEmailError(null); }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleEmailSave(user.userId);
+                                      if (e.key === 'Escape') cancelEmailEdit();
+                                    }}
+                                    maxLength={254}
+                                    autoFocus
+                                    aria-label="Edit email"
+                                    className="h-7 w-44 text-xs"
+                                  />
+                                  <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingEmail} onClick={() => handleEmailSave(user.userId)}>
+                                    Save
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelEmailEdit}>
+                                    Cancel
+                                  </Button>
+                                </div>
+                                {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground block truncate" title={user.email}>{user.email}</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             {editingRoleId === user.userId ? (
                               <div className="flex flex-col gap-1">
@@ -648,40 +810,21 @@ function UsersTab() {
                             {user.createdAt ? new Date(user.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-2">
-                              {editingRoleId !== user.userId && (
-                                user.isActive ? (
-                                  <>
-                                    {user.userId !== currentUserId && (
-                                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => openRoleEdit(user)}>
-                                        Edit Role
-                                      </Button>
-                                    )}
-                                    {canDeactivate && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                        onClick={() => { setDeactivateError(null); setDeactivateTarget(user); }}
-                                      >
-                                        Deactivate
-                                      </Button>
-                                    )}
-                                  </>
-                                ) : (
-                                  canDeactivate && (
-                                    <Button
-                                      size="sm"
-                                      variant="success"
-                                      className="h-7 px-2 text-xs"
-                                      disabled={reactivating}
-                                      onClick={() => handleReactivate(user)}
-                                    >
-                                      Reactivate
-                                    </Button>
-                                  )
-                                )
-                              )}
+                            <div className="flex items-center justify-end">
+                              {/* Kebab stays available even while a row editor is open —
+                                  picking an action just switches editors (handlers reset
+                                  their own state, one editor at a time). */}
+                              <UserActionsMenu
+                                user={user}
+                                currentUserId={currentUserId}
+                                canEditEmail={canEditEmail}
+                                canDeactivate={canDeactivate}
+                                reactivating={reactivating}
+                                onEditEmail={openEmailEdit}
+                                onEditRole={openRoleEdit}
+                                onDeactivate={(u) => { setDeactivateError(null); setDeactivateTarget(u); }}
+                                onReactivate={handleReactivate}
+                              />
                             </div>
                           </td>
                         </tr>
