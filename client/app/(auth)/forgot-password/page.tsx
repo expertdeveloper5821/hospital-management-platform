@@ -3,6 +3,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,10 +11,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { useForgotPasswordMutation } from '@/store/api/auth.api';
 import { NavForm } from '@/components/ui/form';
 
-// Backend requires both email AND tenantId (forgotPasswordSchema)
 const schema = z.object({
-  email:    z.string().email('Invalid email address'),
-  tenantId: z.string().min(1, 'Hospital ID is required'),
+  email: z.string().trim().email('Invalid email address'),
 });
 
 type Form = z.infer<typeof schema>;
@@ -29,7 +28,7 @@ export default function ForgotPasswordPage() {
 
   async function onSubmit(values: Form) {
     try {
-      await forgotPassword({ email: values.email, tenantId: values.tenantId }).unwrap();
+      await forgotPassword({ email: values.email }).unwrap();
     } catch {
       // Errors (e.g. setup-not-complete) are surfaced via RTK Query's `error` state below
     }
@@ -42,7 +41,7 @@ export default function ForgotPasswordPage() {
         <CardDescription>
           {isSuccess
             ? 'If that email exists, a reset link has been sent to your inbox.'
-            : 'Enter your Hospital ID and email address to receive a reset link.'}
+            : 'Enter your email address to receive a password reset link.'}
         </CardDescription>
       </CardHeader>
 
@@ -50,28 +49,18 @@ export default function ForgotPasswordPage() {
         <NavForm onSubmit={handleSubmit(onSubmit)}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="tenantId">Hospital ID</Label>
-              <Input
-                id="tenantId"
-                placeholder="Your hospital tenant ID"
-                {...register('tenantId')}
-              />
-              {errors.tenantId && (
-                <p className="text-xs text-destructive">{errors.tenantId.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
                 placeholder="you@hospital.com"
                 autoComplete="email"
+                aria-invalid={!!errors.email}
+                aria-describedby={errors.email ? 'email-error' : undefined}
                 {...register('email')}
               />
               {errors.email && (
-                <p className="text-xs text-destructive">{errors.email.message}</p>
+                <p id="email-error" className="text-xs text-destructive" role="alert">{errors.email.message}</p>
               )}
             </div>
 
@@ -88,18 +77,18 @@ export default function ForgotPasswordPage() {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? 'Sending…' : 'Send reset link'}
             </Button>
-            <a href="/login" className="text-sm text-muted-foreground hover:underline text-center">
+            <Link href="/login" className="text-sm text-muted-foreground hover:underline text-center">
               Back to sign in
-            </a>
+            </Link>
           </CardFooter>
         </NavForm>
       )}
 
       {isSuccess && (
         <CardFooter>
-          <a href="/login" className="text-sm text-primary hover:underline">
+          <Link href="/login" className="text-sm text-primary hover:underline">
             Back to sign in
-          </a>
+          </Link>
         </CardFooter>
       )}
     </Card>
