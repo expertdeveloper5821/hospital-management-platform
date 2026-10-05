@@ -1,4 +1,4 @@
-import { PathologyRequestModel, IPathologyRequest } from './lab.model';
+import { PathologyRequestModel, IPathologyRequest, IPathologyTestReport } from './lab.model';
 import { RadiologyRequestModel, IRadiologyRequest } from './lab.model';
 import { ListLabRequestsQuery } from './lab.types';
 import { PaginatedResult } from '../../shared/types/common.types';
@@ -27,6 +27,7 @@ function buildListFilter(
   query:       ListLabRequestsQuery,
   patientIds?: string[],
   referral?:   LabReferralScope,
+  extraConds?: Record<string, unknown>[],
 ): Record<string, unknown> {
   const { patientId, status } = query;
   const filter: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
@@ -41,6 +42,9 @@ function buildListFilter(
     filter['patientId'] = scopedCond;
   }
   if (status) filter['status'] = status;
+  // Linked-encounter conditions (lab.service resolveEncounterConditions) — each
+  // carries its own $or, so they're ANDed rather than merged into the filter.
+  if (extraConds?.length) filter['$and'] = extraConds;
   return filter;
 }
 
@@ -65,11 +69,12 @@ export class LabRepository {
     query:       ListLabRequestsQuery,
     patientIds?: string[],
     referral?:   LabReferralScope,
+    extraConds?: Record<string, unknown>[],
   ): Promise<PaginatedResult<IPathologyRequest>> {
     assertDbConnected();
     const { page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter = buildListFilter(tenantId, query, patientIds, referral);
+    const filter = buildListFilter(tenantId, query, patientIds, referral, extraConds);
 
     const [data, total] = await Promise.all([
       PathologyRequestModel.find(filter).sort({ requestedAt: -1, _id: -1 }).skip(skip).limit(limit),
@@ -97,6 +102,36 @@ export class LabRepository {
       { $set: update },
       { new: true },
     );
+  }
+
+  // Stores one test's structured report — replaces that test's existing entry
+  // in place (positional $set) or appends it ($push guarded on the name being
+  // absent). Each test is written on its own, so concurrent submissions for
+  // different tests of the same request never overwrite one another. A fresh
+  // copy is passed per attempt because the encryption plugin encrypts the
+  // payload in place.
+  async upsertPathologyTestReport(
+    requestId: string,
+    tenantId:  string,
+    report:    IPathologyTestReport,
+  ): Promise<IPathologyRequest | null> {
+    assertDbConnected();
+    const base = { requestId, tenantId, isDeleted: { $ne: true } };
+    const replace = () => PathologyRequestModel.findOneAndUpdate(
+      { ...base, 'testReports.testName': report.testName },
+      { $set: { 'testReports.$': { ...report } } },
+      { new: true },
+    );
+    const replaced = await replace();
+    if (replaced) return replaced;
+    const pushed = await PathologyRequestModel.findOneAndUpdate(
+      { ...base, 'testReports.testName': { $ne: report.testName } },
+      { $push: { testReports: { ...report } } },
+      { new: true },
+    );
+    // null here means a concurrent submission added this test first (replace
+    // it) or the request no longer exists (replace also returns null).
+    return pushed ?? replace();
   }
 
   async softDeletePathology(
@@ -133,11 +168,12 @@ export class LabRepository {
     query:       ListLabRequestsQuery,
     patientIds?: string[],
     referral?:   LabReferralScope,
+    extraConds?: Record<string, unknown>[],
   ): Promise<PaginatedResult<IRadiologyRequest>> {
     assertDbConnected();
     const { page, limit } = query;
     const skip   = (page - 1) * limit;
-    const filter = buildListFilter(tenantId, query, patientIds, referral);
+    const filter = buildListFilter(tenantId, query, patientIds, referral, extraConds);
 
     const [data, total] = await Promise.all([
       RadiologyRequestModel.find(filter).sort({ requestedAt: -1, _id: -1 }).skip(skip).limit(limit),
@@ -180,6 +216,23 @@ export class LabRepository {
       { $set: { isDeleted: true, deletedAt: new Date() } },
       { new: true },
     );
+  }
+
+  // ─── Legacy encounter link ─────────────────────────────────────────────────
+  // Requests created before opdVisitId/ipdAdmissionId were stored (both fields
+  // absent — a resolved "no encounter" is stored as null), narrowed by `cond`.
+  // lab.service resolves their encounter from requestedAt for the list filters.
+  async findUnlinked(
+    type:     'pathology' | 'radiology',
+    tenantId: string,
+    cond:     Record<string, unknown>,
+  ): Promise<Pick<IPathologyRequest, 'requestId' | 'patientId' | 'requestedAt' | 'referredBy'>[]> {
+    assertDbConnected();
+    const Model = (type === 'pathology' ? PathologyRequestModel : RadiologyRequestModel) as typeof PathologyRequestModel;
+    return Model.find(
+      { ...cond, tenantId, isDeleted: { $ne: true }, opdVisitId: { $exists: false }, ipdAdmissionId: { $exists: false } },
+      { requestId: 1, patientId: 1, requestedAt: 1, referredBy: 1 },
+    ).lean();
   }
 
   // ─── Test types ────────────────────────────────────────────────────────────

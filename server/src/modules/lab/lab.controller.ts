@@ -8,6 +8,7 @@ import {
   EditRadiologyRequestSchema,
   ListLabRequestsQuerySchema,
   CollectLabPaymentSchema,
+  SubmitPathologyTestReportSchema,
 } from './lab.types';
 import { UserRole } from '../../shared/types/common.types';
 import { opdRepository } from '../opd/opd.repository';
@@ -109,6 +110,61 @@ export async function uploadPathologyReport(
       req.file.mimetype,
     );
     res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── Structured Pathology test reports ────────────────────────────────────────
+// :testIndex is the test's position in the request's testType (0-based).
+const testIndexSchema = z.coerce.number().int().min(0).max(99);
+
+// PUT /api/lab/pathology/:requestId/reports/:testIndex — submit / amend one
+// test's structured report. Audit logging happens in LabService (values redacted).
+export async function submitPathologyTestReport(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+    const index = testIndexSchema.safeParse(req.params['testIndex']);
+    if (!index.success) { res.status(400).json({ status: 'error', message: 'Invalid testIndex' }); return; }
+
+    const parsed = SubmitPathologyTestReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await labService.submitPathologyTestReport(
+      id.data, index.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// GET /api/lab/pathology/:requestId/reports/:testIndex/pdf — one test's report
+// PDF. Same readers (and Doctor scoping) as GET /pathology/:requestId.
+export async function getPathologyTestReportPdf(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+    const index = testIndexSchema.safeParse(req.params['testIndex']);
+    if (!index.success) { res.status(400).json({ status: 'error', message: 'Invalid testIndex' }); return; }
+
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const { buffer, fileName } = await labService.getPathologyTestReportPdf(
+      id.data, index.data, tenantId, allowedPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+    );
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `inline; filename="${fileName}"`,
+        'Content-Length':      buffer.length.toString(),
+        'Cache-Control':       'no-store',
+      })
+      .send(buffer);
   } catch (err) { next(err); }
 }
 

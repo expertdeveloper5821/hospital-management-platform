@@ -1,8 +1,13 @@
 import PDFDocument from 'pdfkit';
-import https from 'https';
-import http from 'http';
 import { DischargeSummaryData } from './ipd.types';
 import { parseRichTextToBlocks, renderRichTextBlocks } from '../../shared/services/rich-text-pdf';
+import {
+  hexToRgb, getContrastTextColor, fetchImageBuffer, drawReportLetterhead, drawReportTitleBar,
+} from '../../shared/services/report-letterhead.pdf';
+
+// The letterhead helpers now live in shared/services/report-letterhead.pdf.ts
+// (reused by other report PDFs) — re-exported for existing importers.
+export { hexToRgb, getContrastTextColor };
 
 const PAGE_MARGIN = 40;
 const CONTENT_WIDTH = 612 - PAGE_MARGIN * 2; // Letter width (72pt/in × 8.5in) minus margins
@@ -43,41 +48,6 @@ export function formatCurrency(amount: number, fontName: string): string {
   return fontSupportsRupeeSymbol(fontName) ? `₹${formatted}` : formatted;
 }
 
-// No valid primary color configured (missing/malformed hex) falls back to
-// black rather than a hardcoded brand hue.
-export function hexToRgb(hex: string): [number, number, number] {
-  const h = (hex || '').replace('#', '');
-  if (!/^[0-9A-Fa-f]{6}$/.test(h)) return [0, 0, 0];
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-
-// Perceived-brightness heuristic (ITU-R BT.601 luma) — picks the readable
-// foreground (white on dark brands, near-black on light/pastel brands) for
-// text sitting directly on the primary-color letterhead band.
-export function getContrastTextColor(hex: string): string {
-  const [r, g, b] = hexToRgb(hex);
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return brightness > 150 ? '#1a1a1a' : '#ffffff';
-}
-
-async function fetchBuffer(url: string): Promise<Buffer | null> {
-  return new Promise((resolve) => {
-    try {
-      const proto = url.startsWith('https') ? https : http;
-      const req = proto.get(url, (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data',  (c: Buffer) => chunks.push(c));
-        res.on('end',   () => resolve(Buffer.concat(chunks)));
-        res.on('error', () => resolve(null));
-      });
-      req.on('error', () => resolve(null));
-      req.setTimeout(3000, () => { req.destroy(); resolve(null); });
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
 export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Promise<Buffer> {
   // pdfkit's color normalizer only accepts hex strings, named colors, or
   // [r,g,b]/[c,m,y,k] arrays — a CSS `rgb(r,g,b)` string silently fails to
@@ -87,7 +57,7 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
   const [pr, pg, pb] = hexToRgb(data.hospital.primaryColor);
   const primary: [number, number, number] = [pr, pg, pb];
   const onPrimary = getContrastTextColor(data.hospital.primaryColor);
-  const logo = data.hospital.logoUrl ? await fetchBuffer(data.hospital.logoUrl).catch(() => null) : null;
+  const logo = data.hospital.logoUrl ? await fetchImageBuffer(data.hospital.logoUrl).catch(() => null) : null;
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -177,59 +147,9 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
         doc.fillColor('#1a1a1a');
       });
 
-      // ── Letterhead (first page) ──────────────────────────────────────────────
-      // Full-bleed primary-color band across the top of the page carrying the
-      // logo (aspect-ratio preserved via `fit`, never stretched/cropped) and
-      // hospital identity. Falls back cleanly when logo/address/email/GSTIN
-      // are unavailable — each line is only drawn when present.
-      const LETTERHEAD_PAD_X = PAGE_MARGIN;
-      const LETTERHEAD_PAD_Y = 16;
-      const LOGO_BOX = 56;
-      const textX = logo ? LETTERHEAD_PAD_X + LOGO_BOX + 14 : LETTERHEAD_PAD_X;
-      const textWidth = doc.page.width - textX - PAGE_MARGIN;
-
-      const metaLines: string[] = [];
-      if (data.hospital.address) metaLines.push(data.hospital.address);
-      if (data.hospital.email) metaLines.push(data.hospital.email);
-      if (data.hospital.registrationNumber) metaLines.push(`GSTIN: ${data.hospital.registrationNumber}`);
-
-      doc.font('Helvetica-Bold').fontSize(16);
-      const nameHeight = doc.heightOfString(data.hospital.name, { width: textWidth });
-      doc.font('Helvetica').fontSize(8.5);
-      const metaHeight = metaLines.reduce(
-        (sum, line) => sum + doc.heightOfString(line, { width: textWidth }) + 2, 0,
-      );
-      const textBlockHeight = nameHeight + (metaLines.length ? 4 + metaHeight : 0);
-
-      const letterheadHeight = LETTERHEAD_PAD_Y * 2 + Math.max(logo ? LOGO_BOX : 0, textBlockHeight);
-      doc.rect(0, 0, doc.page.width, letterheadHeight).fill(primary);
-      // Neutral separator so the band stays visible even on near-white brand colors.
-      doc.strokeColor('#e0e0e0').lineWidth(0.75)
-        .moveTo(0, letterheadHeight).lineTo(doc.page.width, letterheadHeight).stroke();
-
-      const contentY = LETTERHEAD_PAD_Y;
-      if (logo) {
-        try { doc.image(logo, LETTERHEAD_PAD_X, contentY, { fit: [LOGO_BOX, LOGO_BOX] }); } catch { /* skip */ }
-      }
-      doc.font('Helvetica-Bold').fontSize(16).fillColor(onPrimary)
-        .text(data.hospital.name, textX, contentY, { width: textWidth });
-      if (metaLines.length) {
-        doc.moveDown(0.2);
-        doc.font('Helvetica').fontSize(8.5).fillColor(onPrimary).fillOpacity(0.85);
-        metaLines.forEach((line) => doc.text(line, textX, doc.y, { width: textWidth }));
-        doc.fillOpacity(1);
-      }
-
-      doc.y = letterheadHeight + 14;
-      doc.x = PAGE_MARGIN;
-      doc.fillColor('#1a1a1a');
-
-      doc.rect(PAGE_MARGIN, doc.y, CONTENT_WIDTH, 26).fill(primary);
-      doc.fillColor(onPrimary).font('Helvetica-Bold').fontSize(14)
-        .text('PATIENT DISCHARGE SUMMARY', PAGE_MARGIN, doc.y + 6, { width: CONTENT_WIDTH, align: 'center', lineBreak: false });
-      doc.y += 10;
-      doc.fillColor('#1a1a1a');
-      doc.moveDown(1);
+      // ── Letterhead (first page) + title bar ──────────────────────────────────
+      drawReportLetterhead(doc, data.hospital, logo, PAGE_MARGIN);
+      drawReportTitleBar(doc, 'PATIENT DISCHARGE SUMMARY', data.hospital.primaryColor, PAGE_MARGIN, CONTENT_WIDTH);
 
       // ── Patient Information ──────────────────────────────────────────────────
       sectionHeading('Patient Information');

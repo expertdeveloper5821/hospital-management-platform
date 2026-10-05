@@ -24,6 +24,8 @@ import {
   listTestTypes,
   collectPathologyPayment,
   collectRadiologyPayment,
+  submitPathologyTestReport,
+  getPathologyTestReportPdf,
 } from './lab.controller';
 
 const router = express.Router();
@@ -42,6 +44,9 @@ const radiologyUpload = multer({
   limits:  { fileSize: RADIOLOGY_REPORT_MAX_BYTES },   // 20 MB
 });
 
+// Pathology routes exclude RADIOLOGIST and Radiology routes exclude PATHOLOGIST
+// entirely — each lab role only ever sees its own request type.
+
 // ─── Pathology ────────────────────────────────────────────────────────────────
 
 router.post(
@@ -53,13 +58,13 @@ router.post(
 
 router.get(
   '/pathology',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.MANAGER, UserRole.RECEPTIONIST),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.MANAGER, UserRole.RECEPTIONIST),
   listPathologyRequests,
 );
 
 router.get(
   '/pathology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   getPathologyRequest,
 );
 
@@ -78,11 +83,28 @@ router.delete(
 
 // multipart/form-data — field name: "report"
 // Multer rejects files > 10 MB with a MulterError (LIMIT_FILE_SIZE → 413).
+// No PATHOLOGIST: Pathologists create reports only through the structured
+// per-test report form below.
 router.patch(
   '/pathology/:requestId/report',
-  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
+  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
   pathologyUpload.single('report'),
   uploadPathologyReport,
+);
+
+// Structured per-test report entry — lab staff only (no Doctor/Nurse/
+// Receptionist). Re-submitting the same test amends its report.
+router.put(
+  '/pathology/:requestId/reports/:testIndex',
+  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN),
+  submitPathologyTestReport,
+);
+
+// One test's report PDF — same readers as GET /pathology/:requestId.
+router.get(
+  '/pathology/:requestId/reports/:testIndex/pdf',
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  getPathologyTestReportPdf,
 );
 
 // ─── Radiology ────────────────────────────────────────────────────────────────
@@ -96,13 +118,13 @@ router.post(
 
 router.get(
   '/radiology',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   listRadiologyRequests,
 );
 
 router.get(
   '/radiology/:requestId',
-  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  requireRole(UserRole.DOCTOR, UserRole.RADIOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   getRadiologyRequest,
 );
 

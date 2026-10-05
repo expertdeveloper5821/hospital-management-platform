@@ -213,6 +213,34 @@ export class OPDRepository {
     return OPDVisitModel.findOne(query);
   }
 
+  // Non-cancelled visits for a patient on the IST calendar day of `at` that
+  // already existed at `at` — the OPD encounter(s) a lab request raised at that
+  // moment belongs to (see lab.service resolveLabEncounterLink).
+  async findPatientVisitsOnDayAt(
+    tenantId:  string,
+    patientId: string,
+    at:        Date,
+  ): Promise<IOPDVisit[]> {
+    assertDbConnected();
+    const start = toIstMidnight(at);
+    const end   = new Date(start.getTime() + MS_PER_DAY);
+    return OPDVisitModel.find({
+      tenantId,
+      patientId,
+      visitDate: { $gte: start, $lt: end },
+      status:    { $ne: OPDVisitStatus.CANCELLED },
+      createdAt: { $lte: at },
+    });
+  }
+
+  // visitIds of every visit (any status) dated within [start, end) — the Lab
+  // list's Visit Date filter matches requests linked to these visits.
+  async findVisitIdsInRange(tenantId: string, start: Date, end: Date): Promise<string[]> {
+    assertDbConnected();
+    const ids = await OPDVisitModel.distinct('visitId', { tenantId, visitDate: { $gte: start, $lt: end } });
+    return ids as string[];
+  }
+
   async save(data: Partial<IOPDVisit>): Promise<IOPDVisit> {
     assertDbConnected();
     try {

@@ -15,6 +15,8 @@ import {
   useDeleteRadiologyRequestMutation,
   useCollectPathologyPaymentMutation,
   useCollectRadiologyPaymentMutation,
+  useGetPathologyRequestQuery,
+  useGetRadiologyRequestQuery,
 } from '@/store/api/lab.api';
 import { useLazyGetReceiptUrlQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
@@ -36,6 +38,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { RichTextEditor } from '@/components/ui/rich-text-editor';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
+import { PathologyTestReportModal } from '@/components/lab/pathology-test-report-modal';
 import {
   FlaskConical,
   Plus,
@@ -62,6 +66,11 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+// Date only, on the IST calendar day (OPD visitDate is stored as IST midnight).
+function formatDay(iso: string) {
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
+}
+
 // Fixed width so every Status pill (PENDING / IN PROGRESS / COMPLETED) renders
 // at the same size — content centered, text never clipped or wrapped.
 const STATUS_BADGE_CLASS = 'w-28 justify-center text-center whitespace-nowrap';
@@ -79,6 +88,27 @@ function testLabelOf(request: LabRequest, type: 'pathology' | 'radiology'): stri
   return type === 'pathology'
     ? (request as PathologyRequestResponse).testType
     : (request as RadiologyRequestResponse).imagingType;
+}
+
+// A request's tests are stored as one string, joined with ", " when several
+// are selected. Commas inside parentheses belong to a single test's name
+// (e.g. "Thyroid Profile (T3, T4, TSH)"), so only top-level commas split.
+function splitTests(label: string): string[] {
+  const tests: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of label) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      tests.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  tests.push(current);
+  return tests.map((t) => t.trim()).filter(Boolean);
 }
 
 const PAYMENT_MODES = [
@@ -187,6 +217,67 @@ function PatientCombobox({ selected, onSelect, onClear }: PatientComboboxProps) 
   );
 }
 
+// ─── Pathology Test Types ─────────────────────────────────────────────────────
+// Fixed catalog for the New Pathology Request multi-select. Selected tests are
+// joined (in selection order) into the existing single `testType` string, so
+// the backend contract, list/detail display and Edit modal are unchanged.
+const PATHOLOGY_TEST_TYPES = [
+  'CBC (Complete Blood Count)',
+  'ESR',
+  'Blood Sugar (Fasting / Post-Prandial / Random)',
+  'HbA1c',
+  'LFT (Liver Function Test)',
+  'KFT / RFT (Kidney / Renal Function Test)',
+  'Lipid Profile',
+  'Thyroid Profile (T3, T4, TSH)',
+  'Urine Routine & Microscopy',
+  'Serum Electrolytes (Sodium, Potassium, Chloride)',
+  'CRP (C-Reactive Protein)',
+  'Blood Grouping & Rh Typing',
+  'PT / INR',
+  'Vitamin D (25-OH)',
+  'Vitamin B12',
+  'Uric Acid',
+  'Dengue NS1 / IgM / IgG',
+  'Malaria Parasite / Antigen',
+  'Urine Culture & Sensitivity',
+  'Troponin I',
+  'Peripheral Blood Smear (PBS)',
+  'Reticulocyte Count',
+  'Iron Profile / Iron Studies',
+  'Serum Ferritin',
+  'Serum Calcium',
+  'Serum Magnesium',
+  'Serum Phosphorus',
+  'Serum Amylase',
+  'Serum Lipase',
+  'Total & Direct Bilirubin',
+  'Alkaline Phosphatase (ALP)',
+  'Procalcitonin (PCT)',
+  'HBsAg (Hepatitis B Surface Antigen)',
+  'Anti-HCV (Hepatitis C Antibody)',
+  'HIV 1 & 2 Screening',
+  'Widal Test',
+  'Typhoid IgM',
+  'Pregnancy Test (Urine β-hCG)',
+  'Stool Routine & Microscopy',
+  'Stool Occult Blood Test (FOBT)',
+] as const;
+
+// Option ids are index-based so the listbox's DOM ids stay free of spaces/parens.
+const PATHOLOGY_TEST_OPTIONS = PATHOLOGY_TEST_TYPES.map((name, i) => ({ userId: `pt-${i}`, name }));
+// A test name outside the catalog (legacy free text, Billing-created requests)
+// keeps its own id so Edit shows it as a removable chip instead of dropping it.
+const NON_CATALOG_TEST_PREFIX = 'custom:';
+const pathologyTestName = (id: string) =>
+  PATHOLOGY_TEST_OPTIONS.find((o) => o.userId === id)?.name
+  ?? (id.startsWith(NON_CATALOG_TEST_PREFIX) ? id.slice(NON_CATALOG_TEST_PREFIX.length) : id);
+const pathologyTestIdFor = (name: string) =>
+  PATHOLOGY_TEST_OPTIONS.find((o) => o.name === name)?.userId ?? `${NON_CATALOG_TEST_PREFIX}${name}`;
+
+// Mirrors the backend's CreatePathologyRequestSchema testType max length.
+const TEST_TYPE_MAX_LENGTH = 200;
+
 // ─── New Request Modal ────────────────────────────────────────────────────────
 
 interface NewRequestModalProps {
@@ -208,6 +299,7 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
 
   const [patient,    setPatient]    = useState<PatientResponse | null>(null);
   const [testType,   setTestType]   = useState('');
+  const [testIds,    setTestIds]    = useState<string[]>([]);
   const [referredBy, setReferredBy] = useState(isDoctorSelf ? (profile?.userId ?? LAB_REFERRED_BY_SELF) : LAB_REFERRED_BY_SELF);
   const [notes,      setNotes]      = useState('');
   const [error,      setError]      = useState('');
@@ -230,13 +322,20 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
     e.preventDefault();
     setError('');
     if (!patient)           { setError('Please select a patient.'); return; }
-    if (!testType.trim())   { setError(`${fieldLabel} is required.`); return; }
+    const pathologyTestType = testIds.map(pathologyTestName).join(', ');
+    if (type === 'pathology') {
+      if (testIds.length === 0) { setError('Please select at least one test.'); return; }
+      if (pathologyTestType.length > TEST_TYPE_MAX_LENGTH) {
+        setError('Too many tests selected for one request. Please split them into separate requests.');
+        return;
+      }
+    } else if (!testType.trim()) { setError(`${fieldLabel} is required.`); return; }
 
     try {
       const created: LabRequest = type === 'pathology'
         ? await createPathology({
           patientId:  patient.patientId,
-          testType:   testType.trim(),
+          testType:   pathologyTestType,
           referredBy,
           notes:      notes.trim() || undefined,
         }).unwrap()
@@ -295,16 +394,30 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
               </select>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="nr-testtype">{fieldLabel} *</Label>
-              <Input
-                id="nr-testtype"
-                value={testType}
-                onChange={(e) => setTestType(e.target.value)}
-                placeholder={fieldPlaceholder}
-                required
-              />
-            </div>
+            {type === 'pathology' ? (
+              <div className="space-y-1.5">
+                <Label id="nr-testtype-label">{fieldLabel} *</Label>
+                <PeopleMultiSelect
+                  labelId="nr-testtype-label"
+                  noun="tests"
+                  options={PATHOLOGY_TEST_OPTIONS}
+                  getLabel={pathologyTestName}
+                  selectedIds={testIds}
+                  onChange={setTestIds}
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="nr-testtype">{fieldLabel} *</Label>
+                <Input
+                  id="nr-testtype"
+                  value={testType}
+                  onChange={(e) => setTestType(e.target.value)}
+                  placeholder={fieldPlaceholder}
+                  required
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="nr-notes">Clinical Notes (optional)</Label>
@@ -649,6 +762,10 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
   const radioDoc    = request as RadiologyRequestResponse;
 
   const [typeField, setTypeField] = useState(isPathology ? pathDoc.testType : radioDoc.imagingType);
+  // Pathology: the request's tests as selected chips in the same multi-select
+  // as New Request, in their stored order (duplicates collapse).
+  const [testIds,   setTestIds]   = useState<string[]>(() =>
+    isPathology ? [...new Set(splitTests(pathDoc.testType).map(pathologyTestIdFor))] : []);
   const [notes,     setNotes]     = useState(request.notes ?? '');
   const [priority,  setPriority]  = useState<LabRequestPriority>(request.priority);
   const [status,    setStatus]    = useState<'PENDING' | 'IN_PROGRESS'>(
@@ -671,11 +788,19 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
+    const pathologyTestType = testIds.map(pathologyTestName).join(', ');
+    if (isPathology) {
+      if (testIds.length === 0) { setError('Please select at least one test.'); return; }
+      if (pathologyTestType.length > TEST_TYPE_MAX_LENGTH) {
+        setError('Too many tests selected for one request. Please split them into separate requests.');
+        return;
+      }
+    }
     try {
       if (isPathology) {
         await editPathology({
           requestId: request.requestId,
-          testType:  typeField.trim() || undefined,
+          testType:  pathologyTestType,
           notes:     notes.trim() || null,
           priority,
           ...(canChangeStatus ? { status } : {}),
@@ -717,14 +842,28 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
             )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor="er-type">{fieldLabel}</Label>
-              <Input
-                id="er-type"
-                value={typeField}
-                onChange={(e) => setTypeField(e.target.value)}
-              />
-            </div>
+            {isPathology ? (
+              <div className="space-y-1.5">
+                <Label id="er-testtype-label">{fieldLabel} *</Label>
+                <PeopleMultiSelect
+                  labelId="er-testtype-label"
+                  noun="tests"
+                  options={PATHOLOGY_TEST_OPTIONS}
+                  getLabel={pathologyTestName}
+                  selectedIds={testIds}
+                  onChange={setTestIds}
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="er-type">{fieldLabel}</Label>
+                <Input
+                  id="er-type"
+                  value={typeField}
+                  onChange={(e) => setTypeField(e.target.value)}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="er-notes">Clinical Notes</Label>
@@ -854,6 +993,9 @@ interface RequestDetailPanelProps {
   request:   PathologyRequestResponse | RadiologyRequestResponse;
   type:      'pathology' | 'radiology';
   canUpload: boolean;
+  // Upload a report file — separate from canUpload (structured result entry):
+  // Pathologists create Pathology reports only through the structured form.
+  canUploadFile: boolean;
   canEdit:   boolean;
   canDelete: boolean;
   canCollectPayment:  boolean;
@@ -862,15 +1004,32 @@ interface RequestDetailPanelProps {
 }
 
 function RequestDetailPanel({
-  request, type, canUpload, canEdit, canDelete, canCollectPayment, canDownloadReceipt, onClose,
+  request, type, canUpload, canUploadFile, canEdit, canDelete, canCollectPayment, canDownloadReceipt, onClose,
 }: RequestDetailPanelProps) {
   const [showUpload,  setShowUpload]  = useState(false);
   const [showEdit,    setShowEdit]    = useState(false);
   const [showDelete,  setShowDelete]  = useState(false);
   const [showCollect, setShowCollect] = useState(false);
+  // testIndex of the Pathology test whose structured report is open.
+  const [openTestIndex, setOpenTestIndex] = useState<number | null>(null);
 
   const testLabel = testLabelOf(request, type);
+  const tests     = splitTests(testLabel);
   const payment   = request.payment ?? null;
+
+  // The linked OPD visit / IPD admission is only on the single-request GET
+  // (not the list rows). Offline-created requests don't exist server-side yet.
+  const skipDetail      = isTempId(request.requestId);
+  const pathologyDetail = useGetPathologyRequestQuery(request.requestId, { skip: skipDetail || type !== 'pathology' });
+  const radiologyDetail = useGetRadiologyRequestQuery(request.requestId, { skip: skipDetail || type !== 'radiology' });
+  const detail          = type === 'pathology' ? pathologyDetail : radiologyDetail;
+  // currentData (not data): never shows another request's OPD/IPD details
+  // while this request's own detail is still loading.
+  const encounter       = detail.currentData?.encounter ?? null;
+  // Structured per-test reports (Pathology only, single-request GET) — each
+  // test opens its own report form / submitted report.
+  const testReports     = type === 'pathology' ? (pathologyDetail.currentData?.testReports ?? null) : null;
+  const openReport      = testReports?.find((r) => r.testIndex === openTestIndex) ?? null;
   // A paid request cannot be deleted (the backend also returns 409).
   const showDeleteButton  = canDelete && !payment;
   // Offline-created requests (temp id) don't exist server-side yet — payment
@@ -881,7 +1040,7 @@ function RequestDetailPanel({
   const showReceiptButton = canDownloadReceipt && !!payment?.receiptAvailable;
   // Reports can only be uploaded after payment is collected (the backend
   // rejects an unpaid upload with 409).
-  const canUploadNow      = canUpload && request.status !== 'COMPLETED';
+  const canUploadNow      = canUploadFile && request.status !== 'COMPLETED';
   const showUploadButton  = canUploadNow && !!payment;
 
   const row = (label: string, value: React.ReactNode) => (
@@ -904,7 +1063,9 @@ function RequestDetailPanel({
                 <Badge variant={statusVariant(request.status)} className={STATUS_BADGE_CLASS}>{request.status.replace('_', ' ')}</Badge>
                 <span className="text-xs text-muted-foreground capitalize">{type}</span>
               </div>
-              <p className="text-sm font-semibold">{testLabel}</p>
+              <p className="text-sm font-semibold">
+                {tests.length > 1 ? `${tests.length} tests` : testLabel}
+              </p>
             </div>
             <button onClick={onClose} className="rounded-md p-1 hover:bg-muted transition-colors">
               <X className="h-5 w-5" />
@@ -914,6 +1075,48 @@ function RequestDetailPanel({
           <div className="flex-1 overflow-y-auto p-5">
             {row('Patient Name',  request.fullName ?? '—')}
             {row('UHID',         <span className="font-mono text-xs">{request.patientId}</span>)}
+            {row(tests.length > 1 ? `Tests (${tests.length})` : 'Test', (
+              <ul className="space-y-1" aria-label="Requested tests">
+                {tests.map((t, i) => {
+                  const report = testReports?.find((r) => r.testName === t);
+                  return (
+                    <li key={i} className={tests.length > 1 ? 'list-disc ml-4' : undefined}>
+                      {report ? (
+                        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setOpenTestIndex(report.testIndex)}
+                            className="text-left text-primary underline-offset-2 hover:underline"
+                          >
+                            {t}
+                          </button>
+                          <span className={cn(
+                            'rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                            report.result ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600',
+                          )}>
+                            {report.result ? 'Report Submitted' : 'Pending'}
+                          </span>
+                        </span>
+                      ) : t}
+                    </li>
+                  );
+                })}
+              </ul>
+            ))}
+            {detail.isFetching && !detail.currentData && row('Patient Type', 'Loading…')}
+            {encounter && (
+              <>
+                {row('Patient Type', encounter.type)}
+                {row(encounter.type === 'IPD' ? 'Admission Date' : 'OPD Visit Date', formatDay(encounter.date))}
+                {encounter.type === 'IPD' && row('Ward Name',  encounter.wardName ?? '—')}
+                {encounter.type === 'IPD' && row('Bed Number', encounter.bedNumber ?? '—')}
+                {encounter.departmentName && row('Department', encounter.departmentName)}
+                {encounter.doctorNames.length > 0 && row(
+                  encounter.doctorNames.length > 1 ? 'Doctors' : 'Doctor',
+                  encounter.doctorNames.join(', '),
+                )}
+              </>
+            )}
             {row('Requested By', request.requestedByName ?? '—')}
             {row('Referred By',  <span className="block truncate" title={request.referredByName}>{request.referredByName}</span>)}
             {row('Requested At', formatDate(request.requestedAt))}
@@ -1032,6 +1235,18 @@ function RequestDetailPanel({
           onClose={() => setShowCollect(false)}
         />
       )}
+      {openReport && (
+        <PathologyTestReportModal
+          key={openReport.testIndex}
+          requestId={request.requestId}
+          report={openReport}
+          patientName={request.fullName ?? ''}
+          patientId={request.patientId}
+          canEnterResults={canUpload}
+          paid={!!payment}
+          onClose={() => setOpenTestIndex(null)}
+        />
+      )}
     </>
   );
 }
@@ -1044,6 +1259,7 @@ interface RequestsTableProps {
   type:      'pathology' | 'radiology';
   canCreate: boolean;
   canUpload: boolean;
+  canUploadFile: boolean;
   canEdit:   boolean;
   canDelete: boolean;
   canCollectPayment:  boolean;
@@ -1051,7 +1267,7 @@ interface RequestsTableProps {
 }
 
 function RequestsTable({
-  type, canCreate, canUpload, canEdit, canDelete, canCollectPayment, canDownloadReceipt,
+  type, canCreate, canUpload, canUploadFile, canEdit, canDelete, canCollectPayment, canDownloadReceipt,
 }: RequestsTableProps) {
   // Initialize from the URL (e.g. the dashboard "Pending Lab Reports" card links
   // here as /lab?status=PENDING) so the first query already carries the filter.
@@ -1063,17 +1279,33 @@ function RequestsTable({
   });
   const [searchFilter,  setSearchFilter]  = useState('');
   const [searchInput,   setSearchInput]   = useState('');
+  // Linked-encounter filters: Date (the request's own encounter date — OPD
+  // visit date or IPD admission date), Ward / Bed (IPD).
+  const [encounterDate, setEncounterDate] = useState('');
+  const [wardFilter,    setWardFilter]    = useState('');
+  const [wardInput,     setWardInput]     = useState('');
+  const [bedFilter,     setBedFilter]     = useState('');
+  const [bedInput,      setBedInput]      = useState('');
   const [page,          setPage]          = useState(1);
   const [showNewRequest,setShowNewRequest]= useState(false);
   const [selected,      setSelected]      = useState<PathologyRequestResponse | RadiologyRequestResponse | null>(null);
   const [collectFor,    setCollectFor]    = useState<{ request: LabRequest; justCreated: boolean } | null>(null);
 
+  const listArgs = {
+    search:        searchFilter  || undefined,
+    status:        statusFilter  || undefined,
+    date:          encounterDate || undefined,
+    wardName:      wardFilter    || undefined,
+    bedNumber:     bedFilter     || undefined,
+    page,
+    limit:         LAB_REQUESTS_PAGE_SIZE,
+  };
   const pathologyResult = useListPathologyRequestsQuery(
-    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: LAB_REQUESTS_PAGE_SIZE },
+    listArgs,
     { skip: type !== 'pathology' },
   );
   const radiologyResult = useListRadiologyRequestsQuery(
-    { search: searchFilter || undefined, status: statusFilter || undefined, page, limit: LAB_REQUESTS_PAGE_SIZE },
+    listArgs,
     { skip: type !== 'radiology' },
   );
 
@@ -1104,6 +1336,17 @@ function RequestsTable({
 
   function handleSearch() {
     setSearchFilter(searchInput.trim());
+    setPage(1);
+  }
+
+  function commitWard() { setWardFilter(wardInput.trim()); setPage(1); }
+  function commitBed()  { setBedFilter(bedInput.trim());   setPage(1); }
+
+  const hasEncounterFilter = !!(encounterDate || wardFilter || bedFilter);
+  function clearEncounterFilters() {
+    setEncounterDate('');
+    setWardFilter(''); setWardInput('');
+    setBedFilter('');  setBedInput('');
     setPage(1);
   }
 
@@ -1149,6 +1392,51 @@ function RequestsTable({
             ))}
           </select>
         </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${type}-date`} className="text-xs">Date</Label>
+          <Input
+            id={`${type}-date`}
+            type="date"
+            title="OPD visit date or IPD admission date"
+            value={encounterDate}
+            onChange={(e) => { setEncounterDate(e.target.value); setPage(1); }}
+            className="h-9 w-40"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${type}-ward`} className="text-xs">Ward Name</Label>
+          <Input
+            id={`${type}-ward`}
+            placeholder="Ward…"
+            value={wardInput}
+            onChange={(e) => setWardInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && commitWard()}
+            onBlur={commitWard}
+            className="h-9 w-32"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${type}-bed`} className="text-xs">Bed Number</Label>
+          <Input
+            id={`${type}-bed`}
+            placeholder="Bed…"
+            value={bedInput}
+            onChange={(e) => setBedInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && commitBed()}
+            onBlur={commitBed}
+            className="h-9 w-24"
+          />
+        </div>
+
+        {hasEncounterFilter && (
+          <Button variant="ghost" size="sm" className="h-9" onClick={clearEncounterFilters}>
+            <X className="h-4 w-4 mr-1" />
+            Clear
+          </Button>
+        )}
 
         <Button variant="outline" size="sm" className="h-9" onClick={() => result.refetch()} disabled={isFetching}>
           <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />
@@ -1202,7 +1490,7 @@ function RequestsTable({
                         onClick={() => setSelected(r)}
                       >
                         <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
-                        <td className="px-4 py-3 font-medium max-w-xs truncate">{label}</td>
+                        <td className="px-4 py-3 font-medium max-w-xs truncate" title={label}>{label}</td>
                         <td className="px-4 py-3">
                           <p className="text-sm font-medium">{r.fullName}</p>
                           <p className="font-mono text-xs text-muted-foreground">{r.patientId}</p>
@@ -1304,6 +1592,7 @@ function RequestsTable({
           request={liveSelected}
           type={type}
           canUpload={canUpload}
+          canUploadFile={canUploadFile}
           canEdit={canEdit}
           canDelete={canDelete}
           canCollectPayment={canCollectPayment}
@@ -1334,7 +1623,15 @@ const LAB_ALLOWED_ROLES = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURS
 export default function LabPage() {
   const router = useRouter();
   const role = useAppSelector((s) => s.auth.profile?.role);
-  const [activeTab, setActiveTab] = useState<TabType>('pathology');
+  const [selectedTab, setSelectedTab] = useState<TabType>('pathology');
+
+  // PATHOLOGIST sees only Pathology and RADIOLOGIST only Radiology — mirrors
+  // the backend, where each lab role is excluded from the other type's routes.
+  const visibleTabs: TabType[] =
+    role === 'PATHOLOGIST' ? ['pathology']
+    : role === 'RADIOLOGIST' ? ['radiology']
+    : ['pathology', 'radiology'];
+  const activeTab = visibleTabs.includes(selectedTab) ? selectedTab : visibleTabs[0];
 
   useEffect(() => {
     if (role && !LAB_ALLOWED_ROLES.includes(role)) {
@@ -1350,6 +1647,9 @@ export default function LabPage() {
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;
+  // Pathologists create Pathology reports only through the structured report
+  // form — no file upload (the backend's upload route also rejects them).
+  const canUploadFile = activeTab === 'pathology' ? canUploadPathology && role !== 'PATHOLOGIST' : canUploadRadiology;
 
   const canEditPathology   = ['PATHOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
   const canEditRadiology   = ['RADIOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
@@ -1372,10 +1672,10 @@ export default function LabPage() {
 
       {/* Tabs */}
       <div className="flex border-b gap-1">
-        {(['pathology', 'radiology'] as TabType[]).map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => setSelectedTab(tab)}
             className={cn(
               'px-4 py-2 text-sm font-medium transition-colors capitalize',
               activeTab === tab
@@ -1395,6 +1695,7 @@ export default function LabPage() {
         type={activeTab}
         canCreate={canCreate}
         canUpload={canUpload}
+        canUploadFile={canUploadFile}
         canEdit={canEdit}
         canDelete={canDelete}
         canCollectPayment={canCollectPayment}

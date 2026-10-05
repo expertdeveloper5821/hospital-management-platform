@@ -55,6 +55,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCollectPathologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -83,7 +85,8 @@ const unwrapping = <T,>(value: T) => ({ unwrap: () => Promise.resolve(value) });
 const rejecting  = (error: unknown) => ({ unwrap: () => Promise.reject(error) });
 
 const CASES = [
-  { type: 'pathology' as const, role: 'PATHOLOGIST', prefix: 'path', upload: mockUploadPathology },
+  // Pathology file upload is Hospital Admin only (Pathologists use the structured report form).
+  { type: 'pathology' as const, role: 'HOSPITAL_ADMIN', prefix: 'path', upload: mockUploadPathology },
   { type: 'radiology' as const, role: 'RADIOLOGIST', prefix: 'rad',  upload: mockUploadRadiology },
 ];
 
@@ -98,6 +101,17 @@ async function openDetail(type: 'pathology' | 'radiology', testLabel: string) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('Lab pathology — Pathologist', () => {
+  beforeEach(() => { mockRole = 'PATHOLOGIST'; });
+
+  test.each(['Unpaid Test', 'Paid Test'])('%s: no Upload Report option at all (structured reports only)', async (label) => {
+    await openDetail('pathology', label);
+    expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/can be uploaded once payment has been collected/i)).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
 });
 
 describe.each(CASES)('Lab $type — report upload & display', ({ type, role, prefix, upload }) => {

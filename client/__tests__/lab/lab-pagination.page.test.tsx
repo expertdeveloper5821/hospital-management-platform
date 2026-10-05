@@ -23,6 +23,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCollectPathologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -127,6 +129,64 @@ describe('LabPage — server-side pagination', () => {
     fireEvent.change(screen.getByDisplayValue('All Status'), { target: { value: 'COMPLETED' } });
     expect(mockUsePathology).toHaveBeenLastCalledWith(
       expect.objectContaining({ search: 'ravi', status: 'COMPLETED', page: 1 }), { skip: false },
+    );
+  });
+
+  test('one Date filter (replacing Visit Date / Admission Date) plus Ward / Bed are sent to the server, reset to page 1, and clear together', () => {
+    mockUsePathology.mockImplementation(paged(25));
+    render(<LabPage />);
+
+    expect(screen.queryByLabelText('Visit Date')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Admission Date')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-10-01' } });
+    expect(mockUsePathology).toHaveBeenLastCalledWith(
+      expect.objectContaining({ date: '2026-10-01', page: 1 }), { skip: false },
+    );
+    const args = mockUsePathology.mock.calls[mockUsePathology.mock.calls.length - 1][0];
+    expect(args).not.toHaveProperty('visitDate');
+    expect(args).not.toHaveProperty('admissionDate');
+
+    fireEvent.change(screen.getByLabelText('Ward Name'), { target: { value: ' ICU ' } });
+    // Typing alone doesn't refetch; Enter/blur commits the trimmed value.
+    expect(mockUsePathology).toHaveBeenLastCalledWith(expect.objectContaining({ wardName: undefined }), { skip: false });
+    fireEvent.keyDown(screen.getByLabelText('Ward Name'), { key: 'Enter' });
+    fireEvent.change(screen.getByLabelText('Bed Number'), { target: { value: 'B-07' } });
+    fireEvent.blur(screen.getByLabelText('Bed Number'));
+    expect(mockUsePathology).toHaveBeenLastCalledWith(
+      expect.objectContaining({ date: '2026-10-01', wardName: 'ICU', bedNumber: 'B-07', page: 1 }),
+      { skip: false },
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+    expect(mockUsePathology).toHaveBeenLastCalledWith(
+      expect.objectContaining({ date: undefined, wardName: undefined, bedNumber: undefined }),
+      { skip: false },
+    );
+    expect(screen.getByLabelText('Date')).toHaveValue('');
+    expect(screen.getByLabelText('Ward Name')).toHaveValue('');
+  });
+
+  test('Radiology tab has the same single Date filter', () => {
+    mockUseRadiology.mockImplementation(paged(5));
+    render(<LabPage />);
+    fireEvent.click(screen.getByRole('button', { name: /radiology/i }));
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: '2026-09-28' } });
+    expect(mockUseRadiology).toHaveBeenLastCalledWith(
+      expect.objectContaining({ date: '2026-09-28', page: 1 }), { skip: false },
+    );
+  });
+
+  test('Radiology tab sends the same encounter filters', () => {
+    mockUseRadiology.mockImplementation(paged(5));
+    render(<LabPage />);
+    fireEvent.click(screen.getByRole('button', { name: /radiology/i }));
+
+    fireEvent.change(screen.getByLabelText('Ward Name'), { target: { value: 'General' } });
+    fireEvent.keyDown(screen.getByLabelText('Ward Name'), { key: 'Enter' });
+    expect(mockUseRadiology).toHaveBeenLastCalledWith(
+      expect.objectContaining({ wardName: 'General', page: 1 }), { skip: false },
     );
   });
 
