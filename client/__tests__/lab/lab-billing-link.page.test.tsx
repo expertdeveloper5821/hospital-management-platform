@@ -51,6 +51,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCollectPathologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -107,16 +109,17 @@ describe('Billing-created lab requests in the Lab section', () => {
     expect(screen.queryByRole('button', { name: /collect payment/i })).not.toBeInTheDocument();
   });
 
-  test('the Pathologist cannot upload until Billing collects the payment', async () => {
-    mockRole = 'PATHOLOGIST';
+  // Pathology file upload is Hospital Admin only (Pathologists use the structured report form).
+  test('the Hospital Admin cannot upload until Billing collects the payment', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
     render(<LabPage />);
     await openPanel('Thyroid Panel');
     expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
     expect(screen.getByText(/once the payment has been collected in Billing/)).toBeInTheDocument();
   });
 
-  test('once paid in Billing, the Pathologist can upload without collecting again', async () => {
-    mockRole = 'PATHOLOGIST';
+  test('once paid in Billing, the Hospital Admin can upload without collecting again', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
     render(<LabPage />);
     await openPanel('Liver Function');
     expect(screen.getByRole('button', { name: /upload report/i })).toBeInTheDocument();
@@ -143,10 +146,18 @@ describe('Billing-created lab requests in the Lab section', () => {
     expect(screen.getByRole('button', { name: /download receipt/i })).toBeInTheDocument();
   });
 
-  test('a free (₹0) test can be uploaded by the Pathologist', async () => {
-    mockRole = 'PATHOLOGIST';
+  test('a free (₹0) test can be uploaded by the Hospital Admin', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
     render(<LabPage />);
     await openPanel('Blood Sugar');
     expect(screen.getByRole('button', { name: /upload report/i })).toBeInTheDocument();
+  });
+
+  test('the Pathologist never gets a file upload option, paid or unpaid', async () => {
+    mockRole = 'PATHOLOGIST';
+    render(<LabPage />);
+    await openPanel('Liver Function');
+    expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/can be uploaded once/)).not.toBeInTheDocument();
   });
 });

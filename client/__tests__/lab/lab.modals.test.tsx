@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeletePathologyRequestMutation:  () => [mockDeletePathology, { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [mockEditRadiology,   { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [mockDeleteRadiology, { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/patient.api', () => ({
@@ -110,7 +112,10 @@ describe('EditRequestModal — pathology', () => {
     fireEvent.click(editBtn);
 
     expect(screen.getByText(/edit pathology request/i)).toBeInTheDocument();
-    expect(screen.getByLabelText('Test Type')).toHaveValue('Blood CBC');
+    // Same multi-select as New Request; the stored (non-catalog) test loads as a chip.
+    const combobox = screen.getByRole('combobox', { name: /Test Type/ });
+    expect(within(combobox).getByText('Blood CBC')).toBeInTheDocument();
+    expect(within(combobox).getByRole('button', { name: 'Remove Blood CBC' })).toBeInTheDocument();
   });
 
   test('calls editPathologyRequest mutation on submit', async () => {
@@ -120,14 +125,17 @@ describe('EditRequestModal — pathology', () => {
     const editBtn = await screen.findByText('Edit Request');
     fireEvent.click(editBtn);
 
-    const typeInput = screen.getByLabelText('Test Type');
-    fireEvent.change(typeInput, { target: { value: 'Urine Analysis' } });
+    // Swap the stored test for a catalog test via the multi-select.
+    const combobox = screen.getByRole('combobox', { name: /Test Type/ });
+    fireEvent.click(within(combobox).getByRole('button', { name: 'Remove Blood CBC' }));
+    fireEvent.click(combobox);
+    fireEvent.click(screen.getByRole('option', { name: 'Urine Routine & Microscopy' }));
 
     fireEvent.click(screen.getByText('Save Changes'));
 
     await waitFor(() => {
       expect(mockEditPathology).toHaveBeenCalledWith(
-        expect.objectContaining({ requestId: 'req-001', testType: 'Urine Analysis' }),
+        expect.objectContaining({ requestId: 'req-001', testType: 'Urine Routine & Microscopy' }),
       );
     });
   });

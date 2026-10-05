@@ -74,6 +74,42 @@ export class IPDRepository {
     return IPDAdmissionModel.findOne({ patientId, tenantId, status: 'ADMITTED' });
   }
 
+  // The patient's admission in effect at `at` (admitted on/before it and not yet
+  // discharged by then). At most one can match, since a patient can only hold
+  // one ADMITTED admission at a time (uniq_active_admission_per_patient).
+  async findAdmissionCoveringDate(
+    tenantId:  string,
+    patientId: string,
+    at:        Date,
+  ): Promise<IIPDAdmission | null> {
+    assertDbConnected();
+    return IPDAdmissionModel.findOne({
+      tenantId,
+      patientId,
+      admissionDate: { $lte: at },
+      $or: [{ status: 'ADMITTED' }, { dischargeDate: { $gt: at } }],
+    }).sort({ admissionDate: -1 });
+  }
+
+  // Admissions matching the Lab list's IPD filters (any status): admissionDate
+  // within [start, end), ward name containing `wardName`, bed number equal to
+  // `bedNumber` (both case-insensitive). Only the fields lab.service needs to
+  // match requests — including legacy unlinked ones — to these admissions.
+  async findForLabFilter(
+    tenantId: string,
+    filter:   { admissionDateRange?: { start: Date; end: Date }; wardName?: string; bedNumber?: string },
+  ): Promise<Pick<IIPDAdmission, 'admissionId' | 'patientId' | 'admissionDate' | 'dischargeDate' | 'status'>[]> {
+    assertDbConnected();
+    const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const query: Record<string, unknown> = { tenantId };
+    if (filter.admissionDateRange) {
+      query['admissionDate'] = { $gte: filter.admissionDateRange.start, $lt: filter.admissionDateRange.end };
+    }
+    if (filter.wardName)  query['wardName']  = new RegExp(escape(filter.wardName), 'i');
+    if (filter.bedNumber) query['bedNumber'] = new RegExp(`^${escape(filter.bedNumber)}$`, 'i');
+    return IPDAdmissionModel.find(query, { admissionId: 1, patientId: 1, admissionDate: 1, dischargeDate: 1, status: 1 }).lean();
+  }
+
   async findByPatient(
     tenantId:  string,
     patientId: string,

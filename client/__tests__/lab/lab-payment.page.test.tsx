@@ -46,6 +46,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCollectPathologyPaymentMutation: () => [mockCollectPathology, { isLoading: false }],
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({

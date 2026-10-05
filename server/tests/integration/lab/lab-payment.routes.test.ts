@@ -501,7 +501,8 @@ describe('Deleting a paid lab request', () => {
 
 describe('Report upload requires a collected payment', () => {
   const kinds = [
-    { kind: 'pathology' as const, role: UserRole.PATHOLOGIST, otherRole: UserRole.RADIOLOGIST, id: () => pathologyRequestId },
+    // Pathologists don't upload files (structured reports only) — Hospital Admin does.
+    { kind: 'pathology' as const, role: UserRole.HOSPITAL_ADMIN, otherRole: UserRole.RADIOLOGIST, id: () => pathologyRequestId },
     { kind: 'radiology' as const, role: UserRole.RADIOLOGIST, otherRole: UserRole.PATHOLOGIST, id: () => radiologyRequestId },
   ];
 
@@ -562,6 +563,14 @@ describe('Report upload requires a collected payment', () => {
     expect(res.status).toBe(403);
   });
 
+  test('403 — a Pathologist cannot upload a paid pathology report file (structured reports only)', async () => {
+    await collect('pathology', pathologyRequestId, tokens.RECEPTIONIST, VALID_BODY);
+    jest.mocked(s3Service.uploadFile).mockClear();   // the receipt PDF upload
+    const res = await upload('pathology', pathologyRequestId, tokens.PATHOLOGIST);
+    expect(res.status).toBe(403);
+    expect(s3Service.uploadFile).not.toHaveBeenCalled();
+  });
+
   test('paying one request does not unlock upload for a different request', async () => {
     await collect('pathology', pathologyRequestId, tokens.RECEPTIONIST, VALID_BODY);
 
@@ -570,7 +579,7 @@ describe('Report upload requires a collected payment', () => {
       requestId: otherRequestId, patientId: PATIENT_ID, tenantId,
       requestedBy: doctorId, testType: 'Lipid Profile', status: 'PENDING', requestedAt: new Date(),
     });
-    const res = await upload('pathology', otherRequestId, tokens.PATHOLOGIST);
+    const res = await upload('pathology', otherRequestId, tokens.HOSPITAL_ADMIN);
     expect(res.status).toBe(409);
 
     // Nor does a pathology payment unlock the radiology request.
@@ -584,7 +593,7 @@ describe('Report upload requires a collected payment', () => {
       amount: 100, paymentMethod: 'CASH', description: 'x', status: 'COMPLETED',
       referenceType: 'PATHOLOGY_REQUEST', referenceId: pathologyRequestId, createdBy: 'test',
     });
-    const res = await upload('pathology', pathologyRequestId, tokens.PATHOLOGIST);
+    const res = await upload('pathology', pathologyRequestId, tokens.HOSPITAL_ADMIN);
     expect(res.status).toBe(409);
   });
 });

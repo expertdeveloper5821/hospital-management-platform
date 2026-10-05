@@ -11,7 +11,27 @@ jest.mock('../../../src/modules/payment/payment.repository', () => ({
     findCompletedByReferences: jest.fn().mockResolvedValue([]),
   },
 }));
+// The request's linked OPD visit / IPD admission (none by default).
+jest.mock('../../../src/modules/opd/opd.repository', () => ({
+  opdRepository: {
+    findPatientVisitsOnDayAt: jest.fn().mockResolvedValue([]),
+    findByVisitId:            jest.fn().mockResolvedValue(null),
+  },
+}));
+jest.mock('../../../src/modules/ipd/ipd.repository', () => ({
+  ipdRepository: {
+    findAdmissionCoveringDate: jest.fn().mockResolvedValue(null),
+    findById:                  jest.fn().mockResolvedValue(null),
+  },
+}));
+jest.mock('../../../src/modules/department/department.repository', () => ({
+  departmentRepository: { findById: jest.fn().mockResolvedValue(null) },
+}));
 import { auditService } from '../../../src/shared/services/audit.service';
+import { opdRepository }        from '../../../src/modules/opd/opd.repository';
+import { ipdRepository }        from '../../../src/modules/ipd/ipd.repository';
+import { departmentRepository } from '../../../src/modules/department/department.repository';
+import { userRepository }       from '../../../src/modules/user/user.repository';
 import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 
 import { labRepository }        from '../../../src/modules/lab/lab.repository';
@@ -457,6 +477,58 @@ describe('LabService — editPathologyRequest', () => {
     expect(entry.newValue.notes).toBe('[redacted]');
     expect(JSON.stringify(entry)).not.toContain('confidential note');
   });
+
+  describe('status recalculation after a test-type edit', () => {
+    const report = (testName: string) => ({
+      testName, templateKey: 'generic', resultData: '{}', submittedBy: 'path-1', submittedAt: new Date(),
+    });
+
+    test('completes an IN_PROGRESS request when the removed test was the only unreported one', async () => {
+      const doc     = makePathologyDoc({
+        status: LabRequestStatus.IN_PROGRESS, testType: 'CBC, LFT', testReports: [report('CBC')],
+      } as Partial<IPathologyRequest>);
+      const edited  = { ...doc, testType: 'CBC' } as IPathologyRequest;
+      const completed = { ...edited, status: LabRequestStatus.COMPLETED } as IPathologyRequest;
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+      mockLabRepo.updatePathology   = jest.fn().mockResolvedValueOnce(edited).mockResolvedValueOnce(completed);
+
+      const result = await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { testType: 'CBC' });
+
+      expect(result.status).toBe(LabRequestStatus.COMPLETED);
+      expect(mockLabRepo.updatePathology).toHaveBeenNthCalledWith(
+        2, 'req-path-001', TENANT, { status: LabRequestStatus.COMPLETED }, undefined,
+      );
+      const [entry] = mockAuditSvc.log.mock.calls[0] as [{ previousValue: Record<string, unknown>; newValue: Record<string, unknown> }];
+      expect(entry.previousValue.status).toBe(LabRequestStatus.IN_PROGRESS);
+      expect(entry.newValue.status).toBe(LabRequestStatus.COMPLETED);
+    });
+
+    test('stays IN_PROGRESS while a remaining test is still unreported', async () => {
+      const doc    = makePathologyDoc({
+        status: LabRequestStatus.IN_PROGRESS, testType: 'CBC, LFT, KFT', testReports: [report('CBC')],
+      } as Partial<IPathologyRequest>);
+      const edited = { ...doc, testType: 'CBC, LFT' } as IPathologyRequest;
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+      mockLabRepo.updatePathology   = jest.fn().mockResolvedValue(edited);
+
+      const result = await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { testType: 'CBC, LFT' });
+
+      expect(result.status).toBe(LabRequestStatus.IN_PROGRESS);
+      expect(mockLabRepo.updatePathology).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not recalculate a PENDING request', async () => {
+      const doc    = makePathologyDoc({ testType: 'CBC, LFT' });
+      const edited = { ...doc, testType: 'CBC' } as IPathologyRequest;
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+      mockLabRepo.updatePathology   = jest.fn().mockResolvedValue(edited);
+
+      const result = await service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { testType: 'CBC' });
+
+      expect(result.status).toBe(LabRequestStatus.PENDING);
+      expect(mockLabRepo.updatePathology).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 // ─── deletePathologyRequest ───────────────────────────────────────────────────
@@ -726,5 +798,209 @@ describe('LabService — deleteRadiologyRequest', () => {
         previousValue: expect.objectContaining({ requestId: 'req-radio-001', imagingType: 'X-Ray Chest' }),
       }),
     );
+  });
+});
+
+// ─── Linked OPD/IPD encounter ────────────────────────────────────────────────
+
+describe('LabService — linked OPD/IPD encounter', () => {
+  let service: LabService;
+  const mockOpdRepo  = opdRepository        as jest.Mocked<typeof opdRepository>;
+  const mockIpdRepo  = ipdRepository        as jest.Mocked<typeof ipdRepository>;
+  const mockDeptRepo = departmentRepository as jest.Mocked<typeof departmentRepository>;
+  const mockUserRepo = userRepository       as jest.Mocked<typeof userRepository>;
+
+  const ADMISSION = {
+    admissionId: 'ADM-1', patientId: 'patient-001', wardName: 'General Ward', bedNumber: 'B-12',
+    assignedDoctorIds: ['doc-1'], departmentId: 'dept-1', admissionDate: new Date('2026-10-01T05:00:00Z'),
+  };
+  const visit = (visitId: string, doctorIds: string[]) => ({
+    visitId, patientId: 'patient-001', doctorIds, departmentId: 'dept-1',
+    visitDate: new Date('2026-10-04T18:30:00Z'),
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new LabService();
+    mockPatientRepo.findByPatientId = jest.fn().mockResolvedValue({ patientId: 'patient-001' });
+    mockNotifSvc.sendToRole         = jest.fn().mockResolvedValue(undefined);
+    mockLabRepo.savePathology       = jest.fn().mockResolvedValue(makePathologyDoc());
+    (mockUserRepo.findById as jest.Mock).mockResolvedValue({ role: UserRole.DOCTOR, departmentIds: [] });
+    (mockUserRepo.findNamesByIds as jest.Mock).mockResolvedValue(new Map([['doc-1', 'Dr. One']]));
+    (mockIpdRepo.findAdmissionCoveringDate as jest.Mock).mockResolvedValue(null);
+    (mockIpdRepo.findById as jest.Mock).mockResolvedValue(null);
+    (mockOpdRepo.findPatientVisitsOnDayAt as jest.Mock).mockResolvedValue([]);
+    (mockOpdRepo.findByVisitId as jest.Mock).mockResolvedValue(null);
+    (mockDeptRepo.findById as jest.Mock).mockResolvedValue({ name: 'Cardiology' });
+  });
+
+  const savedFields = () => (mockLabRepo.savePathology as jest.Mock).mock.calls[0][0];
+
+  test('links the active IPD admission at creation (IPD wins over a same-day OPD visit)', async () => {
+    (mockIpdRepo.findAdmissionCoveringDate as jest.Mock).mockResolvedValue(ADMISSION);
+    (mockOpdRepo.findPatientVisitsOnDayAt as jest.Mock).mockResolvedValue([visit('V-1', [])]);
+    await service.createPathologyRequest({ patientId: 'patient-001', testType: 'CBC', referredBy: 'SELF' }, TENANT, DOCTOR);
+    expect(savedFields()).toMatchObject({ ipdAdmissionId: 'ADM-1', opdVisitId: null });
+  });
+
+  test('links the single same-day OPD visit at creation', async () => {
+    (mockOpdRepo.findPatientVisitsOnDayAt as jest.Mock).mockResolvedValue([visit('V-1', [])]);
+    await service.createPathologyRequest({ patientId: 'patient-001', testType: 'CBC', referredBy: 'SELF' }, TENANT, DOCTOR);
+    expect(savedFields()).toMatchObject({ opdVisitId: 'V-1', ipdAdmissionId: null });
+  });
+
+  test('narrows several same-day OPD visits to the one naming the referring doctor', async () => {
+    (mockOpdRepo.findPatientVisitsOnDayAt as jest.Mock).mockResolvedValue([visit('V-1', ['doc-1']), visit('V-2', ['doc-2'])]);
+    await service.createPathologyRequest({ patientId: 'patient-001', testType: 'CBC', referredBy: 'doc-2' }, TENANT, DOCTOR);
+    expect(savedFields()).toMatchObject({ opdVisitId: 'V-2', ipdAdmissionId: null });
+  });
+
+  test('links nothing when several same-day OPD visits cannot be told apart', async () => {
+    (mockOpdRepo.findPatientVisitsOnDayAt as jest.Mock).mockResolvedValue([visit('V-1', ['doc-1']), visit('V-2', ['doc-2'])]);
+    await service.createPathologyRequest({ patientId: 'patient-001', testType: 'CBC', referredBy: 'SELF' }, TENANT, DOCTOR);
+    expect(savedFields()).toMatchObject({ opdVisitId: null, ipdAdmissionId: null });
+  });
+
+  test('GET returns the stored IPD admission with ward, bed, department and doctors', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ ipdAdmissionId: 'ADM-1', opdVisitId: null }));
+    (mockIpdRepo.findById as jest.Mock).mockResolvedValue(ADMISSION);
+
+    const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+    expect(mockIpdRepo.findById).toHaveBeenCalledWith('ADM-1', TENANT);
+    expect(mockIpdRepo.findAdmissionCoveringDate).not.toHaveBeenCalled();
+    expect(result.encounter).toEqual({
+      type: 'IPD', encounterId: 'ADM-1', date: ADMISSION.admissionDate.toISOString(),
+      wardName: 'General Ward', bedNumber: 'B-12', departmentName: 'Cardiology', doctorNames: ['Dr. One'],
+    });
+  });
+
+  test('GET returns the stored OPD visit', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ opdVisitId: 'V-1', ipdAdmissionId: null }));
+    (mockOpdRepo.findByVisitId as jest.Mock).mockResolvedValue(visit('V-1', ['doc-1']));
+
+    const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+    expect(result.encounter).toMatchObject({
+      type: 'OPD', encounterId: 'V-1', departmentName: 'Cardiology', doctorNames: ['Dr. One'], wardName: null, bedNumber: null,
+    });
+  });
+
+  test('GET returns null (no re-resolution) when the request was created with no encounter', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ opdVisitId: null, ipdAdmissionId: null }));
+    (mockIpdRepo.findAdmissionCoveringDate as jest.Mock).mockResolvedValue(ADMISSION);
+
+    const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+    expect(result.encounter).toBeNull();
+    expect(mockIpdRepo.findAdmissionCoveringDate).not.toHaveBeenCalled();
+  });
+
+  test('GET ignores a stored link that points at another patient', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ opdVisitId: 'V-1', ipdAdmissionId: null }));
+    (mockOpdRepo.findByVisitId as jest.Mock).mockResolvedValue({ ...visit('V-1', []), patientId: 'other' });
+
+    const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+    expect(result.encounter).toBeNull();
+  });
+
+  test('GET resolves a legacy request (no stored link) against its own requestedAt', async () => {
+    const requestedAt = new Date('2026-10-02T06:00:00Z');
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ requestedAt }));
+    (mockIpdRepo.findAdmissionCoveringDate as jest.Mock).mockResolvedValue(ADMISSION);
+
+    const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+    expect(mockIpdRepo.findAdmissionCoveringDate).toHaveBeenCalledWith(TENANT, 'patient-001', requestedAt);
+    expect(result.encounter).toMatchObject({ type: 'IPD', encounterId: 'ADM-1' });
+  });
+});
+
+describe('LabService — submitPathologyTestReport', () => {
+  const CBC = 'CBC (Complete Blood Count)';
+  const LFT = 'LFT (Liver Function Test)';
+  let service: LabService;
+
+  // The stored request after the upsert: its testReports carry the given names.
+  const withReports = (base: IPathologyRequest, names: string[]) => ({
+    ...base,
+    testReports: names.map((testName) => ({
+      testName, templateKey: 'X', resultData: JSON.stringify({ values: [], remarks: null }),
+      submittedBy: 'path-1', submittedAt: new Date(),
+    })),
+  }) as unknown as IPathologyRequest;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new LabService();
+    mockPatientRepo.findByPatientId = jest.fn().mockResolvedValue({ patientId: 'patient-001', fullName: 'Jane', gender: 'FEMALE' });
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(PAID as never);
+    (userRepository.findNamesByIds as jest.Mock).mockResolvedValue(new Map([['path-1', 'Pathologist One']]));
+    mockNotifSvc.sendNotification = jest.fn().mockResolvedValue(undefined);
+    mockLabRepo.updatePathology = jest.fn().mockImplementation(async (_id, _t, update) => ({ ...lastSaved, ...update }));
+  });
+
+  let lastSaved: IPathologyRequest;
+  function arrange(doc: IPathologyRequest, savedNames: string[]) {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+    lastSaved = withReports(doc, savedNames);
+    mockLabRepo.upsertPathologyTestReport = jest.fn().mockResolvedValue(lastSaved);
+  }
+
+  test('stores filled values only, with the female range and flag, as JSON; first test → IN_PROGRESS', async () => {
+    const doc = makePathologyDoc({ testType: `${CBC}, ${LFT}` });
+    arrange(doc, [CBC]);
+
+    const result = await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', {
+      testName: CBC, values: { hemoglobin: '12.5', rbc: '  ', wbc: null }, remarks: '  ',
+    });
+
+    const stored = (mockLabRepo.upsertPathologyTestReport as jest.Mock).mock.calls[0][2];
+    expect(stored).toMatchObject({ testName: CBC, templateKey: 'CBC', submittedBy: 'path-1' });
+    expect(JSON.parse(stored.resultData)).toEqual({
+      values: [{ key: 'hemoglobin', name: 'Haemoglobin (Hb)', section: null, value: '12.5', unit: 'g/dL', referenceRange: '12.0 - 15.0', flag: null }],
+      remarks: null,
+    });
+    expect(mockLabRepo.updatePathology).toHaveBeenCalledWith('req-path-001', TENANT, { status: LabRequestStatus.IN_PROGRESS });
+    expect(result.status).toBe(LabRequestStatus.IN_PROGRESS);
+  });
+
+  test('the last outstanding test → COMPLETED', async () => {
+    const doc = makePathologyDoc({ testType: `${CBC}, ${LFT}`, status: LabRequestStatus.IN_PROGRESS });
+    arrange(doc, [CBC, LFT]);
+    await service.submitPathologyTestReport('req-path-001', 1, TENANT, 'path-1', { testName: LFT, values: { sgpt: '20' } });
+    expect(mockLabRepo.updatePathology).toHaveBeenCalledWith('req-path-001', TENANT, { status: LabRequestStatus.COMPLETED });
+  });
+
+  test('never moves a COMPLETED request (e.g. completed by a file upload) back', async () => {
+    const doc = makePathologyDoc({ testType: `${CBC}, ${LFT}`, status: LabRequestStatus.COMPLETED });
+    arrange(doc, [CBC]);
+    await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', { testName: CBC, values: { hemoglobin: '14' } });
+    expect(mockLabRepo.updatePathology).not.toHaveBeenCalled();
+  });
+
+  test('rejects an unpaid request before storing anything', async () => {
+    arrange(makePathologyDoc({ testType: CBC }), [CBC]);
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null);
+    await expect(service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', { testName: CBC, values: { hemoglobin: '14' } }))
+      .rejects.toMatchObject({ statusCode: 409 });
+    expect(mockLabRepo.upsertPathologyTestReport).not.toHaveBeenCalled();
+  });
+
+  test('a free-text (legacy) test uses the generic Result field', async () => {
+    arrange(makePathologyDoc({ testType: 'Blood CBC' }), ['Blood CBC']);
+    await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', { testName: 'Blood CBC', values: { result: 'Normal study' } });
+    const stored = (mockLabRepo.upsertPathologyTestReport as jest.Mock).mock.calls[0][2];
+    expect(stored.templateKey).toBe('GENERIC');
+    expect(JSON.parse(stored.resultData).values[0]).toMatchObject({ key: 'result', value: 'Normal study', flag: null });
+  });
+
+  test('notifies the requester and referring doctor (not the submitter) and never audits values', async () => {
+    arrange(makePathologyDoc({ testType: CBC, requestedBy: 'nurse-1', referredBy: DOCTOR, opdVisitId: null, ipdAdmissionId: null }), [CBC]);
+    await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', { testName: CBC, values: { hemoglobin: '9' } });
+    const recipients = (mockNotifSvc.sendNotification as jest.Mock).mock.calls.map((c) => c[0]).sort();
+    expect(recipients).toEqual([DOCTOR, 'nurse-1'].sort());
+    expect(JSON.stringify((auditService.log as jest.Mock).mock.calls)).not.toContain('"9"');
   });
 });

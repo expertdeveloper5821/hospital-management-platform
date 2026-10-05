@@ -83,6 +83,15 @@ export const ListLabRequestsQuerySchema = z.object({
   patientId: z.string().min(1).optional(),
   search:    z.string().max(200).trim().optional(),
   status:    z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
+  // Linked-encounter filters (IST calendar days) — matched against the OPD
+  // visit / IPD admission each request was raised during, never the patient's
+  // latest encounter. visitDate narrows to OPD requests; the other three to IPD.
+  // date matches the encounter's own date: OPD visit date or IPD admission date.
+  date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+  visitDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+  admissionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+  wardName:      z.string().max(100).trim().optional(),
+  bedNumber:     z.string().max(50).trim().optional(),
   page:      z.coerce.number().int().min(1).default(1),
   limit:     z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -120,6 +129,83 @@ export interface LabPaymentSummary {
   receiptAvailable: boolean;
 }
 
+// ─── Linked OPD/IPD encounter ─────────────────────────────────────────────────
+// The OPD visit / IPD admission the request was raised during. Returned only by
+// the single-request GET endpoints (null when the request has no encounter).
+export interface LabEncounterSummary {
+  type:           'OPD' | 'IPD';
+  // OPD: visitId; IPD: admissionId.
+  encounterId:    string;
+  // OPD: visitDate; IPD: admissionDate (ISO).
+  date:           string;
+  departmentName: string | null;
+  doctorNames:    string[];
+  // IPD only (null for OPD).
+  wardName:       string | null;
+  bedNumber:      string | null;
+}
+
+// ─── Structured Pathology test report ─────────────────────────────────────────
+// One test of a request (addressed by its position in the split testType) is
+// submitted with the values entered for its template's parameters. Every
+// value is optional; empty ones are dropped. Per-parameter type checks
+// (number / allowed option) happen in LabService against the template.
+export const PATHOLOGY_RESULT_VALUE_MAX = 500;
+export const PATHOLOGY_REPORT_REMARKS_MAX = 2000;
+
+export const SubmitPathologyTestReportSchema = z.object({
+  // The test name the form was opened for — rejected with 409 if the request's
+  // tests changed since (so a result is never stored under the wrong test).
+  testName: z.string().min(1).max(200).trim(),
+  values:   z.record(
+    z.string().max(64),
+    z.string().max(PATHOLOGY_RESULT_VALUE_MAX, `Each result cannot exceed ${PATHOLOGY_RESULT_VALUE_MAX} characters.`).trim().nullable(),
+  ).default({}),
+  remarks:  z.string().max(PATHOLOGY_REPORT_REMARKS_MAX, `Remarks cannot exceed ${PATHOLOGY_REPORT_REMARKS_MAX} characters.`).trim().nullable().optional(),
+}).strict();
+
+export type SubmitPathologyTestReportInput = z.infer<typeof SubmitPathologyTestReportSchema>;
+
+export type PathologyResultFlagValue = 'HIGH' | 'LOW' | 'ABNORMAL';
+
+// A parameter of a test's report form (template + this patient's range).
+export interface PathologyReportParameterField {
+  key:            string;
+  name:           string;
+  unit:           string | null;
+  inputType:      'number' | 'text' | 'select';
+  section:        string | null;
+  options:        string[] | null;
+  referenceRange: string | null;
+}
+
+// One stored (non-empty) result value, with its unit/range snapshotted at submission.
+export interface PathologyResultValue {
+  key:            string;
+  name:           string;
+  section:        string | null;
+  value:          string;
+  unit:           string | null;
+  referenceRange: string | null;
+  flag:           PathologyResultFlagValue | null;
+}
+
+export interface PathologyTestReportResponse {
+  testIndex:   number;
+  testName:    string;
+  templateKey: string;
+  // The structured entry form for this test.
+  fields:      PathologyReportParameterField[];
+  // null until the test's report has been submitted.
+  result: {
+    values:          PathologyResultValue[];
+    remarks:         string | null;
+    submittedBy:     string;
+    submittedByName: string;
+    submittedAt:     string;
+  } | null;
+}
+
 // ─── Response shapes ──────────────────────────────────────────────────────────
 // reportUrl is a fresh pre-signed S3 URL generated at response time (null when no report yet).
 export interface PathologyRequestResponse {
@@ -142,6 +228,10 @@ export interface PathologyRequestResponse {
   // Billing charge this request was created from (its payment is collected in
   // Billing, never via the Lab collect endpoint); null for Lab-created requests.
   chargeId:    string | null;
+  encounter?:  LabEncounterSummary | null;
+  // Structured per-test reports — returned by the single-request GET only, one
+  // entry per test in testType (in order).
+  testReports?: PathologyTestReportResponse[];
 }
 
 export interface RadiologyRequestResponse {
@@ -164,6 +254,7 @@ export interface RadiologyRequestResponse {
   // Billing charge this request was created from (its payment is collected in
   // Billing, never via the Lab collect endpoint); null for Lab-created requests.
   chargeId:    string | null;
+  encounter?:  LabEncounterSummary | null;
 }
 
 // ─── File size limits (bytes) ─────────────────────────────────────────────────

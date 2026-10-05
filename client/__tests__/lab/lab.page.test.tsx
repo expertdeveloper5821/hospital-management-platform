@@ -21,6 +21,8 @@ jest.mock('@/store/api/lab.api', () => ({
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCollectPathologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
+  useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
+  useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
 }));
 
 jest.mock('@/store/api/payment.api', () => ({
@@ -90,26 +92,24 @@ describe('LabPage — New Request role gating', () => {
     expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
   });
 
-  test('PATHOLOGIST does not see the New Request button on the Radiology tab', async () => {
-    const user = userEvent.setup();
+  test('PATHOLOGIST sees only the Pathology tab (Radiology hidden)', () => {
     mockRole = 'PATHOLOGIST';
     render(<LabPage />);
-    await user.click(screen.getByRole('button', { name: /radiology/i }));
-    expect(screen.queryByRole('button', { name: /new request/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /pathology/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /radiology/i })).not.toBeInTheDocument();
   });
 
-  test('RADIOLOGIST sees the New Request button on the Radiology tab', async () => {
-    const user = userEvent.setup();
+  test('RADIOLOGIST lands on the Radiology tab and sees the New Request button', () => {
     mockRole = 'RADIOLOGIST';
     render(<LabPage />);
-    await user.click(screen.getByRole('button', { name: /radiology/i }));
     expect(screen.getByRole('button', { name: /new request/i })).toBeInTheDocument();
   });
 
-  test('RADIOLOGIST does not see the New Request button on the Pathology tab (default)', () => {
+  test('RADIOLOGIST sees only the Radiology tab (Pathology hidden)', () => {
     mockRole = 'RADIOLOGIST';
     render(<LabPage />);
-    expect(screen.queryByRole('button', { name: /new request/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /radiology/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /pathology/i })).not.toBeInTheDocument();
   });
 
   test('RECEPTIONIST sees the New Request button on the Pathology tab (default)', () => {

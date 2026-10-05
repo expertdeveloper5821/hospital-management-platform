@@ -1,4 +1,6 @@
 import { baseApi } from './base.api';
+import { type FetchBaseQueryError } from '@reduxjs/toolkit/query';
+import type { RootState } from '../index';
 import type {
   ApiSuccess,
   PathologyRequestResponse,
@@ -11,7 +13,26 @@ import type {
   LabTestTypeResponse,
   CollectLabPaymentRequest,
   PaymentResponse,
+  SubmitPathologyTestReportRequest,
 } from '../types';
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
+
+// List filters. date / visitDate / admissionDate are YYYY-MM-DD (date matches
+// the encounter's own date: OPD visit date or IPD admission date); they and wardName /
+// bedNumber match the OPD visit / IPD admission each request is linked to.
+interface LabListParams {
+  patientId?:     string;
+  status?:        string;
+  search?:        string;
+  date?:          string;
+  visitDate?:     string;
+  admissionDate?: string;
+  wardName?:      string;
+  bedNumber?:     string;
+  page?:          number;
+  limit?:         number;
+}
 
 export const labApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
@@ -20,13 +41,18 @@ export const labApi = baseApi.injectEndpoints({
 
     listPathologyRequests: build.query<
       LabListResult<PathologyRequestResponse>,
-      { patientId?: string; status?: string; search?: string; page?: number; limit?: number }
+      LabListParams
     >({
-      query: ({ patientId, status, search, page = 1, limit = 20 } = {}) => {
+      query: ({ patientId, status, search, date, visitDate, admissionDate, wardName, bedNumber, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
-        if (patientId) params.set('patientId', patientId);
-        if (status)    params.set('status',    status);
-        if (search)    params.set('search',    search);
+        if (patientId)     params.set('patientId',     patientId);
+        if (status)        params.set('status',        status);
+        if (search)        params.set('search',        search);
+        if (date)          params.set('date',          date);
+        if (visitDate)     params.set('visitDate',     visitDate);
+        if (admissionDate) params.set('admissionDate', admissionDate);
+        if (wardName)      params.set('wardName',      wardName);
+        if (bedNumber)     params.set('bedNumber',     bedNumber);
         params.set('page',  String(page));
         params.set('limit', String(limit));
         return `/api/lab/pathology?${params.toString()}`;
@@ -60,17 +86,58 @@ export const labApi = baseApi.injectEndpoints({
       invalidatesTags: ['Lab'],
     }),
 
+    // ─── Structured Pathology test reports (online-only) ─────────────────────
+
+    // Submits — or amends — one test's structured results (lab staff only).
+    submitPathologyTestReport: build.mutation<
+      PathologyRequestResponse,
+      { requestId: string; testIndex: number } & SubmitPathologyTestReportRequest
+    >({
+      query: ({ requestId, testIndex, ...body }) => ({
+        url: `/api/lab/pathology/${requestId}/reports/${testIndex}`, method: 'PUT', body,
+      }),
+      transformResponse: (raw: ApiSuccess<PathologyRequestResponse>) => raw.data,
+      invalidatesTags: ['Lab'],
+    }),
+
+    // One test's report PDF as a blob object URL (the endpoint returns a raw
+    // PDF, not JSON) — same queryFn pattern as ipd.api's downloadDischargeSummary.
+    getPathologyTestReportPdf: build.mutation<string, { requestId: string; testIndex: number }>({
+      queryFn: async ({ requestId, testIndex }, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        try {
+          const res = await fetch(`${BASE_URL}/api/lab/pathology/${requestId}/reports/${testIndex}/pdf`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'Failed to load the report PDF' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          return { data: URL.createObjectURL(blob) };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
+
     // ─── Radiology ────────────────────────────────────────────────────────────
 
     listRadiologyRequests: build.query<
       LabListResult<RadiologyRequestResponse>,
-      { patientId?: string; status?: string; search?: string; page?: number; limit?: number }
+      LabListParams
     >({
-      query: ({ patientId, status, search, page = 1, limit = 20 } = {}) => {
+      query: ({ patientId, status, search, date, visitDate, admissionDate, wardName, bedNumber, page = 1, limit = 20 } = {}) => {
         const params = new URLSearchParams();
-        if (patientId) params.set('patientId', patientId);
-        if (status)    params.set('status',    status);
-        if (search)    params.set('search',    search);
+        if (patientId)     params.set('patientId',     patientId);
+        if (status)        params.set('status',        status);
+        if (search)        params.set('search',        search);
+        if (date)          params.set('date',          date);
+        if (visitDate)     params.set('visitDate',     visitDate);
+        if (admissionDate) params.set('admissionDate', admissionDate);
+        if (wardName)      params.set('wardName',      wardName);
+        if (bedNumber)     params.set('bedNumber',     bedNumber);
         params.set('page',  String(page));
         params.set('limit', String(limit));
         return `/api/lab/radiology?${params.toString()}`;
@@ -182,4 +249,6 @@ export const {
   useListLabTestTypesQuery,
   useCollectPathologyPaymentMutation,
   useCollectRadiologyPaymentMutation,
+  useSubmitPathologyTestReportMutation,
+  useGetPathologyTestReportPdfMutation,
 } = labApi;

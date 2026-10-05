@@ -23,6 +23,41 @@ const ENCRYPTED_LAB_NOTES = {
   purpose: EncryptionKeyPurpose.MEDICAL,
 };
 
+// Pathology additionally encrypts each structured test report's `resultData`
+// (the JSON-serialised entered values + remarks — see IPathologyTestReport)
+// per array element, same key. `testName`/`templateKey`/`submittedBy`/
+// `submittedAt` stay plaintext: testName is already plaintext in `testType`,
+// and it is the only sub-field ever used in a filter (the positional update in
+// LabRepository.upsertPathologyTestReport) — resultData never is.
+const ENCRYPTED_PATHOLOGY_FIELDS = {
+  ...ENCRYPTED_LAB_NOTES,
+  arrayFields: [{ path: 'testReports', fields: ['resultData'] }],
+};
+
+// ─── Structured Pathology test report (one per submitted test) ───────────────
+export interface IPathologyTestReport {
+  testName:    string;
+  templateKey: string;
+  // JSON of { values: PathologyResultValue[]; remarks: string | null } —
+  // encrypted at rest; plaintext JSON on every read through the model.
+  resultData:  string;
+  submittedBy: string;
+  submittedAt: Date;
+}
+
+const pathologyTestReportSchema = new Schema<IPathologyTestReport>(
+  {
+    testName:    { type: String, required: true },
+    templateKey: { type: String, required: true },
+    // No `maxlength` — ciphertext is longer than the plaintext; the content
+    // limits live in SubmitPathologyTestReportSchema (lab.types.ts).
+    resultData:  { type: String, required: true },
+    submittedBy: { type: String, required: true },
+    submittedAt: { type: Date,   required: true },
+  },
+  { _id: false },
+);
+
 // ─── PathologyRequest ─────────────────────────────────────────────────────────
 export interface IPathologyRequest extends Document {
   requestId:    string;
@@ -40,6 +75,15 @@ export interface IPathologyRequest extends Document {
   // Set when the request was created from a Billing LAB_TEST charge — its
   // payment is the charge's Payment (referenceType CHARGE), not a Lab collect.
   chargeId:     string | null;
+  // The patient's OPD visit / IPD admission this request was raised during,
+  // resolved server-side at creation (lab.service resolveLabEncounterLink).
+  // `null` = resolved, no encounter; `undefined` = legacy row created before
+  // the link existed (resolved at read time from requestedAt instead).
+  opdVisitId?:     string | null;
+  ipdAdmissionId?: string | null;
+  // Structured per-test reports, at most one per test name in `testType`.
+  // Absent/empty on legacy rows and on requests with no submitted report yet.
+  testReports:  IPathologyTestReport[];
   isDeleted:    boolean;
   deletedAt:    Date | null;
   requestedAt:  Date;
@@ -76,6 +120,10 @@ const pathologyRequestSchema = new Schema<IPathologyRequest>(
     notes:       { type: String, default: null, trim: true },
     reportS3Key: { type: String, default: null },
     chargeId:    { type: String, default: null },
+    // No default — a missing value marks a legacy row (see the interface).
+    opdVisitId:     { type: String },
+    ipdAdmissionId: { type: String },
+    testReports: { type: [pathologyTestReportSchema], default: [] },
     isDeleted:   { type: Boolean, default: false },
     deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },
@@ -97,7 +145,7 @@ pathologyRequestSchema.index(
   { unique: true, partialFilterExpression: { chargeId: { $type: 'string' } } },
 );
 
-pathologyRequestSchema.plugin(encryptedFieldsPlugin, ENCRYPTED_LAB_NOTES);
+pathologyRequestSchema.plugin(encryptedFieldsPlugin, ENCRYPTED_PATHOLOGY_FIELDS);
 
 export const PathologyRequestModel = mongoose.model<IPathologyRequest>(
   'PathologyRequest',
@@ -106,7 +154,7 @@ export const PathologyRequestModel = mongoose.model<IPathologyRequest>(
 
 // Model.bulkWrite() runs no query middleware — wrap it so bulk operations
 // cannot write plaintext either.
-wrapModelBulkWrite(PathologyRequestModel, ENCRYPTED_LAB_NOTES);
+wrapModelBulkWrite(PathologyRequestModel, ENCRYPTED_PATHOLOGY_FIELDS);
 
 // ─── RadiologyRequest ─────────────────────────────────────────────────────────
 export interface IRadiologyRequest extends Document {
@@ -124,6 +172,12 @@ export interface IRadiologyRequest extends Document {
   // Set when the request was created from a Billing LAB_TEST charge — its
   // payment is the charge's Payment (referenceType CHARGE), not a Lab collect.
   chargeId:     string | null;
+  // The patient's OPD visit / IPD admission this request was raised during,
+  // resolved server-side at creation (lab.service resolveLabEncounterLink).
+  // `null` = resolved, no encounter; `undefined` = legacy row created before
+  // the link existed (resolved at read time from requestedAt instead).
+  opdVisitId?:     string | null;
+  ipdAdmissionId?: string | null;
   isDeleted:    boolean;
   deletedAt:    Date | null;
   requestedAt:  Date;
@@ -160,6 +214,9 @@ const radiologyRequestSchema = new Schema<IRadiologyRequest>(
     notes:       { type: String, default: null, trim: true },
     reportS3Key: { type: String, default: null },
     chargeId:    { type: String, default: null },
+    // No default — a missing value marks a legacy row (see the interface).
+    opdVisitId:     { type: String },
+    ipdAdmissionId: { type: String },
     isDeleted:   { type: Boolean, default: false },
     deletedAt:   { type: Date,    default: null },
     requestedAt: { type: Date, required: true, default: () => new Date() },

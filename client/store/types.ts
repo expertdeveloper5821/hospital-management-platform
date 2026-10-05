@@ -332,6 +332,60 @@ export interface PathologyRequestResponse {
   // Billing charge this request was created from — its payment is collected
   // in Billing (Mark Paid), never via Lab's Collect Payment.
   chargeId?:   string | null;
+  // Linked OPD visit / IPD admission — returned by the single-request GET only.
+  encounter?:  LabEncounterSummary | null;
+  // Structured per-test reports (one per test in testType, in order) —
+  // returned by the single-request GET only.
+  testReports?: PathologyTestReport[];
+}
+
+// ─── Structured Pathology test reports ────────────────────────────────────────
+
+export type PathologyResultFlag = 'HIGH' | 'LOW' | 'ABNORMAL';
+
+// One parameter of a test's report-entry form (referenceRange is already
+// resolved for the patient's gender).
+export interface PathologyReportField {
+  key:            string;
+  name:           string;
+  unit:           string | null;
+  inputType:      'number' | 'text' | 'select';
+  section:        string | null;
+  options:        string[] | null;
+  referenceRange: string | null;
+}
+
+// A stored (non-empty) result, unit/range snapshotted at submission.
+export interface PathologyResultValue {
+  key:            string;
+  name:           string;
+  section:        string | null;
+  value:          string;
+  unit:           string | null;
+  referenceRange: string | null;
+  flag:           PathologyResultFlag | null;
+}
+
+export interface PathologyTestReport {
+  testIndex:   number;
+  testName:    string;
+  templateKey: string;
+  fields:      PathologyReportField[];
+  // null until this test's report has been submitted.
+  result: {
+    values:          PathologyResultValue[];
+    remarks:         string | null;
+    submittedBy:     string;
+    submittedByName: string;
+    submittedAt:     string;
+  } | null;
+}
+
+// PUT /api/lab/pathology/:requestId/reports/:testIndex — every value optional.
+export interface SubmitPathologyTestReportRequest {
+  testName: string;
+  values:   Record<string, string | null>;
+  remarks?: string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -356,6 +410,19 @@ export interface RadiologyRequestResponse {
   // Billing charge this request was created from — its payment is collected
   // in Billing (Mark Paid), never via Lab's Collect Payment.
   chargeId?:   string | null;
+  // Linked OPD visit / IPD admission — returned by the single-request GET only.
+  encounter?:  LabEncounterSummary | null;
+}
+
+// The OPD visit / IPD admission a lab request was raised during.
+export interface LabEncounterSummary {
+  type:           'OPD' | 'IPD';
+  encounterId:    string;
+  date:           string; // OPD visitDate / IPD admissionDate (ISO)
+  departmentName: string | null;
+  doctorNames:    string[];
+  wardName:       string | null; // IPD only
+  bedNumber:      string | null; // IPD only
 }
 
 export interface LabPaymentSummary {

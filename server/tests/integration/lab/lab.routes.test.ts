@@ -33,6 +33,7 @@ import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { PaymentModel } from '../../../src/modules/payment/payment.model';
 import { TenantStatus, UserRole }     from '../../../src/shared/types/common.types';
 import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
+import { toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -367,10 +368,22 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
     await markPaid('pathology', requestId);
   });
 
-  test('uploads a pathology report and sets status to COMPLETED (200)', async () => {
+  test('a Pathologist cannot upload a report file — structured reports only (403)', async () => {
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}/report`)
       .set('Authorization', `Bearer ${pathologistToken}`)
+      .attach('report', Buffer.from('PDF content'), { filename: 'r.pdf', contentType: 'application/pdf' });
+
+    expect(res.status).toBe(403);
+    const doc = await PathologyRequestModel.findOne({ requestId, tenantId }).lean();
+    expect(doc?.status).toBe('PENDING');
+    expect(doc?.reportS3Key ?? null).toBeNull();
+  });
+
+  test('uploads a pathology report and sets status to COMPLETED (200)', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${requestId}/report`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .attach('report', Buffer.from('PDF content for blood test results'), {
         filename:    'blood_test.pdf',
         contentType: 'application/pdf',
@@ -386,7 +399,7 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
 
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${pathologistToken}`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .attach('report', oversized, { filename: 'big.pdf', contentType: 'application/pdf' });
 
     expect(res.status).toBe(413);
@@ -395,7 +408,7 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
   test('returns 400 when no file is attached', async () => {
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${pathologistToken}`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .field('note', 'missing file');
 
     expect(res.status).toBe(400);
@@ -405,7 +418,7 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
   test('returns 404 for unknown request ID', async () => {
     const res = await request(app)
       .patch(`/api/lab/pathology/${uuidv4()}/report`)
-      .set('Authorization', `Bearer ${pathologistToken}`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .attach('report', Buffer.from('content'), {
         filename: 'report.pdf', contentType: 'application/pdf',
       });
@@ -421,7 +434,7 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
 
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${pathologistToken}`)
+      .set('Authorization', `Bearer ${adminToken}`)
       .attach('report', Buffer.from('new content'), {
         filename: 'report.pdf', contentType: 'application/pdf',
       });
@@ -1306,6 +1319,76 @@ describe('Doctor scoping — edit/delete lab requests', () => {
 
 // ─── Receptionist Lab access ────────────────────────────────────────────────
 
+describe('Lab role isolation — Pathologist/Radiologist see only their own type', () => {
+  let pathologyRequestId: string;
+  let radiologyRequestId: string;
+
+  beforeEach(async () => {
+    pathologyRequestId = uuidv4();
+    radiologyRequestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId: pathologyRequestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+    await RadiologyRequestModel.create({
+      requestId: radiologyRequestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, imagingType: 'X-Ray Chest',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — pathologist can list and view pathology requests', async () => {
+    const list = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${pathologistToken}`);
+    expect(list.status).toBe(200);
+    expect(list.body.data.data).toHaveLength(1);
+
+    const one = await request(app)
+      .get(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`);
+    expect(one.status).toBe(200);
+  });
+
+  test('403 — pathologist cannot list or view radiology requests', async () => {
+    const list = await request(app)
+      .get('/api/lab/radiology')
+      .set('Authorization', `Bearer ${pathologistToken}`);
+    expect(list.status).toBe(403);
+
+    const one = await request(app)
+      .get(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${pathologistToken}`);
+    expect(one.status).toBe(403);
+  });
+
+  test('200 — radiologist can list and view radiology requests', async () => {
+    const list = await request(app)
+      .get('/api/lab/radiology')
+      .set('Authorization', `Bearer ${radiologistToken}`);
+    expect(list.status).toBe(200);
+    expect(list.body.data.data).toHaveLength(1);
+
+    const one = await request(app)
+      .get(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`);
+    expect(one.status).toBe(200);
+  });
+
+  test('403 — radiologist cannot list or view pathology requests', async () => {
+    const list = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${radiologistToken}`);
+    expect(list.status).toBe(403);
+
+    const one = await request(app)
+      .get(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${radiologistToken}`);
+    expect(one.status).toBe(403);
+  });
+});
+
 describe('Receptionist Lab access', () => {
   let pathologyRequestId: string;
   let radiologyRequestId: string;
@@ -1443,5 +1526,295 @@ describe('GET /api/lab/test-types', () => {
   test('401 — no auth token', async () => {
     const res = await request(app).get('/api/lab/test-types');
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── Linked OPD/IPD encounter (View panel) ────────────────────────────────────
+
+describe('GET /api/lab/{pathology,radiology}/:requestId — linked encounter', () => {
+  const admit = (overrides: Record<string, unknown> = {}) => IPDAdmissionModel.create({
+    admissionId: 'adm-enc-001', patientId: 'PAT-001', wardId: 'ward-1', bedId: 'bed-1',
+    bedNumber: 'B-07', wardName: 'ICU', assignedDoctorIds: [doctorId], status: 'ADMITTED',
+    admissionDate: new Date(Date.now() - 60_000), dischargeDate: null, progressNotes: [], tenantId,
+    ...overrides,
+  });
+
+  test("links and returns the patient's same-day OPD visit", async () => {
+    const created = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+    expect(created.status).toBe(201);
+
+    const stored = await PathologyRequestModel.findOne({ requestId: created.body.data.requestId }).lean();
+    expect(stored).toMatchObject({ opdVisitId: 'OPD-LABTEST01', ipdAdmissionId: null });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${created.body.data.requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.encounter).toMatchObject({
+      type: 'OPD', encounterId: 'OPD-LABTEST01', doctorNames: ['Lab Doctor'], wardName: null, bedNumber: null,
+    });
+  });
+
+  test('links and returns the active IPD admission (with ward and bed) over a same-day OPD visit', async () => {
+    await admit();
+    const created = await request(app)
+      .post('/api/lab/radiology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', imagingType: 'X-Ray Chest' });
+    expect(created.status).toBe(201);
+
+    const res = await request(app)
+      .get(`/api/lab/radiology/${created.body.data.requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.encounter).toMatchObject({
+      type: 'IPD', encounterId: 'adm-enc-001', wardName: 'ICU', bedNumber: 'B-07', doctorNames: ['Lab Doctor'],
+    });
+  });
+
+  test('an OPD request and a later IPD request for the same patient each keep their own encounter', async () => {
+    const opdReq = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'CBC (Complete Blood Count), Thyroid Profile (T3, T4, TSH)' });
+    expect(opdReq.status).toBe(201);
+
+    await admit();
+    const ipdReq = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Lipid Profile' });
+    expect(ipdReq.status).toBe(201);
+
+    const [opdView, ipdView] = await Promise.all([
+      request(app).get(`/api/lab/pathology/${opdReq.body.data.requestId}`).set('Authorization', `Bearer ${adminToken}`),
+      request(app).get(`/api/lab/pathology/${ipdReq.body.data.requestId}`).set('Authorization', `Bearer ${adminToken}`),
+    ]);
+
+    expect(opdView.body.data.testType).toBe('CBC (Complete Blood Count), Thyroid Profile (T3, T4, TSH)');
+    expect(opdView.body.data.encounter).toMatchObject({
+      type: 'OPD', encounterId: 'OPD-LABTEST01', wardName: null, bedNumber: null,
+    });
+    expect(ipdView.body.data.encounter).toMatchObject({
+      type: 'IPD', encounterId: 'adm-enc-001', wardName: 'ICU', bedNumber: 'B-07',
+    });
+  });
+
+  test('keeps showing the linked admission after the patient is discharged', async () => {
+    await admit();
+    const created = await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+    await IPDAdmissionModel.updateOne({ admissionId: 'adm-enc-001' }, { status: 'DISCHARGED', dischargeDate: new Date() });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${created.body.data.requestId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.body.data.encounter).toMatchObject({ type: 'IPD', encounterId: 'adm-enc-001' });
+  });
+
+  test('legacy request (no stored link) resolves the admission in effect at requestedAt, not a later one', async () => {
+    const requestedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    await admit({
+      admissionId: 'adm-old', status: 'DISCHARGED',
+      admissionDate: new Date(requestedAt.getTime() - 60 * 60 * 1000),
+      dischargeDate: new Date(requestedAt.getTime() + 60 * 60 * 1000),
+    });
+    await admit({ admissionId: 'adm-current', bedId: 'bed-2' });
+    const legacyId = uuidv4();
+    await mongoose.connection.collection('pathology_requests').insertOne({
+      requestId: legacyId, patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      testType: 'Lipid Profile', referredBy: 'SELF', status: 'PENDING', priority: 'NORMAL',
+      notes: null, reportS3Key: null, chargeId: null, isDeleted: false, deletedAt: null,
+      requestedAt, createdAt: requestedAt, updatedAt: requestedAt,
+    });
+
+    const res = await request(app)
+      .get(`/api/lab/pathology/${legacyId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.encounter).toMatchObject({ type: 'IPD', encounterId: 'adm-old' });
+  });
+
+  test('list responses are unchanged (no encounter lookup per row)', async () => {
+    await request(app)
+      .post('/api/lab/pathology')
+      .set('Authorization', `Bearer ${doctorToken}`)
+      .send({ patientId: 'PAT-001', testType: 'Blood CBC' });
+
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0]).not.toHaveProperty('encounter');
+  });
+});
+
+// ─── Linked-encounter list filters ────────────────────────────────────────────
+
+describe('GET /api/lab/{pathology,radiology} — Visit Date / Admission Date / Ward / Bed filters', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const oldDate = new Date(Date.now() - 10 * DAY);
+
+  const admit = (overrides: Record<string, unknown> = {}) => IPDAdmissionModel.create({
+    admissionId: 'adm-f-1', patientId: 'PAT-001', wardId: 'ward-1', bedId: 'bed-1',
+    bedNumber: 'B-07', wardName: 'ICU North', assignedDoctorIds: [doctorId], status: 'ADMITTED',
+    admissionDate: new Date(), dischargeDate: null, progressNotes: [], tenantId,
+    ...overrides,
+  });
+  const pathology = (requestId: string, link: Record<string, unknown>, requestedAt = new Date()) =>
+    PathologyRequestModel.create({
+      requestId, patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      testType: 'Blood CBC', status: 'PENDING', requestedAt, ...link,
+    });
+  const list = (type: 'pathology' | 'radiology', query: Record<string, string>) =>
+    request(app).get(`/api/lab/${type}`).query(query).set('Authorization', `Bearer ${adminToken}`);
+  const ids = (res: request.Response) => res.body.data.data.map((r: { requestId: string }) => r.requestId).sort();
+
+  beforeEach(async () => {
+    // A second, older OPD visit and a discharged admission for the same
+    // patient, so filters must use each request's own link, not the latest.
+    await OPDVisitModel.create({
+      visitId: 'OPD-F-OLD', tenantId, patientId: 'PAT-001', doctorIds: [doctorId],
+      departmentId: null, visitDate: oldDate, queueNumber: 1, status: 'COMPLETED',
+    });
+    // Legacy resolution only links visits that already existed at requestedAt.
+    await mongoose.connection.collection('opd_visits').updateOne(
+      { visitId: 'OPD-F-OLD' }, { $set: { createdAt: new Date(oldDate.getTime() - DAY) } },
+    );
+    await admit({
+      admissionId: 'adm-f-old', bedId: 'bed-9', bedNumber: 'B-01', wardName: 'General',
+      status: 'DISCHARGED', admissionDate: new Date(oldDate.getTime() - DAY), dischargeDate: new Date(oldDate.getTime() - 60_000),
+    });
+    await admit();
+    await pathology('opd-today', { opdVisitId: 'OPD-LABTEST01', ipdAdmissionId: null });
+    await pathology('opd-old',   { opdVisitId: 'OPD-F-OLD',     ipdAdmissionId: null }, oldDate);
+    await pathology('ipd-now',   { opdVisitId: null, ipdAdmissionId: 'adm-f-1' });
+    await pathology('ipd-old',   { opdVisitId: null, ipdAdmissionId: 'adm-f-old' }, new Date(oldDate.getTime() - 2 * 60_000));
+    await pathology('no-enc',    { opdVisitId: null, ipdAdmissionId: null });
+  });
+
+  test('visitDate matches only requests linked to an OPD visit on that IST day', async () => {
+    const today = await list('pathology', { visitDate: toIstDateKey(new Date()) });
+    expect(today.status).toBe(200);
+    expect(ids(today)).toEqual(['opd-today']);
+    expect(today.body.data.total).toBe(1);
+
+    const old = await list('pathology', { visitDate: toIstDateKey(oldDate) });
+    expect(ids(old)).toEqual(['opd-old']);
+  });
+
+  test('admissionDate matches only requests linked to an admission on that IST day', async () => {
+    const res = await list('pathology', { admissionDate: toIstDateKey(new Date()) });
+    expect(ids(res)).toEqual(['ipd-now']);
+  });
+
+  test('wardName (case-insensitive contains) and bedNumber (exact) use the linked admission', async () => {
+    expect(ids(await list('pathology', { wardName: 'icu' }))).toEqual(['ipd-now']);
+    expect(ids(await list('pathology', { wardName: 'general' }))).toEqual(['ipd-old']);
+    expect(ids(await list('pathology', { bedNumber: 'b-01' }))).toEqual(['ipd-old']);
+    expect(ids(await list('pathology', { bedNumber: 'B-0' }))).toEqual([]);
+    expect(ids(await list('pathology', { wardName: 'ICU', bedNumber: 'B-01' }))).toEqual([]);
+  });
+
+  test('filters combine with status and search', async () => {
+    await PathologyRequestModel.updateOne({ requestId: 'ipd-now' }, { status: 'COMPLETED' });
+    expect(ids(await list('pathology', { wardName: 'ICU', status: 'PENDING' }))).toEqual([]);
+    expect(ids(await list('pathology', { wardName: 'ICU', status: 'COMPLETED', search: 'PAT-001' }))).toEqual(['ipd-now']);
+    expect(ids(await list('pathology', { wardName: 'ICU', search: 'nobody-matches' }))).toEqual([]);
+  });
+
+  test('legacy requests (no stored link) match by the encounter in effect at requestedAt', async () => {
+    const insert = (requestId: string, requestedAt: Date) =>
+      mongoose.connection.collection('pathology_requests').insertOne({
+        requestId, patientId: 'PAT-001', tenantId, requestedBy: doctorId, testType: 'Lipid Profile',
+        referredBy: 'SELF', status: 'PENDING', priority: 'NORMAL', notes: null, reportS3Key: null,
+        chargeId: null, isDeleted: false, deletedAt: null, requestedAt, createdAt: requestedAt, updatedAt: requestedAt,
+      });
+    // During the old admission → IPD (General); on the old OPD day after discharge → OPD.
+    await insert('legacy-ipd', new Date(oldDate.getTime() - 30 * 60_000));
+    await insert('legacy-opd', new Date(oldDate.getTime() + 60_000));
+
+    expect(ids(await list('pathology', { wardName: 'General' }))).toEqual(['ipd-old', 'legacy-ipd']);
+    expect(ids(await list('pathology', { visitDate: toIstDateKey(oldDate) }))).toEqual(['legacy-opd', 'opd-old']);
+  });
+
+  test('radiology list applies the same filters', async () => {
+    await RadiologyRequestModel.create({
+      requestId: 'rad-ipd', patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      imagingType: 'X-Ray Chest', status: 'PENDING', requestedAt: new Date(),
+      opdVisitId: null, ipdAdmissionId: 'adm-f-1',
+    });
+    await RadiologyRequestModel.create({
+      requestId: 'rad-opd', patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      imagingType: 'MRI Brain', status: 'PENDING', requestedAt: new Date(),
+      opdVisitId: 'OPD-LABTEST01', ipdAdmissionId: null,
+    });
+    expect(ids(await list('radiology', { bedNumber: 'B-07' }))).toEqual(['rad-ipd']);
+    expect(ids(await list('radiology', { visitDate: toIstDateKey(new Date()) }))).toEqual(['rad-opd']);
+  });
+
+  test('date matches each request\'s own encounter date — OPD visit date or IPD admission date', async () => {
+    const today = await list('pathology', { date: toIstDateKey(new Date()) });
+    expect(today.status).toBe(200);
+    expect(ids(today)).toEqual(['ipd-now', 'opd-today']);
+    expect(today.body.data.total).toBe(2);
+
+    // The old OPD visit day vs the old admission's day (one day earlier).
+    expect(ids(await list('pathology', { date: toIstDateKey(oldDate) }))).toEqual(['opd-old']);
+    expect(ids(await list('pathology', { date: toIstDateKey(new Date(oldDate.getTime() - DAY)) }))).toEqual(['ipd-old']);
+  });
+
+  test('date combines with Ward / Bed (IPD only) and status', async () => {
+    const todayKey = toIstDateKey(new Date());
+    expect(ids(await list('pathology', { date: todayKey, wardName: 'icu' }))).toEqual(['ipd-now']);
+    expect(ids(await list('pathology', { date: todayKey, bedNumber: 'B-01' }))).toEqual([]);
+    await PathologyRequestModel.updateOne({ requestId: 'opd-today' }, { status: 'COMPLETED' });
+    expect(ids(await list('pathology', { date: todayKey, status: 'COMPLETED' }))).toEqual(['opd-today']);
+  });
+
+  test('date resolves legacy requests (no stored link) by the encounter in effect at requestedAt', async () => {
+    const insert = (requestId: string, requestedAt: Date) =>
+      mongoose.connection.collection('pathology_requests').insertOne({
+        requestId, patientId: 'PAT-001', tenantId, requestedBy: doctorId, testType: 'Lipid Profile',
+        referredBy: 'SELF', status: 'PENDING', priority: 'NORMAL', notes: null, reportS3Key: null,
+        chargeId: null, isDeleted: false, deletedAt: null, requestedAt, createdAt: requestedAt, updatedAt: requestedAt,
+      });
+    await insert('legacy-ipd', new Date(oldDate.getTime() - 30 * 60_000));
+    await insert('legacy-opd', new Date(oldDate.getTime() + 60_000));
+
+    expect(ids(await list('pathology', { date: toIstDateKey(new Date(oldDate.getTime() - DAY)) })))
+      .toEqual(['ipd-old', 'legacy-ipd']);
+    expect(ids(await list('pathology', { date: toIstDateKey(oldDate) }))).toEqual(['legacy-opd', 'opd-old']);
+  });
+
+  test('radiology list applies the same date filter', async () => {
+    await RadiologyRequestModel.create({
+      requestId: 'rad-ipd', patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      imagingType: 'X-Ray Chest', status: 'PENDING', requestedAt: new Date(),
+      opdVisitId: null, ipdAdmissionId: 'adm-f-1',
+    });
+    await RadiologyRequestModel.create({
+      requestId: 'rad-opd-old', patientId: 'PAT-001', tenantId, requestedBy: doctorId,
+      imagingType: 'MRI Brain', status: 'PENDING', requestedAt: oldDate,
+      opdVisitId: 'OPD-F-OLD', ipdAdmissionId: null,
+    });
+    expect(ids(await list('radiology', { date: toIstDateKey(new Date()) }))).toEqual(['rad-ipd']);
+    expect(ids(await list('radiology', { date: toIstDateKey(oldDate) }))).toEqual(['rad-opd-old']);
+  });
+
+  test('400 — malformed date', async () => {
+    const res = await list('pathology', { visitDate: '05-10-2026' });
+    expect(res.status).toBe(400);
+    expect((await list('pathology', { date: '2026/10/05' })).status).toBe(400);
   });
 });

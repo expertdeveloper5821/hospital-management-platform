@@ -16,14 +16,25 @@ import {
   LAB_REFERRED_BY_SELF,
   CollectLabPaymentInput,
   LabPaymentSummary,
+  LabEncounterSummary,
+  SubmitPathologyTestReportInput,
+  PathologyResultValue,
+  PathologyTestReportResponse,
 } from './lab.types';
+import {
+  findReportTemplate,
+  splitPathologyTests,
+  resolveReferenceText,
+  computeFlag,
+} from './pathology-report-templates';
+import { buildPathologyReportPdf } from './pathology-report.pdf';
 import { patientRepository }   from '../patient/patient.repository';
 import { userRepository }      from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
 import { s3Service }           from '../../shared/services/s3.service';
 import { auditService }        from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
-import { AppError, NotFoundError, ForbiddenError, ConflictError } from '../../shared/middleware/error-handler';
+import { AppError, NotFoundError, ForbiddenError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import { PatientModel } from '../patient/patient.model';
 import { tenantRepository }  from '../tenant/tenant.repository';
 import { paymentRepository } from '../payment/payment.repository';
@@ -32,7 +43,13 @@ import { IPayment }          from '../payment/payment.model';
 import { IPatient }          from '../patient/patient.model';
 import { PaymentReferenceType, PaymentResponse } from '../payment/payment.types';
 import { pdfService }        from '../../shared/services/pdf.service';
-import { resolveReceiptHospitalDetails, resolvePatientAge } from '../../shared/utils/receipt-details';
+import { resolveReceiptHospitalDetails, resolvePatientAge, formatHospitalAddress } from '../../shared/utils/receipt-details';
+import { opdRepository }        from '../opd/opd.repository';
+import { ipdRepository }        from '../ipd/ipd.repository';
+import { departmentRepository } from '../department/department.repository';
+import { IOPDVisit }            from '../opd/opd.model';
+import { IIPDAdmission }        from '../ipd/ipd.model';
+import { istMidnightFor }       from '../attendance/attendance.timezone';
 
 // Pre-signed URL expiry: 1 hour (3600 s) — short-lived per security baseline.
 const REPORT_URL_EXPIRY_SECONDS = 3600;
@@ -201,6 +218,317 @@ async function renderLabReceipt(input: {
   });
 }
 
+// ─── Linked OPD/IPD encounter ─────────────────────────────────────────────────
+
+interface LabEncounterLink {
+  opdVisitId:     string | null;
+  ipdAdmissionId: string | null;
+}
+
+type LabEncounterRecord =
+  | { type: 'IPD'; admission: IIPDAdmission }
+  | { type: 'OPD'; visit: IOPDVisit };
+
+// The encounter the patient was in at `at`. An admission in effect wins (the
+// patient is in IPD); otherwise the patient's non-cancelled OPD visit that day.
+// Several same-day visits are narrowed to the one naming the referring doctor;
+// if that still leaves more than one, nothing is linked rather than guessing.
+async function findEncounterAt(
+  tenantId:   string,
+  patientId:  string,
+  at:         Date,
+  referredBy: string,
+): Promise<LabEncounterRecord | null> {
+  const admission = await ipdRepository.findAdmissionCoveringDate(tenantId, patientId, at);
+  if (admission) return { type: 'IPD', admission };
+
+  const visits = await opdRepository.findPatientVisitsOnDayAt(tenantId, patientId, at);
+  if (visits.length === 1) return { type: 'OPD', visit: visits[0] };
+  const referred = visits.filter((v) => (v.doctorIds ?? []).includes(referredBy));
+  return referred.length === 1 ? { type: 'OPD', visit: referred[0] } : null;
+}
+
+// Stored on the request at creation so the View always shows the encounter the
+// request was actually raised during, not whatever the patient is in later.
+async function resolveLabEncounterLink(
+  tenantId:   string,
+  patientId:  string,
+  at:         Date,
+  referredBy: string,
+): Promise<LabEncounterLink> {
+  const found = await findEncounterAt(tenantId, patientId, at, referredBy);
+  return {
+    opdVisitId:     found?.type === 'OPD' ? found.visit.visitId : null,
+    ipdAdmissionId: found?.type === 'IPD' ? found.admission.admissionId : null,
+  };
+}
+
+type LabEncounterSource = Pick<
+  IPathologyRequest,
+  'tenantId' | 'patientId' | 'referredBy' | 'requestedAt' | 'opdVisitId' | 'ipdAdmissionId'
+>;
+
+async function resolveEncounterRecord(doc: LabEncounterSource): Promise<LabEncounterRecord | null> {
+  const { tenantId } = doc;
+  if (doc.opdVisitId === undefined && doc.ipdAdmissionId === undefined) {
+    // Legacy request (created before the link was stored) — resolve against
+    // the request's own timestamp, never the patient's latest encounter.
+    return findEncounterAt(tenantId, doc.patientId, doc.requestedAt, doc.referredBy);
+  }
+  if (doc.ipdAdmissionId) {
+    const admission = await ipdRepository.findById(doc.ipdAdmissionId, tenantId);
+    return admission && admission.patientId === doc.patientId ? { type: 'IPD', admission } : null;
+  }
+  if (doc.opdVisitId) {
+    const visit = await opdRepository.findByVisitId(tenantId, doc.opdVisitId);
+    return visit && visit.patientId === doc.patientId ? { type: 'OPD', visit } : null;
+  }
+  return null;
+}
+
+function encounterDoctorIds(record: LabEncounterRecord): string[] {
+  return (record.type === 'IPD' ? record.admission.assignedDoctorIds : record.visit.doctorIds) ?? [];
+}
+
+async function getEncounterSummary(doc: LabEncounterSource): Promise<LabEncounterSummary | null> {
+  const { tenantId } = doc;
+  const record = await resolveEncounterRecord(doc);
+  if (!record) return null;
+
+  const departmentId = record.type === 'IPD' ? record.admission.departmentId : record.visit.departmentId;
+  const doctorIds    = encounterDoctorIds(record);
+  const [department, names] = await Promise.all([
+    departmentId ? departmentRepository.findById(tenantId, departmentId) : Promise.resolve(null),
+    userRepository.findNamesByIds(tenantId, doctorIds),
+  ]);
+  const common = {
+    departmentName: department?.name ?? null,
+    doctorNames:    doctorIds.map((id) => names.get(id)).filter((n): n is string => !!n),
+  };
+
+  if (record.type === 'IPD') {
+    return {
+      type:        'IPD',
+      encounterId: record.admission.admissionId,
+      date:        record.admission.admissionDate.toISOString(),
+      wardName:    record.admission.wardName ?? null,
+      bedNumber:   record.admission.bedNumber ?? null,
+      ...common,
+    };
+  }
+  return {
+    type:        'OPD',
+    encounterId: record.visit.visitId,
+    date:        record.visit.visitDate.toISOString(),
+    wardName:    null,
+    bedNumber:   null,
+    ...common,
+  };
+}
+
+// ─── Linked-encounter list filters ────────────────────────────────────────────
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// [00:00 IST, next 00:00 IST) of a YYYY-MM-DD hospital-local date.
+function istDayRange(date: string): { start: Date; end: Date } {
+  const [y, m, d] = date.split('-').map(Number);
+  const start = istMidnightFor(y, m, d);
+  return { start, end: new Date(start.getTime() + MS_PER_DAY) };
+}
+
+// Mirrors ipdRepository.findAdmissionCoveringDate's in-effect test.
+function admissionCovers(
+  a:  Pick<IIPDAdmission, 'admissionDate' | 'dischargeDate' | 'status'>,
+  at: Date,
+): boolean {
+  if (a.admissionDate > at) return false;
+  return a.status === 'ADMITTED' || (!!a.dischargeDate && a.dischargeDate > at);
+}
+
+// Turns the Date / Visit Date / Admission Date / Ward / Bed filters into
+// conditions on the request's OWN linked encounter (opdVisitId /
+// ipdAdmissionId), never the patient's latest one. Legacy rows with no stored
+// link are resolved from their requestedAt exactly as getEncounterSummary
+// does, so the list filter and the View always agree. `date` matches the
+// encounter's own date — the OPD visit date or the IPD admission date.
+// Returns undefined when no encounter filter is set.
+async function resolveEncounterConditions(
+  type:     'pathology' | 'radiology',
+  tenantId: string,
+  query:    ListLabRequestsQuery,
+): Promise<Record<string, unknown>[] | undefined> {
+  // Requests linked to an OPD visit on the given IST day.
+  async function opdOnDay(day: string): Promise<Record<string, unknown>> {
+    const { start, end } = istDayRange(day);
+    // A legacy request resolves to an OPD visit on its own requestedAt day, so
+    // only that day's unlinked requests can match.
+    const [visitIds, legacy] = await Promise.all([
+      opdRepository.findVisitIdsInRange(tenantId, start, end),
+      labRepository.findUnlinked(type, tenantId, { requestedAt: { $gte: start, $lt: end } }),
+    ]);
+    const resolved = await Promise.all(legacy.map(async (doc) => {
+      const found = await findEncounterAt(tenantId, doc.patientId, doc.requestedAt, doc.referredBy);
+      return found?.type === 'OPD' ? doc.requestId : null;
+    }));
+    return { $or: [
+      { opdVisitId: { $in: visitIds } },
+      { requestId:  { $in: resolved.filter((id): id is string => !!id) } },
+    ] };
+  }
+
+  // Requests linked to an IPD admission matching the given criteria.
+  async function ipdMatching(
+    admissionDay: string | undefined, wardName: string | undefined, bedNumber: string | undefined,
+  ): Promise<Record<string, unknown>> {
+    const admissions = await ipdRepository.findForLabFilter(tenantId, {
+      admissionDateRange: admissionDay ? istDayRange(admissionDay) : undefined,
+      wardName,
+      bedNumber,
+    });
+    const byPatient = new Map<string, typeof admissions>();
+    for (const a of admissions) byPatient.set(a.patientId, [...(byPatient.get(a.patientId) ?? []), a]);
+    // A legacy request resolves to the admission in effect at its requestedAt.
+    const legacy = byPatient.size
+      ? await labRepository.findUnlinked(type, tenantId, { patientId: { $in: [...byPatient.keys()] } })
+      : [];
+    const legacyIds = legacy
+      .filter((doc) => byPatient.get(doc.patientId)!.some((a) => admissionCovers(a, doc.requestedAt)))
+      .map((doc) => doc.requestId);
+    return { $or: [
+      { ipdAdmissionId: { $in: admissions.map((a) => a.admissionId) } },
+      { requestId:      { $in: legacyIds } },
+    ] };
+  }
+
+  const conds: Record<string, unknown>[] = [];
+  const wardName  = query.wardName  || undefined;
+  const bedNumber = query.bedNumber || undefined;
+
+  if (query.visitDate) conds.push(await opdOnDay(query.visitDate));
+
+  if (query.admissionDate || wardName || bedNumber) {
+    conds.push(await ipdMatching(query.admissionDate, wardName, bedNumber));
+  }
+
+  if (query.date) {
+    // Ward / Bed only exist on IPD admissions — with either set, the date can
+    // only match an admission in that ward/bed.
+    const [opd, ipd] = await Promise.all([
+      wardName || bedNumber ? Promise.resolve(null) : opdOnDay(query.date),
+      ipdMatching(query.date, wardName, bedNumber),
+    ]);
+    conds.push(opd ? { $or: [opd, ipd] } : ipd);
+  }
+
+  return conds.length ? conds : undefined;
+}
+
+// ─── Structured Pathology test reports ────────────────────────────────────────
+
+// Plaintext JSON held (encrypted at rest) in IPathologyTestReport.resultData.
+interface StoredPathologyResult {
+  values:  PathologyResultValue[];
+  remarks: string | null;
+}
+
+function parseResultData(raw: string): StoredPathologyResult {
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredPathologyResult>;
+    return {
+      values:  Array.isArray(parsed.values) ? parsed.values : [],
+      remarks: typeof parsed.remarks === 'string' ? parsed.remarks : null,
+    };
+  } catch {
+    return { values: [], remarks: null };
+  }
+}
+
+const NUMERIC_RESULT = /^[-+]?(\d+(\.\d*)?|\.\d+)$/;
+
+// Validates the submitted values against the test's template and returns only
+// the filled ones, in template order, each with the unit and this patient's
+// reference range snapshotted and its HIGH/LOW/ABNORMAL flag computed.
+function buildResultValues(
+  testName: string,
+  input:    SubmitPathologyTestReportInput['values'],
+  gender:   string | null | undefined,
+): PathologyResultValue[] {
+  const template = findReportTemplate(testName);
+  const known    = new Set(template.parameters.map((p) => p.key));
+  const unknown  = Object.keys(input).filter((k) => !known.has(k));
+  if (unknown.length) throw new ValidationError(`Unknown result field(s) for ${testName}: ${unknown.join(', ')}`);
+
+  const errors: string[] = [];
+  const values: PathologyResultValue[] = [];
+  for (const param of template.parameters) {
+    const value = input[param.key]?.trim();
+    if (!value) continue;   // every field is optional
+    if (param.inputType === 'number' && !NUMERIC_RESULT.test(value)) {
+      errors.push(`${param.name} must be a number.`);
+      continue;
+    }
+    if (param.inputType === 'select' && !(param.options ?? []).includes(value)) {
+      errors.push(`${param.name} must be one of: ${(param.options ?? []).join(', ')}.`);
+      continue;
+    }
+    values.push({
+      key:            param.key,
+      name:           param.name,
+      section:        param.section ?? null,
+      value,
+      unit:           param.unit,
+      referenceRange: resolveReferenceText(param, gender),
+      flag:           computeFlag(param, value, gender),
+    });
+  }
+  if (errors.length) throw new ValidationError(errors.join(' '));
+  return values;
+}
+
+// One entry per test in testType (in order): its entry form (template fields
+// with this patient's reference ranges) and its submitted result, if any.
+// A result stored under a test name no longer in testType is not returned.
+async function buildTestReports(
+  doc:    IPathologyRequest,
+  gender: string | null | undefined,
+): Promise<PathologyTestReportResponse[]> {
+  const stored = new Map((doc.testReports ?? []).map((r) => [r.testName, r]));
+  const names  = stored.size
+    ? await userRepository.findNamesByIds(doc.tenantId, [...new Set([...stored.values()].map((r) => r.submittedBy))])
+    : new Map<string, string>();
+  return splitPathologyTests(doc.testType).map((testName, testIndex) => {
+    const template = findReportTemplate(testName);
+    const report   = stored.get(testName);
+    const data     = report ? parseResultData(report.resultData) : null;
+    return {
+      testIndex,
+      testName,
+      templateKey: template.key,
+      fields: template.parameters.map((p) => ({
+        key:            p.key,
+        name:           p.name,
+        unit:           p.unit,
+        inputType:      p.inputType,
+        section:        p.section ?? null,
+        options:        p.options ?? null,
+        referenceRange: resolveReferenceText(p, gender),
+      })),
+      result: report && data ? {
+        values:          data.values,
+        remarks:         data.remarks,
+        submittedBy:     report.submittedBy,
+        submittedByName: names.get(report.submittedBy) ?? 'Lab Staff',
+        submittedAt:     report.submittedAt.toISOString(),
+      } : null,
+    };
+  });
+}
+
+function reportFileSlug(text: string): string {
+  return text.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'test';
+}
+
 async function toPathologyResponse(
   doc: IPathologyRequest,
   fullName?: string,
@@ -302,6 +630,9 @@ export class LabService {
     const requester = await userRepository.findById(tenantId, userId);
     await this.assertValidReferredBy(tenantId, input.referredBy);
 
+    const requestedAt = new Date();
+    const encounter   = await resolveLabEncounterLink(tenantId, input.patientId, requestedAt, input.referredBy);
+
     const doc = await labRepository.savePathology({
       requestId:    billing?.requestId ?? uuidv4(),
       patientId:    input.patientId,
@@ -314,7 +645,9 @@ export class LabService {
       notes:        input.notes ?? null,
       reportS3Key:  null,
       chargeId:     billing?.chargeId ?? null,
-      requestedAt:  new Date(),
+      opdVisitId:     encounter.opdVisitId,
+      ipdAdmissionId: encounter.ipdAdmissionId,
+      requestedAt,
     });
 
     try {
@@ -399,19 +732,191 @@ export class LabService {
     return toPathologyResponse(updated);
   }
 
-  async getPathologyRequest(
+  // Read access to one pathology request — a Doctor only for their assigned
+  // patients or requests they were "Referred By" on (same 404 either way).
+  private async findReadablePathology(
     requestId:           string,
     tenantId:            string,
     allowedPatientIds?:  string[],
     referredByDoctorId?: string,
-  ): Promise<PathologyRequestResponse> {
+  ): Promise<IPathologyRequest> {
     const doc = await labRepository.findPathologyById(requestId, tenantId);
     if (!doc) throw new NotFoundError('Pathology request not found');
     const isReferredDoctor = !!referredByDoctorId && doc.referredBy === referredByDoctorId;
     if (allowedPatientIds && !isReferredDoctor && !allowedPatientIds.includes(doc.patientId)) {
       throw new NotFoundError('Pathology request not found');
     }
-    return toPathologyResponse(doc);
+    return doc;
+  }
+
+  // Single-request view: the list shape plus the linked encounter and the
+  // structured per-test reports.
+  private async toPathologyDetail(doc: IPathologyRequest): Promise<PathologyRequestResponse> {
+    const patient = await patientRepository.findByPatientId(doc.tenantId, doc.patientId);
+    const [response, encounter, testReports] = await Promise.all([
+      toPathologyResponse(doc, patient?.fullName),
+      getEncounterSummary(doc),
+      buildTestReports(doc, patient?.gender),
+    ]);
+    return { ...response, encounter, testReports };
+  }
+
+  async getPathologyRequest(
+    requestId:           string,
+    tenantId:            string,
+    allowedPatientIds?:  string[],
+    referredByDoctorId?: string,
+  ): Promise<PathologyRequestResponse> {
+    const doc = await this.findReadablePathology(requestId, tenantId, allowedPatientIds, referredByDoctorId);
+    return this.toPathologyDetail(doc);
+  }
+
+  // ─── Structured test reports ──────────────────────────────────────────────
+
+  // Lab staff (route: PATHOLOGIST / HOSPITAL_ADMIN) submit — or later amend —
+  // the structured result of one test of the request. Each test is stored and
+  // editable independently; the request moves to IN_PROGRESS on its first
+  // submitted test and COMPLETED once every test has a submitted report. The
+  // requester, the referring doctor and the encounter's assigned doctors are
+  // notified that the report is available.
+  async submitPathologyTestReport(
+    requestId: string,
+    testIndex: number,
+    tenantId:  string,
+    userId:    string,
+    input:     SubmitPathologyTestReportInput,
+  ): Promise<PathologyRequestResponse> {
+    const doc = await labRepository.findPathologyById(requestId, tenantId);
+    if (!doc) throw new NotFoundError('Pathology request not found');
+
+    const testName = splitPathologyTests(doc.testType)[testIndex];
+    if (testName === undefined) throw new NotFoundError('Test not found on this pathology request');
+    if (testName !== input.testName) {
+      throw new ConflictError('The tests on this request have changed. Reload the request and try again.');
+    }
+
+    await this.assertPaid(tenantId, 'pathology', doc, 'Payment must be collected before the report can be submitted.');
+
+    const patient = await patientRepository.findByPatientId(tenantId, doc.patientId);
+    const values  = buildResultValues(testName, input.values, patient?.gender);
+    const remarks = input.remarks?.trim() || null;
+    if (values.length === 0 && !remarks) {
+      throw new ValidationError('Enter at least one result before submitting the report.');
+    }
+
+    const isAmendment = (doc.testReports ?? []).some((r) => r.testName === testName);
+    const saved = await labRepository.upsertPathologyTestReport(requestId, tenantId, {
+      testName,
+      templateKey: findReportTemplate(testName).key,
+      resultData:  JSON.stringify({ values, remarks }),
+      submittedBy: userId,
+      submittedAt: new Date(),
+    });
+    if (!saved) throw new NotFoundError('Pathology request not found');
+
+    // Status follows the tests' report coverage; a request already COMPLETED
+    // (e.g. by a file upload) is never moved back.
+    const submitted  = new Set((saved.testReports ?? []).map((r) => r.testName));
+    const allDone    = splitPathologyTests(saved.testType).every((t) => submitted.has(t));
+    const nextStatus = allDone
+      ? LabRequestStatus.COMPLETED
+      : saved.status === LabRequestStatus.PENDING ? LabRequestStatus.IN_PROGRESS : saved.status;
+    const updated = nextStatus !== saved.status
+      ? (await labRepository.updatePathology(requestId, tenantId, { status: nextStatus })) ?? saved
+      : saved;
+
+    try {
+      const record     = await resolveEncounterRecord(updated);
+      const recipients = new Set([
+        updated.requestedBy,
+        ...(updated.referredBy !== LAB_REFERRED_BY_SELF ? [updated.referredBy] : []),
+        ...(record ? encounterDoctorIds(record) : []),
+      ]);
+      recipients.delete(userId);
+      await Promise.all([...recipients].map((recipientId) => notificationService.sendNotification(
+        recipientId, tenantId,
+        isAmendment ? 'Pathology Report Updated' : 'Pathology Report Ready',
+        `The ${testName} report for patient ${doc.patientId} is ${isAmendment ? 'updated' : 'now available'}.`,
+        'PATHOLOGY_REQUEST', requestId,
+      ).catch(() => undefined)));
+    } catch { /* swallow */ }
+
+    // Result values are clinical data (encrypted at rest) — the audit entry
+    // records which test's report was submitted, never its values.
+    try {
+      await auditService.log({
+        entityType:    AuditEntityType.PATHOLOGY_REQUEST,
+        entityId:      requestId,
+        action:        'UPDATE',
+        userId,
+        tenantId,
+        previousValue: { status: doc.status },
+        newValue: {
+          status:     updated.status,
+          testReport: { testName, action: isAmendment ? 'AMENDED' : 'SUBMITTED', results: REDACTED_AUDIT_MARKER },
+        },
+      });
+    } catch { /* swallow */ }
+
+    return this.toPathologyDetail(updated);
+  }
+
+  // One test's submitted report as its own PDF — never several tests combined.
+  async getPathologyTestReportPdf(
+    requestId:           string,
+    testIndex:           number,
+    tenantId:            string,
+    allowedPatientIds?:  string[],
+    referredByDoctorId?: string,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const doc = await this.findReadablePathology(requestId, tenantId, allowedPatientIds, referredByDoctorId);
+    const testName = splitPathologyTests(doc.testType)[testIndex];
+    if (testName === undefined) throw new NotFoundError('Test not found on this pathology request');
+    const report = (doc.testReports ?? []).find((r) => r.testName === testName);
+    if (!report) throw new NotFoundError('The report for this test has not been submitted yet.');
+    const result = parseResultData(report.resultData);
+
+    const [patient, tenant, encounter, referredByName, reporter] = await Promise.all([
+      patientRepository.findByPatientId(tenantId, doc.patientId),
+      tenantRepository.findById(tenantId),
+      getEncounterSummary(doc),
+      getReferredByName(tenantId, doc.referredBy),
+      userRepository.findById(tenantId, report.submittedBy),
+    ]);
+    if (!patient) throw new NotFoundError('Patient not found');
+    const logoUrl = tenant?.branding?.logoUrl
+      ? await s3Service.getPresignedUrl(tenant.branding.logoUrl, REPORT_URL_EXPIRY_SECONDS).catch(() => null)
+      : null;
+
+    const buffer = await buildPathologyReportPdf({
+      hospital: {
+        name:               tenant?.branding?.displayName || tenant?.name || 'Hospital',
+        logoUrl,
+        primaryColor:       tenant?.branding?.primaryColor || '',
+        address:            formatHospitalAddress(tenant),
+        email:              tenant?.adminEmail ?? null,
+        registrationNumber: tenant?.onboardingDocuments?.gstNumber ?? null,
+      },
+      patient: {
+        fullName:     patient.fullName,
+        patientId:    patient.patientId,
+        age:          resolvePatientAge(patient),
+        gender:       patient.gender ?? null,
+        mobileNumber: patient.mobileNumber ?? null,
+        address:      patient.address ?? null,
+      },
+      request: {
+        requestId:   doc.requestId,
+        requestedAt: doc.requestedAt.toISOString(),
+        referredByName,
+      },
+      encounter,
+      test:           { testName, values: result.values, remarks: result.remarks },
+      reportedByName: reporter?.name ?? reporter?.email ?? 'Lab Staff',
+      reportedAt:     report.submittedAt.toISOString(),
+      generatedAt:    new Date().toISOString(),
+    });
+    return { buffer, fileName: `pathology-report-${reportFileSlug(testName)}-${doc.patientId}.pdf` };
   }
 
   async listPathologyRequests(
@@ -427,7 +932,8 @@ export class LabService {
     const referral = referredByDoctorId && doctorPatientIds
       ? { doctorId: referredByDoctorId, patientIds: searchPatientIds }
       : undefined;
-    const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds, referral);
+    const encounterConds = await resolveEncounterConditions('pathology', tenantId, query);
+    const result = await labRepository.findPathologyByPatient(tenantId, query, scopedPatientIds, referral, encounterConds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const [nameMap, paymentMap] = await Promise.all([
       patientRepository.findNamesByPatientIds(tenantId, patientIds),
@@ -460,6 +966,9 @@ export class LabService {
     const requester = await userRepository.findById(tenantId, userId);
     await this.assertValidReferredBy(tenantId, input.referredBy);
 
+    const requestedAt = new Date();
+    const encounter   = await resolveLabEncounterLink(tenantId, input.patientId, requestedAt, input.referredBy);
+
     const doc = await labRepository.saveRadiology({
       requestId:    billing?.requestId ?? uuidv4(),
       patientId:    input.patientId,
@@ -472,7 +981,9 @@ export class LabService {
       notes:        input.notes ?? null,
       reportS3Key:  null,
       chargeId:     billing?.chargeId ?? null,
-      requestedAt:  new Date(),
+      opdVisitId:     encounter.opdVisitId,
+      ipdAdmissionId: encounter.ipdAdmissionId,
+      requestedAt,
     });
 
     try {
@@ -567,7 +1078,8 @@ export class LabService {
     if (allowedPatientIds && !isReferredDoctor && !allowedPatientIds.includes(doc.patientId)) {
       throw new NotFoundError('Radiology request not found');
     }
-    return toRadiologyResponse(doc);
+    const [response, encounter] = await Promise.all([toRadiologyResponse(doc), getEncounterSummary(doc)]);
+    return { ...response, encounter };
   }
 
   async listRadiologyRequests(
@@ -583,7 +1095,8 @@ export class LabService {
     const referral = referredByDoctorId && doctorPatientIds
       ? { doctorId: referredByDoctorId, patientIds: searchPatientIds }
       : undefined;
-    const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds, referral);
+    const encounterConds = await resolveEncounterConditions('radiology', tenantId, query);
+    const result = await labRepository.findRadiologyByPatient(tenantId, query, scopedPatientIds, referral, encounterConds);
     const patientIds = [...new Set(result.data.map((doc) => doc.patientId))];
     const [nameMap, paymentMap] = await Promise.all([
       patientRepository.findNamesByPatientIds(tenantId, patientIds),
@@ -633,8 +1146,23 @@ export class LabService {
       }
     }
 
-    const updated = await labRepository.updatePathology(requestId, tenantId, updatePayload, allowedPatientIds);
+    let updated = await labRepository.updatePathology(requestId, tenantId, updatePayload, allowedPatientIds);
     if (!updated) throw new NotFoundError('Pathology request not found');
+
+    // Removing a test that had no report can leave every remaining test
+    // reported — recalculate so the request completes immediately.
+    const newValue: Record<string, unknown> = { ...updatePayload };
+    if ('testType' in input && updated.status === LabRequestStatus.IN_PROGRESS) {
+      const submitted = new Set((updated.testReports ?? []).map((r) => r.testName));
+      const tests     = splitPathologyTests(updated.testType);
+      if (tests.length > 0 && tests.every((t) => submitted.has(t))) {
+        updated = (await labRepository.updatePathology(
+          requestId, tenantId, { status: LabRequestStatus.COMPLETED }, allowedPatientIds,
+        )) ?? updated;
+        previousValue.status = doc.status;
+        newValue.status      = updated.status;
+      }
+    }
 
     try {
       await auditService.log({
@@ -644,7 +1172,7 @@ export class LabService {
         userId,
         tenantId,
         previousValue: redactNotes(previousValue),
-        newValue:      redactNotes(updatePayload as Record<string, unknown>),
+        newValue:      redactNotes(newValue),
       });
     } catch { /* swallow */ }
 
@@ -800,10 +1328,13 @@ export class LabService {
   // collected (in Lab, or in Billing for a Billing-created request). Checked
   // before the S3 write so an unpaid upload stores nothing.
   private async assertPaidForUpload(tenantId: string, kind: LabKind, doc: LabPaymentLink): Promise<void> {
+    await this.assertPaid(tenantId, kind, doc, 'Payment must be collected before the report can be uploaded.');
+  }
+
+  // Same rule for a structured Pathology report submission.
+  private async assertPaid(tenantId: string, kind: LabKind, doc: LabPaymentLink, message: string): Promise<void> {
     const paid = await findCompletedPayment(tenantId, kind, doc);
-    if (!paid) {
-      throw new ConflictError('Payment must be collected before the report can be uploaded.');
-    }
+    if (!paid) throw new ConflictError(message);
   }
 
   // Records the lab charge as a COMPLETED manual payment linked to the
