@@ -4,7 +4,10 @@ import { ICharge, ChargeCategory, CHARGE_CATEGORIES } from './charges.model';
 import { patientRepository } from '../patient/patient.repository';
 import { userRepository } from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
-import { paymentService } from '../payment/payment.service';
+import { paymentService, ManualPaymentOptions } from '../payment/payment.service';
+import { labService, LabKind } from '../lab/lab.service';
+import { labRepository } from '../lab/lab.repository';
+import { LAB_REFERRED_BY_SELF } from '../lab/lab.types';
 import { paymentRepository } from '../payment/payment.repository';
 import { PaymentReferenceType, PaymentMethod, PaymentStatus } from '../payment/payment.types';
 import { auditService }  from '../../shared/services/audit.service';
@@ -13,6 +16,7 @@ import {
   ForbiddenError,
   NotFoundError,
   ConflictError,
+  ValidationError,
 } from '../../shared/middleware/error-handler';
 
 // SYSTEM_AUTO role: internal bypass — not a real UserRole
@@ -75,6 +79,35 @@ function generateChargeId(): string {
   return 'CHG-' + uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase();
 }
 
+// A LAB_TEST charge's testTypeId is `${category}:${name}` (see
+// LabService.listTestTypes) — the prefix decides which Lab request it creates.
+export function parseLabTestKind(testTypeId: string | null | undefined): LabKind | null {
+  const prefix = testTypeId?.split(':', 1)[0];
+  if (prefix === 'PATHOLOGY') return 'pathology';
+  if (prefix === 'RADIOLOGY') return 'radiology';
+  return null;
+}
+
+function labKindOf(charge: ICharge): LabKind | null {
+  if (charge.labRequestKind === 'PATHOLOGY') return 'pathology';
+  if (charge.labRequestKind === 'RADIOLOGY') return 'radiology';
+  return null;
+}
+
+// A LAB_TEST charge's Payment gets the Lab receipt (test, lab request id,
+// referred by) instead of the generic one, so Billing and Lab download the same
+// receipt for the same payment. Other charges keep the generic receipt.
+function labReceiptOptions(charge: ICharge, collectedBy: string, paymentMethod: string): ManualPaymentOptions {
+  const kind = labKindOf(charge);
+  if (!kind || !charge.labRequestId) return {};
+  const requestId = charge.labRequestId;
+  return {
+    buildReceipt: ({ paymentId, paymentDate }) => labService.buildChargeLabReceipt(kind, requestId, charge.tenantId, {
+      paymentId, paymentDate, amount: charge.amount, paymentMethod, collectedBy,
+    }),
+  };
+}
+
 class ChargeService {
   async addCharge(
     tenantId: string,
@@ -94,19 +127,57 @@ class ChargeService {
       );
     }
 
+    // A LAB_TEST charge also creates the matching Lab request, so the test
+    // shows up in the Lab section for the Pathologist/Radiologist.
+    const isLabTest = data.category === 'LAB_TEST';
+    const labKind   = isLabTest ? parseLabTestKind(data.testTypeId) : null;
+    if (isLabTest && (!labKind || !data.testTypeName)) {
+      throw new ValidationError('Test Type must be a Pathology or Radiology test.');
+    }
+    const amount = Math.round(data.amount * 100) / 100;
+    if (!isLabTest && amount < 0.01) throw new ValidationError('Amount must be at least ₹0.01.');
+    // A free (₹0) lab test has nothing to collect — it is settled on creation.
+    const isFree       = isLabTest && amount === 0;
+    const labRequestId = labKind ? uuidv4() : null;
+
     const charge = await chargeRepository.save({
       chargeId:           generateChargeId(),
       tenantId,
       patientId:          data.patientId,
       category:           data.category,
       description:        data.description,
-      amount:             Math.round(data.amount * 100) / 100,
+      amount,
       encounterReference: data.encounterReference ?? null,
-      testTypeId:         data.category === 'LAB_TEST' ? (data.testTypeId   ?? null) : null,
-      testTypeName:       data.category === 'LAB_TEST' ? (data.testTypeName ?? null) : null,
+      testTypeId:         isLabTest ? (data.testTypeId   ?? null) : null,
+      testTypeName:       isLabTest ? (data.testTypeName ?? null) : null,
+      labRequestId,
+      labRequestKind:     labKind === 'pathology' ? 'PATHOLOGY' : labKind === 'radiology' ? 'RADIOLOGY' : null,
       addedBy,
-      status:             'UNPAID',
+      status:             isFree ? 'PAID'  : 'UNPAID',
+      paidBy:             isFree ? addedBy : null,
+      paidAt:             isFree ? new Date() : null,
     });
+
+    if (labKind && labRequestId) {
+      const billing = { requestId: labRequestId, chargeId: charge.chargeId };
+      try {
+        if (labKind === 'pathology') {
+          await labService.createPathologyRequest(
+            { patientId: data.patientId, testType: data.testTypeName!, referredBy: LAB_REFERRED_BY_SELF },
+            tenantId, addedBy, undefined, billing,
+          );
+        } else {
+          await labService.createRadiologyRequest(
+            { patientId: data.patientId, imagingType: data.testTypeName!, referredBy: LAB_REFERRED_BY_SELF },
+            tenantId, addedBy, undefined, billing,
+          );
+        }
+      } catch (err) {
+        // No charge without its Lab request: undo the (not yet audited) charge.
+        try { await chargeRepository.deleteById(tenantId, charge.chargeId); } catch { /* best-effort */ }
+        throw err;
+      }
+    }
 
     await auditService.log({
       entityType: AuditEntityType.CHARGE,
@@ -118,19 +189,37 @@ class ChargeService {
     });
 
     // Mirror the new charge into Payments as PENDING; markPaid / cancelCharge
-    // settle it to COMPLETED / CANCELLED. Failure must not undo the charge.
+    // settle it to COMPLETED / CANCELLED. A free lab test is recorded straight
+    // away as a ₹0 COMPLETED payment so it has a receipt in Billing and Lab.
+    // Failure must not undo the charge.
     try {
-      await paymentService.createPendingChargePayment(
-        {
-          patientId:   charge.patientId,
-          amount:      charge.amount,
-          description: `Billing Charge – ${charge.description}`,
-          chargeId:    charge.chargeId,
-        },
-        tenantId,
-        addedBy,
-      );
-    } catch { /* pending payment creation failure must not undo the charge */ }
+      if (isFree) {
+        await paymentService.createManualPayment(
+          {
+            patientId:     charge.patientId,
+            amount:        0,
+            paymentMethod: PaymentMethod.CASH,
+            description:   `Billing Charge – ${charge.description}`,
+            referenceType: PaymentReferenceType.CHARGE,
+            referenceId:   charge.chargeId,
+          },
+          tenantId,
+          addedBy,
+          labReceiptOptions(charge, addedBy, PaymentMethod.CASH),
+        );
+      } else {
+        await paymentService.createPendingChargePayment(
+          {
+            patientId:   charge.patientId,
+            amount:      charge.amount,
+            description: `Billing Charge – ${charge.description}`,
+            chargeId:    charge.chargeId,
+          },
+          tenantId,
+          addedBy,
+        );
+      }
+    } catch { /* payment record creation failure must not undo the charge */ }
 
     return charge;
   }
@@ -193,6 +282,28 @@ class ChargeService {
         await paymentService.settleChargePayment(pendingPayment, PaymentStatus.CANCELLED, cancelledBy);
       }
     } catch { /* payment status sync failure must not undo the charge's CANCELLED status */ }
+
+    // A cancelled LAB_TEST charge's Lab request will never be paid — remove it
+    // from the Lab section (soft delete). It can't have a report: uploads need
+    // a paid request, and only UNPAID charges reach this point.
+    const labKind = labKindOf(charge);
+    if (labKind && charge.labRequestId) {
+      try {
+        const removed = labKind === 'pathology'
+          ? await labRepository.softDeletePathology(charge.labRequestId, tenantId)
+          : await labRepository.softDeleteRadiology(charge.labRequestId, tenantId);
+        if (removed) {
+          await auditService.log({
+            entityType:    labKind === 'pathology' ? AuditEntityType.PATHOLOGY_REQUEST : AuditEntityType.RADIOLOGY_REQUEST,
+            entityId:      charge.labRequestId,
+            action:        'DELETE',
+            userId:        cancelledBy,
+            tenantId,
+            previousValue: { requestId: charge.labRequestId, chargeId, status: removed.status, patientId: charge.patientId },
+          });
+        }
+      } catch { /* lab request cleanup failure must not undo the charge's CANCELLED status */ }
+    }
 
     // Notify original adder if a different user cancelled the charge
     if (cancelledBy !== charge.addedBy) {
@@ -270,7 +381,10 @@ class ChargeService {
         tenantId, PaymentReferenceType.CHARGE, chargeId,
       );
       if (existingPayment) {
-        await paymentService.settleChargePayment(existingPayment, PaymentStatus.COMPLETED, paidBy);
+        await paymentService.settleChargePayment(
+          existingPayment, PaymentStatus.COMPLETED, paidBy,
+          labReceiptOptions(updated!, paidBy, existingPayment.paymentMethod),
+        );
       } else {
         await paymentService.createManualPayment(
           {
@@ -283,6 +397,7 @@ class ChargeService {
           },
           tenantId,
           paidBy,
+          labReceiptOptions(updated!, paidBy, PaymentMethod.CASH),
         );
       }
     } catch { /* payment record creation failure must not undo the charge's PAID status */ }
@@ -308,7 +423,7 @@ class ChargeService {
   async listCharges(
     tenantId: string,
     filters:  ChargeListFilters,
-  ): Promise<PaginatedResult<ICharge & { addedByName: string | null }>> {
+  ): Promise<PaginatedResult<ICharge & { addedByName: string | null; paymentId: string | null; receiptAvailable: boolean }>> {
     // Name search: resolve the typed name to the matching actor ids. No match →
     // empty result (rather than ignoring the filter).
     let repoFilters = filters;
@@ -322,15 +437,26 @@ class ChargeService {
 
     const result = await chargeRepository.list(tenantId, repoFilters);
 
-    // Enrich each charge with the actor's display name for the UI.
+    // Enrich each charge with the actor's display name and, for a paid charge,
+    // its COMPLETED Payment (for the Billing receipt download).
     const actorIds = [...new Set(result.data.map((c) => c.addedBy))];
-    const names = await userRepository.findNamesByIds(tenantId, actorIds);
+    const paidIds  = result.data.filter((c) => c.status === 'PAID').map((c) => c.chargeId);
+    const [names, payments] = await Promise.all([
+      userRepository.findNamesByIds(tenantId, actorIds),
+      paymentRepository.findCompletedByReferences(tenantId, PaymentReferenceType.CHARGE, paidIds),
+    ]);
+    const paymentByCharge = new Map((payments ?? []).map((p) => [p.referenceId as string, p]));
     // result.data are lean (plain) objects despite the ICharge typing.
-    const data = result.data.map((c) => ({
-      ...(c as unknown as Record<string, unknown>),
-      // Auto-generated charges (e.g. package assignment) have a synthetic actor.
-      addedByName: c.addedBy === 'SYSTEM_AUTO' ? 'System' : (names.get(c.addedBy) ?? null),
-    })) as unknown as (ICharge & { addedByName: string | null })[];
+    const data = result.data.map((c) => {
+      const payment = paymentByCharge.get(c.chargeId);
+      return {
+        ...(c as unknown as Record<string, unknown>),
+        // Auto-generated charges (e.g. package assignment) have a synthetic actor.
+        addedByName:      c.addedBy === 'SYSTEM_AUTO' ? 'System' : (names.get(c.addedBy) ?? null),
+        paymentId:        payment?.paymentId ?? null,
+        receiptAvailable: !!payment?.receiptS3Key,
+      };
+    }) as unknown as (ICharge & { addedByName: string | null; paymentId: string | null; receiptAvailable: boolean })[];
 
     return { ...result, data };
   }

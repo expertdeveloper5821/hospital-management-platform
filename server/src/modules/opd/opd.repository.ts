@@ -6,7 +6,7 @@ import { paymentRepository } from '../payment/payment.repository';
 import { OpdNurseAssignmentModel, IOpdNurseAssignment } from './opd-nurse-assignment.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
-import { OPDVisitStatus, ACTIVE_STATUSES, OPDVitals } from './opd.types';
+import { OPDVisitStatus, ACTIVE_STATUSES } from './opd.types';
 import { ConflictError } from '../../shared/middleware/error-handler';
 import { toIstMidnight } from '../attendance/attendance.timezone';
 
@@ -20,6 +20,12 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // OPD history, but keeps a pathological record from turning one request into an
 // unbounded read.
 const SEARCH_SCAN_LIMIT = 1000;
+
+// Oldest-created visit first, so the OPD queue's day-wise S. No. starts at 1
+// with the day's first registration and a freshly created visit lands at the
+// bottom of that day's list. `_id` breaks createdAt ties so skip/limit pages
+// never overlap or skip a row.
+const QUEUE_SORT = { createdAt: 1, _id: 1 } as const;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -48,6 +54,40 @@ export class OPDRepository {
     nurseId?:   string,
   ): Promise<IOPDVisit[]> {
     assertDbConnected();
+    const query = this.buildQueueQuery(tenantId, date, doctorId, patientIds, nurseId);
+    return OPDVisitModel.find(query).sort(QUEUE_SORT);
+  }
+
+  // Paginated variant of findByDate — same filter and sort, plus the
+  // whole-day Open/Completed counts the queue's stat cards show (so they keep
+  // reflecting every matching visit, not just the current page).
+  async findPageByDate(
+    tenantId:    string,
+    date:        Date,
+    doctorId:    string | undefined,
+    patientIds:  string[] | undefined,
+    nurseId:     string | undefined,
+    page:        number,
+    limit:       number,
+  ): Promise<{ data: IOPDVisit[]; total: number; openCount: number; completedCount: number }> {
+    assertDbConnected();
+    const query = this.buildQueueQuery(tenantId, date, doctorId, patientIds, nurseId);
+    const [data, total, openCount, completedCount] = await Promise.all([
+      OPDVisitModel.find(query).sort(QUEUE_SORT).skip((page - 1) * limit).limit(limit),
+      OPDVisitModel.countDocuments(query),
+      OPDVisitModel.countDocuments({ ...query, status: OPDVisitStatus.OPEN }),
+      OPDVisitModel.countDocuments({ ...query, status: OPDVisitStatus.COMPLETED }),
+    ]);
+    return { data, total, openCount, completedCount };
+  }
+
+  private buildQueueQuery(
+    tenantId:   string,
+    date:       Date,
+    doctorId?:  string,
+    patientIds?: string[],
+    nurseId?:   string,
+  ): Record<string, unknown> {
     // IST calendar-day bucket (not server-local midnight) — see toIstMidnight's
     // doc comment. Keeps the query in sync with how createVisit/updateVisit
     // now normalize and store visitDate, regardless of server OS timezone.
@@ -79,9 +119,7 @@ export class OPDRepository {
       query.$or = scope;
     }
 
-    // Newest-created visit first, so the OPD queue list surfaces a freshly
-    // registered visit at the top rather than after same-day earlier tokens.
-    return OPDVisitModel.find(query).sort({ createdAt: -1 });
+    return query;
   }
 
   async findByPatient(
@@ -210,16 +248,17 @@ export class OPDRepository {
     }
   }
 
-  // Hard delete, restricted to a visit that is still active (OPEN /
-  // IN_PROGRESS) — the status filter makes the check-and-delete atomic, so a
-  // visit completed/cancelled concurrently is never removed. Every active
+  // Hard delete, restricted to a visit that is still waiting (OPEN) — the
+  // status filter makes the check-and-delete atomic, so a visit whose
+  // consultation was started, or that was completed/cancelled, concurrently is
+  // never removed. Every active
   // payment linked to the visit (referenceType OPD_VISIT) is cancelled in the
   // same transaction, so a deleted visit never leaves an active payment
   // behind (and a failed cancellation never leaves the visit deleted).
   //
   // Requires a transaction-capable MongoDB deployment (replica set / Atlas) —
   // same requirement as IPDRepository.createAdmissionWithBedOccupancy.
-  async deleteActiveByVisitIdCancellingPayments(
+  async deleteOpenByVisitIdCancellingPayments(
     tenantId: string,
     visitId:  string,
   ): Promise<{ deleted: IOPDVisit | null; cancelledPayments: IPayment[] }> {
@@ -233,7 +272,7 @@ export class OPDRepository {
           {
             tenantId,
             visitId,
-            status: { $in: [...ACTIVE_STATUSES] }, // spread — Mongoose rejects a readonly array
+            status: OPDVisitStatus.OPEN,
           },
           { session },
         );
@@ -247,20 +286,6 @@ export class OPDRepository {
     } finally {
       await session.endSession();
     }
-  }
-
-  // Patient's most recently updated visit — the source a new OPD visit / IPD
-  // admission seeds its vitals from (vitals are one shared state per patient).
-  async findLatestByPatient(tenantId: string, patientId: string): Promise<IOPDVisit | null> {
-    assertDbConnected();
-    return OPDVisitModel.findOne({ tenantId, patientId }).sort({ updatedAt: -1 });
-  }
-
-  // Write the patient's latest vitals onto every one of their visits so OPD
-  // and IPD always show the same readings. Filters on plaintext keys only.
-  async setVitalsByPatient(tenantId: string, patientId: string, vitals: OPDVitals): Promise<void> {
-    assertDbConnected();
-    await OPDVisitModel.updateMany({ tenantId, patientId }, { $set: { vitals } });
   }
 
   // Sweep visits left on the queue after their visit date has passed. Bulk

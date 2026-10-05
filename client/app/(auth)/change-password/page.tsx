@@ -14,6 +14,7 @@ import { useChangePasswordMutation } from '@/store/api/auth.api';
 import { useAppDispatch } from '@/store/hooks';
 import { tokenReceived, setFirstLoginDone } from '@/store/slices/auth.slice';
 import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
+import { NavForm } from '@/components/ui/form';
 
 const schema = z
   .object({
@@ -77,7 +78,7 @@ export default function ChangePasswordPage() {
         </CardDescription>
       </CardHeader>
 
-      <form onSubmit={handleSubmit(onSubmit)}>
+      <NavForm onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="currentPassword">Current password</Label>
@@ -177,7 +178,7 @@ export default function ChangePasswordPage() {
             {isLoading ? 'Saving…' : 'Save new password'}
           </Button>
         </CardFooter>
-      </form>
+      </NavForm>
     </Card>
   );
 }

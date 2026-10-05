@@ -14,6 +14,7 @@ import { logout }                              from '@/store/slices/auth.slice';
 import { baseApi }                             from '@/store/api/base.api';
 import { toastSuccess }                        from '@/lib/toast';
 import { passwordSchema, PASSWORD_REQUIREMENTS } from '@/lib/password';
+import { NavForm } from '@/components/ui/form';
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ export default function ChangePasswordPage() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <NavForm onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
             <label htmlFor="currentPassword" className="text-sm font-medium">Current Password</label>
             <PasswordInput
@@ -191,7 +192,7 @@ export default function ChangePasswordPage() {
           >
             {isLoading ? 'Saving…' : 'Update Password'}
           </button>
-        </form>
+        </NavForm>
       </div>
     </div>
   );

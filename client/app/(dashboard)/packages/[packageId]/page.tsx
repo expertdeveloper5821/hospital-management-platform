@@ -7,12 +7,14 @@ import {
   useUpdatePackageMutation,
   useAssignPackageMutation,
 } from '@/store/api/packages.api';
+import { useListWardsQuery } from '@/store/api/ipd.api';
 import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { NavForm } from '@/components/ui/form';
 
 export default function PackageDetailPage() {
   const params  = useParams<{ packageId: string }>();
@@ -29,8 +31,11 @@ export default function PackageDetailPage() {
   const [assignSuccess, setAssignSuccess] = useState('');
 
   const [editStatus, setEditStatus] = useState<'ACTIVE' | 'INACTIVE' | ''>('');
+  const [editWardId, setEditWardId] = useState<string | null>(null);
+  const [wardError, setWardError]   = useState('');
 
-  const canEdit   = role === 'HOSPITAL_ADMIN' || role === 'ADMIN';
+  const canEdit   = role === 'HOSPITAL_ADMIN' || role === 'ADMIN' || role === 'RECEPTIONIST';
+  const { data: wards = [] } = useListWardsQuery(undefined, { skip: !canEdit });
   const canAssign = ['HOSPITAL_ADMIN', 'ADMIN', 'RECEPTIONIST', 'DOCTOR'].includes(role ?? '');
 
   const handleStatusUpdate = async () => {
@@ -39,11 +44,23 @@ export default function PackageDetailPage() {
     setEditStatus('');
   };
 
+  // '' in the select means "unlink" (wardId: null).
+  const handleWardUpdate = async () => {
+    if (editWardId === null || !pkg) return;
+    setWardError('');
+    try {
+      await updatePackage({ packageId: pkg.packageId, wardId: editWardId || null }).unwrap();
+      setEditWardId(null);
+    } catch (err: unknown) {
+      setWardError((err as { data?: { message?: string } })?.data?.message ?? 'Failed to update ward.');
+    }
+  };
+
   const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
     setAssignError('');
     setAssignSuccess('');
-    if (!patientId.trim()) { setAssignError('Patient ID is required'); return; }
+    if (!patientId.trim()) { setAssignError('UHID is required'); return; }
     try {
       const result = await assignPackage({
         packageId: params.packageId,
@@ -72,6 +89,7 @@ export default function PackageDetailPage() {
       <Card>
         <CardContent className="pt-4 space-y-2 text-sm">
           <p><span className="font-medium">Price:</span> ₹{pkg.price.toFixed(2)}</p>
+          <p><span className="font-medium">Ward:</span> {pkg.wardName ?? (pkg.wardId ? 'Unknown ward' : 'Not linked')}</p>
           {pkg.description && <p><span className="font-medium">Description:</span> {pkg.description}</p>}
           <div>
             <span className="font-medium">Included Services:</span>
@@ -103,13 +121,42 @@ export default function PackageDetailPage() {
         </Card>
       )}
 
+      {canEdit && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">Linked Ward</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex gap-3 items-end">
+              <select
+                aria-label="Linked ward"
+                className="border rounded px-3 py-2 text-sm"
+                value={editWardId ?? (pkg.wardId ?? '')}
+                onChange={e => setEditWardId(e.target.value)}
+              >
+                <option value="">No ward</option>
+                {wards.map(w => (
+                  <option key={w.wardId} value={w.wardId}>{w.name}</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                disabled={editWardId === null || editWardId === (pkg.wardId ?? '') || updating}
+                onClick={handleWardUpdate}
+              >
+                {updating ? 'Updating…' : 'Update Ward'}
+              </Button>
+            </div>
+            {wardError && <p className="text-red-600 text-sm">{wardError}</p>}
+          </CardContent>
+        </Card>
+      )}
+
       {canAssign && pkg.status === 'ACTIVE' && (
         <Card>
           <CardHeader><CardTitle className="text-base">Assign to Patient</CardTitle></CardHeader>
           <CardContent>
-            <form onSubmit={handleAssign} className="space-y-3">
+            <NavForm onSubmit={handleAssign} autoFocusFirstField={false} className="space-y-3">
               <div>
-                <Label htmlFor="pid">Patient ID *</Label>
+                <Label htmlFor="pid">UHID *</Label>
                 <Input id="pid" value={patientId} onChange={e => setPatientId(e.target.value)} placeholder="PAT-XXXXXXXX" />
               </div>
               <div>
@@ -119,7 +166,7 @@ export default function PackageDetailPage() {
               {assignError   && <p className="text-red-600 text-sm">{assignError}</p>}
               {assignSuccess && <p className="text-green-600 text-sm">{assignSuccess}</p>}
               <Button type="submit" disabled={assigning}>{assigning ? 'Assigning…' : 'Assign Package'}</Button>
-            </form>
+            </NavForm>
           </CardContent>
         </Card>
       )}

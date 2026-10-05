@@ -46,6 +46,8 @@ const vitalsSchema = z.object({
   bloodPressure:   bloodPressureSchema,
   sugar:           z.number().min(10, 'Sugar must be between 10 and 1000 mg/dL.').max(1000, 'Sugar must be between 10 and 1000 mg/dL.').nullable().optional(),
   bodyTemperature: z.number().min(80, 'Body temperature must be between 80 and 115 °F.').max(115, 'Body temperature must be between 80 and 115 °F.').nullable().optional(),
+  spo2:            z.number().min(50, 'SpO2 must be between 50 and 100 %.').max(100, 'SpO2 must be between 50 and 100 %.').nullable().optional(),
+  pulse:           z.number().min(20, 'Pulse must be between 20 and 250 bpm.').max(250, 'Pulse must be between 20 and 250 bpm.').nullable().optional(),
 }).optional();
 
 const updateVisitSchema = z.object({
@@ -76,6 +78,8 @@ const queueQuerySchema = z.object({
   date:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   doctorId: z.string().optional(),
   search:   z.string().max(200).trim().optional(),
+  page:     z.coerce.number().int().min(1).default(1),
+  limit:    z.coerce.number().int().min(1).max(100).default(20),
 });
 
 const OPD_STATUS_VALUES = ['OPEN', 'COMPLETED'] as const;
@@ -120,6 +124,8 @@ function toResponse(v: IOPDVisit) {
       bloodPressure:   v.vitals?.bloodPressure   ?? null,
       sugar:           v.vitals?.sugar           ?? null,
       bodyTemperature: v.vitals?.bodyTemperature ?? null,
+      spo2:            v.vitals?.spo2            ?? null,
+      pulse:           v.vitals?.pulse           ?? null,
     },
     createdAt:      v.createdAt,
     updatedAt:      v.updatedAt,
@@ -152,10 +158,13 @@ export async function getQueue(req: Request, res: Response, next: NextFunction):
     // nursePatientIds, which is ward-scoped patient-level access only.
     const nurseId = req.user!.role === UserRole.NURSE ? req.user!.userId : undefined;
 
-    const visits = await opdService.getQueue(tenantId, query.data.date, doctorId, query.data.search, nursePatientIds, nurseId);
+    const result = await opdService.getQueue(
+      tenantId, query.data.date, doctorId, query.data.search, nursePatientIds, nurseId,
+      query.data.page, query.data.limit,
+    );
     res.status(200).json({
       status: 'success',
-      data: visits.map((v) => toResponse(v)),
+      data: { ...result, data: result.data.map((v) => toResponse(v)) },
     });
   } catch (err) { next(err); }
 }

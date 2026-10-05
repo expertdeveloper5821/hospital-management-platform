@@ -10,6 +10,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { cn } from '@/lib/utils';
+import { getCurrentCoordinates, geolocationErrorMessage } from '@/lib/geolocation';
+import { toastError } from '@/lib/toast';
 
 // Compact Dashboard check-in/out row. Reuses the Attendance module's endpoints
 // and the same "today's row" lookup as the Attendance page's TodayStatusCard
@@ -55,13 +57,14 @@ export function AttendanceQuickBar() {
   const [checkIn,  { isLoading: checkingIn }]  = useCheckInMutation();
   const [checkOut, { isLoading: checkingOut }] = useCheckOutMutation();
   const [confirming, setConfirming] = useState<'check-in' | 'check-out' | null>(null);
+  const [locating,   setLocating]   = useState(false);
 
   const todayRow      = data?.records[data.records.length - 1];
   const checkInAt     = todayRow?.checkIn ?? null;
   const checkOutAt    = todayRow?.checkOut ?? null;
   const isRunning     = !!checkInAt && !checkOutAt;
   const hasCheckedOut = !!checkInAt && !!checkOutAt;
-  const isBusy        = checkingIn || checkingOut;
+  const isBusy        = checkingIn || checkingOut || locating;
 
   const now = useLiveClock(isRunning);
 
@@ -73,10 +76,22 @@ export function AttendanceQuickBar() {
       ? new Date(checkOutAt!).getTime() - new Date(checkInAt!).getTime()
       : 0;
 
-  function handleConfirm() {
-    if (confirming === 'check-in') checkIn();
-    else if (confirming === 'check-out') checkOut();
+  // Attendance is only submitted with a fresh GPS fix — if location can't be
+  // captured, nothing is sent and the user is told why.
+  async function handleConfirm() {
+    const action = confirming;
     setConfirming(null);
+    if (!action) return;
+    setLocating(true);
+    try {
+      const location = await getCurrentCoordinates();
+      if (action === 'check-in') checkIn(location);
+      else checkOut(location);
+    } catch (err) {
+      toastError(`Could not ${action === 'check-in' ? 'check in' : 'check out'}`, geolocationErrorMessage(err));
+    } finally {
+      setLocating(false);
+    }
   }
 
   if (isLoading) {
@@ -119,7 +134,7 @@ export function AttendanceQuickBar() {
           )}
         >
           {isRunning ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
-          {checkingIn ? 'Checking in…' : checkingOut ? 'Checking out…' : isRunning ? 'Check Out' : 'Check In'}
+          {locating ? 'Getting location…' : checkingIn ? 'Checking in…' : checkingOut ? 'Checking out…' : isRunning ? 'Check Out' : 'Check In'}
         </button>
       )}
 

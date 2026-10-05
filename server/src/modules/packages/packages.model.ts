@@ -10,6 +10,10 @@ export interface IPackage extends Document {
   price:            number;
   includedServices: string[];
   status:           PackageStatus;
+  // Ward this package's IPD admissions are allocated to (Ward._id string).
+  // null for packages created before ward linking — they keep working, they
+  // just never lock the ward on an IPD admission.
+  wardId:           string | null;
   isDeleted:        boolean;
   createdAt:        Date;
   updatedAt:        Date;
@@ -24,6 +28,7 @@ const PackageSchema = new Schema<IPackage>(
     price:            { type: Number, required: true, min: 0 },
     includedServices: [{ type: String }],
     status:           { type: String, required: true, enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' },
+    wardId:           { type: String, default: null },
     isDeleted:        { type: Boolean, default: false },
   },
   { timestamps: true, collection: 'packages' },
@@ -32,5 +37,6 @@ const PackageSchema = new Schema<IPackage>(
 PackageSchema.index({ tenantId: 1, packageId: 1 }, { unique: true });
 PackageSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 PackageSchema.index({ tenantId: 1, name: 1 });
+PackageSchema.index({ tenantId: 1, wardId: 1 });
 
 export const PackageModel = mongoose.model<IPackage>('Package', PackageSchema);

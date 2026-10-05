@@ -27,6 +27,23 @@ export const ipdApi = baseApi.injectEndpoints({
       providesTags: ['IPD'],
     }),
 
+    // Paginated + searchable list for the Wards page. listWards above stays the
+    // unpaginated source for every ward dropdown (IPD, OPD, Packages, …).
+    listWardsPaginated: build.query<
+      PaginatedResult<WardResponse>,
+      { search?: string; page?: number; limit?: number }
+    >({
+      query: ({ search, page = 1, limit = 20 }) => {
+        const params = new URLSearchParams();
+        if (search) params.set('search', search);
+        params.set('page',  String(page));
+        params.set('limit', String(limit));
+        return `/api/ipd/wards?${params.toString()}`;
+      },
+      transformResponse: (raw: ApiSuccess<PaginatedResult<WardResponse>>) => raw.data,
+      providesTags: ['IPD'],
+    }),
+
     createWard: build.mutation<WardResponse, { name: string; floor?: string }>({
       query: (body) => ({ url: '/api/ipd/wards', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<WardResponse>) => raw.data,
@@ -61,6 +78,33 @@ export const ipdApi = baseApi.injectEndpoints({
         body:   { nurseIds },
       }),
       transformResponse: (raw: ApiSuccess<WardResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
+    // Hospital Admin only. Soft delete; the server answers 409 while the ward
+    // has an admitted patient, an occupied bed or an active linked package.
+    // Online-only (not in the offline mutation allowlists).
+    deleteWard: build.mutation<void, string>({
+      query: (wardId) => {
+        if (!wardId) throw new Error('wardId is required');
+        return { url: `/api/ipd/wards/${wardId}`, method: 'DELETE' };
+      },
+      invalidatesTags: ['IPD'],
+    }),
+
+    // Hospital Admin only. 409 while the bed is occupied / has an active admission.
+    updateBed: build.mutation<BedResponse, { wardId: string; bedId: string; bedNumber: string }>({
+      query: ({ wardId, bedId, bedNumber }) => ({
+        url:    `/api/ipd/wards/${wardId}/beds/${bedId}`,
+        method: 'PATCH',
+        body:   { bedNumber },
+      }),
+      transformResponse: (raw: ApiSuccess<BedResponse>) => raw.data,
+      invalidatesTags: ['IPD'],
+    }),
+
+    deleteBed: build.mutation<void, { wardId: string; bedId: string }>({
+      query: ({ wardId, bedId }) => ({ url: `/api/ipd/wards/${wardId}/beds/${bedId}`, method: 'DELETE' }),
       invalidatesTags: ['IPD'],
     }),
 
@@ -102,7 +146,10 @@ export const ipdApi = baseApi.injectEndpoints({
 
     updateAdmission: build.mutation<AdmissionResponse, {
       admissionId:      string;
-      assignedDoctorId?: string;
+      // Receptionist-only patient correction (the backend rejects it from
+      // every other role); a Receptionist may send only patientId + vitals.
+      patientId?:        string;
+      assignedDoctorIds?: string[];
       wardId?:           string;
       bedId?:            string;
       // Partial — only the sub-fields present are merged onto the
@@ -120,7 +167,18 @@ export const ipdApi = baseApi.injectEndpoints({
         };
       },
       transformResponse: (raw: ApiSuccess<AdmissionResponse>) => raw.data,
-      invalidatesTags: ['IPD', 'OPD'], // OPD too: vitals are shared per patient
+      invalidatesTags: ['IPD'], // vitals are per admission — never written to OPD visits
+    }),
+
+    // Receptionist-only permanent delete of a still-ADMITTED admission; the
+    // backend releases the bed and cancels the admission's payment(s) in the
+    // same transaction, so payment lists must refetch too.
+    deleteAdmission: build.mutation<void, string>({
+      query: (admissionId) => {
+        if (!admissionId) throw new Error('admissionId is required');
+        return { url: `/api/ipd/admissions/${admissionId}`, method: 'DELETE' };
+      },
+      invalidatesTags: ['IPD', 'Payment'],
     }),
 
     // Hospital Admin, the admission's assigned Doctor(s), or a Nurse on its
@@ -245,13 +303,18 @@ export const ipdApi = baseApi.injectEndpoints({
 export const {
   useGetAdmissionByIdQuery,
   useListWardsQuery,
+  useListWardsPaginatedQuery,
   useCreateWardMutation,
   useListBedsQuery,
   useAddBedsMutation,
   useAssignNursesToWardMutation,
+  useDeleteWardMutation,
+  useUpdateBedMutation,
+  useDeleteBedMutation,
   useListAdmissionsQuery,
   useCreateAdmissionMutation,
   useUpdateAdmissionMutation,
+  useDeleteAdmissionMutation,
   useAddProgressNoteMutation,
   useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,

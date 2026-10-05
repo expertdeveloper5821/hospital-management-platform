@@ -826,6 +826,9 @@ describe('OPDService — example-based', () => {
 
   // ── getQueue ───────────────────────────────────────────────────────────────
   describe('getQueue', () => {
+    const page = (data: unknown[], total = data.length, openCount = 0, completedCount = 0) =>
+      ({ data, total, openCount, completedCount }) as never;
+
     test('returns all visits for the date regardless of status', async () => {
       const visits = [
         makeVisit({ visitId: 'OPD-OPEN0001', status: OPDVisitStatus.OPEN }),
@@ -833,60 +836,99 @@ describe('OPDService — example-based', () => {
         makeVisit({ visitId: 'OPD-DONE0001', status: OPDVisitStatus.COMPLETED }),
         makeVisit({ visitId: 'OPD-CANC0001', status: OPDVisitStatus.CANCELLED }),
       ];
-      mockOpdRepo.findByDate.mockResolvedValue(visits as never);
+      mockOpdRepo.findPageByDate.mockResolvedValue(page(visits, 4, 1, 1));
 
       const queue = await service.getQueue('t1', '2026-05-15');
 
-      expect(queue).toHaveLength(4);
-      expect(queue.map((v) => v.visitId)).toEqual([
+      expect(queue.data).toHaveLength(4);
+      expect(queue.data.map((v) => v.visitId)).toEqual([
         'OPD-OPEN0001', 'OPD-INPR0001', 'OPD-DONE0001', 'OPD-CANC0001',
       ]);
+      expect(queue).toMatchObject({ total: 4, page: 1, limit: 20, totalPages: 1, openCount: 1, completedCount: 1 });
     });
 
-    test('returns empty array when no visits exist for the date', async () => {
-      mockOpdRepo.findByDate.mockResolvedValue([] as never);
+    test('returns empty page when no visits exist for the date', async () => {
+      mockOpdRepo.findPageByDate.mockResolvedValue(page([]));
 
       const queue = await service.getQueue('t1', '2026-05-15');
 
-      expect(queue).toHaveLength(0);
+      expect(queue.data).toHaveLength(0);
+      expect(queue.total).toBe(0);
+      expect(queue.totalPages).toBe(0);
     });
 
-    test('passes doctorId filter to repository', async () => {
-      mockOpdRepo.findByDate.mockResolvedValue([]);
+    test('passes doctorId filter and default pagination to repository', async () => {
+      mockOpdRepo.findPageByDate.mockResolvedValue(page([]));
 
       await service.getQueue('t1', '2026-05-15', 'doc-99');
 
-      expect(mockOpdRepo.findByDate).toHaveBeenCalledWith(
+      expect(mockOpdRepo.findPageByDate).toHaveBeenCalledWith(
         't1',
         expect.any(Date),
         'doc-99',
         undefined,
         undefined,
+        1,
+        20,
       );
     });
 
     test('passes patientIds (ward scope) and nurseId (direct assignment) filters to repository', async () => {
-      mockOpdRepo.findByDate.mockResolvedValue([]);
+      mockOpdRepo.findPageByDate.mockResolvedValue(page([]));
 
       await service.getQueue('t1', '2026-05-15', undefined, undefined, ['PAT-1'], 'nurse-1');
 
-      expect(mockOpdRepo.findByDate).toHaveBeenCalledWith(
+      expect(mockOpdRepo.findPageByDate).toHaveBeenCalledWith(
         't1',
         expect.any(Date),
         undefined,
         ['PAT-1'],
         'nurse-1',
+        1,
+        20,
       );
     });
 
+    test('forwards page/limit to repository and computes totalPages from total', async () => {
+      mockOpdRepo.findPageByDate.mockResolvedValue(page([makeVisit()], 21, 15, 4));
+
+      const queue = await service.getQueue('t1', '2026-05-15', undefined, undefined, undefined, undefined, 3, 10);
+
+      expect(mockOpdRepo.findPageByDate).toHaveBeenCalledWith(
+        't1', expect.any(Date), undefined, undefined, undefined, 3, 10,
+      );
+      expect(queue).toMatchObject({ total: 21, page: 3, limit: 10, totalPages: 3, openCount: 15, completedCount: 4 });
+    });
+
+    test('search filters the whole day in memory, then paginates the matches', async () => {
+      const visits = Array.from({ length: 5 }, (_, i) => ({
+        ...makeVisit({
+          visitId: `OPD-RAVI000${i}`,
+          status:  i === 0 ? OPDVisitStatus.COMPLETED : OPDVisitStatus.OPEN,
+        }),
+        patientId: `PAT-${i}`,
+      }));
+      mockOpdRepo.findByDate.mockResolvedValue(visits as never);
+      mockPatientRepo.findNamesByPatientIds.mockResolvedValue(new Map([
+        ['PAT-0', 'Ravi Kumar'], ['PAT-1', 'Ravi Shah'], ['PAT-2', 'Anita Rao'],
+        ['PAT-3', 'Ravindra Das'], ['PAT-4', 'Meena Iyer'],
+      ]));
+
+      const queue = await service.getQueue('t1', '2026-05-15', undefined, 'ravi', undefined, undefined, 2, 2);
+
+      expect(mockOpdRepo.findPageByDate).not.toHaveBeenCalled();
+      expect(queue.data.map((v) => v.visitId)).toEqual(['OPD-RAVI0003']);
+      expect(queue).toMatchObject({ total: 3, page: 2, limit: 2, totalPages: 2, openCount: 2, completedCount: 1 });
+    });
+
     test('defaults to today when no date provided', async () => {
-      mockOpdRepo.findByDate.mockResolvedValue([]);
+      mockOpdRepo.findPageByDate.mockResolvedValue(page([]));
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
       await service.getQueue('t1');
 
-      const calledDate = (mockOpdRepo.findByDate.mock.calls[0] as unknown[])[1] as Date;
+      const calledDate = (mockOpdRepo.findPageByDate.mock.calls[0] as unknown[])[1] as Date;
       expect(calledDate.getTime()).toBeGreaterThanOrEqual(todayStart.getTime());
     });
   });

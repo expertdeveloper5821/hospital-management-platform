@@ -79,7 +79,7 @@ const BASE_VISIT: OPDVisitResponse = {
   diagnosis:    null,
   prescription: null,
   notes:        null,
-  vitals:       { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null },
+  vitals:       { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null },
   createdAt:    '2026-05-15T00:00:00.000Z',
   updatedAt:    '2026-05-15T00:00:00.000Z',
 };
@@ -96,7 +96,7 @@ describe('OPD Parcha print page — Vitals section', () => {
 
   test('renders the Vitals heading and every saved vital with its short label', () => {
     setup({
-      vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6 },
+      vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 97, pulse: 76 },
     });
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
@@ -111,6 +111,10 @@ describe('OPD Parcha print page — Vitals section', () => {
     expect(screen.getByText('95')).toBeInTheDocument();
     expect(screen.getByText('Temp')).toBeInTheDocument();
     expect(screen.getByText('98.6')).toBeInTheDocument();
+    expect(screen.getByText('SpO2')).toBeInTheDocument();
+    expect(screen.getByText('97')).toBeInTheDocument();
+    expect(screen.getByText('Pulse')).toBeInTheDocument();
+    expect(screen.getByText('76')).toBeInTheDocument();
   });
 
   test('a vital that was never recorded renders as a blank line, not a placeholder like "N/A" or "—"', () => {
@@ -126,7 +130,7 @@ describe('OPD Parcha print page — Vitals section', () => {
   });
 
   test('a partially-recorded vitals set shows saved fields and leaves the rest blank', () => {
-    setup({ vitals: { weight: 70, height: null, bloodPressure: null, sugar: 110, bodyTemperature: null } });
+    setup({ vitals: { weight: 70, height: null, bloodPressure: null, sugar: 110, bodyTemperature: null, spo2: null, pulse: null } });
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
     expect(screen.getByText('70')).toBeInTheDocument();

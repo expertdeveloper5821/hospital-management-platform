@@ -12,10 +12,11 @@ import type {
 
 export const packagesApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    listPackages: build.query<PackageListResult, { status?: PackageStatus; page?: number; limit?: number } | void>({
+    listPackages: build.query<PackageListResult, { status?: PackageStatus; search?: string; page?: number; limit?: number } | void>({
       query: (args) => {
         const params = new URLSearchParams();
         if (args?.status) params.set('status', args.status);
+        if (args?.search) params.set('search', args.search);
         if (args?.page)   params.set('page',   String(args.page));
         if (args?.limit)  params.set('limit',  String(args.limit));
         const qs = params.toString();
@@ -34,7 +35,8 @@ export const packagesApi = baseApi.injectEndpoints({
     createPackage: build.mutation<PackageResponse, CreatePackageRequest>({
       query: (body) => ({ url: '/api/packages', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<PackageResponse>) => raw.data,
-      invalidatesTags: ['Package'],
+      // A package may create a ward inline, so refresh ward lists (IPD/Wards) too.
+      invalidatesTags: ['Package', 'IPD'],
     }),
 
     updatePackage: build.mutation<PackageResponse, { packageId: string } & UpdatePackageRequest>({

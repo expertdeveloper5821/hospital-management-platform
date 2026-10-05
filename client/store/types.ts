@@ -196,7 +196,7 @@ export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' 
 // OPD Vitals — recorded via the OPD View → Edit form only (see
 // server opd.types.ts's OPDVitals for the field/unit contract): weight in kg,
 // height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F. Every field is independently
+// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
 // nullable — a visit with nothing recorded yet still reports the full shape
 // with every value null, never an undefined/missing field.
 export interface OPDVitals {
@@ -205,6 +205,8 @@ export interface OPDVitals {
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export interface OPDVisitResponse {
@@ -324,6 +326,12 @@ export interface PathologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  // The request's COMPLETED payment; null/absent = Unpaid (absent on
+  // offline-created requests not yet synced).
+  payment?:    LabPaymentSummary | null;
+  // Billing charge this request was created from — its payment is collected
+  // in Billing (Mark Paid), never via Lab's Collect Payment.
+  chargeId?:   string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -342,6 +350,28 @@ export interface RadiologyRequestResponse {
   reportUrl:   string | null;
   requestedAt: string;
   updatedAt:   string;
+  // The request's COMPLETED payment; null/absent = Unpaid (absent on
+  // offline-created requests not yet synced).
+  payment?:    LabPaymentSummary | null;
+  // Billing charge this request was created from — its payment is collected
+  // in Billing (Mark Paid), never via Lab's Collect Payment.
+  chargeId?:   string | null;
+}
+
+export interface LabPaymentSummary {
+  paymentId:        string;
+  amount:           number;
+  paymentMethod:    PaymentMethod;
+  paidAt:           string;
+  receiptAvailable: boolean;
+}
+
+// POST /api/lab/{pathology|radiology}/:requestId/payment — the patient and
+// payment reference are derived server-side from the lab request.
+export interface CollectLabPaymentRequest {
+  amount:         number;
+  paymentMethod:  'CASH' | 'UPI' | 'CARD';
+  transactionId?: string;
 }
 
 // 'SELF' or a referring doctor's userId — 'SELF' is the default/top dropdown option.
@@ -427,7 +457,7 @@ export interface ProgressNote {
 // IPD Vitals — recorded via the IPD Admission View → Edit form only (see
 // server ipd.types.ts's IPDVitals for the field/unit contract): weight in kg,
 // height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F. Every field is independently
+// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
 // nullable — an admission with nothing recorded yet still reports the full
 // shape with every value null, never an undefined/missing field. Mirrors
 // OPDVitals field-for-field.
@@ -437,6 +467,8 @@ export interface IPDVitals {
   bloodPressure:   string | null;
   sugar:           number | null;
   bodyTemperature: number | null;
+  spo2:            number | null;
+  pulse:           number | null;
 }
 
 export interface AdmissionResponse {
@@ -456,6 +488,7 @@ export interface AdmissionResponse {
   vitals:           IPDVitals;
   prescription:          string | null;
   dischargeSummaryNotes: string | null;
+  packageId:             string | null;
 }
  
 export interface WardOccupancySummary {
@@ -472,6 +505,7 @@ export interface CreateAdmissionRequest {
   wardId:           string;
   bedId:            string;
   assignedDoctorIds?: string[];
+  packageId?:       string;
 }
  
 export interface AddProgressNoteRequest {
@@ -698,6 +732,14 @@ export interface PaginatedResult<T> {
   totalPages: number;
 }
 
+// GET /api/opd/visits — one page of the queue, plus Open/Completed counts
+// across every visit matching the filters. The counts are absent when the
+// response is served from the offline cache (one unpaginated page).
+export interface OPDQueueResult extends PaginatedResult<OPDVisitResponse> {
+  openCount?:      number;
+  completedCount?: number;
+}
+
 // ─── Staff ID Card ────────────────────────────────────────────────────────────
 
 export interface StaffIdCardResponse {
@@ -737,6 +779,9 @@ export interface PackageResponse {
   price:            number;
   includedServices: string[];
   status:           PackageStatus;
+  // Linked IPD ward; null for packages created before ward linking.
+  wardId:           string | null;
+  wardName:         string | null;
   createdAt:        string;
   updatedAt:        string;
 }
@@ -746,6 +791,9 @@ export interface CreatePackageRequest {
   description?:     string;
   price:            number;
   includedServices: string[];
+  // Either link an existing ward or create one inline (Hospital Admin only).
+  wardId?:          string;
+  newWard?:         { name: string; floor?: string };
 }
 
 export interface UpdatePackageRequest {
@@ -754,6 +802,7 @@ export interface UpdatePackageRequest {
   price?:            number;
   includedServices?: string[];
   status?:           PackageStatus;
+  wardId?:           string | null;
 }
 
 export interface AssignmentResponse {
@@ -809,9 +858,15 @@ export interface ChargeResponse {
   // Only populated when category === 'LAB_TEST'.
   testTypeId:         string | null;
   testTypeName:       string | null;
+  // LAB_TEST only: the Lab request created alongside the charge.
+  labRequestId?:      string | null;
+  labRequestKind?:    'PATHOLOGY' | 'RADIOLOGY' | null;
   addedBy:            string;
-  // Only the charge-list endpoint enriches this; add/pay/cancel/bill responses omit it.
+  // Only the charge-list endpoint enriches these; add/pay/cancel/bill responses omit them.
   addedByName?:       string | null;
+  // A PAID charge's COMPLETED payment, for the receipt download.
+  paymentId?:         string | null;
+  receiptAvailable?:  boolean;
   status:             ChargeStatus;
   paidBy:             string | null;
   paidAt:             string | null;
@@ -901,6 +956,12 @@ export interface UpdateDepartmentRequest {
 // ─── Attendance ─────────────────────────────────────────────────────────────
 
 export type AttendanceStatus = 'PRESENT' | 'IN_PROGRESS' | 'ABSENT';
+
+// Device GPS fix sent with self check-in / check-out (WGS-84 decimal degrees).
+export interface GeoCoordinates {
+  latitude:  number;
+  longitude: number;
+}
 
 export interface AttendanceRecord {
   attendanceId:   string | null;

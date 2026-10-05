@@ -16,7 +16,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { cn } from '@/lib/utils';
-import type { AttendanceRecord } from '@/store/types';
+import { getCurrentCoordinates, geolocationErrorMessage } from '@/lib/geolocation';
+import { toastError } from '@/lib/toast';
+import type { AttendanceRecord, GeoCoordinates } from '@/store/types';
 import {
   CalendarCheck,
   LogIn,
@@ -30,6 +32,7 @@ import {
   ChevronDown,
   Search,
 } from 'lucide-react';
+import { NavForm } from '@/components/ui/form';
 
 // Roles that can check in/out for themselves *and* manage attendance for any employee.
 const MANAGER_ROLES = new Set(['HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'HR']);
@@ -272,18 +275,19 @@ function ConfirmActionModal({ action, isLoading, onCancel, onConfirm }: ConfirmA
 
 interface TodayStatusCardProps {
   todayRow:    AttendanceRecord | undefined;
-  onCheckIn:   () => void;
-  onCheckOut:  () => void;
+  onCheckIn:   (location: GeoCoordinates) => void;
+  onCheckOut:  (location: GeoCoordinates) => void;
   checkingIn:  boolean;
   checkingOut: boolean;
 }
 
 function TodayStatusCard({ todayRow, onCheckIn, onCheckOut, checkingIn, checkingOut }: TodayStatusCardProps) {
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [locating,      setLocating]      = useState(false);
 
   const hasCheckedIn  = !!todayRow?.checkIn;
   const hasCheckedOut = !!todayRow?.checkOut;
-  const isBusy        = checkingIn || checkingOut;
+  const isBusy        = checkingIn || checkingOut || locating;
   const isRunning      = hasCheckedIn && !hasCheckedOut;
 
   const clock = useLiveClock(isRunning);
@@ -300,10 +304,22 @@ function TodayStatusCard({ todayRow, onCheckIn, onCheckOut, checkingIn, checking
       ? new Date(todayRow.checkOut).getTime() - new Date(todayRow.checkIn).getTime()
       : 0;
 
-  function handleConfirm() {
-    if (pendingAction === 'check-in') onCheckIn();
-    else if (pendingAction === 'check-out') onCheckOut();
+  // Attendance is only submitted with a fresh GPS fix — if location can't be
+  // captured, nothing is sent and the user is told why.
+  async function handleConfirm() {
+    const action = pendingAction;
     setPendingAction(null);
+    if (!action) return;
+    setLocating(true);
+    try {
+      const location = await getCurrentCoordinates();
+      if (action === 'check-in') onCheckIn(location);
+      else onCheckOut(location);
+    } catch (err) {
+      toastError(`Could not ${action === 'check-in' ? 'check in' : 'check out'}`, geolocationErrorMessage(err));
+    } finally {
+      setLocating(false);
+    }
   }
 
   return (
@@ -333,7 +349,7 @@ function TodayStatusCard({ todayRow, onCheckIn, onCheckOut, checkingIn, checking
           )}
         >
           {isRunning ? <LogOut className="h-4 w-4" /> : <LogIn className="h-4 w-4" />}
-          {checkingIn ? 'Checking in…' : checkingOut ? 'Checking out…' : isRunning ? 'Check Out' : 'Check In'}
+          {locating ? 'Getting location…' : checkingIn ? 'Checking in…' : checkingOut ? 'Checking out…' : isRunning ? 'Check Out' : 'Check In'}
         </button>
       </div>
 
@@ -511,7 +527,7 @@ function EditAttendanceModal({ record, onClose }: EditAttendanceModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <NavForm onSubmit={handleSubmit} className="space-y-3">
           <TimeField id="edit-checkin"  label="Check In"  value={checkIn}  onChange={setCheckIn} />
           <TimeField id="edit-checkout" label="Check Out" value={checkOut} onChange={setCheckOut} />
 
@@ -523,7 +539,7 @@ function EditAttendanceModal({ record, onClose }: EditAttendanceModalProps) {
             <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>Cancel</Button>
             <Button type="submit" disabled={isLoading}>{isLoading ? 'Saving…' : 'Save Changes'}</Button>
           </div>
-        </form>
+        </NavForm>
       </div>
     </DialogOverlay>
   );
@@ -640,8 +656,8 @@ export default function AttendancePage() {
       {showStatusCard && (
         <TodayStatusCard
           todayRow={todayRow}
-          onCheckIn={() => checkIn()}
-          onCheckOut={() => checkOut()}
+          onCheckIn={(location) => checkIn(location)}
+          onCheckOut={(location) => checkOut(location)}
           checkingIn={checkingIn}
           checkingOut={checkingOut}
         />

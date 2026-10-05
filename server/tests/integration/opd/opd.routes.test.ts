@@ -33,6 +33,7 @@ import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { WardModel }         from '../../../src/modules/ipd/ward.model';
 import { PaymentModel }      from '../../../src/modules/payment/payment.model';
 import { paymentRepository } from '../../../src/modules/payment/payment.repository';
+import { opdRepository }     from '../../../src/modules/opd/opd.repository';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { OPDVisitStatus }         from '../../../src/modules/opd/opd.types';
 import { Gender }                 from '../../../src/modules/patient/patient.types';
@@ -585,19 +586,19 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toContain('OPD-OPEN0001');
     expect(visitIds).toContain('OPD-INPR0001');
     expect(visitIds).toContain('OPD-DONE0001');
     expect(visitIds).toContain('OPD-CANC0001');
   });
 
-  test('200 — orders visits by newest-created first, regardless of queueNumber/insertion order', async () => {
+  test('200 — orders visits by oldest-created first (new visits at the bottom), regardless of queueNumber/insertion order', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
 
     // Insert out of chronological order, with explicit createdAt timestamps,
-    // so the assertion can only pass if the query sorts by createdAt desc
+    // so the assertion can only pass if the query sorts by createdAt asc
     // rather than relying on insertion/document order.
     await OPDVisitModel.create({
       visitId:        'OPD-MID00001',
@@ -648,8 +649,47 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
-    expect(visitIds).toEqual(['OPD-NEW00001', 'OPD-MID00001', 'OPD-OLD00001']);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
+    expect(visitIds).toEqual(['OPD-OLD00001', 'OPD-MID00001', 'OPD-NEW00001']);
+  });
+
+  test('200 — oldest-first order continues across pages and through the search path (day-wise S. No.)', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+
+    const ids = ['OPD-SEQ00003', 'OPD-SEQ00001', 'OPD-SEQ00002'];
+    for (const visitId of ids) {
+      const n = Number(visitId.slice(-1));
+      await OPDVisitModel.create({
+        visitId,
+        tenantId:     tid,
+        patientId:    'PAT-TEST0001',
+        doctorIds:    [],
+        visitDate:    new Date('2026-05-15T00:00:00.000Z'),
+        queueNumber:  n,
+        status:       OPDVisitStatus.OPEN,
+        diagnosis:    null,
+        prescription: null,
+        notes:        null,
+        createdAt:    new Date(`2026-05-15T0${n}:00:00.000Z`),
+      });
+    }
+
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    const idsOf = (res: request.Response) =>
+      res.body.data.data.map((v: { visitId: string }) => v.visitId);
+
+    const page1 = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', page: 1, limit: 2 }).set(bearer(token));
+    const page2 = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', page: 2, limit: 2 }).set(bearer(token));
+    expect(idsOf(page1)).toEqual(['OPD-SEQ00001', 'OPD-SEQ00002']);
+    expect(idsOf(page2)).toEqual(['OPD-SEQ00003']);
+
+    const searched = await request(app).get('/api/opd/visits')
+      .query({ date: '2026-05-15', search: 'PAT-TEST', page: 2, limit: 2 }).set(bearer(token));
+    expect(idsOf(searched)).toEqual(['OPD-SEQ00003']);
   });
 
   test('200 — filters queue by doctorId', async () => {
@@ -667,8 +707,8 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].visitId).toBe('OPD-DOC10001');
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].visitId).toBe('OPD-DOC10001');
   });
 
   test('200 — Doctor sees only their own assigned visits, even when a different doctorId is requested', async () => {
@@ -689,8 +729,8 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].visitId).toBe('OPD-MINE0001');
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].visitId).toBe('OPD-MINE0001');
   });
 
   test('200 — Doctor sees all of their own visits regardless of status (open, in-progress, completed, cancelled)', async () => {
@@ -711,10 +751,10 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toEqual(expect.arrayContaining(['OPD-D-OPEN1', 'OPD-D-DONE1', 'OPD-D-CANC1']));
     expect(visitIds).not.toContain('OPD-OTHRDOC');
-    expect(res.body.data).toHaveLength(3);
+    expect(res.body.data.data).toHaveLength(3);
   });
 
   test('200 — returns empty array when no active visits', async () => {
@@ -729,7 +769,7 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data.data).toHaveLength(0);
   });
 
   test('200 — tenant isolation: only own visits returned', async () => {
@@ -747,8 +787,74 @@ describe('GET /api/opd/visits', () => {
       .set(bearer(tokA));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].visitId).toBe('OPD-TENA0001');
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].visitId).toBe('OPD-TENA0001');
+  });
+
+  test('200 — paginates with page/limit; total and Open/Completed counts span every page', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    // Today's date (IST), so getQueue's stale-visit sweep leaves the OPEN
+    // visits alone and the Open count is meaningful.
+    const statuses = [
+      OPDVisitStatus.OPEN, OPDVisitStatus.OPEN, OPDVisitStatus.COMPLETED,
+      OPDVisitStatus.CANCELLED, OPDVisitStatus.IN_PROGRESS,
+    ];
+    for (const [i, status] of statuses.entries()) {
+      await seedVisit(tid, { visitId: `OPD-PAGE000${i + 1}`, status });
+    }
+    await OPDVisitModel.updateMany({ tenantId: tid }, { $set: { visitDate: toIstMidnight(new Date()) } });
+
+    const rc    = await seedUser(tid, 'rc-page@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const seen: string[] = [];
+    for (const page of [1, 2, 3]) {
+      const res = await request(app)
+        .get('/api/opd/visits')
+        .query({ page, limit: 2 })
+        .set(bearer(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({
+        total: 5, page, limit: 2, totalPages: 3, openCount: 2, completedCount: 1,
+      });
+      expect(res.body.data.data).toHaveLength(page === 3 ? 1 : 2);
+      seen.push(...res.body.data.data.map((v: { visitId: string }) => v.visitId));
+    }
+    // Every visit appears exactly once across the pages.
+    expect(new Set(seen).size).toBe(5);
+  });
+
+  test('200 — defaults to page 1 with a limit of 20', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DFLT0001' });
+
+    const rc    = await seedUser(tid, 'rc-dflt@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/visits')
+      .query({ date: '2026-05-15' })
+      .set(bearer(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ total: 1, page: 1, limit: 20, totalPages: 1 });
+  });
+
+  test('400 — rejects a limit above 100', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    const rc     = await seedUser(tid, 'rc-lim@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .get('/api/opd/visits')
+      .query({ limit: 101 })
+      .set(bearer(token));
+
+    expect(res.status).toBe(400);
   });
 
   test('401 — unauthenticated', async () => {
@@ -837,8 +943,8 @@ describe('Nurse ward-scoped access restriction', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].visitId).toBe('OPD-NWA0001');
+    expect(res.body.data.data).toHaveLength(1);
+    expect(res.body.data.data[0].visitId).toBe('OPD-NWA0001');
   });
 
   test('200 — nurse can fetch an OPD visit for a patient in their own ward by direct visitId', async () => {
@@ -890,7 +996,7 @@ describe('Nurse ward-scoped access restriction', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data.data).toHaveLength(0);
   });
 
   test('200 — other roles (Receptionist) continue to see all OPD visits as before', async () => {
@@ -914,7 +1020,7 @@ describe('Nurse ward-scoped access restriction', () => {
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.data).toHaveLength(2);
   });
 });
 
@@ -1525,7 +1631,7 @@ describe('PATCH /api/opd/visits/:visitId', () => {
 // ─── OPD Vitals (PATCH /api/opd/visits/:visitId) ──────────────────────────────
 describe('OPD Vitals', () => {
   const VITALS = {
-    weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6,
+    weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
   };
 
   test('200 — a fresh visit reports the default (all-null) vitals shape', async () => {
@@ -1539,7 +1645,7 @@ describe('OPD Vitals', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.vitals).toEqual({
-      weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null,
+      weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
     });
   });
 
@@ -1711,6 +1817,10 @@ describe('OPD Vitals', () => {
     ['sugar too high', { sugar: 5000 }],
     ['body temperature too low', { bodyTemperature: 10 }],
     ['body temperature too high', { bodyTemperature: 200 }],
+    ['SpO2 too low', { spo2: 10 }],
+    ['SpO2 too high', { spo2: 101 }],
+    ['pulse too low', { pulse: 5 }],
+    ['pulse too high', { pulse: 300 }],
     ['blood pressure missing the slash', { bloodPressure: '12080' }],
     ['blood pressure non-numeric', { bloodPressure: 'high/low' }],
   ])('400 — rejects an out-of-range/malformed vital: %s', async (_label, badVitals) => {
@@ -1764,6 +1874,57 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(200);
     const visit = res.body.data.data.find((v: { visitId: string }) => v.visitId === 'OPD-VIT00012');
     expect(visit.vitals).toEqual(VITALS);
+  });
+
+  // ── Visit-wise vitals — never shared across a patient's visits/admissions ──
+  test('201 — a new visit starts with empty vitals even when the patient has earlier recorded vitals', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    await seedVisit(tid, { visitId: 'OPD-VITOLD01', status: OPDVisitStatus.COMPLETED });
+    await OPDVisitModel.updateOne({ tenantId: tid, visitId: 'OPD-VITOLD01' }, { $set: { vitals: VITALS } });
+    const rc    = await seedUser(tid, 'rc-vitnew@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app).post('/api/opd/visits').set(bearer(token)).send(VALID_VISIT_BODY);
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.vitals).toEqual({
+      weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+    });
+  });
+
+  test("200 — recording vitals on an open visit leaves the same patient's completed visit and IPD admission untouched", async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedPatient(tid);
+    const doctor = await seedUser(tid, 'doc-vitiso@h.com', UserRole.DOCTOR);
+    await seedVisit(tid, { visitId: 'OPD-VITHIST1', status: OPDVisitStatus.COMPLETED, doctorIds: [doctor._id.toString()] });
+    await OPDVisitModel.updateOne({ tenantId: tid, visitId: 'OPD-VITHIST1' }, { $set: { vitals: VITALS } });
+    await seedVisit(tid, { visitId: 'OPD-VITCURR1', doctorIds: [doctor._id.toString()] });
+    await IPDAdmissionModel.create({
+      admissionId: 'c3000000-0000-0000-0000-000000000001', tenantId: tid, patientId: 'PAT-TEST0001',
+      wardId: 'w-1', wardName: 'General', bedId: 'b-1', bedNumber: 'G-01',
+      status: 'DISCHARGED', admissionDate: new Date(), dischargeDate: new Date(), progressNotes: [],
+      vitals: VITALS,
+    });
+    const token = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-VITCURR1')
+      .set(bearer(token))
+      .send({ vitals: { weight: 80, pulse: 90 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals).toEqual({
+      weight: 80, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: 90,
+    });
+    const history = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-VITHIST1' });
+    expect(history?.vitals?.weight).toBe(VITALS.weight);
+    expect(history?.vitals?.pulse).toBe(VITALS.pulse);
+    const admission = await IPDAdmissionModel.findOne({ tenantId: tid, admissionId: 'c3000000-0000-0000-0000-000000000001' });
+    expect(admission?.vitals?.weight).toBe(VITALS.weight);
+    expect(admission?.vitals?.pulse).toBe(VITALS.pulse);
   });
 });
 
@@ -1937,6 +2098,46 @@ describe('DELETE /api/opd/visits/:visitId', () => {
 
     expect(res.status).toBe(409);
     expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DEL00002' })).not.toBeNull();
+  });
+
+  test('409 — Receptionist cannot delete an IN_PROGRESS (In Consultation) visit; its payment stays COMPLETED', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DELINP01', status: OPDVisitStatus.IN_PROGRESS });
+    const paymentId = await seedOpdPayment(tid, { visitId: 'OPD-DELINP01' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/opd/visits/OPD-DELINP01')
+      .set(bearer(token));
+
+    expect(res.status).toBe(409);
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DELINP01' })).not.toBeNull();
+    expect((await PaymentModel.findOne({ tenantId: tid, paymentId }))!.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('409 — consultation started between the status check and the delete: the visit is kept', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await seedVisit(tid, { visitId: 'OPD-DELRACE1' });
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+    // Service reads OPEN, then the atomic delete must still refuse IN_PROGRESS.
+    const spy = jest.spyOn(opdRepository, 'findByVisitId').mockImplementationOnce(async (t, v) => {
+      const visit = await OPDVisitModel.findOne({ tenantId: t, visitId: v });
+      await OPDVisitModel.updateOne({ tenantId: t, visitId: v }, { $set: { status: OPDVisitStatus.IN_PROGRESS } });
+      return visit;
+    });
+
+    try {
+      const res = await request(app).delete('/api/opd/visits/OPD-DELRACE1').set(bearer(token));
+      expect(res.status).toBe(409);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-DELRACE1' })).not.toBeNull();
   });
 
   test('404 — unknown visitId', async () => {
@@ -2992,7 +3193,7 @@ describe('Nurse OPD visibility — direct visit assignment (multi-nurse)', () =>
       .query({ date: '2026-05-15' })
       .set(bearer(token));
     expect(queueRes.status).toBe(200);
-    expect(queueRes.body.data.map((v: { visitId: string }) => v.visitId)).toContain('OPD-DN00001');
+    expect(queueRes.body.data.data.map((v: { visitId: string }) => v.visitId)).toContain('OPD-DN00001');
 
     const directRes = await request(app).get('/api/opd/visits/OPD-DN00001').set(bearer(token));
     expect(directRes.status).toBe(200);
@@ -3039,10 +3240,10 @@ describe('Nurse OPD visibility — direct visit assignment (multi-nurse)', () =>
       .set(bearer(token));
 
     expect(res.status).toBe(200);
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toEqual(expect.arrayContaining(['OPD-DN00003', 'OPD-DN00004']));
     expect(visitIds).not.toContain('OPD-DN00005');
-    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.data).toHaveLength(2);
   });
 
   // Patient history is a bulk, patient-level list (every OPD visit for that
@@ -3108,7 +3309,7 @@ describe('Nurse OPD visibility — visit-level scoping (no patientId-based leak)
 
       const queueRes = await request(app)
         .get('/api/opd/visits').query({ date: '2026-05-15' }).set(bearer(token));
-      expect(queueRes.body.data.map((v: { visitId: string }) => v.visitId)).toContain('OPD-VS00001');
+      expect(queueRes.body.data.data.map((v: { visitId: string }) => v.visitId)).toContain('OPD-VS00001');
 
       const directRes = await request(app).get('/api/opd/visits/OPD-VS00001').set(bearer(token));
       expect(directRes.status).toBe(200);
@@ -3130,7 +3331,7 @@ describe('Nurse OPD visibility — visit-level scoping (no patientId-based leak)
     const res    = await request(app)
       .get('/api/opd/visits').query({ date: '2026-05-15' }).set(bearer(tokenA));
 
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toContain('OPD-VS00002A');
     expect(visitIds).not.toContain('OPD-VS00002B'); // nurseA is NOT on this one
   });
@@ -3166,7 +3367,7 @@ describe('Nurse OPD visibility — visit-level scoping (no patientId-based leak)
 
     const queueRes = await request(app)
       .get('/api/opd/visits').query({ date: '2026-05-15' }).set(bearer(token));
-    const visitIds = queueRes.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = queueRes.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toContain('OPD-VS00004A');     // still sees the one she IS on
     expect(visitIds).not.toContain('OPD-VS00004B'); // not the unassigned one, despite shared history
 
@@ -3186,7 +3387,7 @@ describe('Nurse OPD visibility — visit-level scoping (no patientId-based leak)
       .get('/api/opd/visits').query({ date: '2026-05-15' }).set(bearer(token));
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toHaveLength(0);
+    expect(res.body.data.data).toHaveLength(0);
   });
 
   test('200 — a nurse directly assigned to the visit can start the consultation', async () => {
@@ -3256,7 +3457,7 @@ describe('Nurse OPD visibility — visit-level scoping (no patientId-based leak)
     const res   = await request(app)
       .get('/api/opd/visits').query({ date: '2026-05-15' }).set(bearer(token));
 
-    const visitIds = res.body.data.map((v: { visitId: string }) => v.visitId);
+    const visitIds = res.body.data.data.map((v: { visitId: string }) => v.visitId);
     expect(visitIds).toEqual(expect.arrayContaining(['OPD-VS00009A', 'OPD-VS00009B']));
   });
 });
@@ -3449,7 +3650,7 @@ describe('Clinical field encryption at rest — OPD diagnosis/prescription', () 
       .query({ date: '2026-05-15' })
       .set(bearer(token));
     expect(queueRes.status).toBe(200);
-    const queued = queueRes.body.data.find((v: { visitId: string }) => v.visitId === 'OPD-ENC00002');
+    const queued = queueRes.body.data.data.find((v: { visitId: string }) => v.visitId === 'OPD-ENC00002');
     expect(queued.diagnosis).toBe('Lumbar strain');
     expect(queued.notes).toBe(NOTE);
 

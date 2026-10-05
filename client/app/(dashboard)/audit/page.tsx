@@ -21,6 +21,7 @@ import { Badge }  from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { cn, toTitleCase } from '@/lib/utils';
 import { todayLocalISO, clampToToday } from '@/lib/date';
+import { serialNumber, serialOffset } from '@/lib/serial-number';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ export default function AuditPage() {
   }
 
   const logs       = data?.data       ?? [];
+  const serialStart = serialOffset(data, page, LIMIT);
   const total      = data?.total      ?? 0;
   const totalPages = data?.totalPages ?? 1;
 
@@ -355,6 +357,7 @@ export default function AuditPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
+                      <th className="px-4 py-3 text-left font-medium text-muted-foreground w-16 whitespace-nowrap">S. No.</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity Type</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Entity ID</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground whitespace-nowrap">Action</th>
@@ -363,11 +366,12 @@ export default function AuditPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {logs.map((log) => (
+                    {logs.map((log, idx) => (
                       <tr
                         key={log.auditId}
                         className="border-b last:border-0 hover:bg-muted/30 transition-colors"
                       >
+                        <td className="px-4 py-3 text-muted-foreground tabular-nums whitespace-nowrap">{serialNumber(serialStart, idx)}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-xs font-medium">
                             {log.entityType.replace(/_/g, ' ')}

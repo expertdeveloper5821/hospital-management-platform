@@ -234,7 +234,7 @@ export async function buildDischargeSummaryPdf(data: DischargeSummaryData): Prom
       // ── Patient Information ──────────────────────────────────────────────────
       sectionHeading('Patient Information');
       field('Patient Name:', data.patient.fullName);
-      field('Patient ID:', data.patient.patientId);
+      field('UHID:', data.patient.patientId);
       field('Age / Gender:', `${data.patient.age} years / ${data.patient.gender}`);
       field('Mobile Number:', data.patient.mobileNumber);
       field('Address:', data.patient.address);

@@ -17,6 +17,12 @@ jest.mock('@/store/api/packages.api', () => ({
   useCreatePackageMutation: () => [mockCreate, { isLoading: false, error: undefined }],
 }));
 
+jest.mock('@/store/api/ipd.api', () => ({
+  useListWardsQuery: () => ({
+    data: [{ wardId: 'ward-1', name: 'Maternity Ward', floor: '2', assignedNurseIds: [] }],
+  }),
+}));
+
 let mockRole = 'HOSPITAL_ADMIN';
 
 jest.mock('@/store/hooks', () => ({
@@ -90,5 +96,91 @@ describe('NewPackagePage — role gating', () => {
     mockRole = 'DOCTOR';
     render(<NewPackagePage />);
     expect(mockReplace).toHaveBeenCalledWith('/packages');
+  });
+});
+
+describe('NewPackagePage — ward linking', () => {
+  beforeEach(() => {
+    mockReplace.mockClear();
+    mockPush.mockClear();
+    mockCreate.mockReset();
+    mockCreate.mockReturnValue({ unwrap: () => Promise.resolve({ packageId: 'PKG-1' }) });
+  });
+
+  async function fillBasics(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByLabelText(/^name/i), 'Maternity Package');
+    await user.type(screen.getByLabelText(/^price/i), '25000');
+    await user.type(screen.getByPlaceholderText('Service 1'), 'Delivery');
+  }
+
+  test('RECEPTIONIST can link an existing ward but cannot create one inline', async () => {
+    mockRole = 'RECEPTIONIST';
+    const user = userEvent.setup();
+    render(<NewPackagePage />);
+
+    expect(screen.queryByRole('button', { name: /create new ward/i })).not.toBeInTheDocument();
+    await fillBasics(user);
+    await user.selectOptions(screen.getByLabelText(/^ward$/i), 'ward-1');
+    await user.click(screen.getByRole('button', { name: /^create package$/i }));
+
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ wardId: 'ward-1' }));
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty('newWard');
+  });
+
+  test('no ward selected sends neither wardId nor newWard (ward is optional)', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    const user = userEvent.setup();
+    render(<NewPackagePage />);
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /^create package$/i }));
+
+    const body = mockCreate.mock.calls[0][0];
+    expect(body).not.toHaveProperty('wardId');
+    expect(body).not.toHaveProperty('newWard');
+  });
+
+  test('HOSPITAL_ADMIN can create a new ward inline', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    const user = userEvent.setup();
+    render(<NewPackagePage />);
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /create new ward/i }));
+    await user.type(screen.getByLabelText(/new ward name/i), 'Package Ward');
+    await user.type(screen.getByLabelText(/new ward floor/i), '3');
+    await user.click(screen.getByRole('button', { name: /^create package$/i }));
+
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      newWard: { name: 'Package Ward', floor: '3' },
+    }));
+    expect(mockCreate.mock.calls[0][0]).not.toHaveProperty('wardId');
+    expect(mockPush).toHaveBeenCalledWith('/packages');
+  });
+
+  test('HOSPITAL_ADMIN must name the new ward', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    const user = userEvent.setup();
+    render(<NewPackagePage />);
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /create new ward/i }));
+    await user.click(screen.getByRole('button', { name: /^create package$/i }));
+
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(screen.getByText(/ward name is required/i)).toBeInTheDocument();
+  });
+
+  test('a backend error (e.g. duplicate ward name) is shown and the user stays on the form', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockCreate.mockReturnValue({
+      unwrap: () => Promise.reject({ data: { message: 'Ward "Package Ward" already exists' } }),
+    });
+    const user = userEvent.setup();
+    render(<NewPackagePage />);
+    await fillBasics(user);
+    await user.click(screen.getByRole('button', { name: /create new ward/i }));
+    await user.type(screen.getByLabelText(/new ward name/i), 'Package Ward');
+    await user.click(screen.getByRole('button', { name: /^create package$/i }));
+
+    expect(await screen.findByText(/already exists/i)).toBeInTheDocument();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

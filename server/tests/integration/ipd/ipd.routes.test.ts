@@ -34,6 +34,8 @@ import { PatientModel } from '../../../src/modules/patient/patient.model';
 import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { AdmissionStatus } from '../../../src/modules/ipd/ipd.types';
+import { PaymentModel } from '../../../src/modules/payment/payment.model';
+import { PaymentMethod, PaymentStatus, PaymentReferenceType } from '../../../src/modules/payment/payment.types';
 
 const JWT_SECRET = process.env['JWT_SECRET']!;
 
@@ -717,6 +719,98 @@ describe('GET /api/ipd/admissions', () => {
   });
 });
 
+describe('GET /api/ipd/admissions — pagination', () => {
+  // Every admission shares one admissionDate so page boundaries depend on the
+  // sort's _id tiebreaker — without it, rows could repeat or vanish across pages.
+  const SAME_DATE = new Date('2026-01-01T00:00:00.000Z');
+
+  // One active admission per patient (uniq_active_admission_per_patient), so
+  // each ADMITTED row gets its own patient: 15 named "Ravi …", 10 "Sita …".
+  const patientIdOf = (i: number) => `PAT-PG-${String(i).padStart(2, '0')}`;
+
+  async function seedAdmissions(tenantId: string) {
+    await PatientModel.create(Array.from({ length: 25 }, (_, i) => ({
+      patientId: patientIdOf(i), tenantId,
+      fullName:  i < 15 ? `Ravi Kumar ${i}` : `Sita Devi ${i}`,
+      dateOfBirth: new Date('1985-01-01'), gender: 'MALE',
+      mobileNumber: `90000001${String(i).padStart(2, '0')}`, address: 'A',
+    })));
+    const rows = Array.from({ length: 25 }, (_, i) => ({
+      admissionId: `adm-pg-${String(i).padStart(2, '0')}`,
+      patientId:   patientIdOf(i),
+      wardId: 'ward-pg', wardName: 'General', bedId: `bed-${i}`, bedNumber: `G-${i}`,
+      status: AdmissionStatus.ADMITTED, admissionDate: SAME_DATE,
+      dischargeDate: null, progressNotes: [], tenantId,
+    }));
+    // Plus 3 discharged admissions that must never appear under status=ADMITTED.
+    const discharged = Array.from({ length: 3 }, (_, i) => ({
+      admissionId: `adm-pg-dis-${i}`, patientId: patientIdOf(i),
+      wardId: 'ward-pg', wardName: 'General', bedId: `bed-d${i}`, bedNumber: `D-${i}`,
+      status: AdmissionStatus.DISCHARGED, admissionDate: SAME_DATE,
+      dischargeDate: SAME_DATE, progressNotes: [], tenantId,
+    }));
+    await IPDAdmissionModel.create([...rows, ...discharged]);
+  }
+
+  async function getPage(token: string, qs: string) {
+    return request(app).get(`/api/ipd/admissions?${qs}`).set('Authorization', `Bearer ${token}`);
+  }
+
+  test('walks every page with accurate totals and no duplicate/missing rows', async () => {
+    const tenant = await seedTenant();
+    await seedAdmissions(toId(tenant));
+    const token = makeToken('admin-001', toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    const seen: string[] = [];
+    const sizes: number[] = [];
+    for (let page = 1; page <= 3; page++) {
+      const res = await getPage(token, `page=${page}&limit=10`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ total: 25, page, limit: 10, totalPages: 3 });
+      sizes.push(res.body.data.data.length);
+      seen.push(...res.body.data.data.map((a: { admissionId: string }) => a.admissionId));
+    }
+
+    expect(sizes).toEqual([10, 10, 5]);
+    expect(new Set(seen).size).toBe(25);
+    expect(seen.every((id) => !id.startsWith('adm-pg-dis-'))).toBe(true);
+  });
+
+  test('a page past the end returns no rows but keeps the real total', async () => {
+    const tenant = await seedTenant();
+    await seedAdmissions(toId(tenant));
+    const token = makeToken('admin-001', toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    const res = await getPage(token, 'page=4&limit=10');
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(0);
+    expect(res.body.data).toMatchObject({ total: 25, totalPages: 3 });
+  });
+
+  test('search and status filters are applied before paginating', async () => {
+    const tenant = await seedTenant();
+    await seedAdmissions(toId(tenant));
+    const token = makeToken('admin-001', toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    const search = await getPage(token, 'search=ravi&page=2&limit=10');
+    expect(search.body.data).toMatchObject({ total: 15, page: 2, totalPages: 2 });
+    expect(search.body.data.data).toHaveLength(5);
+    expect(search.body.data.data.every((a: { fullName: string }) => a.fullName.startsWith('Ravi'))).toBe(true);
+
+    const discharged = await getPage(token, 'status=DISCHARGED&page=1&limit=10');
+    expect(discharged.body.data).toMatchObject({ total: 3, totalPages: 1 });
+    expect(discharged.body.data.data).toHaveLength(3);
+  });
+
+  test('rejects an out-of-range page or limit with 400', async () => {
+    const tenant = await seedTenant();
+    const token  = makeToken('admin-001', toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    expect((await getPage(token, 'page=0')).status).toBe(400);
+    expect((await getPage(token, 'limit=101')).status).toBe(400);
+  });
+});
+
 // ─── Nurse ward-scoped access (backend-enforced) ─────────────────────────────
 describe('Nurse ward-scoped access restriction', () => {
   async function seedAdmission(opts: {
@@ -1227,5 +1321,474 @@ describe('IPD route middleware order — requireRole before requireFirstPassword
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
+  });
+});
+
+// ─── Receptionist IPD edit scope, delete + payment cancellation, per-admission vitals ──
+
+const ADM_RC_ID    = 'b3000000-0000-0000-0000-000000000001';
+const ADM_RC_OLD   = 'b3000000-0000-0000-0000-000000000002';
+const ADM_RC_OTHER = 'b3000000-0000-0000-0000-000000000003';
+
+const RC_VITALS = {
+  weight: 70, height: 170, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
+};
+const EMPTY_VITALS = {
+  weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+};
+
+async function seedOtherTenant() {
+  return TenantModel.create({
+    name:       'Other Hospital',
+    status:     TenantStatus.ACTIVE,
+    adminEmail: 'admin@other-inttest.com',
+    onboardingDocuments: {
+      registrationCertificate: 's3-key-3',
+      gstNumber:               'GST456',
+      panCard:                 's3-key-4',
+      addressLine:             '1 Other Street',
+      city:                    'Pune',
+      state:                   'Maharashtra',
+      pincode:                 '411001',
+    },
+    branding: { displayName: 'Other Hospital', primaryColor: '#000', logoUrl: null },
+  });
+}
+
+async function seedSecondPatient(tenantId: string, patientId = 'PAT-INT00002') {
+  return PatientModel.create({
+    patientId,
+    tenantId,
+    fullName:     'Second Patient',
+    dateOfBirth:  new Date('1990-01-01'),
+    gender:       'FEMALE',
+    mobileNumber: '9000000002',
+    address:      'Second Address, City',
+  });
+}
+
+async function seedAdmission(tenantId: string, overrides: Partial<{
+  admissionId: string; patientId: string; wardId: string; bedId: string; status: AdmissionStatus;
+  vitals: typeof RC_VITALS;
+}> = {}) {
+  const status = overrides.status ?? AdmissionStatus.ADMITTED;
+  return IPDAdmissionModel.create({
+    admissionId:       overrides.admissionId ?? ADM_RC_ID,
+    patientId:         overrides.patientId   ?? 'PAT-INT00001',
+    wardId:            overrides.wardId      ?? 'ward-placeholder',
+    wardName:          'General Ward',
+    bedId:             overrides.bedId       ?? 'bed-placeholder',
+    bedNumber:         'G-01',
+    assignedDoctorIds: [],
+    status,
+    admissionDate:     new Date(),
+    dischargeDate:     status === AdmissionStatus.DISCHARGED ? new Date() : null,
+    progressNotes:     [],
+    ...(overrides.vitals ? { vitals: overrides.vitals } : {}),
+    tenantId,
+  });
+}
+
+async function seedIpdPayment(
+  tenantId:      string,
+  paymentId:     string,
+  admissionId:   string,
+  referenceType: string = PaymentReferenceType.IPD_ADMISSION,
+) {
+  return PaymentModel.create({
+    paymentId,
+    tenantId,
+    patientId:     'PAT-INT00001',
+    amount:        5000,
+    paymentMethod: PaymentMethod.CASH,
+    description:   'IPD Admission',
+    status:        PaymentStatus.COMPLETED,
+    referenceType,
+    referenceId:   admissionId,
+    createdBy:     'rc-001',
+  });
+}
+
+describe('PATCH /api/ipd/admissions/:admissionId — Receptionist edit scope', () => {
+  test('200 — Receptionist can record vitals', async () => {
+    const tenant = await seedTenant();
+    await seedAdmission(toId(tenant));
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: RC_VITALS });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals).toEqual(RC_VITALS);
+  });
+
+  test('200 — Receptionist can correct the patient of an admission', async () => {
+    const tenant = await seedTenant();
+    await seedPatient(toId(tenant));
+    await seedSecondPatient(toId(tenant));
+    await seedAdmission(toId(tenant));
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: 'PAT-INT00002' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.patientId).toBe('PAT-INT00002');
+    expect(res.body.data.fullName).toBe('Second Patient');
+  });
+
+  test('200 — Receptionist keeps doctor/ward/bed edit access, alongside patient + vitals in the same save', async () => {
+    const tenant = await seedTenant();
+    await seedPatient(toId(tenant));
+    await seedSecondPatient(toId(tenant));
+    const doctor = await seedUser(UserRole.DOCTOR, toId(tenant));
+    const ward   = await seedWard(toId(tenant));
+    const oldBed = await seedBed(toId(ward), toId(tenant), true);
+    const newBed = await BedModel.create({ wardId: toId(ward), bedNumber: 'G-02', isOccupied: false, tenantId: toId(tenant) });
+    await BedModel.updateOne({ _id: oldBed._id }, { currentAdmissionId: ADM_RC_ID });
+    await seedAdmission(toId(tenant), { wardId: toId(ward), bedId: toId(oldBed) });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        assignedDoctorIds: [toId(doctor)],
+        wardId:            toId(ward),
+        bedId:             toId(newBed),
+        patientId:         'PAT-INT00002',
+        vitals:            { weight: 70 },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.assignedDoctorIds).toEqual([toId(doctor)]);
+    expect(res.body.data.bedId).toBe(toId(newBed));
+    expect(res.body.data.patientId).toBe('PAT-INT00002');
+    expect(res.body.data.vitals.weight).toBe(70);
+    expect((await BedModel.findById(oldBed._id))?.isOccupied).toBe(false);
+    expect((await BedModel.findById(newBed._id))?.isOccupied).toBe(true);
+  });
+
+  test.each([UserRole.DOCTOR, UserRole.NURSE, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN])(
+    '403 — %s cannot change the patient of an admission',
+    async (role) => {
+      const tenant = await seedTenant();
+      await seedSecondPatient(toId(tenant));
+      await seedAdmission(toId(tenant));
+      const token = makeToken('user-001', toId(tenant), role);
+
+      const res = await request(app)
+        .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ patientId: 'PAT-INT00002' });
+
+      expect(res.status).toBe(403);
+      expect((await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID }))?.patientId).toBe('PAT-INT00001');
+    },
+  );
+
+  test('403 — Admin still cannot update vitals (unchanged)', async () => {
+    const tenant = await seedTenant();
+    await seedAdmission(toId(tenant));
+    const token = makeToken('admin-001', toId(tenant), UserRole.ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: { weight: 70 } });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('404 — patient correction to a patient that only exists in another tenant', async () => {
+    const tenant = await seedTenant();
+    const other  = await seedOtherTenant();
+    await seedSecondPatient(toId(other));
+    await seedAdmission(toId(tenant));
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: 'PAT-INT00002' });
+
+    expect(res.status).toBe(404);
+    expect((await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID }))?.patientId).toBe('PAT-INT00001');
+  });
+
+  test('409 — patient correction to a patient who is already admitted', async () => {
+    const tenant = await seedTenant();
+    await seedSecondPatient(toId(tenant));
+    await seedAdmission(toId(tenant));
+    await seedAdmission(toId(tenant), { admissionId: ADM_RC_OTHER, patientId: 'PAT-INT00002', bedId: 'bed-2' });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: 'PAT-INT00002' });
+
+    expect(res.status).toBe(409);
+  });
+});
+
+describe('DELETE /api/ipd/admissions/:admissionId', () => {
+  test('200 — Receptionist deletes an ADMITTED admission, releases its bed and cancels only its payments', async () => {
+    const tenant = await seedTenant();
+    const ward   = await seedWard(toId(tenant));
+    const bed    = await seedBed(toId(ward), toId(tenant), true);
+    await BedModel.updateOne({ _id: bed._id }, { currentAdmissionId: ADM_RC_ID });
+    await seedAdmission(toId(tenant), { wardId: toId(ward), bedId: toId(bed) });
+    await seedIpdPayment(toId(tenant), 'PAY-IPD-1', ADM_RC_ID);
+    await seedIpdPayment(toId(tenant), 'PAY-IPD-2', ADM_RC_OTHER);                              // other admission
+    await seedIpdPayment(toId(tenant), 'PAY-OPD-1', ADM_RC_ID, PaymentReferenceType.OPD_VISIT); // other reference type
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID })).toBeNull();
+    const releasedBed = await BedModel.findById(bed._id);
+    expect(releasedBed?.isOccupied).toBe(false);
+    expect(releasedBed?.currentAdmissionId ?? null).toBeNull();
+    expect((await PaymentModel.findOne({ paymentId: 'PAY-IPD-1' }))?.status).toBe(PaymentStatus.CANCELLED);
+    expect((await PaymentModel.findOne({ paymentId: 'PAY-IPD-2' }))?.status).toBe(PaymentStatus.COMPLETED);
+    expect((await PaymentModel.findOne({ paymentId: 'PAY-OPD-1' }))?.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('409 — a DISCHARGED admission cannot be deleted and its payment is untouched', async () => {
+    const tenant = await seedTenant();
+    await seedAdmission(toId(tenant), { status: AdmissionStatus.DISCHARGED });
+    await seedIpdPayment(toId(tenant), 'PAY-IPD-DIS', ADM_RC_ID);
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(409);
+    expect(await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID })).not.toBeNull();
+    expect((await PaymentModel.findOne({ paymentId: 'PAY-IPD-DIS' }))?.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test.each([UserRole.HOSPITAL_ADMIN, UserRole.ADMIN, UserRole.DOCTOR, UserRole.NURSE, UserRole.MANAGER])(
+    '403 — %s cannot delete an admission',
+    async (role) => {
+      const tenant = await seedTenant();
+      await seedAdmission(toId(tenant));
+      const token = makeToken('user-001', toId(tenant), role);
+
+      const res = await request(app)
+        .delete(`/api/ipd/admissions/${ADM_RC_ID}`)
+        .set('Authorization', `Bearer ${token}`);
+
+      expect(res.status).toBe(403);
+      expect(await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID })).not.toBeNull();
+    },
+  );
+
+  test("404 — a Receptionist cannot delete another tenant's admission (tenant isolation)", async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedOtherTenant();
+    await seedAdmission(toId(tenantA));
+    await seedIpdPayment(toId(tenantA), 'PAY-IPD-A', ADM_RC_ID);
+    const token = makeToken('rc-b', toId(tenantB), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+    expect(await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID })).not.toBeNull();
+    expect((await PaymentModel.findOne({ paymentId: 'PAY-IPD-A' }))?.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  test('400 — invalid admission ID format', async () => {
+    const tenant = await seedTenant();
+    const token  = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .delete('/api/ipd/admissions/not-a-uuid')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('IPD vitals are per admission', () => {
+  test('a new admission starts with empty vitals even when an earlier admission recorded them', async () => {
+    const tenant  = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    await seedAdmission(toId(tenant), { admissionId: ADM_RC_OLD, status: AdmissionStatus.DISCHARGED, vitals: RC_VITALS });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: patient.patientId, wardId: toId(ward), bedId: toId(bed) });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.vitals).toEqual(EMPTY_VITALS);
+  });
+
+  test("updating the current admission's vitals never changes a discharged admission or an OPD visit of the same patient", async () => {
+    const tenant = await seedTenant();
+    await seedPatient(toId(tenant));
+    await seedAdmission(toId(tenant), { admissionId: ADM_RC_OLD, status: AdmissionStatus.DISCHARGED, vitals: RC_VITALS });
+    await seedAdmission(toId(tenant));
+    await OPDVisitModel.create({
+      visitId: 'OPD-IPDVIT01', tenantId: toId(tenant), patientId: 'PAT-INT00001', doctorIds: [],
+      visitDate: new Date(), queueNumber: 1, status: 'COMPLETED', vitals: RC_VITALS,
+    });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: { weight: 82 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals).toEqual({ ...EMPTY_VITALS, weight: 82 });
+    const old = await IPDAdmissionModel.findOne({ admissionId: ADM_RC_OLD });
+    expect(old?.vitals?.weight).toBe(RC_VITALS.weight);
+    const visit = await OPDVisitModel.findOne({ visitId: 'OPD-IPDVIT01' });
+    expect(visit?.vitals?.weight).toBe(RC_VITALS.weight);
+  });
+
+  test("400 — a discharged admission's vitals cannot be edited", async () => {
+    const tenant = await seedTenant();
+    await seedAdmission(toId(tenant), { status: AdmissionStatus.DISCHARGED, vitals: RC_VITALS });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: { weight: 82 } });
+
+    expect(res.status).toBe(400);
+    expect((await IPDAdmissionModel.findOne({ admissionId: ADM_RC_ID }))?.vitals?.weight).toBe(RC_VITALS.weight);
+  });
+});
+
+describe('GET /api/ipd/wards — pagination', () => {
+  async function seedWards(tenantId: string, count: number) {
+    await WardModel.insertMany(
+      Array.from({ length: count }, (_, i) => ({
+        tenantId,
+        name:  `Ward ${String(i + 1).padStart(2, '0')}`,
+        floor: i % 2 === 0 ? 'Ground' : 'First',
+      })),
+    );
+  }
+
+  test('without page/limit keeps the legacy bare-array response (all wards)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    await seedWards(toId(tenant), 25);
+
+    const res = await request(app)
+      .get('/api/ipd/wards')
+      .set('Authorization', `Bearer ${makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data).toHaveLength(25);
+  });
+
+  test('pages through every ward exactly once with accurate totals', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    await seedWards(toId(tenant), 25);
+    const token = makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    const seen: string[] = [];
+    for (const page of [1, 2, 3]) {
+      const res = await request(app)
+        .get(`/api/ipd/wards?page=${page}&limit=10`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ total: 25, page, limit: 10, totalPages: 3 });
+      expect(res.body.data.data).toHaveLength(page === 3 ? 5 : 10);
+      seen.push(...res.body.data.data.map((w: { wardId: string }) => w.wardId));
+    }
+    expect(new Set(seen).size).toBe(25);
+
+    const first = await request(app)
+      .get('/api/ipd/wards?page=1&limit=10')
+      .set('Authorization', `Bearer ${token}`);
+    expect(first.body.data.data[0].name).toBe('Ward 01');
+  });
+
+  test('a page past the end returns an empty page with the real total', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    await seedWards(toId(tenant), 3);
+
+    const res = await request(app)
+      .get('/api/ipd/wards?page=5&limit=10')
+      .set('Authorization', `Bearer ${makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN)}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ data: [], total: 3, page: 5, totalPages: 1 });
+  });
+
+  test('search matches name or floor case-insensitively, treats regex characters literally, and counts only matches', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    await seedWards(toId(tenant), 5); // floors: Ground, First, Ground, First, Ground
+    const token = makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    const byName = await request(app)
+      .get('/api/ipd/wards?page=1&limit=10&search=ward 0')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byName.body.data.total).toBe(5);
+
+    const byFloor = await request(app)
+      .get('/api/ipd/wards?page=1&limit=10&search=gROUND')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byFloor.body.data.total).toBe(3);
+    expect(byFloor.body.data.data).toHaveLength(3);
+
+    const regex = await request(app)
+      .get(`/api/ipd/wards?page=1&limit=10&search=${encodeURIComponent('.*')}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(regex.body.data).toMatchObject({ data: [], total: 0, totalPages: 0 });
+
+    const blank = await request(app)
+      .get('/api/ipd/wards?page=1&limit=10&search=%20%20')
+      .set('Authorization', `Bearer ${token}`);
+    expect(blank.body.data.total).toBe(5);
+  });
+
+  test('is tenant-scoped', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    await seedWards(toId(tenant), 2);
+    await seedWards(new mongoose.Types.ObjectId().toString(), 4);
+
+    const res = await request(app)
+      .get('/api/ipd/wards?page=1&limit=10')
+      .set('Authorization', `Bearer ${makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN)}`);
+
+    expect(res.body.data.total).toBe(2);
+  });
+
+  test('rejects an invalid page or limit with 400', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(UserRole.HOSPITAL_ADMIN, toId(tenant));
+    const token  = makeToken(toId(admin), toId(tenant), UserRole.HOSPITAL_ADMIN);
+
+    for (const qs of ['page=0', 'limit=0', 'limit=101', 'page=abc']) {
+      const res = await request(app).get(`/api/ipd/wards?${qs}`).set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(400);
+    }
   });
 });

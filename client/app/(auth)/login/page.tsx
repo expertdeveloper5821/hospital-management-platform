@@ -18,6 +18,7 @@ import {
 import { useLoginMutation } from '@/store/api/auth.api';
 import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
 import { useAppSelector } from '@/store/hooks';
+import { NavForm } from '@/components/ui/form';
 
 const schema = z.object({
   email:    z.string().email('Enter a valid email address'),
@@ -110,7 +111,7 @@ export default function LoginPage() {
         <p className="text-sm text-muted-foreground">Sign in to your account</p>
       </CardHeader>
 
-      <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <NavForm onSubmit={handleSubmit(onSubmit)} noValidate>
         <CardContent className="space-y-4">
           {apiError && (
             <div
@@ -195,7 +196,7 @@ export default function LoginPage() {
             Platform admin? Sign in here
           </a>
         </CardFooter>
-      </form>
+      </NavForm>
     </Card>
   );
 }

@@ -84,7 +84,7 @@ router.get('/visits/:visitId/parcha-pdf',
   getParchaPdf,
 );
 
-// Permanent delete of a not-yet-finalized visit — Receptionist-only.
+// Permanent delete of a still-waiting (OPEN) visit — Receptionist-only.
 router.delete('/visits/:visitId',
   ...protect,
   requireRole(UserRole.RECEPTIONIST),

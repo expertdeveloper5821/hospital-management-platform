@@ -1,5 +1,10 @@
 import { DepartmentModel, IDepartment } from './department.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
+import { PaginatedResult } from '../../shared/types/common.types';
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 export class DepartmentRepository {
   async findById(tenantId: string, departmentId: string): Promise<IDepartment | null> {
@@ -19,6 +24,32 @@ export class DepartmentRepository {
   async findAll(tenantId: string): Promise<IDepartment[]> {
     assertDbConnected();
     return DepartmentModel.find({ tenantId, isDeleted: { $ne: true } }).sort({ name: 1 });
+  }
+
+  // Paginated list. `search` matches the department name, or any department in
+  // `matchedDepartmentIds` (resolved from assigned doctors' names by the service).
+  async findPaginated(
+    tenantId: string,
+    filters: { search?: string; matchedDepartmentIds?: string[] },
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<IDepartment>> {
+    assertDbConnected();
+    const query: Record<string, unknown> = { tenantId, isDeleted: { $ne: true } };
+    if (filters.search) {
+      const re = new RegExp(escapeRegex(filters.search), 'i');
+      query.$or = [
+        { name: re },
+        { departmentId: { $in: filters.matchedDepartmentIds ?? [] } },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+    const [data, total] = await Promise.all([
+      DepartmentModel.find(query).sort({ name: 1, _id: 1 }).skip(skip).limit(limit),
+      DepartmentModel.countDocuments(query),
+    ]);
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async save(data: Partial<IDepartment>): Promise<IDepartment> {

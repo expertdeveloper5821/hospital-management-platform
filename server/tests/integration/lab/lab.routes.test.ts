@@ -30,6 +30,7 @@ import { PatientModel }     from '../../../src/modules/patient/patient.model';
 import { PathologyRequestModel, RadiologyRequestModel } from '../../../src/modules/lab/lab.model';
 import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
+import { PaymentModel } from '../../../src/modules/payment/payment.model';
 import { TenantStatus, UserRole }     from '../../../src/shared/types/common.types';
 import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
 
@@ -134,6 +135,16 @@ beforeEach(async () => {
   adminToken        = sign(adminId, UserRole.HOSPITAL_ADMIN);
   receptionistToken = sign(receptionistId, UserRole.RECEPTIONIST);
 });
+
+// Report upload requires the request's payment to have been collected.
+async function markPaid(kind: 'pathology' | 'radiology', requestId: string): Promise<void> {
+  await PaymentModel.create({
+    paymentId: `PAY-${uuidv4()}`, tenantId, patientId: 'PAT-001',
+    amount: 100, paymentMethod: 'CASH', description: 'Lab payment', status: 'COMPLETED',
+    referenceType: kind === 'pathology' ? 'PATHOLOGY_REQUEST' : 'RADIOLOGY_REQUEST',
+    referenceId: requestId, createdBy: 'test',
+  });
+}
 
 // ─── Pathology ────────────────────────────────────────────────────────────────
 
@@ -266,6 +277,83 @@ describe('GET /api/lab/pathology', () => {
   });
 });
 
+describe('GET /api/lab/{pathology,radiology} — pagination', () => {
+  // Every request shares one requestedAt so page boundaries depend on the
+  // sort's _id tiebreaker — without it, rows could repeat or vanish across pages.
+  const SAME_DATE = new Date('2026-01-01T00:00:00.000Z');
+
+  async function seedRequests(kind: 'pathology' | 'radiology') {
+    await PatientModel.create({
+      patientId: 'PAT-PG-SITA', tenantId, fullName: 'Sita Devi',
+      dateOfBirth: new Date('1990-01-01'), gender: 'FEMALE',
+      mobileNumber: '1234567891', address: '1 Test Street',
+    });
+    // 15 for John Doe (PAT-001), 10 for Sita; 4 of John's COMPLETED; plus one
+    // soft-deleted row that must never be counted.
+    const rows = Array.from({ length: 26 }, (_, i) => ({
+      requestId: uuidv4(), tenantId, requestedBy: doctorId, requestedAt: SAME_DATE,
+      patientId: i < 15 ? 'PAT-001' : 'PAT-PG-SITA',
+      status:    i < 4 ? 'COMPLETED' : 'PENDING',
+      isDeleted: i === 25,
+      ...(kind === 'pathology' ? { testType: 'Blood CBC' } : { imagingType: 'X-Ray' }),
+    }));
+    if (kind === 'pathology') await PathologyRequestModel.create(rows);
+    else await RadiologyRequestModel.create(rows);
+  }
+
+  describe.each(['pathology', 'radiology'] as const)('%s', (kind) => {
+    const getPage = (qs: string) =>
+      request(app).get(`/api/lab/${kind}?${qs}`).set('Authorization', `Bearer ${adminToken}`);
+
+    test('walks every page with accurate totals and no duplicate/missing rows', async () => {
+      await seedRequests(kind);
+
+      const seen: string[] = [];
+      const sizes: number[] = [];
+      for (let page = 1; page <= 3; page++) {
+        const res = await getPage(`page=${page}&limit=10`);
+        expect(res.status).toBe(200);
+        expect(res.body.data).toMatchObject({ total: 25, page, limit: 10, totalPages: 3 });
+        sizes.push(res.body.data.data.length);
+        seen.push(...res.body.data.data.map((r: { requestId: string }) => r.requestId));
+      }
+
+      expect(sizes).toEqual([10, 10, 5]);
+      expect(new Set(seen).size).toBe(25);
+    });
+
+    test('a page past the end returns no rows but keeps the real total', async () => {
+      await seedRequests(kind);
+
+      const res = await getPage('page=4&limit=10');
+      expect(res.status).toBe(200);
+      expect(res.body.data.data).toHaveLength(0);
+      expect(res.body.data).toMatchObject({ total: 25, totalPages: 3 });
+    });
+
+    test('search and status filters are applied before paginating', async () => {
+      await seedRequests(kind);
+
+      const search = await getPage('search=sita&page=1&limit=10');
+      expect(search.body.data).toMatchObject({ total: 10, totalPages: 1 });
+      expect(search.body.data.data.every((r: { patientId: string }) => r.patientId === 'PAT-PG-SITA')).toBe(true);
+
+      const completed = await getPage('status=COMPLETED&page=1&limit=3');
+      expect(completed.body.data).toMatchObject({ total: 4, totalPages: 2 });
+      expect(completed.body.data.data).toHaveLength(3);
+
+      const pending = await getPage('search=john&status=PENDING&page=2&limit=10');
+      expect(pending.body.data).toMatchObject({ total: 11, page: 2, totalPages: 2 });
+      expect(pending.body.data.data).toHaveLength(1);
+    });
+
+    test('rejects an out-of-range page or limit with 400', async () => {
+      expect((await getPage('page=0')).status).toBe(400);
+      expect((await getPage('limit=101')).status).toBe(400);
+    });
+  });
+});
+
 describe('PATCH /api/lab/pathology/:requestId/report', () => {
   let requestId: string;
 
@@ -276,6 +364,7 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
       requestedBy: doctorId, testType: 'Blood CBC',
       status: 'PENDING', requestedAt: new Date(),
     });
+    await markPaid('pathology', requestId);
   });
 
   test('uploads a pathology report and sets status to COMPLETED (200)', async () => {
@@ -740,6 +829,7 @@ describe('PATCH /api/lab/radiology/:requestId/report', () => {
       requestedBy: doctorId, imagingType: 'X-Ray Chest',
       status: 'PENDING', requestedAt: new Date(),
     });
+    await markPaid('radiology', requestId);
   });
 
   test('uploads a radiology report and sets status to COMPLETED (200)', async () => {
@@ -1211,6 +1301,98 @@ describe('Doctor scoping — edit/delete lab requests', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(res.status).toBe(200);
+  });
+});
+
+// ─── Receptionist Lab access ────────────────────────────────────────────────
+
+describe('Receptionist Lab access', () => {
+  let pathologyRequestId: string;
+  let radiologyRequestId: string;
+
+  beforeEach(async () => {
+    pathologyRequestId = uuidv4();
+    radiologyRequestId = uuidv4();
+    await PathologyRequestModel.create({
+      requestId: pathologyRequestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, testType: 'Blood CBC',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+    await RadiologyRequestModel.create({
+      requestId: radiologyRequestId, patientId: 'PAT-001', tenantId,
+      requestedBy: doctorId, imagingType: 'X-Ray Chest',
+      status: 'PENDING', requestedAt: new Date(),
+    });
+  });
+
+  test('200 — receptionist can list pathology requests', async () => {
+    const res = await request(app)
+      .get('/api/lab/pathology')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+  });
+
+  test('200 — receptionist can view a pathology request', async () => {
+    const res = await request(app)
+      .get(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.requestId).toBe(pathologyRequestId);
+  });
+
+  test('200 — receptionist can list radiology requests', async () => {
+    const res = await request(app)
+      .get('/api/lab/radiology')
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.data).toHaveLength(1);
+  });
+
+  test('200 — receptionist can view a radiology request', async () => {
+    const res = await request(app)
+      .get(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.requestId).toBe(radiologyRequestId);
+  });
+
+  test('403 — receptionist cannot upload a pathology report', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/pathology/${pathologyRequestId}/report`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .attach('report', Buffer.from('%PDF-1.4 test'), { filename: 'r.pdf', contentType: 'application/pdf' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — receptionist cannot upload a radiology report', async () => {
+    const res = await request(app)
+      .patch(`/api/lab/radiology/${radiologyRequestId}/report`)
+      .set('Authorization', `Bearer ${receptionistToken}`)
+      .attach('report', Buffer.from('image'), { filename: 'r.jpg', contentType: 'image/jpeg' });
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — receptionist cannot delete a pathology request', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/pathology/${pathologyRequestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test('403 — receptionist cannot delete a radiology request', async () => {
+    const res = await request(app)
+      .delete(`/api/lab/radiology/${radiologyRequestId}`)
+      .set('Authorization', `Bearer ${receptionistToken}`);
+
+    expect(res.status).toBe(403);
   });
 });
 

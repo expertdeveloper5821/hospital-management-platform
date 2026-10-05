@@ -7,6 +7,7 @@ import {
   EditPathologyRequestSchema,
   EditRadiologyRequestSchema,
   ListLabRequestsQuerySchema,
+  CollectLabPaymentSchema,
 } from './lab.types';
 import { UserRole } from '../../shared/types/common.types';
 import { opdRepository } from '../opd/opd.repository';
@@ -267,6 +268,32 @@ export async function deleteRadiologyRequest(
     res.status(200).json({ status: 'success', message: 'Radiology request deleted.' });
   } catch (err) { next(err); }
 }
+
+// ─── Payment collection ───────────────────────────────────────────────────────
+// Audit logging happens in PaymentService.createManualPayment (PAYMENT_RECORD).
+
+function collectPaymentHandler(kind: 'pathology' | 'radiology') {
+  return async function collectPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const id = requestIdSchema.safeParse(req.params['requestId']);
+      if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+      const parsed = CollectLabPaymentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ status: 'error', message: 'Validation failed', details: parsed.error.flatten().fieldErrors });
+        return;
+      }
+
+      const result = await labService.collectPayment(
+        kind, id.data, req.user!.tenantId as string, req.user!.userId, parsed.data,
+      );
+      res.status(201).json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  };
+}
+
+export const collectPathologyPayment = collectPaymentHandler('pathology');
+export const collectRadiologyPayment = collectPaymentHandler('radiology');
 
 // ─── Test types ────────────────────────────────────────────────────────────────
 
