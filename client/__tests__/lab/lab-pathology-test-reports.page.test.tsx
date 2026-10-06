@@ -68,6 +68,7 @@ let mockPathologyRows: unknown[] = [];
 let mockDetails: Record<string, unknown> = {};
 const mockSubmit = jest.fn();
 const mockGetPdf = jest.fn();
+const mockGetAllPdf = jest.fn();
 
 const detailFor = (id: string) =>
   id in mockDetails ? { currentData: mockDetails[id], isFetching: false } : { currentData: undefined, isFetching: true };
@@ -91,6 +92,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useSubmitPathologyTestReportMutation: () => [mockSubmit, { isLoading: false }],
   useGetPathologyTestReportPdfMutation: () => [mockGetPdf, { isLoading: false }],
+  useGetAllPathologyTestReportsPdfMutation: () => [mockGetAllPdf, { isLoading: false }],
   useGetPathologyRequestQuery: (id: string, opts: { skip?: boolean }) =>
     opts?.skip ? { currentData: undefined, isFetching: false } : detailFor(id),
   useGetRadiologyRequestQuery: (id: string, opts: { skip?: boolean }) =>
@@ -325,7 +327,7 @@ describe('Per-test PDF', () => {
     await user.click(within(testsList()).getByRole('button', { name: CBC }));
     await user.click(within(reportDialog(CBC)).getByRole('button', { name: /Download PDF/ }));
 
-    expect(mockGetPdf).toHaveBeenCalledWith({ requestId: REQUEST.requestId, testIndex: 0 });
+    expect(mockGetPdf).toHaveBeenCalledWith({ requestId: REQUEST.requestId, testIndex: 0, letterhead: true });
     await waitFor(() => expect(clicks).toHaveLength(1));
     expect(clicks[0].getAttribute('href')).toBe('blob:cbc-pdf');
     expect(clicks[0].download).toBe('pathology-report-CBC-Complete-Blood-Count-PAT-001.pdf');
@@ -344,6 +346,8 @@ describe('Per-test PDF', () => {
 
     await waitFor(() => expect(win.location.href).toBe('blob:cbc-pdf'));
     expect(open).toHaveBeenCalledWith('', '_blank');
+    // View / Print keeps the plain copy — no letterhead request.
+    expect(mockGetPdf).toHaveBeenCalledWith({ requestId: REQUEST.requestId, testIndex: 0 });
     open.mockRestore();
   });
 
@@ -355,6 +359,78 @@ describe('Per-test PDF', () => {
     await user.click(within(testsList()).getByRole('button', { name: CBC }));
     await user.click(within(reportDialog(CBC)).getByRole('button', { name: /Download PDF/ }));
     expect(await screen.findByText('Could not load the report PDF. Please try again.')).toBeInTheDocument();
+  });
+});
+
+describe('Bulk Download / Print of all available reports', () => {
+  const bulk = () => screen.getByLabelText('All test reports');
+
+  test('is hidden until at least one test report has been submitted', async () => {
+    const user = userEvent.setup();
+    setup({ role: 'DOCTOR', cbcResult: null });
+    await openRequest(user);
+    expect(testsList()).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Download All Reports/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Print All Reports/ })).not.toBeInTheDocument();
+  });
+
+  test('Download All fetches one combined letterhead PDF and saves it — per-test PDF untouched', async () => {
+    const user = userEvent.setup();
+    setup({ role: 'DOCTOR', cbcResult: CBC_RESULT });
+    mockGetAllPdf.mockResolvedValue({ data: 'blob:all-pdf' });
+    const clicks: HTMLAnchorElement[] = [];
+    const spy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicks.push(this); });
+    await openRequest(user);
+    // Counts only the available (submitted) reports.
+    await user.click(within(bulk()).getByRole('button', { name: 'Download All Reports (1)' }));
+
+    expect(mockGetAllPdf).toHaveBeenCalledWith({ requestId: REQUEST.requestId, letterhead: true });
+    await waitFor(() => expect(clicks).toHaveLength(1));
+    expect(clicks[0].getAttribute('href')).toBe('blob:all-pdf');
+    expect(clicks[0].download).toBe('pathology-reports-PAT-001.pdf');
+    expect(mockGetPdf).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  test('Download All and Print All sit side by side in one row', async () => {
+    const user = userEvent.setup();
+    setup({ role: 'DOCTOR', cbcResult: CBC_RESULT });
+    await openRequest(user);
+    const download = within(bulk()).getByRole('button', { name: /Download All Reports/ });
+    const print    = within(bulk()).getByRole('button', { name: /Print All Reports/ });
+    expect(download.parentElement).toBe(print.parentElement);
+    expect(download.parentElement).toHaveClass('grid', 'grid-cols-2');
+    expect(download.className).toBe(print.className);
+  });
+
+  test('Print All loads the combined print copy (no letterhead) into a hidden frame and opens one print dialog', async () => {
+    const user = userEvent.setup();
+    setup({ role: 'DOCTOR', cbcResult: CBC_RESULT });
+    mockGetAllPdf.mockResolvedValue({ data: 'blob:all-pdf' });
+    await openRequest(user);
+    await user.click(within(bulk()).getByRole('button', { name: /Print All Reports/ }));
+
+    // Print copy — no letterhead request (the server adds the Doctor Signature to every copy).
+    expect(mockGetAllPdf).toHaveBeenCalledWith({ requestId: REQUEST.requestId });
+    const frame = await waitFor(() => {
+      const f = document.querySelector('iframe[src="blob:all-pdf"]') as HTMLIFrameElement | null;
+      expect(f).not.toBeNull();
+      return f!;
+    });
+    const print = jest.fn();
+    Object.defineProperty(frame, 'contentWindow', { value: { focus: jest.fn(), print } });
+    frame.onload?.(new Event('load'));
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(mockGetPdf).not.toHaveBeenCalled();
+  });
+
+  test('shows an error when the combined PDF cannot be loaded', async () => {
+    const user = userEvent.setup();
+    setup({ role: 'DOCTOR', cbcResult: CBC_RESULT });
+    mockGetAllPdf.mockResolvedValue({ error: { status: 500 } });
+    await openRequest(user);
+    await user.click(within(bulk()).getByRole('button', { name: /Download All Reports/ }));
+    expect(await within(bulk()).findByText('Could not load the reports PDF. Please try again.')).toBeInTheDocument();
   });
 });
 
@@ -416,7 +492,7 @@ describe('Added catalog tests use the same report workflow', () => {
     const dialog = reportDialog(PREG);
     expect(within(within(dialog).getByRole('table')).getAllByRole('row')[1]).toHaveTextContent('Urine hCG (Qualitative)Positive—Negative');
     await user.click(within(dialog).getByRole('button', { name: /Download PDF/ }));
-    expect(mockGetPdf).toHaveBeenCalledWith({ requestId: NEW_REQUEST.requestId, testIndex: 1 });
+    expect(mockGetPdf).toHaveBeenCalledWith({ requestId: NEW_REQUEST.requestId, testIndex: 1, letterhead: true });
     await waitFor(() => expect(clicks).toHaveLength(1));
     expect(clicks[0].download).toBe('pathology-report-Pregnancy-Test-Urine-hCG-PAT-001.pdf');
     spy.mockRestore();

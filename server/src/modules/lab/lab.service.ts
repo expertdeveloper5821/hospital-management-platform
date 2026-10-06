@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { labRepository } from './lab.repository';
-import { IPathologyRequest, IRadiologyRequest } from './lab.model';
+import { IPathologyRequest, IPathologyTestReport, IRadiologyRequest } from './lab.model';
 import {
   LabRequestStatus,
   CreatePathologyRequestInput,
@@ -10,7 +10,6 @@ import {
   ListLabRequestsQuery,
   PathologyRequestResponse,
   RadiologyRequestResponse,
-  PATHOLOGY_REPORT_MAX_BYTES,
   RADIOLOGY_REPORT_MAX_BYTES,
   LabTestTypeResponse,
   LAB_REFERRED_BY_SELF,
@@ -28,6 +27,8 @@ import {
   computeFlag,
 } from './pathology-report-templates';
 import { buildPathologyReportPdf } from './pathology-report.pdf';
+import { PDFDocument as PdfLibDocument } from 'pdf-lib';
+import { fetchImageBuffer } from '../../shared/services/report-letterhead.pdf';
 import { patientRepository }   from '../patient/patient.repository';
 import { userRepository }      from '../user/user.repository';
 import { notificationService } from '../notification/notification.service';
@@ -673,65 +674,6 @@ export class LabService {
     return toPathologyResponse(doc, undefined, null);
   }
 
-  async uploadPathologyReport(
-    requestId:  string,
-    tenantId:   string,
-    userId:     string,
-    fileBuffer: Buffer,
-    mimeType:   string,
-  ): Promise<PathologyRequestResponse> {
-    if (fileBuffer.length > PATHOLOGY_REPORT_MAX_BYTES) {
-      throw new AppError(
-        `Pathology report exceeds the 10 MB size limit (received ${(fileBuffer.length / 1024 / 1024).toFixed(2)} MB)`,
-        413,
-      );
-    }
-
-    const request = await labRepository.findPathologyById(requestId, tenantId);
-    if (!request) throw new NotFoundError('Pathology request not found');
-
-    if (request.status === LabRequestStatus.COMPLETED) {
-      throw new AppError('Report has already been uploaded for this request', 409);
-    }
-
-    await this.assertPaidForUpload(tenantId, 'pathology', request);
-
-    // Upload to S3; store the key as the permanent reference in the DB.
-    const ext   = mimeType.split('/')[1] ?? 'bin';
-    const s3Key = `org/${tenantId}/lab/pathology/${requestId}/report.${ext}`;
-    await s3Service.uploadFile(s3Key, fileBuffer, mimeType);
-
-    const updated = await labRepository.updatePathology(requestId, tenantId, {
-      status:      LabRequestStatus.COMPLETED,
-      reportS3Key: s3Key,
-    });
-    if (!updated) throw new NotFoundError('Pathology request not found');
-
-    try {
-      await notificationService.sendNotification(
-        request.requestedBy, tenantId,
-        'Pathology Report Ready',
-        `The pathology report for test "${request.testType}" is now available.`,
-        'PATHOLOGY_REQUEST', requestId,
-      );
-    } catch { /* swallow */ }
-
-    try {
-      await auditService.log({
-        entityType:    AuditEntityType.PATHOLOGY_REQUEST,
-        entityId:      requestId,
-        action:        'UPDATE',
-        userId,
-        tenantId,
-        previousValue: { status: request.status },
-        newValue:      { status: LabRequestStatus.COMPLETED, reportS3Key: s3Key },
-      });
-    } catch { /* swallow */ }
-
-    // Response includes a fresh pre-signed URL so the caller can immediately download.
-    return toPathologyResponse(updated);
-  }
-
   // Read access to one pathology request — a Doctor only for their assigned
   // patients or requests they were "Referred By" on (same 404 either way).
   private async findReadablePathology(
@@ -862,33 +804,79 @@ export class LabService {
   }
 
   // One test's submitted report as its own PDF — never several tests combined.
+  // Every copy carries the Doctor Signature block; `letterhead` (the Download
+  // button) also adds the hospital letterhead, which the Print copy omits.
   async getPathologyTestReportPdf(
     requestId:           string,
     testIndex:           number,
     tenantId:            string,
     allowedPatientIds?:  string[],
     referredByDoctorId?: string,
+    letterhead = false,
   ): Promise<{ buffer: Buffer; fileName: string }> {
     const doc = await this.findReadablePathology(requestId, tenantId, allowedPatientIds, referredByDoctorId);
     const testName = splitPathologyTests(doc.testType)[testIndex];
     if (testName === undefined) throw new NotFoundError('Test not found on this pathology request');
     const report = (doc.testReports ?? []).find((r) => r.testName === testName);
     if (!report) throw new NotFoundError('The report for this test has not been submitted yet.');
-    const result = parseResultData(report.resultData);
 
-    const [patient, tenant, encounter, referredByName, reporter] = await Promise.all([
+    const context = await this.loadPathologyReportContext(doc, tenantId, letterhead);
+    const buffer  = await this.renderPathologyTestReport(context, testName, report);
+    return { buffer, fileName: `pathology-report-${reportFileSlug(testName)}-${doc.patientId}.pdf` };
+  }
+
+  // Bulk Download / Print: every submitted test report of the request, in test
+  // order, as one PDF. Each report is rendered exactly as its own per-test PDF
+  // (same content, formatting, page numbering, Doctor Signature and — with
+  // `letterhead` — the letterhead) and the reports are appended back to back.
+  // Tests whose report hasn't been submitted are skipped; none submitted → 404.
+  async getAllPathologyTestReportsPdf(
+    requestId:           string,
+    tenantId:            string,
+    allowedPatientIds?:  string[],
+    referredByDoctorId?: string,
+    letterhead = false,
+  ): Promise<{ buffer: Buffer; fileName: string }> {
+    const doc = await this.findReadablePathology(requestId, tenantId, allowedPatientIds, referredByDoctorId);
+    const reports = splitPathologyTests(doc.testType).flatMap((testName) => {
+      const report = (doc.testReports ?? []).find((r) => r.testName === testName);
+      return report ? [{ testName, report }] : [];
+    });
+    if (reports.length === 0) throw new NotFoundError('No test report has been submitted for this request yet.');
+
+    const context = await this.loadPathologyReportContext(doc, tenantId, letterhead);
+    const merged  = await PdfLibDocument.create();
+    for (const { testName, report } of reports) {
+      const part  = await PdfLibDocument.load(await this.renderPathologyTestReport(context, testName, report));
+      const pages = await merged.copyPages(part, part.getPageIndices());
+      pages.forEach((page) => merged.addPage(page));
+    }
+    merged.setTitle(`Pathology Reports - ${context.patient.fullName} (${context.patient.patientId})`);
+    merged.setAuthor(context.hospital.name);
+    merged.setSubject('Pathology Report');
+    return {
+      buffer:   Buffer.from(await merged.save()),
+      fileName: `pathology-reports-${doc.patientId}-${reportFileSlug(doc.requestId)}.pdf`,
+    };
+  }
+
+  // Everything a report PDF needs besides the test itself — shared by all
+  // tests of one request, so the bulk PDF looks each value up only once.
+  private async loadPathologyReportContext(doc: IPathologyRequest, tenantId: string, letterhead: boolean) {
+    const [patient, tenant, encounter, referredByName] = await Promise.all([
       patientRepository.findByPatientId(tenantId, doc.patientId),
       tenantRepository.findById(tenantId),
       getEncounterSummary(doc),
       getReferredByName(tenantId, doc.referredBy),
-      userRepository.findById(tenantId, report.submittedBy),
     ]);
     if (!patient) throw new NotFoundError('Patient not found');
     const logoUrl = tenant?.branding?.logoUrl
       ? await s3Service.getPresignedUrl(tenant.branding.logoUrl, REPORT_URL_EXPIRY_SECONDS).catch(() => null)
       : null;
+    const logo = letterhead && logoUrl ? await fetchImageBuffer(logoUrl) : null;
 
-    const buffer = await buildPathologyReportPdf({
+    return {
+      tenantId,
       hospital: {
         name:               tenant?.branding?.displayName || tenant?.name || 'Hospital',
         logoUrl,
@@ -911,12 +899,28 @@ export class LabService {
         referredByName,
       },
       encounter,
+      letterhead: letterhead ? { logo } : null,
+    };
+  }
+
+  private async renderPathologyTestReport(
+    context:  Awaited<ReturnType<LabService['loadPathologyReportContext']>>,
+    testName: string,
+    report:   IPathologyTestReport,
+  ): Promise<Buffer> {
+    const result   = parseResultData(report.resultData);
+    const reporter = await userRepository.findById(context.tenantId, report.submittedBy);
+    return buildPathologyReportPdf({
+      hospital:       context.hospital,
+      patient:        context.patient,
+      request:        context.request,
+      encounter:      context.encounter,
       test:           { testName, values: result.values, remarks: result.remarks },
       reportedByName: reporter?.name ?? reporter?.email ?? 'Lab Staff',
       reportedAt:     report.submittedAt.toISOString(),
       generatedAt:    new Date().toISOString(),
+      ...(context.letterhead ? { letterhead: context.letterhead } : {}),
     });
-    return { buffer, fileName: `pathology-report-${reportFileSlug(testName)}-${doc.patientId}.pdf` };
   }
 
   async listPathologyRequests(

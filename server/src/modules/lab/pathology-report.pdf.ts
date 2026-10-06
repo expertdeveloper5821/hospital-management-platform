@@ -5,7 +5,7 @@ import { LabEncounterSummary, PathologyResultValue } from './lab.types';
 // ─── Pathology test report PDF ───────────────────────────────────────────────
 // One PDF per test of a Pathology request — never several tests combined.
 // Plain A4, black text and thin black rules only — no hospital header/logo,
-// colours, fills or signature block (the sheet may be printed on the
+// colours or fills (the sheet may be printed on the
 // hospital's own letterhead, so the top 3.5 cm and bottom 2 cm of every page
 // stay blank, same as the OPD/IPD slips). The patient / encounter grid laid
 // out like the OPD slip, the centred test name, then the structured results
@@ -13,6 +13,11 @@ import { LabEncounterSummary, PathologyResultValue } from './lab.types';
 // cell wraps (never truncated) and a row that doesn't fit moves to the next
 // page with the table header repeated. `hospital` / `reportedByName` stay in the data
 // contract (PDF metadata only) so the service is unchanged.
+//
+// Every copy (Download and Print) closes with a Doctor Signature block at the
+// bottom-right. Downloaded copy only (`letterhead` set): the blank top 3.5 cm
+// of every page also carries a black-text, no-fill hospital letterhead (logo,
+// name, registration number, address). Everything else is identical.
 
 export interface PathologyReportPdfData {
   hospital: ReportHospitalInfo;
@@ -38,6 +43,8 @@ export interface PathologyReportPdfData {
   reportedByName: string;
   reportedAt:     string;   // test report submission time = report date
   generatedAt:    string;
+  // Set only for the downloaded copy — see the header comment.
+  letterhead?:    { logo: Buffer | null } | null;
 }
 
 const MM            = 72 / 25.4;
@@ -137,6 +144,34 @@ function writeText(
   doc.font(font).fontSize(size);
   doc.x = x;
   doc.y = y + doc.currentLineHeight(true);
+}
+
+// Black-text, no-background letterhead inside the blank top band of the
+// current page: logo on the left, then hospital name, registration number and
+// address, closed by a thin black rule just above TOP_MARGIN. Each line is only
+// drawn when present; the address is clipped to the band, never overflowing it.
+function drawLetterhead(doc: PDFKit.PDFDocument, hospital: ReportHospitalInfo, logo: Buffer | null): void {
+  const PAD_Y    = 18;
+  const LOGO_BOX = 52;
+  const ruleY    = TOP_MARGIN - 10;
+  const textX    = logo ? PAGE_MARGIN + LOGO_BOX + 12 : PAGE_MARGIN;
+  const textW    = PAGE_MARGIN + CONTENT_WIDTH - textX;
+  if (logo) {
+    try { doc.image(logo, PAGE_MARGIN, PAD_Y, { fit: [LOGO_BOX, LOGO_BOX] }); } catch { /* skip */ }
+  }
+  doc.fillColor(TEXT).font('Helvetica-Bold').fontSize(15)
+    .text(hospital.name, textX, PAD_Y, { width: textW, height: 18, lineBreak: false, ellipsis: true });
+  doc.font('Helvetica').fontSize(8.5);
+  let y = PAD_Y + 20;
+  if (hospital.registrationNumber) {
+    doc.text(`Registration No.: ${hospital.registrationNumber}`, textX, y, { width: textW, lineBreak: false, ellipsis: true });
+    y += 11;
+  }
+  if (hospital.address) {
+    doc.text(hospital.address, textX, y, { width: textW, height: Math.max(ruleY - 4 - y, 11), ellipsis: true });
+  }
+  doc.strokeColor(RULE).lineWidth(0.75)
+    .moveTo(PAGE_MARGIN, ruleY).lineTo(PAGE_MARGIN + CONTENT_WIDTH, ruleY).stroke();
 }
 
 export async function buildPathologyReportPdf(data: PathologyReportPdfData): Promise<Buffer> {
@@ -355,10 +390,24 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         writeText(doc, data.test.remarks, 'Helvetica', 9.5, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
       }
 
+      // ── Doctor Signature (every copy), bottom-right ────────────────────────
+      {
+        const SIG_W = 170;
+        const SIG_SPACE = 40;   // blank space left above the line for the signature
+        ensureSpace(SIG_SPACE + 24);
+        const sigX = PAGE_MARGIN + CONTENT_WIDTH - SIG_W;
+        const lineY = Math.max(doc.y + SIG_SPACE, pageBottom() - 20);
+        doc.strokeColor(RULE).lineWidth(0.5).moveTo(sigX, lineY).lineTo(sigX + SIG_W, lineY).stroke();
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(TEXT)
+          .text('Doctor Signature', sigX, lineY + 5, { width: SIG_W, align: 'center', lineBreak: false });
+        doc.x = PAGE_MARGIN;
+      }
+
       // ── Footer: generation notice + page numbers ───────────────────────────
       const range = doc.bufferedPageRange();
       for (let i = range.start; i < range.start + range.count; i++) {
         doc.switchToPage(i);
+        if (data.letterhead) drawLetterhead(doc, data.hospital, data.letterhead.logo);
         // The footer sits in the FOOTER_SPACE strip reserved just above the
         // blank bottom 2 cm — never inside it. Lift the margin while drawing
         // so PDFKit doesn't treat it as overflow and add a page.

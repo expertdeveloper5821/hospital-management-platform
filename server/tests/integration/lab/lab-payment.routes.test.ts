@@ -500,9 +500,8 @@ describe('Deleting a paid lab request', () => {
 // ─── Report upload gated on payment ────────────────────────────────────────────
 
 describe('Report upload requires a collected payment', () => {
+  // Radiology only — Pathology has no file upload (structured reports only).
   const kinds = [
-    // Pathologists don't upload files (structured reports only) — Hospital Admin does.
-    { kind: 'pathology' as const, role: UserRole.HOSPITAL_ADMIN, otherRole: UserRole.RADIOLOGIST, id: () => pathologyRequestId },
     { kind: 'radiology' as const, role: UserRole.RADIOLOGIST, otherRole: UserRole.PATHOLOGIST, id: () => radiologyRequestId },
   ];
 
@@ -546,9 +545,7 @@ describe('Report upload requires a collected payment', () => {
     // The report is stored under, and View Report resolves, this request's own key.
     const expectedKey = `org/${tenantId}/lab/${kind}/${id()}/report.pdf`;
     expect(s3Service.uploadFile).toHaveBeenCalledWith(expectedKey, expect.any(Buffer), 'application/pdf');
-    const stored = kind === 'pathology'
-      ? await PathologyRequestModel.findOne({ requestId: id() })
-      : await RadiologyRequestModel.findOne({ requestId: id() });
+    const stored = await RadiologyRequestModel.findOne({ requestId: id() });
     expect(stored!.reportS3Key).toBe(expectedKey);
 
     jest.mocked(s3Service.getPresignedUrl).mockClear();
@@ -563,26 +560,24 @@ describe('Report upload requires a collected payment', () => {
     expect(res.status).toBe(403);
   });
 
-  test('403 — a Pathologist cannot upload a paid pathology report file (structured reports only)', async () => {
+  test('404 — no role can upload a paid pathology report file (structured reports only)', async () => {
     await collect('pathology', pathologyRequestId, tokens.RECEPTIONIST, VALID_BODY);
     jest.mocked(s3Service.uploadFile).mockClear();   // the receipt PDF upload
-    const res = await upload('pathology', pathologyRequestId, tokens.PATHOLOGIST);
-    expect(res.status).toBe(403);
+    for (const role of [
+      UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.DOCTOR,
+      UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.RADIOLOGIST, UserRole.ADMIN,
+    ]) {
+      const res = await upload('pathology', pathologyRequestId, tokens[role]);
+      expect(res.status).toBe(404);
+    }
     expect(s3Service.uploadFile).not.toHaveBeenCalled();
+    const stored = await PathologyRequestModel.findOne({ requestId: pathologyRequestId });
+    expect(stored!.status).toBe('PENDING');
+    expect(stored!.reportS3Key ?? null).toBeNull();
   });
 
-  test('paying one request does not unlock upload for a different request', async () => {
+  test('a pathology payment does not unlock upload for the radiology request', async () => {
     await collect('pathology', pathologyRequestId, tokens.RECEPTIONIST, VALID_BODY);
-
-    const otherRequestId = uuidv4();
-    await PathologyRequestModel.create({
-      requestId: otherRequestId, patientId: PATIENT_ID, tenantId,
-      requestedBy: doctorId, testType: 'Lipid Profile', status: 'PENDING', requestedAt: new Date(),
-    });
-    const res = await upload('pathology', otherRequestId, tokens.HOSPITAL_ADMIN);
-    expect(res.status).toBe(409);
-
-    // Nor does a pathology payment unlock the radiology request.
     const rad = await upload('radiology', radiologyRequestId, tokens.RADIOLOGIST);
     expect(rad.status).toBe(409);
   });
@@ -591,9 +586,9 @@ describe('Report upload requires a collected payment', () => {
     await PaymentModel.create({
       paymentId: `PAY-${uuidv4()}`, tenantId: otherTenantId, patientId: PATIENT_ID,
       amount: 100, paymentMethod: 'CASH', description: 'x', status: 'COMPLETED',
-      referenceType: 'PATHOLOGY_REQUEST', referenceId: pathologyRequestId, createdBy: 'test',
+      referenceType: 'RADIOLOGY_REQUEST', referenceId: radiologyRequestId, createdBy: 'test',
     });
-    const res = await upload('pathology', pathologyRequestId, tokens.HOSPITAL_ADMIN);
+    const res = await upload('radiology', radiologyRequestId, tokens.RADIOLOGIST);
     expect(res.status).toBe(409);
   });
 });

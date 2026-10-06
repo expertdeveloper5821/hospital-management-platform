@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   useListPathologyRequestsQuery,
   useCreatePathologyRequestMutation,
-  useUploadPathologyReportMutation,
   useEditPathologyRequestMutation,
   useDeletePathologyRequestMutation,
   useListRadiologyRequestsQuery,
@@ -40,6 +39,7 @@ import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import { PathologyTestReportModal } from '@/components/lab/pathology-test-report-modal';
+import { PathologyReportsBulkActions } from '@/components/lab/pathology-reports-bulk-actions';
 import {
   FlaskConical,
   Plus,
@@ -653,23 +653,21 @@ function CollectPaymentModal({ request, type, justCreated, onClose }: CollectPay
 }
 
 // ─── Report Upload Modal ──────────────────────────────────────────────────────
+// Radiology only — Pathology reports are structured per-test, never uploaded.
 
 interface ReportUploadModalProps {
   requestId: string;
-  type:      'pathology' | 'radiology';
   onClose:   () => void;
 }
 
-function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps) {
+function ReportUploadModal({ requestId, onClose }: ReportUploadModalProps) {
   const [file,  setFile]  = useState<File | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [uploadPathology, { isLoading: uploadingPath }] = useUploadPathologyReportMutation();
-  const [uploadRadiology, { isLoading: uploadingRad  }] = useUploadRadiologyReportMutation();
-  const isLoading = uploadingPath || uploadingRad;
+  const [uploadRadiology, { isLoading }] = useUploadRadiologyReportMutation();
 
-  const maxMB = type === 'pathology' ? 10 : 20;
+  const maxMB = 20;
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -687,11 +685,7 @@ function ReportUploadModal({ requestId, type, onClose }: ReportUploadModalProps)
     if (!file) { setError('Please select a file.'); return; }
     setError('');
     try {
-      if (type === 'pathology') {
-        await uploadPathology({ requestId, file }).unwrap();
-      } else {
-        await uploadRadiology({ requestId, file }).unwrap();
-      }
+      await uploadRadiology({ requestId, file }).unwrap();
       onClose();
     } catch (err: any) {
       setError(err?.data?.message ?? 'Upload failed. Please try again.');
@@ -994,7 +988,7 @@ interface RequestDetailPanelProps {
   type:      'pathology' | 'radiology';
   canUpload: boolean;
   // Upload a report file — separate from canUpload (structured result entry):
-  // Pathologists create Pathology reports only through the structured form.
+  // Radiology only — Pathology reports are created only through the structured form.
   canUploadFile: boolean;
   canEdit:   boolean;
   canDelete: boolean;
@@ -1040,7 +1034,7 @@ function RequestDetailPanel({
   const showReceiptButton = canDownloadReceipt && !!payment?.receiptAvailable;
   // Reports can only be uploaded after payment is collected (the backend
   // rejects an unpaid upload with 409).
-  const canUploadNow      = canUploadFile && request.status !== 'COMPLETED';
+  const canUploadNow      = canUploadFile && type === 'radiology' && request.status !== 'COMPLETED';
   const showUploadButton  = canUploadNow && !!payment;
 
   const row = (label: string, value: React.ReactNode) => (
@@ -1103,6 +1097,10 @@ function RequestDetailPanel({
                 })}
               </ul>
             ))}
+            {/* Bulk Download / Print of every submitted test report (multi-test requests). */}
+            {tests.length > 1 && testReports?.some((r) => r.result) && (
+              <PathologyReportsBulkActions requestId={request.requestId} patientId={request.patientId} reports={testReports} />
+            )}
             {detail.isFetching && !detail.currentData && row('Patient Type', 'Loading…')}
             {encounter && (
               <>
@@ -1132,7 +1130,8 @@ function RequestDetailPanel({
               </span>
             ))}
             {row('Notes', <RichTextDisplay value={request.notes} />)}
-            {row('Report', request.reportUrl ? (
+            {/* Pathology reports are viewed per test above — no uploaded-file row. */}
+            {type !== 'pathology' && row('Report', request.reportUrl ? (
               <a
                 href={request.reportUrl}
                 target="_blank"
@@ -1210,7 +1209,6 @@ function RequestDetailPanel({
       {showUpload && (
         <ReportUploadModal
           requestId={request.requestId}
-          type={type}
           onClose={() => { setShowUpload(false); onClose(); }}
         />
       )}
@@ -1647,9 +1645,9 @@ export default function LabPage() {
   const canUploadPathology = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUploadRadiology = ['RADIOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
   const canUpload = activeTab === 'pathology' ? canUploadPathology : canUploadRadiology;
-  // Pathologists create Pathology reports only through the structured report
-  // form — no file upload (the backend's upload route also rejects them).
-  const canUploadFile = activeTab === 'pathology' ? canUploadPathology && role !== 'PATHOLOGIST' : canUploadRadiology;
+  // No Pathology file upload for any role — Pathology reports are created only
+  // through the structured report form (the backend has no upload route).
+  const canUploadFile = activeTab === 'pathology' ? false : canUploadRadiology;
 
   const canEditPathology   = ['PATHOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
   const canEditRadiology   = ['RADIOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');

@@ -86,7 +86,7 @@ describe('buildPathologyReportPdf', () => {
     }
   });
 
-  test('has no hospital header, signature block, reporter details, request date or request id', async () => {
+  test('has no hospital header, reporter details, request date or request id', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
     for (const text of [
       'Lab Test Hospital', '321 Lab Street', 'admin@labtest.com', 'GSTIN', 'GST001',
@@ -212,8 +212,8 @@ describe('buildPathologyReportPdf', () => {
     expect(bold).not.toBe(regular);
     expect(fontOf('264')).toBe(bold);
     expect(fontOf('48')).toBe(regular);
-    // Only the patient-grid divider and the table header's two rules remain.
-    expect(content.match(/ l\s+S/g)).toHaveLength(3);
+    // Only the patient-grid divider, the table header's two rules and the Doctor Signature line remain.
+    expect(content.match(/ l\s+S/g)).toHaveLength(4);
   });
 
   test('keeps the top 3.5 cm and bottom 2 cm of every page blank', async () => {
@@ -242,6 +242,58 @@ describe('buildPathologyReportPdf', () => {
     // "ESR" at 12pt is ~22pt wide; its left edge sits near the page centre.
     expect(x).toBeGreaterThan(40 + width / 2 - 20);
     expect(x).toBeLessThan(40 + width / 2);
+  });
+
+  test('the print copy (no letterhead) carries the Doctor Signature at the bottom-right of the last page', async () => {
+    const pdf = await buildPathologyReportPdf(makeData());
+    expect(textOf(pdf).split('Doctor Signature').length - 1).toBe(1);
+    expect(has(pdf, 'Registration No.')).toBe(false);
+    const sigHex = Buffer.from('Doctor').toString('hex');
+    // The grid's "Doctor:" label is drawn first; the signature label is the last match.
+    const m = [...contentOf(pdf).matchAll(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ 9 Tf\s+\[<${sigHex}`, 'g'))].pop();
+    expect(m).toBeDefined();
+    expect(Number(m![1])).toBeGreaterThan(595.28 / 2);   // right half
+    expect(Number(m![2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+  });
+
+  describe('downloaded copy (letterhead)', () => {
+    const withLetterhead = (o: Partial<PathologyReportPdfData> = {}) => makeData({ letterhead: { logo: null }, ...o });
+
+    test('carries the hospital name, registration number and address, plus a Doctor Signature', async () => {
+      const pdf = await buildPathologyReportPdf(withLetterhead());
+      for (const text of ['Lab Test Hospital', 'Registration No.: GST001', '321 Lab Street', 'Doctor Signature']) {
+        expect({ text, found: has(pdf, text) }).toEqual({ text, found: true });
+      }
+      expect(has(pdf, 'admin@labtest.com')).toBe(false);
+      expect(pageCount(pdf)).toBe(1);
+    });
+
+    test('letterhead is black text with no background fill', async () => {
+      const content = contentOf(await buildPathologyReportPdf(withLetterhead()));
+      const fills = [...content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) (?:rg|scn)/g)].map((m) => m.slice(1, 4).map(Number));
+      expect(fills.every((c) => c.every((v) => v === 0))).toBe(true);
+      expect(content).not.toMatch(/ re\s+f/);
+    });
+
+    test('the letterhead sits in the top band of every page; content stays below it', async () => {
+      const values = Array.from({ length: 60 }, (_, i) =>
+        value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
+      const pdf = await buildPathologyReportPdf(withLetterhead({ test: { testName: 'Panel', values, remarks: null } }));
+      const pages = pageCount(pdf);
+      expect(pages).toBeGreaterThan(1);
+      expect(textOf(pdf).split('Lab Test Hospital').length - 1).toBe(pages);
+      expect(textOf(pdf).split('Doctor Signature').length - 1).toBe(1);
+    });
+
+    test('the Doctor Signature is at the bottom-right of the last page', async () => {
+      const content = contentOf(await buildPathologyReportPdf(withLetterhead()));
+      const sigHex = Buffer.from('Doctor').toString('hex');
+      // The grid's "Doctor:" label is drawn first; the signature label is the last match.
+      const m = [...content.matchAll(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ 9 Tf\s+\[<${sigHex}`, 'g'))].pop();
+      expect(m).toBeDefined();
+      expect(Number(m![1])).toBeGreaterThan(595.28 / 2);   // right half
+      expect(Number(m![2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+    });
   });
 
   test('the footer never spills onto an extra blank page', async () => {

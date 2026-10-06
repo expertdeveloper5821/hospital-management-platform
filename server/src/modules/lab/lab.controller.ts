@@ -88,31 +88,6 @@ export async function getPathologyRequest(
   } catch (err) { next(err); }
 }
 
-// multipart/form-data upload — multer populates req.file from the "report" field.
-// Buffer is uploaded directly to S3/LocalStack; reportUrl is returned in the response.
-export async function uploadPathologyReport(
-  req: Request, res: Response, next: NextFunction,
-): Promise<void> {
-  try {
-    const id = requestIdSchema.safeParse(req.params['requestId']);
-    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
-
-    if (!req.file) {
-      res.status(400).json({ status: 'error', message: 'No file uploaded — send the file in the "report" field' });
-      return;
-    }
-
-    const result = await labService.uploadPathologyReport(
-      id.data,
-      req.user!.tenantId as string,
-      req.user!.userId,
-      req.file.buffer,
-      req.file.mimetype,
-    );
-    res.status(200).json({ status: 'success', data: result });
-  } catch (err) { next(err); }
-}
-
 // ─── Structured Pathology test reports ────────────────────────────────────────
 // :testIndex is the test's position in the request's testType (0-based).
 const testIndexSchema = z.coerce.number().int().min(0).max(99);
@@ -143,6 +118,7 @@ export async function submitPathologyTestReport(
 
 // GET /api/lab/pathology/:requestId/reports/:testIndex/pdf — one test's report
 // PDF. Same readers (and Doctor scoping) as GET /pathology/:requestId.
+// `?letterhead=true` (downloaded copy) adds the hospital letterhead.
 export async function getPathologyTestReportPdf(
   req: Request, res: Response, next: NextFunction,
 ): Promise<void> {
@@ -156,6 +132,34 @@ export async function getPathologyTestReportPdf(
     const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
     const { buffer, fileName } = await labService.getPathologyTestReportPdf(
       id.data, index.data, tenantId, allowedPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+      req.query['letterhead'] === 'true',
+    );
+    res.status(200)
+      .set({
+        'Content-Type':        'application/pdf',
+        'Content-Disposition': `inline; filename="${fileName}"`,
+        'Content-Length':      buffer.length.toString(),
+        'Cache-Control':       'no-store',
+      })
+      .send(buffer);
+  } catch (err) { next(err); }
+}
+
+// GET /api/lab/pathology/:requestId/reports/pdf — every submitted test report
+// of the request combined into one PDF (bulk Download / Print). Same readers
+// (and Doctor scoping) as the per-test PDF; `?letterhead=true` likewise.
+export async function getAllPathologyTestReportsPdf(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const id = requestIdSchema.safeParse(req.params['requestId']);
+    if (!id.success) { res.status(400).json({ status: 'error', message: 'Invalid requestId format' }); return; }
+
+    const tenantId = req.user!.tenantId as string;
+    const allowedPatientIds = await resolveDoctorPatientIds(tenantId, req.user!.userId, req.user!.role);
+    const { buffer, fileName } = await labService.getAllPathologyTestReportsPdf(
+      id.data, tenantId, allowedPatientIds, referredByDoctorId(req.user!.userId, req.user!.role),
+      req.query['letterhead'] === 'true',
     );
     res.status(200)
       .set({
