@@ -17,7 +17,8 @@ import { cn } from '@/lib/utils';
 
 // Mirrors the backend's numeric result check (lab.service.ts NUMERIC_RESULT).
 const NUMERIC_RESULT = /^[-+]?(\d+(\.\d*)?|\.\d+)$/;
-const REMARKS_MAX = 2000;
+// Mirrors the backend's PATHOLOGY_CLINICAL_NOTE_MAX / PATHOLOGY_COMMENT_MAX.
+const CLINICAL_TEXT_MAX = 2000;
 
 const FLAG_LABEL: Record<PathologyResultFlag, string> = { HIGH: 'High', LOW: 'Low', ABNORMAL: 'Abnormal' };
 
@@ -131,7 +132,12 @@ function ReportEntryForm({
   // Pre-filled from the submitted report, so an amendment starts from it.
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries((report.result?.values ?? []).map((v) => [v.key, v.value])));
-  const [remarks, setRemarks] = useState(report.result?.remarks ?? '');
+  // A submitted report reopens with its own saved text; a new one starts from
+  // the Test Master defaults. Edits here are saved with this report only.
+  const [clinicalNote, setClinicalNote] = useState(() =>
+    (report.result ? report.result.clinicalNote : report.clinicalContent?.clinicalNote) ?? '');
+  const [comment, setComment] = useState(() =>
+    (report.result ? report.result.comment : report.clinicalContent?.comment) ?? '');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
 
@@ -151,7 +157,7 @@ function ReportEntryForm({
     setFieldErrors(errors);
     if (Object.keys(errors).length) { setError('Please correct the highlighted fields.'); return; }
     const filled = report.fields.some((f) => values[f.key]?.trim());
-    if (!filled && !remarks.trim()) { setError('Enter at least one result before submitting the report.'); return; }
+    if (!filled) { setError('Enter at least one result before submitting the report.'); return; }
 
     try {
       const updated = await submitReport({
@@ -159,7 +165,11 @@ function ReportEntryForm({
         testIndex: report.testIndex,
         testName:  report.testName,
         values:    Object.fromEntries(report.fields.map((f) => [f.key, values[f.key]?.trim() || null])),
-        remarks:   remarks.trim() || null,
+        // Free-text Remarks were replaced by Clinical Notes / Comment; a legacy
+        // report's stored remarks are carried over, never dropped.
+        remarks:      report.result?.remarks ?? null,
+        clinicalNote: clinicalNote.trim() || null,
+        comment:      comment.trim() || null,
       }).unwrap();
       const next = updated.testReports?.find((r) => r.testIndex === report.testIndex);
       onSubmitted(next ?? report);
@@ -193,18 +203,20 @@ function ReportEntryForm({
           </fieldset>
         ))}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="report-remarks">Remarks</Label>
-          <textarea
-            id="report-remarks"
-            value={remarks}
-            maxLength={REMARKS_MAX}
-            onChange={(e) => setRemarks(e.target.value)}
-            rows={3}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Optional interpretation or comments"
-          />
-        </div>
+        <ClinicalTextInput
+          id="report-clinical-note"
+          label="Clinical Notes"
+          value={clinicalNote}
+          onChange={setClinicalNote}
+          placeholder="Optional clinical notes for this report"
+        />
+        <ClinicalTextInput
+          id="report-comment"
+          label="Comment"
+          value={comment}
+          onChange={setComment}
+          placeholder="Optional comment for this report"
+        />
       </div>
 
       <div className="flex justify-end gap-3 border-t p-5 shrink-0">
@@ -214,6 +226,25 @@ function ReportEntryForm({
         </Button>
       </div>
     </NavForm>
+  );
+}
+
+function ClinicalTextInput({
+  id, label, value, onChange, placeholder,
+}: { id: string; label: string; value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <textarea
+        id={id}
+        value={value}
+        maxLength={CLINICAL_TEXT_MAX}
+        onChange={(e) => onChange(e.target.value)}
+        rows={3}
+        className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        placeholder={placeholder}
+      />
+    </div>
   );
 }
 
@@ -335,12 +366,7 @@ function ReportView({
                 </tbody>
               </table>
             </div>
-            {result.remarks && (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Remarks</p>
-                <p className="mt-1 whitespace-pre-wrap break-words text-sm">{result.remarks}</p>
-              </div>
-            )}
+            <ClinicalContent clinicalNote={result.clinicalNote} comment={result.comment} />
             <p className="text-xs text-muted-foreground">
               Reported by {result.submittedByName} on {formatDateTime(result.submittedAt)}
             </p>
@@ -372,6 +398,26 @@ function ReportView({
         </div>
       )}
     </>
+  );
+}
+
+// The submitted report's Clinical Notes / Comment, exactly as they print on
+// its PDF (each omitted when empty).
+function ClinicalContent({ clinicalNote, comment }: { clinicalNote: string | null; comment: string | null }) {
+  const sections = [
+    { title: 'Clinical Notes', text: clinicalNote },
+    { title: 'Comment',        text: comment },
+  ].filter((s): s is { title: string; text: string } => !!s.text?.trim());
+  if (sections.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      {sections.map((s) => (
+        <div key={s.title}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{s.title}</p>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm">{s.text}</p>
+        </div>
+      ))}
+    </div>
   );
 }
 

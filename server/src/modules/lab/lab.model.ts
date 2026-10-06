@@ -38,8 +38,10 @@ const ENCRYPTED_PATHOLOGY_FIELDS = {
 export interface IPathologyTestReport {
   testName:    string;
   templateKey: string;
-  // JSON of { values: PathologyResultValue[]; remarks: string | null } —
-  // encrypted at rest; plaintext JSON on every read through the model.
+  // JSON of { values: PathologyResultValue[]; remarks: string | null;
+  // clinicalNote?: string | null; comment?: string | null } — encrypted at
+  // rest; plaintext JSON on every read through the model. clinicalNote /
+  // comment are absent on reports saved before they were stored per report.
   resultData:  string;
   submittedBy: string;
   submittedAt: Date;

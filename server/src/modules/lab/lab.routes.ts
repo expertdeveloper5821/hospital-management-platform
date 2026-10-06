@@ -26,6 +26,8 @@ import {
   submitPathologyTestReport,
   getPathologyTestReportPdf,
   getAllPathologyTestReportsPdf,
+  listPathologyTestMaster,
+  updatePathologyTestMaster,
 } from './lab.controller';
 
 const router = express.Router();
@@ -43,6 +45,22 @@ const radiologyUpload = multer({
 // entirely — each lab role only ever sees its own request type.
 
 // ─── Pathology ────────────────────────────────────────────────────────────────
+
+// Pathology Test Master — per-test Clinical Note / Comment / Please Correlate
+// Clinically printed on every report. Registered before /pathology/:requestId
+// so "test-master" is never parsed as a requestId. Lab staff only (same roles
+// as structured report entry).
+router.get(
+  '/pathology/test-master',
+  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN),
+  listPathologyTestMaster,
+);
+
+router.patch(
+  '/pathology/test-master/:templateKey',
+  requireRole(UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN),
+  updatePathologyTestMaster,
+);
 
 router.post(
   '/pathology',

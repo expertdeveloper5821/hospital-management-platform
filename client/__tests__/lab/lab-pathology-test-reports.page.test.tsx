@@ -52,12 +52,15 @@ const CBC_RESULT = {
     { key: 'neutrophils', name: 'Neutrophils', section: 'Differential Leucocyte Count', value: '60', unit: '%', referenceRange: '40 - 80', flag: null },
   ],
   remarks: 'Mild anaemia.',
+  clinicalNote: 'CBC clinical note.' as string | null,
+  comment: null as string | null,
   submittedBy: 'p1', submittedByName: 'Lab Pathologist', submittedAt: '2026-10-04T12:00:00.000Z',
 };
 
 function reportsWith(cbcResult: typeof CBC_RESULT | null) {
   return [
-    { testIndex: 0, testName: CBC,    templateKey: 'CBC',    fields: CBC_FIELDS,    result: cbcResult },
+    { testIndex: 0, testName: CBC,    templateKey: 'CBC',    fields: CBC_FIELDS,    result: cbcResult,
+      clinicalContent: { clinicalNote: 'CBC clinical note.', comment: null, correlateClinically: 'Correlate clinically.' } },
     { testIndex: 1, testName: LFT,    templateKey: 'LFT',    fields: LFT_FIELDS,    result: null },
     { testIndex: 2, testName: DENGUE, templateKey: 'DENGUE', fields: DENGUE_FIELDS, result: null },
   ];
@@ -205,6 +208,9 @@ describe('Structured report-entry forms (lab staff)', () => {
       testName:  CBC,
       values:    { hemoglobin: '10.5', wbc: null, neutrophils: null },
       remarks:   null,
+      // Pre-filled from the Test Master and sent with the report as-is.
+      clinicalNote: 'CBC clinical note.',
+      comment:      null,
     });
     // After submission the submitted report (filled values only) is shown.
     expect(await within(dialog).findByText(/Report submitted\. It is now available to the doctor\./)).toBeInTheDocument();
@@ -268,7 +274,74 @@ describe('Structured report-entry forms (lab staff)', () => {
     await user.click(within(dialog).getByRole('button', { name: /Edit Results/ }));
     expect(within(dialog).getByLabelText('Haemoglobin (Hb)')).toHaveValue('10.5');
     expect(within(dialog).getByLabelText('Neutrophils')).toHaveValue('60');
-    expect(within(dialog).getByLabelText('Remarks')).toHaveValue('Mild anaemia.');
+    // Free-text Remarks were replaced by Clinical Notes / Comment; a legacy
+    // report's stored remarks are carried over.
+    expect(within(dialog).queryByLabelText('Remarks')).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Clinical Notes')).toHaveValue('CBC clinical note.');
+    mockSubmit.mockReturnValue({ unwrap: () => Promise.resolve({ ...REQUEST, testReports: reportsWith(CBC_RESULT) }) });
+    await user.click(within(dialog).getByRole('button', { name: 'Submit Report' }));
+    expect(mockSubmit).toHaveBeenCalledWith(expect.objectContaining({ testIndex: 0, remarks: 'Mild anaemia.' }));
+  });
+
+  test('a new report pre-fills Clinical Notes from the Test Master; Comment stays blank when none is configured', async () => {
+    const user = userEvent.setup();
+    setup();
+    await openRequest(user);
+    await user.click(within(testsList()).getByRole('button', { name: CBC }));
+    const dialog = reportDialog(CBC);
+    expect(within(dialog).getByLabelText('Clinical Notes')).toHaveValue('CBC clinical note.');
+    expect(within(dialog).getByLabelText('Comment')).toHaveValue('');
+  });
+
+  test('edited Clinical Notes and an entered Comment are submitted with the report', async () => {
+    const user = userEvent.setup();
+    setup();
+    const saved = { ...CBC_RESULT, clinicalNote: 'Edited note.', comment: 'Repeat after 2 weeks.' };
+    mockSubmit.mockReturnValue({ unwrap: () => Promise.resolve({ ...REQUEST, testReports: reportsWith(saved) }) });
+    await openRequest(user);
+    await user.click(within(testsList()).getByRole('button', { name: CBC }));
+    const dialog = reportDialog(CBC);
+
+    await user.type(within(dialog).getByLabelText('Haemoglobin (Hb)'), '10.5');
+    const note = within(dialog).getByLabelText('Clinical Notes');
+    await user.clear(note);
+    await user.type(note, 'Edited note.');
+    await user.type(within(dialog).getByLabelText('Comment'), '  Repeat after 2 weeks.  ');
+    await user.click(within(dialog).getByRole('button', { name: 'Submit Report' }));
+
+    expect(mockSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      testIndex: 0, clinicalNote: 'Edited note.', comment: 'Repeat after 2 weeks.',
+    }));
+    // The submitted view shows the report's saved text.
+    expect(await within(dialog).findByText('Edited note.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Repeat after 2 weeks.')).toBeInTheDocument();
+  });
+
+  test('clearing Clinical Notes submits it as empty (null)', async () => {
+    const user = userEvent.setup();
+    setup();
+    mockSubmit.mockReturnValue({ unwrap: () => Promise.resolve({ ...REQUEST, testReports: reportsWith(CBC_RESULT) }) });
+    await openRequest(user);
+    await user.click(within(testsList()).getByRole('button', { name: CBC }));
+    const dialog = reportDialog(CBC);
+    await user.type(within(dialog).getByLabelText('Haemoglobin (Hb)'), '10.5');
+    await user.clear(within(dialog).getByLabelText('Clinical Notes'));
+    await user.click(within(dialog).getByRole('button', { name: 'Submit Report' }));
+    expect(mockSubmit).toHaveBeenCalledWith(expect.objectContaining({ clinicalNote: null, comment: null }));
+  });
+
+  test('reopening a submitted report loads its saved Clinical Notes / Comment (not the Test Master default) for editing', async () => {
+    const user = userEvent.setup();
+    setup({ cbcResult: { ...CBC_RESULT, clinicalNote: 'Saved note.', comment: 'Saved comment.' } });
+    await openRequest(user);
+    await user.click(within(testsList()).getByRole('button', { name: CBC }));
+    const dialog = reportDialog(CBC);
+    expect(within(dialog).getByText('Saved note.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Saved comment.')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /Edit Results/ }));
+    expect(within(dialog).getByLabelText('Clinical Notes')).toHaveValue('Saved note.');
+    expect(within(dialog).getByLabelText('Comment')).toHaveValue('Saved comment.');
   });
 
   test('results cannot be entered before payment is collected', async () => {
@@ -283,7 +356,7 @@ describe('Structured report-entry forms (lab staff)', () => {
 });
 
 describe('Doctor viewing', () => {
-  test('a doctor sees the submitted results (filled values only), flags and remarks — never the entry form', async () => {
+  test('a doctor sees the submitted results (filled values only), flags and clinical notes — never the entry form', async () => {
     const user = userEvent.setup();
     setup({ role: 'DOCTOR', cbcResult: CBC_RESULT });
     await openRequest(user);
@@ -300,7 +373,11 @@ describe('Doctor viewing', () => {
     ]);
     // Unfilled parameters (e.g. TLC) are not listed.
     expect(within(dialog).queryByText('Total Leucocyte Count (TLC / WBC)')).not.toBeInTheDocument();
-    expect(within(dialog).getByText('Mild anaemia.')).toBeInTheDocument();
+    expect(within(dialog).getByText('Clinical Notes')).toBeInTheDocument();
+    expect(within(dialog).getByText('CBC clinical note.')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Comment')).not.toBeInTheDocument();
+    // The old free-text Remarks are no longer part of the report.
+    expect(within(dialog).queryByText('Mild anaemia.')).not.toBeInTheDocument();
     expect(within(dialog).getByText(/Reported by Lab Pathologist/)).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: /Edit Results|Enter Results/ })).not.toBeInTheDocument();
     expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument();

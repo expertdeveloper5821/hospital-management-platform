@@ -67,8 +67,10 @@ function makeData(overrides: Partial<PathologyReportPdfData> = {}): PathologyRep
         value({ key: 'wbc', name: 'Total Leucocyte Count (TLC / WBC)', value: '12500', unit: 'cells/µL', referenceRange: '4000 - 11000', flag: 'HIGH' }),
         value({ key: 'neutrophils', name: 'Neutrophils', value: '60', unit: '%', referenceRange: '40 - 80', section: 'Differential Leucocyte Count' }),
       ],
-      remarks: 'Clinical correlation advised.',
+      clinicalNote: 'Values may vary with hydration status.',
+      comment:      null,
     },
+    correlateClinically: 'Findings pertain only to the sample tested; interpret with clinical history.',
     reportedByName: 'Lab Pathologist',
     reportedAt:     '2026-05-20T06:30:00.000Z',
     ...overrides,
@@ -89,7 +91,8 @@ describe('buildPathologyReportPdf', () => {
       'John Doe', 'PAT-001', '45 years / Male', '1234567890', 'Lab Doctor', 'Cardiology', 'OPD', 'OPD-LABTEST01',
       'Report Date', '20 May 2026', '123 Test Street',
       'CBC (Complete Blood Count)', 'Haemoglobin (Hb)', '10.2', 'g/dL', '13.0 - 17.0',
-      'Differential Leucocyte Count', 'Remarks', 'Clinical correlation advised.',
+      'Differential Leucocyte Count', 'Clinical Notes', 'Values may vary with hydration status.',
+      'Please Correlate Clinically', 'Findings pertain only to the sample tested; interpret with clinical history.',
     ]) {
       expect({ text, found: has(pdf, text) }).toEqual({ text, found: true });
     }
@@ -147,14 +150,15 @@ describe('buildPathologyReportPdf', () => {
     expect(has(pdf, 'OPD Visit ID')).toBe(false);
   });
 
-  test('omits empty optional rows (no encounter, no remarks, no address)', async () => {
+  test('omits empty optional rows (no encounter, no clinical note / comment, no address)', async () => {
     const pdf = await buildPathologyReportPdf(makeData({
       encounter: null,
       patient: { fullName: 'John Doe', patientId: 'PAT-001', age: null, gender: null, mobileNumber: null, address: null },
-      test: { testName: 'ESR', values: [value({ key: 'esr', name: 'ESR (Westergren)', value: '12', unit: 'mm/hr', referenceRange: '0 - 15' })], remarks: null },
+      test: { testName: 'ESR', values: [value({ key: 'esr', name: 'ESR (Westergren)', value: '12', unit: 'mm/hr', referenceRange: '0 - 15' })], clinicalNote: null, comment: '  ' },
     }));
     expect(has(pdf, 'Patient Type')).toBe(false);
-    expect(has(pdf, 'Remarks')).toBe(false);
+    expect(has(pdf, 'Clinical Notes')).toBe(false);
+    expect(has(pdf, 'Comment')).toBe(false);
     expect(has(pdf, 'Address')).toBe(false);
     expect(has(pdf, 'ESR (Westergren)')).toBe(true);
   });
@@ -163,7 +167,7 @@ describe('buildPathologyReportPdf', () => {
     const longList = Array.from({ length: 40 }, (_, i) => `Antibiotic-${i + 1}`).join(', ');
     const values = Array.from({ length: 60 }, (_, i) =>
       value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: i === 0 ? longList : String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
-    const pdf = await buildPathologyReportPdf(makeData({ test: { testName: 'Urine Culture & Sensitivity', values, remarks: null } }));
+    const pdf = await buildPathologyReportPdf(makeData({ test: { testName: 'Urine Culture & Sensitivity', values, clinicalNote: null, comment: null } }));
     expect(pageCount(pdf)).toBeGreaterThan(1);
     expect(has(pdf, 'Parameter 60')).toBe(true);           // last row present
     expect(has(pdf, 'Antibiotic-40')).toBe(true);          // tail of the wrapped long value present
@@ -178,7 +182,8 @@ describe('buildPathologyReportPdf', () => {
       test: {
         testName: 'Pregnancy Test (Urine β-hCG)',
         values: [value({ key: 'urineHcg', name: 'Urine hCG (Qualitative)', value: 'Positive', referenceRange: 'Negative' })],
-        remarks: 'Repeat β-hCG in 48 hours.',
+        clinicalNote: 'Repeat β-hCG in 48 hours.',
+        comment:      null,
       },
     }));
     expect(pdf.toString('latin1')).toMatch(/\/BaseFont \/Symbol/);
@@ -191,8 +196,8 @@ describe('buildPathologyReportPdf', () => {
   });
 
   test('text containing β that has to wrap spells it out instead of drawing a broken glyph', async () => {
-    const remarks = `${'Long remark text that wraps across several lines. '.repeat(6)}β-hCG rising.`;
-    const pdf = await buildPathologyReportPdf(makeData({ test: { ...makeData().test, remarks } }));
+    const clinicalNote = `${'Long note text that wraps across several lines. '.repeat(6)}β-hCG rising.`;
+    const pdf = await buildPathologyReportPdf(makeData({ test: { ...makeData().test, clinicalNote } }));
     expect(has(pdf, 'beta-hCG rising.')).toBe(true);
   });
 
@@ -245,8 +250,10 @@ describe('buildPathologyReportPdf', () => {
           value({ key: 'a', name: 'Total Cholesterol', value: '264', unit: 'mg/dL', referenceRange: '0 - 200', flag: 'HIGH' }),
           value({ key: 'b', name: 'HDL Cholesterol',   value: '48',  unit: 'mg/dL', referenceRange: '40 - 60' }),
         ],
-        remarks: null,
+        clinicalNote: null,
+        comment:      null,
       },
+      correlateClinically: null,
     }));
     const content = contentOf(pdf);
     // Font resource used for the 9pt text run starting with `text`.
@@ -267,7 +274,7 @@ describe('buildPathologyReportPdf', () => {
   test('keeps the top 3.5 cm and bottom 2 cm of every page blank', async () => {
     const values = Array.from({ length: 60 }, (_, i) =>
       value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
-    const pdf = await buildPathologyReportPdf(makeData({ test: { testName: 'Panel', values, remarks: 'Note.' } }));
+    const pdf = await buildPathologyReportPdf(makeData({ test: { testName: 'Panel', values, clinicalNote: 'Note.', comment: 'Comment.' } }));
     expect(pageCount(pdf)).toBeGreaterThan(1);
     const content = contentOf(pdf);
     const PAGE_H = 841.89, TOP = (35 * 72) / 25.4, BOTTOM = (20 * 72) / 25.4;
@@ -361,7 +368,7 @@ describe('buildPathologyReportPdf', () => {
     test('the letterhead sits in the top band of every page; content stays below it', async () => {
       const values = Array.from({ length: 60 }, (_, i) =>
         value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
-      const pdf = await buildPathologyReportPdf(withLetterhead({ test: { testName: 'Panel', values, remarks: null } }));
+      const pdf = await buildPathologyReportPdf(withLetterhead({ test: { testName: 'Panel', values, clinicalNote: null, comment: null } }));
       const pages = pageCount(pdf);
       expect(pages).toBeGreaterThan(1);
       expect(textOf(pdf).split('Lab Test Hospital').length - 1).toBe(pages);
@@ -372,6 +379,51 @@ describe('buildPathologyReportPdf', () => {
       const m = signatureAt(contentOf(await buildPathologyReportPdf(withLetterhead())));
       expect(Number(m[1])).toBeGreaterThan(595.28 / 2);   // right half
       expect(Number(m[2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+    });
+  });
+
+  describe('Test Master clinical content', () => {
+    test('prints Clinical Notes, then Comment, then End of Report, then the Please Correlate Clinically footer last', async () => {
+      const pdf = await buildPathologyReportPdf(makeData({
+        test: { ...makeData().test, clinicalNote: 'Note text.', comment: 'Screening comment.' },
+      }));
+      const text = textOf(pdf);
+      const order = ['Clinical Notes', 'Note text.', 'Comment', 'Screening comment.', 'End of Report', 'Dr Manish Kumar', 'Please Correlate Clinically']
+        .map((t) => text.indexOf(t));
+      expect(order.every((i) => i >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      expect(pageCount(pdf)).toBe(1);
+    });
+
+    test('the Please Correlate Clinically footer sits below the Doctor Signature, inside the bottom margin', async () => {
+      const content = contentOf(await buildPathologyReportPdf(makeData()));
+      const hex = Buffer.from('Please Correlate').toString('hex');
+      const footerY = Number(content.match(new RegExp(String.raw`1 0 0 1 [\d.]+ ([\d.]+) Tm\s+/F\d+ [\d.]+ Tf\s+\[<${hex}`))?.[1]);
+      expect(footerY).toBeLessThan(Number(signatureAt(content)[2]));   // PDF y-up: below the name
+      expect(footerY).toBeGreaterThan((20 * 72) / 25.4);               // above the blank bottom 2 cm
+    });
+
+    test('never prints a Remarks section', async () => {
+      expect(has(await buildPathologyReportPdf(makeData()), 'Remarks')).toBe(false);
+    });
+
+    test('a comment prints only when set, and each section prints once', async () => {
+      const without = await buildPathologyReportPdf(makeData());
+      expect(has(without, 'Comment')).toBe(false);
+      const withComment = await buildPathologyReportPdf(makeData({ test: { ...makeData().test, comment: 'Confirm by PCR.' } }));
+      expect(textOf(withComment).split('Confirm by PCR.').length - 1).toBe(1);
+      expect(textOf(withComment).split('Clinical Notes').length - 1).toBe(1);
+      expect(textOf(withComment).split('Please Correlate Clinically').length - 1).toBe(1);
+    });
+
+    test('a long report keeps the footer on the last page only, below the signature', async () => {
+      const values = Array.from({ length: 60 }, (_, i) =>
+        value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
+      const pdf = await buildPathologyReportPdf(makeData({ test: { ...makeData().test, values } }));
+      expect(pageCount(pdf)).toBeGreaterThan(1);
+      expect(textOf(pdf).split('Please Correlate Clinically').length - 1).toBe(1);
+      const text = textOf(pdf);
+      expect(text.indexOf('Please Correlate Clinically')).toBeGreaterThan(text.indexOf('Dr Manish Kumar'));
     });
   });
 

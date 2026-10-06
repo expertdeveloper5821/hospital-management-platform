@@ -365,15 +365,44 @@ export interface PathologyResultValue {
   flag:           PathologyResultFlag | null;
 }
 
+// ─── Pathology Test Master (per-test clinical content on the report) ─────────
+export interface PathologyTestClinicalContent {
+  clinicalNote:        string | null;
+  comment:             string | null;
+  correlateClinically: string | null;
+}
+
+// GET /api/lab/pathology/test-master
+export interface PathologyTestMasterEntry extends PathologyTestClinicalContent {
+  templateKey:   string;
+  testName:      string;
+  updatedBy:     string | null;
+  updatedByName: string | null;
+  updatedAt:     string;
+}
+
+// PATCH /api/lab/pathology/test-master/:templateKey — empty clinicalNote /
+// comment clears it; correlateClinically can be edited but not cleared.
+export interface UpdatePathologyTestMasterRequest {
+  clinicalNote?:        string | null;
+  comment?:             string | null;
+  correlateClinically?: string;
+}
+
 export interface PathologyTestReport {
   testIndex:   number;
   testName:    string;
   templateKey: string;
+  // The test's Test Master content, as it prints on the report.
+  clinicalContent?: PathologyTestClinicalContent;
   fields:      PathologyReportField[];
   // null until this test's report has been submitted.
   result: {
     values:          PathologyResultValue[];
     remarks:         string | null;
+    // As saved with this report (what its PDF prints).
+    clinicalNote:    string | null;
+    comment:         string | null;
     submittedBy:     string;
     submittedByName: string;
     submittedAt:     string;
@@ -385,6 +414,10 @@ export interface SubmitPathologyTestReportRequest {
   testName: string;
   values:   Record<string, string | null>;
   remarks?: string | null;
+  // Saved with this report only — never written back to the Test Master.
+  // Empty / null clears it for this report.
+  clinicalNote?: string | null;
+  comment?:      string | null;
 }
 
 export interface RadiologyRequestResponse {
@@ -753,6 +786,7 @@ export const AuditEntityTypes = [
   'STAFF_DOCUMENT',
   'CHARGE',
   'DEPARTMENT',
+  'PATHOLOGY_TEST_MASTER',
 ] as const;
  
 export type AuditEntityType = typeof AuditEntityTypes[number];
