@@ -691,6 +691,37 @@ describe('Additional catalog tests — same structured workflow', () => {
     expect(pregText).toContain('Urine hCG (Qualitative)');
     expect(pregText).not.toContain(HBSAG);
   });
+
+  test('Typhoid IgM is one test reporting both Salmonella Typhi IgM and IgG', async () => {
+    const TYPHOID = 'Typhoid IgM';
+    const id = await createRequest(TYPHOID);
+    await markPaid(id);
+
+    const detail = await getDetail(id, UserRole.PATHOLOGIST);
+    expect(detail.body.data.testReports).toHaveLength(1);
+    expect(detail.body.data.testReports[0].fields.map((f: { key: string; name: string; options: string[] }) => [f.key, f.name, f.options]))
+      .toEqual([
+        ['typhoidIgm', 'Salmonella Typhi IgM', ['Negative', 'Positive']],
+        ['typhoidIgg', 'Salmonella Typhi IgG', ['Negative', 'Positive']],
+      ]);
+
+    expect((await submit(id, 0, { testName: TYPHOID, values: { typhoidIgg: 'Maybe' } })).status).toBe(400);
+
+    const res = await submit(id, 0, { testName: TYPHOID, values: { typhoidIgm: 'Negative', typhoidIgg: 'Positive' } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.testReports[0].result.values.map((v: { key: string; value: string; flag: string | null }) => [v.key, v.value, v.flag]))
+      .toEqual([['typhoidIgm', 'Negative', null], ['typhoidIgg', 'Positive', 'ABNORMAL']]);
+
+    const view = await getDetail(id, UserRole.DOCTOR);
+    expect(view.body.data.testReports[0].result.values.map((v: { key: string; value: string }) => [v.key, v.value]))
+      .toEqual([['typhoidIgm', 'Negative'], ['typhoidIgg', 'Positive']]);
+
+    const pdf = await getPdf(id, 0);
+    expect(pdf.status).toBe(200);
+    const text = pdfText(pdf.body as Buffer);
+    expect(text).toContain('Salmonella Typhi IgM');
+    expect(text).toContain('Salmonella Typhi IgG');
+  });
 });
 
 // ─── Editing Test Type (Edit Pathology Request multi-select) ──────────────────

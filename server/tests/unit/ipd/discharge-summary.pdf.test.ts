@@ -93,6 +93,7 @@ function makeData(overrides: Partial<DischargeSummaryData> = {}): DischargeSumma
         { authorName: 'Nurse Priya', authorRole: 'NURSE', timestamp: '2026-01-07T09:00:00.000Z', noteHtml: 'Vitals stable. <u>No complaints</u>.' },
         { authorName: null, authorRole: null, timestamp: '2026-01-08T09:00:00.000Z', noteHtml: 'Legacy plain-text note with no author on record.' },
       ],
+      vitals: { spo2: 98, bloodPressure: '120/80', bodyTemperature: 98.6, sugar: 110, height: 170, weight: 72, pulse: 76 },
     },
     labRequests: [
       {
@@ -202,32 +203,26 @@ describe('buildDischargeSummaryPdf', () => {
     expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
   });
 
-  // ─── Branded letterhead ─────────────────────────────────────────────────────
-  describe('branded letterhead', () => {
+  // ─── Letterhead (downloaded copy) ───────────────────────────────────────────
+  describe('letterhead', () => {
     test('renders a real logo image on the letterhead without crashing (aspect ratio preserved via `fit`, never stretched)', async () => {
       await withLogoServer(async (logoUrl) => {
         const base = makeData();
-        const buf = await buildDischargeSummaryPdf({
-          ...base,
-          hospital: { ...base.hospital, logoUrl, primaryColor: '#7B1FA2' },
-        });
+        const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, logoUrl } });
         expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+        expect(buf.toString('latin1')).toContain('/Subtype /Image');
       });
     }, 10000);
 
-    test('generates a valid, readable PDF for a light/pastel branding color', async () => {
-      const base = makeData();
-      const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, primaryColor: '#F5F5F5' } });
-      expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
-    });
+    test('the Print copy never fetches or embeds the logo', async () => {
+      await withLogoServer(async (logoUrl) => {
+        const base = makeData();
+        const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, logoUrl } }, { print: true });
+        expect(buf.toString('latin1')).not.toContain('/Subtype /Image');
+      });
+    }, 10000);
 
-    test('generates a valid, readable PDF for a dark branding color', async () => {
-      const base = makeData();
-      const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, primaryColor: '#0B1B34' } });
-      expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
-    });
-
-    test('wraps a long hospital name and address in the letterhead without crashing', async () => {
+    test('clips a long hospital name and address to the top band without crashing', async () => {
       const base = makeData();
       const buf = await buildDischargeSummaryPdf({
         ...base,
@@ -238,7 +233,7 @@ describe('buildDischargeSummaryPdf', () => {
         },
       });
       expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
-      expect(pageCount(buf)).toBeGreaterThanOrEqual(1);
+      expect(pageCount(buf)).toBe(pageCount(await buildDischargeSummaryPdf(base)));
     });
 
     test('falls back cleanly with no logo, no address, no email, and no GSTIN', async () => {
@@ -248,70 +243,121 @@ describe('buildDischargeSummaryPdf', () => {
       });
       expect(buf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
     });
-
-    test('the branded letterhead + compact running header do not affect existing footer pagination', async () => {
-      const base = makeData();
-      const manyNotes = Array.from({ length: 60 }, (_, i) => ({
-        authorName: 'Dr. Asha Rao', authorRole: 'DOCTOR', timestamp: `2026-01-0${(i % 9) + 1}T09:00:00.000Z`,
-        noteHtml: `<p>Progress note number ${i + 1} describing the patient's ongoing condition in reasonable detail so the paragraph wraps across multiple lines.</p>`,
-      }));
-      const buf = await buildDischargeSummaryPdf({
-        ...base,
-        hospital: { ...base.hospital, primaryColor: '#0B1B34' },
-        admission: { ...base.admission, progressNotes: manyNotes },
-      });
-      const text = buf.toString('latin1');
-      expect(pageCount(buf)).toBeGreaterThan(1);
-      expect(text).toContain('Page');
-    });
   });
 });
 
-// ─── Proves the Hospital Admin's saved branding color actually reaches and
-// styles the rendered PDF, not just the data passed into the builder.
-describe('branded elements render in the actual configured color', () => {
-  test('a custom color saved in Hospital Admin Branding is written as the fill-color operator for the letterhead, title bar, and section headers', async () => {
+// ─── Download vs Print copy, page layout ──────────────────────────────────────
+describe('Download / Print layout', () => {
+  const hex = (t: string) => Buffer.from(t, 'latin1').toString('hex');
+  const longData = () => {
     const base = makeData();
-    const customColor = '#7B1FA2';
-    const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, primaryColor: customColor } });
-
-    const content = decompressContentStreams(buf);
-    const op = fillOperatorFor(customColor);
-    const occurrences = content.split(op).length - 1;
-
-    // Letterhead band + title bar + at least one section heading (e.g.
-    // "Patient Information") all fill with this exact operator.
-    expect(occurrences).toBeGreaterThanOrEqual(3);
-  });
-
-  test('the compact running header on continuation pages also uses the exact configured color', async () => {
-    const base = makeData();
-    const customColor = '#0B1B34';
     const manyNotes = Array.from({ length: 60 }, (_, i) => ({
       authorName: 'Dr. Asha Rao', authorRole: 'DOCTOR', timestamp: `2026-01-0${(i % 9) + 1}T09:00:00.000Z`,
-      noteHtml: `<p>Progress note number ${i + 1} with enough text to force pagination across multiple pages.</p>`,
+      noteHtml: `<p>Progress note number ${i + 1} describing the patient's ongoing condition in reasonable detail so the paragraph wraps across multiple lines.</p>`,
     }));
-    const buf = await buildDischargeSummaryPdf({
-      ...base,
-      hospital: { ...base.hospital, primaryColor: customColor },
-      admission: { ...base.admission, progressNotes: manyNotes },
-    });
+    return { ...base, admission: { ...base.admission, progressNotes: manyNotes } };
+  };
 
-    const content = decompressContentStreams(buf);
-    const op = fillOperatorFor(customColor);
-    // One occurrence per page (letterhead/title bar/headings on page 1, one
-    // compact-header fill per continuation page) — proves the color isn't
-    // just applied once and then dropped.
-    expect(content.split(op).length - 1).toBeGreaterThan(1);
+  test('is A4', async () => {
+    const buf = await buildDischargeSummaryPdf(makeData());
+    expect(buf.toString('latin1')).toMatch(/\/MediaBox \[0 0 595\.28 841\.89\]/);
   });
 
-  test('no valid branding color configured renders the letterhead in black, not a hardcoded brand hue', async () => {
-    const base = makeData();
-    const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, primaryColor: '' } });
+  test('the downloaded copy prints the letterhead (GSTIN line) on every page; the Print copy has none', async () => {
+    const data = longData();
+    const download = await buildDischargeSummaryPdf(data);
+    const print    = await buildDischargeSummaryPdf(data, { print: true });
+    const pages    = pageCount(download);
+    expect(pages).toBeGreaterThan(1);
 
+    const marker = hex('22AAAAA0000A1Z5');   // the GSTIN — only ever drawn by the letterhead
+    const occurrences = (buf: Buffer) => decompressContentStreams(buf).toLowerCase().split(marker).length - 1;
+    expect(occurrences(download)).toBe(pages);
+    expect(occurrences(print)).toBe(0);
+  });
+
+  test('Download and Print carry the same content on the same number of pages', async () => {
+    for (const data of [makeData(), longData()]) {
+      const download = await buildDischargeSummaryPdf(data);
+      const print    = await buildDischargeSummaryPdf(data, { print: true });
+      expect(pageCount(print)).toBe(pageCount(download));
+      const content = decompressContentStreams(print).toLowerCase();
+      expect(decompressContentStreams(download).toLowerCase()).toContain(content.slice(0, 2000));
+    }
+  });
+
+  test('short content fits one page — no trailing blank page', async () => {
+    const short = makeData({ opdVisits: [], labRequests: [] });
+    expect(pageCount(await buildDischargeSummaryPdf(short))).toBe(1);
+    expect(pageCount(await buildDischargeSummaryPdf(short, { print: true }))).toBe(1);
+  });
+
+  test('has no "Generated on" footer or page numbers', async () => {
+    for (const buf of [await buildDischargeSummaryPdf(longData()), await buildDischargeSummaryPdf(longData(), { print: true })]) {
+      const content = decompressContentStreams(buf).toLowerCase();
+      expect(content).not.toContain(hex('Generated'));
+      expect(content).not.toContain(hex(' of '));
+    }
+  });
+
+  test('uses only black for text and rules — no brand-colour fills', async () => {
+    const base = makeData();
+    const buf = await buildDischargeSummaryPdf({ ...base, hospital: { ...base.hospital, primaryColor: '#7B1FA2' } });
     const content = decompressContentStreams(buf);
-    expect(content).toContain(fillOperatorFor('')); // hexToRgb('') → black
-    expect(content).not.toContain(fillOperatorFor('#1A73E8'));
+    const colours = content.match(/[\d.]+ [\d.]+ [\d.]+ (scn|SCN)/g) ?? [];
+    expect(colours.length).toBeGreaterThan(0);
+    colours.forEach((op) => expect(op).toMatch(/^0 0 0 (scn|SCN)$/));
+  });
+
+  // Content stream text with pdfkit's kerning adjustments (`<..> 30 <..>` inside
+  // a TJ array) removed, so whole words can be matched by their hex encoding.
+  const unkerned = (buf: Buffer) => decompressContentStreams(buf).toLowerCase().replace(/>\s*-?[\d.]+\s*</g, '');
+
+  test('renders the Vitals grid in order SpO2 | BP | Temperature, Sugar | Height | Weight', async () => {
+    const content = unkerned(await buildDischargeSummaryPdf(makeData(), { print: true }));
+    const positions = ['SpO2', 'BP', 'Temperature', 'Sugar', 'Height', 'Weight', 'mmHg', 'mg/dL']
+      .map((label) => content.indexOf(hex(label)));
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions.slice(0, 6)).toEqual([...positions.slice(0, 6)].sort((x, y) => x - y));
+  });
+
+  test('a partially recorded vitals set keeps the grid; no recorded vitals omits the section', async () => {
+    const base = makeData({ opdVisits: [], labRequests: [] });
+    const partial = { spo2: null, bloodPressure: '120/80', bodyTemperature: null, sugar: null, height: null, weight: 72, pulse: null };
+    const empty   = { spo2: null, bloodPressure: null, bodyTemperature: null, sugar: null, height: null, weight: null, pulse: null };
+    const withPartial = unkerned(await buildDischargeSummaryPdf({ ...base, admission: { ...base.admission, vitals: partial } }));
+    expect(withPartial).toContain(hex('SpO2'));
+    expect(withPartial).toContain(hex('Height'));
+    for (const vitals of [empty, null, undefined]) {
+      const buf = await buildDischargeSummaryPdf({ ...base, admission: { ...base.admission, vitals } });
+      expect(unkerned(buf)).not.toContain(hex('SpO2'));
+      expect(pageCount(buf)).toBe(1);
+    }
+  });
+
+  test('the Lab section never prints a "View Report" link', async () => {
+    for (const print of [false, true]) {
+      const buf = await buildDischargeSummaryPdf(makeData(), { print });
+      expect(unkerned(buf)).not.toContain(hex('View Report'));
+      expect(buf.toString('latin1')).not.toContain('s3.test/report.pdf');
+    }
+  });
+
+  test('a long billing description wraps in full instead of being cut off', async () => {
+    const base = makeData({ opdVisits: [], labRequests: [] });
+    const description = 'IPD Admission package including room charges nursing care medicines consumables and final settlementzz';
+    const buf = await buildDischargeSummaryPdf({
+      ...base, billing: { payments: [{ ...base.billing!.payments[0], description }], total: 500 },
+    }, { print: true });
+    expect(unkerned(buf)).toContain(hex('settlementzz'));
+    expect(pageCount(buf)).toBe(1);
+  });
+
+  test('the patient grid follows the OPD slip labels', async () => {
+    const content = decompressContentStreams(await buildDischargeSummaryPdf(makeData(), { print: true })).toLowerCase();
+    for (const label of ['UHID', 'Admission', 'Discharge', 'Mobile']) {
+      expect(content).toContain(hex(label));
+    }
   });
 });
 

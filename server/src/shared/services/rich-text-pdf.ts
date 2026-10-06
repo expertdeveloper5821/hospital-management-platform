@@ -195,10 +195,17 @@ export function renderRichTextBlocks(
 
     doc.x = left;
     if (block.kind === 'list-item') {
+      // The marker is drawn on its own (not as the head of a `continued`
+      // chain — the first segment's narrow width would make the whole item
+      // wrap a few characters per line); the item text then starts on the
+      // same line at `left` with the full item width.
       const prefix = block.listType === 'number' ? `${block.index}.` : '•';
-      doc.font('Helvetica').fontSize(baseFontSize).fillColor(color)
-        .text(prefix, options.x, doc.y, { continued: true, width: indent });
-      doc.text(' ', { continued: true });
+      doc.font('Helvetica').fontSize(baseFontSize).fillColor(color);
+      if (doc.y + doc.currentLineHeight(true) > doc.page.maxY()) doc.addPage();
+      const lineY = doc.y;
+      doc.text(prefix, options.x, lineY, { width: indent, lineBreak: false });
+      doc.x = left;
+      doc.y = lineY;
     }
 
     const nonEmptyRuns = block.runs.filter((r) => r.text !== '');

@@ -213,6 +213,9 @@ export interface DischargeSummaryAdmission {
   // before this field existed (the PDF omits the section then).
   dischargeSummaryNotes: string | null;
   progressNotes:        DischargeSummaryProgressNote[];
+  // The admission's recorded vitals; the PDF omits the section when absent
+  // or when nothing was recorded.
+  vitals?:              IPDVitals | null;
 }
 
 export interface DischargeSummaryLabRequest {
