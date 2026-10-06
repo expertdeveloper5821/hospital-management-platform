@@ -31,7 +31,7 @@ export class PathologyTestMasterService {
 
   // Every master row of the tenant, keyed by templateKey. Rows missing for
   // this tenant (first use, or a test added to the catalog later) are seeded
-  // first; saved rows are never touched.
+  
   async loadMasterMap(tenantId: string): Promise<Map<string, IPathologyTestMaster>> {
     let rows = await pathologyTestMasterRepository.findAll(tenantId);
     const have    = new Set(rows.map((r) => r.templateKey));
