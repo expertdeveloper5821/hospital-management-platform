@@ -13,6 +13,7 @@ import {
   RADIOLOGY_REPORT_MAX_BYTES,
   LabTestTypeResponse,
   LAB_REFERRED_BY_SELF,
+  labOtherReferrerName,
   CollectLabPaymentInput,
   LabPaymentSummary,
   LabEncounterSummary,
@@ -104,10 +105,12 @@ async function getRequesterName(tenantId: string, userId: string): Promise<strin
   return user?.name ?? user?.email;
 }
 
-// 'SELF' displays as "Self"; any other value is a referring doctor's userId,
-// resolved to their display name.
+// 'SELF' displays as "Self"; 'OTHER:<name>' displays the typed name; any
+// other value is a referring doctor's userId, resolved to their display name.
 async function getReferredByName(tenantId: string, referredBy: string): Promise<string> {
   if (referredBy === LAB_REFERRED_BY_SELF) return 'Self';
+  const otherName = labOtherReferrerName(referredBy);
+  if (otherName !== null) return otherName;
   const doctor = await userRepository.findById(tenantId, referredBy);
   return doctor?.name ?? doctor?.email ?? 'Self';
 }
@@ -600,10 +603,16 @@ async function toRadiologyResponse(
 
 export class LabService {
 
-  // Rejects a referredBy value that isn't 'SELF' and isn't a real Doctor in
-  // this tenant — keeps the stored value trustworthy for display/reporting.
+  // Rejects a referredBy value that isn't 'SELF', a non-empty 'OTHER:<name>',
+  // or a real Doctor in this tenant — keeps the stored value trustworthy for
+  // display/reporting.
   private async assertValidReferredBy(tenantId: string, referredBy: string): Promise<void> {
     if (referredBy === LAB_REFERRED_BY_SELF) return;
+    const otherName = labOtherReferrerName(referredBy);
+    if (otherName !== null) {
+      if (!otherName) throw new AppError('Invalid referredBy: referrer name is required', 400);
+      return;
+    }
     const doctor = await userRepository.findById(tenantId, referredBy);
     if (!doctor || doctor.role !== UserRole.DOCTOR) {
       throw new AppError('Invalid referredBy: doctor not found', 400);
@@ -771,7 +780,8 @@ export class LabService {
       const record     = await resolveEncounterRecord(updated);
       const recipients = new Set([
         updated.requestedBy,
-        ...(updated.referredBy !== LAB_REFERRED_BY_SELF ? [updated.referredBy] : []),
+        ...(updated.referredBy !== LAB_REFERRED_BY_SELF && labOtherReferrerName(updated.referredBy) === null
+          ? [updated.referredBy] : []),
         ...(record ? encounterDoctorIds(record) : []),
       ]);
       recipients.delete(userId);
@@ -827,7 +837,7 @@ export class LabService {
 
   // Bulk Download / Print: every submitted test report of the request, in test
   // order, as one PDF. Each report is rendered exactly as its own per-test PDF
-  // (same content, formatting, page numbering, Doctor Signature and — with
+  // (same content, formatting, Doctor Signature and — with
   // `letterhead` — the letterhead) and the reports are appended back to back.
   // Tests whose report hasn't been submitted are skipped; none submitted → 404.
   async getAllPathologyTestReportsPdf(
@@ -918,7 +928,6 @@ export class LabService {
       test:           { testName, values: result.values, remarks: result.remarks },
       reportedByName: reporter?.name ?? reporter?.email ?? 'Lab Staff',
       reportedAt:     report.submittedAt.toISOString(),
-      generatedAt:    new Date().toISOString(),
       ...(context.letterhead ? { letterhead: context.letterhead } : {}),
     });
   }

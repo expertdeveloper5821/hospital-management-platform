@@ -28,8 +28,17 @@ export type LabRequestPriority = typeof LabRequestPriority[keyof typeof LabReque
 
 // ─── Referred By ──────────────────────────────────────────────────────────────
 // 'SELF' means the requesting patient/staff referred themselves (no doctor
-// referral); any other value is the referring doctor's userId.
+// referral); 'OTHER:<name>' is a free-text external referrer typed in by
+// staff; any other value is the referring doctor's userId.
 export const LAB_REFERRED_BY_SELF = 'SELF';
+export const LAB_REFERRED_BY_OTHER_PREFIX = 'OTHER:';
+
+// The typed referrer name for an 'OTHER:<name>' value, else null.
+export function labOtherReferrerName(referredBy: string): string | null {
+  return referredBy.startsWith(LAB_REFERRED_BY_OTHER_PREFIX)
+    ? referredBy.slice(LAB_REFERRED_BY_OTHER_PREFIX.length).trim()
+    : null;
+}
 const referredBySchema = z.string().min(1).max(120).trim().default(LAB_REFERRED_BY_SELF);
 
 // ─── Pathology Schemas ────────────────────────────────────────────────────────

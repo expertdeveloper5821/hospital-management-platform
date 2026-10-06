@@ -142,60 +142,54 @@ describe('LabPage — New Request "Referred By" dropdown', () => {
     expect(select.value).toBe('doc-self');
   });
 
-  test('PATHOLOGIST: Self option present and selected by default (unchanged)', async () => {
+  test('DOCTOR: no Other option and no referrer-name field (unchanged)', async () => {
     const user = userEvent.setup();
-    mockRole   = 'PATHOLOGIST';
-    mockUserId = 'path-001';
+    mockRole   = 'DOCTOR';
+    mockUserId = 'doc-self';
     render(<LabPage />);
     await user.click(screen.getByRole('button', { name: /new request/i }));
 
     const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
-    expect(select.value).toBe('SELF');
-    expect(select.options[0].value).toBe('SELF');
+    expect(Array.from(select.options).map((o) => o.text)).not.toContain('Other');
+    expect(screen.queryByLabelText(/referrer name/i)).not.toBeInTheDocument();
   });
 
-  test('RECEPTIONIST: Self option present and selected by default (unchanged)', async () => {
+  test.each([
+    ['PATHOLOGIST',    'path-001',  false],
+    ['RECEPTIONIST',   'recep-001', false],
+    ['HOSPITAL_ADMIN', 'admin-001', false],
+    ['NURSE',          'nurse-001', false],
+    ['RADIOLOGIST',    'radio-001', true],
+  ])('%s: Self replaced by Other, nothing preselected', async (role, userId, radiologyTab) => {
+    const user = userEvent.setup();
+    mockRole   = role;
+    mockUserId = userId;
+    render(<LabPage />);
+    if (radiologyTab) await user.click(screen.getByRole('button', { name: /radiology/i }));
+    await user.click(screen.getByRole('button', { name: /new request/i }));
+
+    const select = screen.getByLabelText('Referred By *') as HTMLSelectElement;
+    const texts = Array.from(select.options).map((o) => o.text);
+    expect(Array.from(select.options).map((o) => o.value)).not.toContain('SELF');
+    expect(texts).not.toContain('Self');
+    expect(texts).toEqual(['Select referrer…', 'Dr. Self Referrer', 'Dr. Other Physician', 'Other']);
+    expect(select.value).toBe('');
+    expect(screen.queryByLabelText(/referrer name/i)).not.toBeInTheDocument();
+  });
+
+  test('Other shows a required referrer-name field; picking a doctor hides it again', async () => {
     const user = userEvent.setup();
     mockRole   = 'RECEPTIONIST';
     mockUserId = 'recep-001';
     render(<LabPage />);
     await user.click(screen.getByRole('button', { name: /new request/i }));
 
-    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
-    expect(select.value).toBe('SELF');
-  });
+    const select = screen.getByLabelText('Referred By *') as HTMLSelectElement;
+    await user.selectOptions(select, 'Other');
+    expect(screen.getByLabelText('Referrer Name *')).toBeRequired();
 
-  test('HOSPITAL_ADMIN: Self option present and selected by default (unchanged)', async () => {
-    const user = userEvent.setup();
-    mockRole   = 'HOSPITAL_ADMIN';
-    mockUserId = 'admin-001';
-    render(<LabPage />);
-    await user.click(screen.getByRole('button', { name: /new request/i }));
-
-    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
-    expect(select.value).toBe('SELF');
-  });
-
-  test('NURSE: Self option present and selected by default (unchanged)', async () => {
-    const user = userEvent.setup();
-    mockRole   = 'NURSE';
-    mockUserId = 'nurse-001';
-    render(<LabPage />);
-    await user.click(screen.getByRole('button', { name: /new request/i }));
-
-    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
-    expect(select.value).toBe('SELF');
-  });
-
-  test('RADIOLOGIST: Self option present and selected by default on Radiology tab (unchanged)', async () => {
-    const user = userEvent.setup();
-    mockRole   = 'RADIOLOGIST';
-    mockUserId = 'radio-001';
-    render(<LabPage />);
-    await user.click(screen.getByRole('button', { name: /radiology/i }));
-    await user.click(screen.getByRole('button', { name: /new request/i }));
-
-    const select = screen.getByLabelText('Referred By') as HTMLSelectElement;
-    expect(select.value).toBe('SELF');
+    await user.selectOptions(select, 'doc-other');
+    expect(select.value).toBe('doc-other');
+    expect(screen.queryByLabelText(/referrer name/i)).not.toBeInTheDocument();
   });
 });

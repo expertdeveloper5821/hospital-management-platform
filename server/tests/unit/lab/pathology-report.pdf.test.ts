@@ -1,6 +1,7 @@
 import zlib from 'zlib';
 import { buildPathologyReportPdf, PathologyReportPdfData } from '../../../src/modules/lab/pathology-report.pdf';
 import { PathologyResultValue } from '../../../src/modules/lab/lab.types';
+import { DOCTOR_SIGNATURE_IMAGE } from '../../../src/modules/lab/doctor-signature.image';
 
 // Decompresses every FlateDecode content stream so assertions run on the
 // actual drawn text (same helper approach as discharge-summary.pdf.test.ts).
@@ -29,6 +30,15 @@ function textOf(pdf: Buffer): string {
     .join('');
 }
 const has = (pdf: Buffer, text: string) => textOf(pdf).includes(text);
+// Text-matrix position (x, y — PDF y-up) of the signing doctor's name.
+const signatureAt = (content: string): RegExpMatchArray => {
+  const hex = Buffer.from('Dr Manish').toString('hex');
+  const m = content.match(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ [\d.]+ Tf\s+\[<${hex}`));
+  expect(m).not.toBeNull();
+  return m!;
+};
+// 1x1 PNG, standing in for the signature image.
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const pageCount = (pdf: Buffer) => (pdf.toString('latin1').match(/\/Type \/Page\b/g) ?? []).length;
 
 const value = (o: Partial<PathologyResultValue> & { key: string; name: string; value: string }): PathologyResultValue => ({
@@ -61,7 +71,6 @@ function makeData(overrides: Partial<PathologyReportPdfData> = {}): PathologyRep
     },
     reportedByName: 'Lab Pathologist',
     reportedAt:     '2026-05-20T06:30:00.000Z',
-    generatedAt:    '2026-05-20T07:00:00.000Z',
     ...overrides,
   };
 }
@@ -86,6 +95,20 @@ describe('buildPathologyReportPdf', () => {
     }
   });
 
+  test('the details grid has no Doctor field; Referred By stays', async () => {
+    const pdf = await buildPathologyReportPdf(makeData({
+      request:   { ...makeData().request, referredByName: 'Referring Doc' },
+      encounter: { ...makeData().encounter!, doctorNames: ['Visit Doctor'] },
+    }));
+    expect(has(pdf, 'Doctor: ')).toBe(false);
+    expect(has(pdf, 'Visit Doctor')).toBe(false);
+    expect(has(pdf, 'Referred By: ')).toBe(true);
+    expect(has(pdf, 'Referring Doc')).toBe(true);
+    // The signing doctor in the signature block is unaffected.
+    expect(has(pdf, 'Dr Manish Kumar')).toBe(true);
+    expect(has(pdf, 'MBBS, MD Path')).toBe(true);
+  });
+
   test('has no hospital header, reporter details, request date or request id', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
     for (const text of [
@@ -97,7 +120,7 @@ describe('buildPathologyReportPdf', () => {
     }
   });
 
-  test('is plain black-on-white: no colour, no filled bars/backgrounds, no images', async () => {
+  test('is plain black-on-white: no colour, no filled bars/backgrounds, no hospital logo', async () => {
     const pdf = await buildPathologyReportPdf(makeData({
       hospital: { ...makeData().hospital, logoUrl: 'http://127.0.0.1:1/logo.png', primaryColor: '#ff0000' },
     }));
@@ -106,7 +129,8 @@ describe('buildPathologyReportPdf', () => {
     expect(colours.length).toBeGreaterThan(0);
     expect(colours.every((c) => c === '0 0 0')).toBe(true);
     expect(content).not.toMatch(/re\s+f/);          // no filled rectangles
-    expect(pdf.toString('latin1')).not.toMatch(/\/Subtype \/Image/);
+    // The only image drawn is the doctor's signature (none while it is unset).
+    expect(content.match(/\/I\d+ Do/g) ?? []).toHaveLength(DOCTOR_SIGNATURE_IMAGE ? 1 : 0);
   });
 
   test('IPD encounters print ward / bed (no admission date, no OPD visit id)', async () => {
@@ -135,7 +159,7 @@ describe('buildPathologyReportPdf', () => {
     expect(has(pdf, 'ESR (Westergren)')).toBe(true);
   });
 
-  test('long results never truncate — they wrap and flow onto further pages with numbered footers', async () => {
+  test('long results never truncate — they wrap and flow onto further pages', async () => {
     const longList = Array.from({ length: 40 }, (_, i) => `Antibiotic-${i + 1}`).join(', ');
     const values = Array.from({ length: 60 }, (_, i) =>
       value({ key: `p${i}`, name: `Parameter ${i + 1}`, value: i === 0 ? longList : String(i), unit: 'mg/dL', referenceRange: '1 - 100' }));
@@ -143,7 +167,7 @@ describe('buildPathologyReportPdf', () => {
     expect(pageCount(pdf)).toBeGreaterThan(1);
     expect(has(pdf, 'Parameter 60')).toBe(true);           // last row present
     expect(has(pdf, 'Antibiotic-40')).toBe(true);          // tail of the wrapped long value present
-    expect(has(pdf, `Page ${pageCount(pdf)} of ${pageCount(pdf)}`)).toBe(true);
+    expect(has(pdf, `of ${pageCount(pdf)}`)).toBe(false);   // no page-number footer
     // Continuation pages carry a plain one-line identifier.
     expect(has(pdf, 'Pathology Report')).toBe(true);
     expect(has(pdf, 'continued')).toBe(true);
@@ -183,11 +207,34 @@ describe('buildPathologyReportPdf', () => {
     expect(has(pdf, 'Reference Range')).toBe(false);
   });
 
-  test('has no title heading, end-of-report footer or Flag column', async () => {
+  test('has no title heading, generation notice or Flag column', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
-    for (const text of ['PATHOLOGY REPORT', 'End of Report', 'Flag', 'Low', 'High', 'Abnormal']) {
+    for (const text of ['PATHOLOGY REPORT', 'Computer-generated', 'Generated on', 'Flag', 'Low', 'High', 'Abnormal']) {
       expect({ text, found: has(pdf, text) }).toEqual({ text, found: false });
     }
+  });
+
+  test('a bold "End of Report" line precedes the Doctor Signature block', async () => {
+    const pdf = await buildPathologyReportPdf(makeData());
+    const text = textOf(pdf);
+    expect(text.split('End of Report').length - 1).toBe(1);
+    expect(text.indexOf('Clinical correlation advised.')).toBeLessThan(text.indexOf('End of Report'));
+    expect(text.indexOf('End of Report')).toBeLessThan(text.lastIndexOf('Dr Manish Kumar'));
+    const content = contentOf(pdf);
+    const fontOf = (t: string) => content.match(new RegExp(String.raw`/(F\d+) [\d.]+ Tf\s+\[<${Buffer.from(t).toString('hex')}`))?.[1];
+    expect(fontOf('End')).toBeDefined();
+    expect(fontOf('End')).toBe(fontOf('John'));   // bold, like the patient-grid values
+    // A short rule on each side of the text, with a gap: same y, left rule
+    // ends before the text starts, right rule starts after it ends.
+    const endX = Number(content.match(new RegExp(String.raw`1 0 0 1 ([\d.]+) [\d.]+ Tm\s+/F\d+ [\d.]+ Tf\s+\[<${Buffer.from('End').toString('hex')}`))?.[1]);
+    const rules = [...content.matchAll(/([\d.]+) ([\d.]+) m\s+([\d.]+) ([\d.]+) l\s+S/g)]
+      .map((m) => m.slice(1, 5).map(Number))
+      .filter(([x1, y1, x2, y2]) => y1 === y2 && Math.abs(x2 - x1 - 60) < 0.01);
+    expect(rules).toHaveLength(2);
+    expect(rules[0][1]).toBe(rules[1][1]);
+    expect(rules[0][2]).toBeLessThan(endX);
+    expect(rules[1][0]).toBeGreaterThan(endX + 50);
+    expect(rules[0][0] + rules[1][2]).toBeCloseTo(595.28, 0);   // symmetric about the page centre
   });
 
   test('out-of-range results print bold, normal results regular, with no rule under each row', async () => {
@@ -212,8 +259,9 @@ describe('buildPathologyReportPdf', () => {
     expect(bold).not.toBe(regular);
     expect(fontOf('264')).toBe(bold);
     expect(fontOf('48')).toBe(regular);
-    // Only the patient-grid divider, the table header's two rules and the Doctor Signature line remain.
-    expect(content.match(/ l\s+S/g)).toHaveLength(4);
+    // Only the patient-grid divider, the table header's two rules, the two
+    // "End of Report" side rules and the Doctor Signature line remain.
+    expect(content.match(/ l\s+S/g)).toHaveLength(6);
   });
 
   test('keeps the top 3.5 cm and bottom 2 cm of every page blank', async () => {
@@ -246,14 +294,49 @@ describe('buildPathologyReportPdf', () => {
 
   test('the print copy (no letterhead) carries the Doctor Signature at the bottom-right of the last page', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
-    expect(textOf(pdf).split('Doctor Signature').length - 1).toBe(1);
+    expect(textOf(pdf).split('Dr Manish Kumar').length - 1).toBe(1);
+    expect(has(pdf, 'MBBS, MD Path')).toBe(true);
+    expect(has(pdf, 'Doctor Signature')).toBe(false);
     expect(has(pdf, 'Registration No.')).toBe(false);
-    const sigHex = Buffer.from('Doctor').toString('hex');
-    // The grid's "Doctor:" label is drawn first; the signature label is the last match.
-    const m = [...contentOf(pdf).matchAll(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ 9 Tf\s+\[<${sigHex}`, 'g'))].pop();
-    expect(m).toBeDefined();
-    expect(Number(m![1])).toBeGreaterThan(595.28 / 2);   // right half
-    expect(Number(m![2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+    const m = signatureAt(contentOf(pdf));
+    expect(Number(m[1])).toBeGreaterThan(595.28 / 2);   // right half
+    expect(Number(m[2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+  });
+
+  test('embeds the provided doctor signature (transparent PNG) once, above the name, aspect ratio kept', async () => {
+    expect(DOCTOR_SIGNATURE_IMAGE!.subarray(0, 4).toString('hex')).toBe('89504e47');
+    expect(DOCTOR_SIGNATURE_IMAGE!.readUInt32BE(16)).toBe(440);   // IHDR width
+    expect(DOCTOR_SIGNATURE_IMAGE!.readUInt32BE(20)).toBe(314);   // IHDR height
+    const pdf = await buildPathologyReportPdf(makeData());
+    expect(pdf.toString('latin1')).toMatch(/\/SMask \d+ 0 R/);   // alpha channel → no background box
+    const content = contentOf(pdf);
+    const img = content.match(/([\d.]+) 0 0 -([\d.]+) ([\d.]+) ([\d.]+) cm\s+\/I\d+ Do/);
+    expect(img).not.toBeNull();
+    const [w, h, x, y] = img!.slice(1, 5).map(Number);
+    expect(h).toBeLessThanOrEqual(42);
+    expect(w / h).toBeCloseTo(440 / 314, 1);
+    expect(x).toBeGreaterThan(595.28 / 2);
+    expect(841.89 - y).toBeGreaterThan(Number(signatureAt(content)[2]));
+  });
+
+  test("the signature image sits above the doctor's name, inside the signature block", async () => {
+    jest.resetModules();
+    jest.doMock('../../../src/modules/lab/doctor-signature.image', () => ({
+      ...jest.requireActual('../../../src/modules/lab/doctor-signature.image'),
+      DOCTOR_SIGNATURE_IMAGE: Buffer.from(TINY_PNG, 'base64'),
+    }));
+    const { buildPathologyReportPdf: build } = await import('../../../src/modules/lab/pathology-report.pdf');
+    jest.dontMock('../../../src/modules/lab/doctor-signature.image');
+    const content = contentOf(await build(makeData()));
+    // Image placement matrix: `w 0 0 -h x y cm` (PDFKit's y-down space, y = image bottom).
+    const img = content.match(/([\d.]+) 0 0 -([\d.]+) ([\d.]+) ([\d.]+) cm\s+\/I\d+ Do/);
+    expect(img).not.toBeNull();
+    const [w, h, x, y] = img!.slice(1, 5).map(Number);
+    const name = signatureAt(content);
+    expect(h).toBeLessThanOrEqual(42);                    // proportionate, fitted to the box
+    expect(w).toBeCloseTo(h, 1);                          // aspect ratio kept (square test image)
+    expect(x).toBeGreaterThan(595.28 / 2);                // right half, with the name
+    expect(841.89 - y).toBeGreaterThan(Number(name[2])); // image bottom (y-up) above the name
   });
 
   describe('downloaded copy (letterhead)', () => {
@@ -261,7 +344,7 @@ describe('buildPathologyReportPdf', () => {
 
     test('carries the hospital name, registration number and address, plus a Doctor Signature', async () => {
       const pdf = await buildPathologyReportPdf(withLetterhead());
-      for (const text of ['Lab Test Hospital', 'Registration No.: GST001', '321 Lab Street', 'Doctor Signature']) {
+      for (const text of ['Lab Test Hospital', 'Registration No.: GST001', '321 Lab Street', 'End of Report', 'Dr Manish Kumar', 'MBBS, MD Path']) {
         expect({ text, found: has(pdf, text) }).toEqual({ text, found: true });
       }
       expect(has(pdf, 'admin@labtest.com')).toBe(false);
@@ -282,23 +365,19 @@ describe('buildPathologyReportPdf', () => {
       const pages = pageCount(pdf);
       expect(pages).toBeGreaterThan(1);
       expect(textOf(pdf).split('Lab Test Hospital').length - 1).toBe(pages);
-      expect(textOf(pdf).split('Doctor Signature').length - 1).toBe(1);
+      expect(textOf(pdf).split('Dr Manish Kumar').length - 1).toBe(1);
     });
 
     test('the Doctor Signature is at the bottom-right of the last page', async () => {
-      const content = contentOf(await buildPathologyReportPdf(withLetterhead()));
-      const sigHex = Buffer.from('Doctor').toString('hex');
-      // The grid's "Doctor:" label is drawn first; the signature label is the last match.
-      const m = [...content.matchAll(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ 9 Tf\s+\[<${sigHex}`, 'g'))].pop();
-      expect(m).toBeDefined();
-      expect(Number(m![1])).toBeGreaterThan(595.28 / 2);   // right half
-      expect(Number(m![2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
+      const m = signatureAt(contentOf(await buildPathologyReportPdf(withLetterhead())));
+      expect(Number(m[1])).toBeGreaterThan(595.28 / 2);   // right half
+      expect(Number(m[2])).toBeLessThan(841.89 / 4);      // bottom quarter (PDF y-up)
     });
   });
 
-  test('the footer never spills onto an extra blank page', async () => {
+  test('has no "Page X of Y" footer and no extra blank page', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
-    expect(has(pdf, 'Page 1 of 1')).toBe(true);
+    expect(has(pdf, 'Page 1 of 1')).toBe(false);
     expect(pageCount(pdf)).toBe(1);
   });
 

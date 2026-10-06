@@ -440,8 +440,10 @@ export interface CollectLabPaymentRequest {
   transactionId?: string;
 }
 
-// 'SELF' or a referring doctor's userId — 'SELF' is the default/top dropdown option.
+// 'SELF', 'OTHER:<name>' (a typed-in external referrer), or a referring
+// doctor's userId — mirrors server/src/modules/lab/lab.types.ts.
 export const LAB_REFERRED_BY_SELF = 'SELF';
+export const LAB_REFERRED_BY_OTHER_PREFIX = 'OTHER:';
 
 export interface CreatePathologyRequest {
   patientId:   string;

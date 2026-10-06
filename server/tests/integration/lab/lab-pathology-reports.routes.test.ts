@@ -418,9 +418,13 @@ describe('GET /api/lab/pathology/:requestId/reports/:testIndex/pdf', () => {
       for (const t of ['John Doe', 'PAT-001', testName, param, 'OPD-LABTEST01']) {
         expect({ t, found: text.includes(t) }).toEqual({ t, found: true });
       }
-      // Plain layout: no hospital header, request id or reporter/signature block.
-      for (const t of ['PATHOLOGY REPORT', 'End of Report', 'Lab Test Hospital', id, 'Lab Pathologist', 'Reported By']) {
+      // Plain layout: no hospital header, request id, reporter block, Doctor field,
+      // generation notice or page-number footer.
+      for (const t of ['PATHOLOGY REPORT', 'Lab Test Hospital', id, 'Lab Pathologist', 'Reported By', 'Doctor: ', 'Generated on', 'Page 1 of']) {
         expect({ t, found: text.includes(t) }).toEqual({ t, found: false });
+      }
+      for (const t of ['End of Report', 'Dr Manish Kumar', 'MBBS, MD Path']) {
+        expect({ t, found: text.includes(t) }).toEqual({ t, found: true });
       }
       for (const other of absent) expect({ other, found: text.includes(other) }).toEqual({ other, found: false });
     }
@@ -434,13 +438,13 @@ describe('GET /api/lab/pathology/:requestId/reports/:testIndex/pdf', () => {
     const res = await getPdf(id, 0, UserRole.DOCTOR, '?letterhead=true');
     expect(res.status).toBe(200);
     const text = pdfText(res.body as Buffer);
-    for (const t of ['Lab Test Hospital', 'Doctor Signature', 'John Doe', 'Haemoglobin (Hb)']) {
+    for (const t of ['Lab Test Hospital', 'Dr Manish Kumar', 'MBBS, MD Path', 'John Doe', 'Haemoglobin (Hb)']) {
       expect({ t, found: text.includes(t) }).toEqual({ t, found: true });
     }
     // The Print copy has no letterhead but keeps the Doctor Signature.
     const plain = pdfText((await getPdf(id, 0)).body as Buffer);
     expect(plain.includes('Lab Test Hospital')).toBe(false);
-    expect(plain.includes('Doctor Signature')).toBe(true);
+    expect(plain.includes('Dr Manish Kumar')).toBe(true);
   });
 
   test('a test whose report has not been submitted has no PDF (404)', async () => {
@@ -492,7 +496,8 @@ describe('GET /api/lab/pathology/:requestId/reports/pdf — bulk Download / Prin
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     // Print copy — no letterhead, but a Doctor Signature closes each report.
     expect(text.includes('Lab Test Hospital')).toBe(false);
-    expect(text.split('Doctor Signature').length - 1).toBe(3);
+    expect(text.split('End of Report').length - 1).toBe(3);
+    expect(text.split('Dr Manish Kumar').length - 1).toBe(3);
   });
 
   test('?letterhead=true adds the letterhead to every page and a Doctor Signature to each report', async () => {
@@ -506,7 +511,7 @@ describe('GET /api/lab/pathology/:requestId/reports/pdf — bulk Download / Prin
     const pdf  = res.body as Buffer;
     const text = pdfText(pdf);
     expect(text.split('Lab Test Hospital').length - 1).toBe(await pageCount(pdf));
-    expect(text.split('Doctor Signature').length - 1).toBe(2);
+    expect(text.split('Dr Manish Kumar').length - 1).toBe(2);
   });
 
   test('skips tests whose report has not been submitted', async () => {
