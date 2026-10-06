@@ -444,6 +444,7 @@ export const baseApi = createApi({
     'OPD',
     'IPD',
     'Lab',
+    'LabTestMaster',
     'Inventory',
     'Payment',
     'Notification',

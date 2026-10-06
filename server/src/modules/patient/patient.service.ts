@@ -1,5 +1,5 @@
-import { v4 as uuidv4 } from 'uuid';
 import { patientRepository } from './patient.repository';
+import { formatUhid, hospitalInitials } from './patient-uhid';
 import { IPatient } from './patient.model';
 import { tenantRepository } from '../tenant/tenant.repository';
 import { ipdRepository } from '../ipd/ipd.repository';
@@ -39,7 +39,13 @@ export class PatientService {
       );
     }
 
-    const patientId = `PAT-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`;
+    // UHID: PAT-<hospital initials><per-hospital sequence>, e.g. PAT-NH01.
+    // The tenant is resolved before the sequence is reserved so a missing
+    // tenant never burns a number.
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new NotFoundError('Hospital not found');
+    const seq       = await patientRepository.nextUhidSequence(tenantId);
+    const patientId = formatUhid(hospitalInitials(tenant.name), seq);
 
     const patient = await patientRepository.save({
       patientId,

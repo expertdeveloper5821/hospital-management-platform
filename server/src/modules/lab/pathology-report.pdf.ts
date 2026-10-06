@@ -15,10 +15,16 @@ import { DOCTOR_SIGNATURE_IMAGE, SIGNING_DOCTOR } from './doctor-signature.image
 // page with the table header repeated. `hospital` / `reportedByName` stay in the data
 // contract (PDF metadata only) so the service is unchanged.
 //
+// Below the results table come the test's Test Master content — "Clinical
+// Notes" and, only for tests that have one, "Comment" — each omitted when
+// empty. The texts are passed in (read from the Test Master by the service);
+// none are hardcoded here.
+//
 // Every copy (Download and Print) closes with a bold "End of Report" line
 // (short rule either side) and
 // a Doctor Signature block at the bottom-right (signature image, doctor's name
-// and designation — see doctor-signature.image.ts). Downloaded copy only (`letterhead` set): the blank top 3.5 cm
+// and designation — see doctor-signature.image.ts), followed at the very
+// bottom by the "Please Correlate Clinically" footer (when its text is set). Downloaded copy only (`letterhead` set): the blank top 3.5 cm
 // of every page also carries a black-text, no-fill hospital letterhead (logo,
 // name, registration number, address). Everything else is identical.
 
@@ -39,10 +45,14 @@ export interface PathologyReportPdfData {
   };
   encounter: LabEncounterSummary | null;
   test: {
-    testName: string;
-    values:   PathologyResultValue[];   // filled values only
-    remarks:  string | null;
+    testName:     string;
+    values:       PathologyResultValue[];   // filled values only
+    // From the Test Master; null/empty → the section is omitted.
+    clinicalNote: string | null;
+    comment:      string | null;
   };
+  // Report-level footer text from the Test Master; null/empty → omitted.
+  correlateClinically: string | null;
   reportedByName: string;
   reportedAt:     string;   // test report submission time = report date
   // Set only for the downloaded copy — see the header comment.
@@ -369,18 +379,24 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
       inTable = false;
       doc.moveDown(0.8);
 
-      // ── Remarks ────────────────────────────────────────────────────────────
-      if (data.test.remarks) {
+      // ── Clinical Notes / Comment (Test Master) ─────────────────────────────
+      // Each is capped at 2000 characters (well under one page), so a block is
+      // kept together on one page rather than split.
+      function textSection(title: string, body: string | null): void {
+        const text = body?.trim();
+        if (!text) return;
         doc.font('Helvetica').fontSize(9.5);
-        const remarksH = doc.heightOfString(spelledOut(data.test.remarks), { width: CONTENT_WIDTH });
-        // Remarks are capped at 2000 characters (well under one page), so the
-        // whole block is kept together on one page rather than split.
-        ensureSpace(remarksH + 18);
-        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXT).text('Remarks', PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
+        const bodyH = doc.heightOfString(spelledOut(text), { width: CONTENT_WIDTH });
+        ensureSpace(bodyH + 18);
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXT).text(title, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
         doc.moveDown(0.2);
         doc.fillColor(TEXT);
-        writeText(doc, data.test.remarks, 'Helvetica', 9.5, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
+        writeText(doc, text, 'Helvetica', 9.5, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
+        doc.x = PAGE_MARGIN;
+        doc.moveDown(0.6);
       }
+      textSection('Clinical Notes', data.test.clinicalNote);
+      textSection('Comment', data.test.comment);
 
       // ── End of Report + Doctor Signature (every copy), bottom-right ────────
       {
@@ -389,7 +405,18 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         const IMG_H   = 42;    // signature image box height (image fitted, never stretched)
         const IMG_GAP = 4;     // image bottom → signature line
         const NAME_H  = 28;    // name + designation below the line
-        ensureSpace(END_H + IMG_H + IMG_GAP + NAME_H);
+        // "Please Correlate Clinically" footer under the sign-off: gap, thin
+        // rule, bold heading, then the Test Master text.
+        const correlate  = data.correlateClinically?.trim() || null;
+        const CORR_GAP   = 10;
+        const CORR_HEAD  = 17;
+        let corrBodyH = 0;
+        if (correlate) {
+          doc.font('Helvetica').fontSize(8.5);
+          corrBodyH = doc.heightOfString(spelledOut(correlate), { width: CONTENT_WIDTH });
+        }
+        const CORR_H = correlate ? CORR_GAP + CORR_HEAD + corrBodyH : 0;
+        ensureSpace(END_H + IMG_H + IMG_GAP + NAME_H + CORR_H);
         doc.y += 6;
         // Bold, centred, with a short rule on each side: ──── End of Report ────
         const END_RULE_W = 60;
@@ -405,7 +432,7 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         doc.fillColor(TEXT)
           .text('End of Report', PAGE_MARGIN, endY, { width: CONTENT_WIDTH, align: 'center', lineBreak: false });
         const sigX  = PAGE_MARGIN + CONTENT_WIDTH - SIG_W;
-        const lineY = Math.max(doc.y + END_H + IMG_H + IMG_GAP, pageBottom() - NAME_H);
+        const lineY = Math.max(doc.y + END_H + IMG_H + IMG_GAP, pageBottom() - NAME_H - CORR_H);
         if (DOCTOR_SIGNATURE_IMAGE) {
           try {
             doc.image(DOCTOR_SIGNATURE_IMAGE, sigX, lineY - IMG_GAP - IMG_H, {
@@ -418,6 +445,14 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
           .text(SIGNING_DOCTOR.name, sigX, lineY + 4, { width: SIG_W, align: 'center', lineBreak: false });
         doc.font('Helvetica').fontSize(9).fillColor(TEXT)
           .text(SIGNING_DOCTOR.designation, sigX, lineY + 16, { width: SIG_W, align: 'center', lineBreak: false });
+        if (correlate) {
+          const corrY = lineY + NAME_H + CORR_GAP;
+          rule(corrY, 0.5);
+          doc.font('Helvetica-Bold').fontSize(9).fillColor(TEXT)
+            .text('Please Correlate Clinically', PAGE_MARGIN, corrY + 5, { width: CONTENT_WIDTH, lineBreak: false });
+          doc.fillColor(TEXT);
+          writeText(doc, correlate, 'Helvetica', 8.5, PAGE_MARGIN, corrY + CORR_HEAD, { width: CONTENT_WIDTH });
+        }
         doc.x = PAGE_MARGIN;
       }
 

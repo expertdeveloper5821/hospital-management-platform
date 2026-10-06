@@ -9,6 +9,7 @@ import {
   ListLabRequestsQuerySchema,
   CollectLabPaymentSchema,
   SubmitPathologyTestReportSchema,
+  UpdatePathologyTestMasterSchema,
 } from './lab.types';
 import { UserRole } from '../../shared/types/common.types';
 import { opdRepository } from '../opd/opd.repository';
@@ -91,6 +92,48 @@ export async function getPathologyRequest(
 // ─── Structured Pathology test reports ────────────────────────────────────────
 // :testIndex is the test's position in the request's testType (0-based).
 const testIndexSchema = z.coerce.number().int().min(0).max(99);
+
+// ─── Pathology Test Master ────────────────────────────────────────────────────
+
+const templateKeySchema = z.string().regex(/^[A-Z0-9_]{1,64}$/, 'Invalid test key');
+
+// GET /api/lab/pathology/test-master — every test's clinical content
+// (Clinical Note, Comment, Please Correlate Clinically), in catalog order.
+export async function listPathologyTestMaster(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await labService.listPathologyTestMaster(req.user!.tenantId as string);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// PATCH /api/lab/pathology/test-master/:templateKey — edit one test's content.
+// Audit logging happens in PathologyTestMasterService.
+export async function updatePathologyTestMaster(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const key = templateKeySchema.safeParse(req.params['templateKey']);
+    if (!key.success) { res.status(400).json({ status: 'error', message: 'Invalid test key' }); return; }
+
+    const parsed = UpdatePathologyTestMasterSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const flat = parsed.error.flatten();
+      res.status(400).json({
+        status: 'error',
+        message: flat.formErrors[0] ?? 'Validation failed',
+        details: flat.fieldErrors,
+      });
+      return;
+    }
+
+    const result = await labService.updatePathologyTestMaster(
+      req.user!.tenantId as string, key.data, req.user!.userId, parsed.data,
+    );
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
 
 // PUT /api/lab/pathology/:requestId/reports/:testIndex — submit / amend one
 // test's structured report. Audit logging happens in LabService (values redacted).

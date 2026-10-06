@@ -1,4 +1,5 @@
 import { PatientModel, IPatient } from './patient.model';
+import { PatientUhidCounterModel } from './patient-uhid-counter.model';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
@@ -106,6 +107,30 @@ export class PatientRepository {
   async save(data: Partial<IPatient>): Promise<IPatient> {
     assertDbConnected();
     return PatientModel.create(data);
+  }
+
+  /**
+   * Atomically reserves the tenant's next UHID sequence number (1, 2, 3, …).
+   * `$inc` on a single counter document is atomic, so concurrent callers
+   * always receive distinct numbers. Two concurrent upserts for a tenant's very
+   * first patient can race on the counter's unique `tenantId` index — the loser
+   * gets E11000 and simply retries, by which point the row exists.
+   */
+  async nextUhidSequence(tenantId: string): Promise<number> {
+    assertDbConnected();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const counter = await PatientUhidCounterModel.findOneAndUpdate(
+          { tenantId },
+          { $inc: { seq: 1 } },
+          { new: true, upsert: true },
+        ).lean();
+        return counter!.seq;
+      } catch (err) {
+        if ((err as { code?: number }).code === 11000 && attempt < 2) continue;
+        throw err;
+      }
+    }
   }
 
   async update(

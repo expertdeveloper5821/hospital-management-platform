@@ -58,6 +58,9 @@ describe('PatientService — example-based', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new PatientService();
+    let seq = 0;
+    mockRepo.nextUhidSequence.mockImplementation(async () => ++seq);
+    mockTenantRepo.findById.mockResolvedValue({ ...BASE_TENANT } as never);
   });
 
   // ── createPatient ──────────────────────────────────────────────────────────
@@ -125,17 +128,37 @@ describe('PatientService — example-based', () => {
       expect(result.patientId).toBe('PAT-FAM00001');
     });
 
-    test('generated patientId has PAT- prefix', async () => {
+    test('generates PAT-<hospital initials><sequence> from the tenant name', async () => {
       mockRepo.findByMobileAndName.mockResolvedValue(null);
-      let savedPatientId = '';
+      mockTenantRepo.findById.mockResolvedValue({ ...BASE_TENANT, name: 'Narayan Hospital' } as never);
+      const saved: string[] = [];
       mockRepo.save.mockImplementation(async (data) => {
-        savedPatientId = (data as { patientId: string }).patientId;
-        return { ...BASE_PATIENT, patientId: savedPatientId } as never;
+        saved.push((data as { patientId: string }).patientId);
+        return { ...BASE_PATIENT, patientId: saved[saved.length - 1] } as never;
       });
 
       await service.createPatient('t1', validReq, 'admin-1');
+      await service.createPatient('t1', { ...validReq, fullName: 'Second' }, 'admin-1');
+      await service.createPatient('t1', { ...validReq, fullName: 'Third' }, 'admin-1');
 
-      expect(savedPatientId).toMatch(/^PAT-[A-F0-9]{8}$/);
+      expect(saved).toEqual(['PAT-NH01', 'PAT-NH02', 'PAT-NH03']);
+      expect(mockRepo.nextUhidSequence).toHaveBeenCalledWith('t1');
+    });
+
+    test('throws NotFoundError and reserves no sequence when the tenant does not exist', async () => {
+      mockRepo.findByMobileAndName.mockResolvedValue(null);
+      mockTenantRepo.findById.mockResolvedValue(null);
+
+      await expect(service.createPatient('t1', validReq, 'admin-1')).rejects.toThrow(NotFoundError);
+      expect(mockRepo.nextUhidSequence).not.toHaveBeenCalled();
+      expect(mockRepo.save).not.toHaveBeenCalled();
+    });
+
+    test('does not reserve a sequence number when a duplicate warning is raised', async () => {
+      mockRepo.findByMobileAndName.mockResolvedValue({ ...BASE_PATIENT } as never);
+
+      await expect(service.createPatient('t1', validReq, 'admin-1')).rejects.toThrow(DuplicateWarningError);
+      expect(mockRepo.nextUhidSequence).not.toHaveBeenCalled();
     });
 
     test('sets optional fields to null when not provided', async () => {
@@ -472,10 +495,13 @@ describe('PatientService — property-based', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new PatientService();
+    let seq = 0;
+    mockRepo.nextUhidSequence.mockImplementation(async () => ++seq);
+    mockTenantRepo.findById.mockResolvedValue({ ...BASE_TENANT } as never);
   });
 
   // U2-A-07: patient ID uniqueness invariant
-  test('PBT: every created patient receives a unique PAT-XXXXXXXX id', async () => {
+  test('PBT: every created patient receives a unique PAT-<INITIALS><SEQ> id', async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.integer({ min: 2, max: 20 }), // N patients to create
@@ -508,7 +534,7 @@ describe('PatientService — property-based', () => {
           expect(ids.size).toBe(n);
           // All IDs match the expected format
           for (const id of ids) {
-            expect(id).toMatch(/^PAT-[A-F0-9]{8}$/);
+            expect(id).toMatch(/^PAT-AH\d{2,}$/);
           }
         },
       ),
