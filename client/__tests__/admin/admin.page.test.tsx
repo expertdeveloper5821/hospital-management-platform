@@ -9,11 +9,17 @@ let mockUsers: any[] = [];
 const mockReactivateUser = jest.fn();
 const mockDeactivateUser = jest.fn();
 const mockUpdateUserEmail = jest.fn();
+const mockUpdateUserRole = jest.fn();
+const mockRouterPush = jest.fn();
+
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn() }),
+}));
 
 jest.mock('@/store/api/user.api', () => ({
   useListUsersQuery: () => ({ data: { data: mockUsers, total: mockUsers.length }, isLoading: false, isFetching: false, refetch: jest.fn() }),
   useCreateUserMutation: () => [jest.fn(), { isLoading: false }],
-  useUpdateUserRoleMutation: () => [jest.fn(), { isLoading: false }],
+  useUpdateUserRoleMutation: () => [mockUpdateUserRole, { isLoading: false }],
   useUpdateUserEmailMutation: () => [mockUpdateUserEmail, { isLoading: false }],
   useDeactivateUserMutation: () => [mockDeactivateUser, { isLoading: false }],
   useReactivateUserMutation: () => [mockReactivateUser, { isLoading: false }],
@@ -59,6 +65,8 @@ beforeEach(() => {
   mockReactivateUser.mockClear();
   mockDeactivateUser.mockClear();
   mockUpdateUserEmail.mockClear();
+  mockRouterPush.mockClear();
+  mockUpdateUserRole.mockReset();
 });
 
 describe('AdminPage — Add User role gating', () => {
@@ -246,5 +254,159 @@ describe('AdminPage — Inline email editing', () => {
     const user = userEvent.setup();
     await openFirstKebab(user);
     expect(menuItems(/edit email/i).length).toBe(0);
+  });
+});
+
+// ─── Doctor role-change restriction modal ─────────────────────────────────────
+// The backend rejects with HTTP 409 and a structured details payload; the page
+// branches on details.code === 'DOCTOR_ACTIVE_PATIENTS' (never on message
+// text) and opens DoctorActivePatientsDialog.
+describe('AdminPage — doctor role-change blocked modal', () => {
+  const doctorUser = {
+    userId: 'u-doc', email: 'doc@h.com', name: 'Dr Asha Verma',
+    role: 'DOCTOR', departmentIds: [], isActive: true, isFirstLogin: false,
+    tenantId: 't1', createdAt: '2026-01-01',
+  };
+
+  // RTK Query throws the error object from .unwrap(); the page reads
+  // err.status and err.data.{message,details}.
+  const structured409 = {
+    status: 409,
+    data: {
+      status: 'error',
+      message: 'Cannot change role: Dr Asha Verma still has 3 active patient(s). Reassign them first, then retry.',
+      details: {
+        code: 'DOCTOR_ACTIVE_PATIENTS',
+        activePatients: 3,
+        breakdown: { opd: 2, ipd: 1 },
+        userId: 'u-doc',
+        currentRole: 'DOCTOR',
+        requestedRole: 'NURSE',
+      },
+    },
+  };
+
+  async function openRoleEditorOnDoctor(user: ReturnType<typeof userEvent.setup>) {
+    await openFirstKebab(user);
+    await user.click(menuItems(/edit role/i)[0]);
+  }
+
+  // RTK Query mutations return a promise-like object with .unwrap(); the page
+  // calls .unwrap() and awaits it inside its try/catch. Mock that contract —
+  // a bare rejected promise would escape as an unhandled rejection instead of
+  // exercising the page's catch branch.
+  const reject409 = (payload: unknown) =>
+    mockUpdateUserRole.mockImplementationOnce(() => ({ unwrap: () => Promise.reject(payload) }));
+  const resolveOk = () =>
+    mockUpdateUserRole.mockImplementationOnce(() => ({ unwrap: () => Promise.resolve({}) }));
+
+  // The role editor's <select> has no accessible label; an open editor is
+  // identifiable by its Save/Cancel buttons (also rendered by the email
+  // editor, which these tests never open alongside). JSDOM renders the mobile
+  // and desktop editors together — both bind the same state, so driving the
+  // first is enough.
+  async function clickFirstSave(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getAllByRole('button', { name: /^save$/i })[0]);
+  }
+
+  // Pick the target role in the inline editor, as an admin would, before saving.
+  async function chooseNewRole(user: ReturnType<typeof userEvent.setup>, value = 'NURSE') {
+    const selects = screen.getAllByDisplayValue('DOCTOR') as HTMLSelectElement[];
+    await user.selectOptions(selects[0], value);
+  }
+
+  test('structured 409 opens the modal with name, count and breakdown; no inline error', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [doctorUser];
+    reject409(structured409);
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openRoleEditorOnDoctor(user);
+    await chooseNewRole(user);
+    await clickFirstSave(user);
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.textContent).toContain('Dr Asha Verma');
+    expect(dialog.textContent).toContain('3');
+    expect(dialog.textContent).toContain('2'); // opd breakdown
+    expect(dialog.textContent).toContain('1'); // ipd breakdown
+    expect(dialog.textContent).toContain('NURSE');
+
+    // Modal replaces the inline error path for this case.
+    expect(screen.queryByText(/failed to update role/i)).not.toBeInTheDocument();
+  });
+
+  test('Close dismisses the modal and keeps the inline role editor open', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [doctorUser];
+    reject409(structured409);
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openRoleEditorOnDoctor(user);
+    await chooseNewRole(user);
+    await clickFirstSave(user);
+    await screen.findByRole('dialog', { name: /role change blocked/i });
+
+    await user.click(screen.getAllByRole('button', { name: /^close$/i })[0]);
+
+    expect(screen.queryByRole('dialog', { name: /role change blocked/i })).not.toBeInTheDocument();
+    // Editor state preserved for retry after reassignment.
+    expect(screen.getAllByRole('button', { name: /^cancel$/i }).length).toBeGreaterThan(0);
+  });
+
+  test('View Patients navigates to /patients and closes modal + editor', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [doctorUser];
+    reject409(structured409);
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openRoleEditorOnDoctor(user);
+    await chooseNewRole(user);
+    await clickFirstSave(user);
+    await screen.findByRole('dialog', { name: /role change blocked/i });
+
+    await user.click(screen.getAllByRole('button', { name: /view patients/i })[0]);
+
+    expect(mockRouterPush).toHaveBeenCalledWith('/patients');
+    expect(screen.queryByRole('dialog', { name: /role change blocked/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument();
+  });
+
+  test('unstructured 409 (e.g. last-admin) shows the inline error instead of the modal', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ ...doctorUser, role: 'HOSPITAL_ADMIN', userId: 'u-admin2' }];
+    reject409({
+      status: 409,
+      data: { status: 'error', message: 'Cannot change role of the last active Hospital Admin. Assign another admin first.' },
+    });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openFirstKebab(user);
+    await user.click(menuItems(/edit role/i)[0]);
+    await clickFirstSave(user);
+
+    expect(screen.queryByRole('dialog', { name: /role change blocked/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/cannot change role of the last active hospital admin/i).length).toBeGreaterThan(0);
+  });
+
+  test('successful save still closes the editor (regression guard)', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [doctorUser];
+    resolveOk();
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openRoleEditorOnDoctor(user);
+    await chooseNewRole(user);
+    await clickFirstSave(user);
+
+    expect(mockUpdateUserRole).toHaveBeenCalledWith({ userId: 'u-doc', role: 'NURSE' });
+    expect(screen.queryByRole('button', { name: /^cancel$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });

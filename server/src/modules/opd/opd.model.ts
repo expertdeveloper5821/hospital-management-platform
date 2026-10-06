@@ -88,6 +88,7 @@ OPDVisitSchema.index({ tenantId: 1, visitId: 1 }, { unique: true });
 OPDVisitSchema.index({ tenantId: 1, patientId: 1, visitDate: -1 }); // patient history
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, status: 1 });      // queue queries
 OPDVisitSchema.index({ tenantId: 1, visitDate: 1, doctorIds: 1 });   // doctor's queue
+OPDVisitSchema.index({ tenantId: 1, doctorIds: 1, status: 1 });      // doctor's active-patient load (role-change guard)
 OPDVisitSchema.index({ tenantId: 1, nurseIds: 1 });                  // nurse-scoped OPD visibility
 OPDVisitSchema.index({ tenantId: 1, departmentId: 1, visitDate: -1 }); // department queue
 

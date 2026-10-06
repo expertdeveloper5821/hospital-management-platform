@@ -44,8 +44,13 @@ export class NotFoundError extends AppError {
 }
 
 export class ConflictError extends AppError {
-  constructor(message: string) {
-    super(message, 409);
+  // Optional `details` lets structured conflict payloads (e.g. the doctor
+  // role-change restriction's DOCTOR_ACTIVE_PATIENTS code + active patient
+  // count) reach the client — the global errorHandler serializes AppError
+  // details into the response body in every environment. Existing call sites
+  // pass only a message and are unaffected.
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, 409, details);
     this.name = 'ConflictError';
   }
 }

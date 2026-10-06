@@ -12,6 +12,8 @@ import { addToDenylist } from '../../shared/middleware/token-denylist';
 import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
+import { opdRepository } from '../opd/opd.repository';
+import { ipdRepository } from '../ipd/ipd.repository';
 import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 // Roles that must never be created or assigned through tenant user-management.
@@ -109,6 +111,35 @@ export class UserService {
     });
   }
 
+  /**
+   * Doctor role-change restriction — resolve the doctor's active patient load
+   * across OPD (OPEN / IN_PROGRESS visits) and IPD (ADMITTED admissions).
+   * Returns null for non-doctors: the restriction never applies to them, and
+   * no encounter query is issued at all. A patient active via both OPD and IPD
+   * is counted once in `total` (distinct patientId union) while `breakdown`
+   * keeps the per-source counts for the UI.
+   *
+   * NOTE: imports OPD/IPD repositories only — never their services — so the
+   * dependency graph stays acyclic (opd.service.ts imports userRepository).
+   */
+  private async resolveDoctorActiveLoad(
+    tenantId: string,
+    user: IUser,
+  ): Promise<{ total: number; opd: number; ipd: number } | null> {
+    if (user.role !== UserRole.DOCTOR) return null;
+
+    const [opdPatientIds, ipdPatientIds] = await Promise.all([
+      opdRepository.countActivePatientsByDoctor(tenantId, user._id.toString()),
+      ipdRepository.countActivePatientsByDoctor(tenantId, user._id.toString()),
+    ]);
+
+    return {
+      total: new Set([...opdPatientIds, ...ipdPatientIds]).size,
+      opd:   opdPatientIds.length,
+      ipd:   ipdPatientIds.length,
+    };
+  }
+
   async updateUserRole(
     tenantId: string,
     userId: string,
@@ -137,6 +168,36 @@ export class UserService {
           'Cannot change role of the last active Hospital Admin. Assign another admin first.',
         );
       }
+    }
+
+    // Doctor role-change restriction: a doctor with active (non-terminal)
+    // assigned encounters cannot leave the DOCTOR role — their workload must
+    // be reassigned first. Applies even to inactive doctors (fail-closed: the
+    // encounters are real workload regardless of login state). Changing INTO
+    // DOCTOR is never blocked (a non-doctor has no doctor-encounters by
+    // definition; the helper returns null for them).
+    //
+    // Historical data integrity: this is the ONLY mutation updateUserRole
+    // makes, and it touches User.role alone. Completed visits'/discharged
+    // admissions' doctorIds / assignedDoctorIds are never rewritten, users are
+    // never hard-deleted (deactivation only flips isActive, and read-time name
+    // resolution via findNamesByIds matches on _id for any role), and doctor
+    // names are never denormalized onto encounter documents — so past records
+    // and their audit trail stay intact after any legitimate role change.
+    const activeLoad = await this.resolveDoctorActiveLoad(tenantId, user);
+    if (activeLoad && activeLoad.total > 0) {
+      throw new ConflictError(
+        `Cannot change role: ${user.name} still has ${activeLoad.total} active patient(s). ` +
+        'Reassign them first, then retry.',
+        {
+          code:           'DOCTOR_ACTIVE_PATIENTS',
+          activePatients: activeLoad.total,
+          breakdown:      { opd: activeLoad.opd, ipd: activeLoad.ipd },
+          userId,
+          currentRole:    user.role,
+          requestedRole:  newRole,
+        },
+      );
     }
 
     await userRepository.updateRole(tenantId, userId, newRole);

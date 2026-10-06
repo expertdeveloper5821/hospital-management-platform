@@ -27,6 +27,10 @@ import app             from '../../../src/app';
 import { UserModel }   from '../../../src/modules/user/user.model';
 import { TenantModel } from '../../../src/modules/tenant/tenant.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
+import { OPDVisitModel }    from '../../../src/modules/opd/opd.model';
+import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
+import { auditService } from '../../../src/shared/services/audit.service';
+import { AuditEntityType } from '../../../src/shared/types/common.types';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -696,5 +700,284 @@ describe('PATCH /api/users/:userId/deactivate', () => {
   test('401 — unauthenticated', async () => {
     const res = await request(app).patch('/api/users/some-id/deactivate');
     expect(res.status).toBe(401);
+  });
+});
+
+// ─── Doctor role-change restriction (PATCH /api/users/:userId/role) ──────────
+// A doctor with active (non-terminal) assigned encounters cannot leave the
+// DOCTOR role until their workload is reassigned. Terminal encounters —
+// COMPLETED / CANCELLED / NO_SHOW OPD visits, DISCHARGED admissions — never
+// block. See doctor_role_restriction_guide.md for the authoritative contract.
+describe('PATCH /api/users/:userId/role — doctor restriction', () => {
+  // Minimal tenant-scoped seeders for the encounter models the guard queries.
+  // doctorIds/assignedDoctorIds hold the doctor's user._id as a string.
+  async function seedVisit(tenantId: string, overrides: Partial<{
+    visitId:   string;
+    patientId: string;
+    status:    string;
+    doctorIds: string[];
+  }> = {}) {
+    return OPDVisitModel.create({
+      visitId:      overrides.visitId   ?? `OPD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      tenantId,
+      patientId:    overrides.patientId ?? 'PAT-ROLE-0001',
+      doctorIds:    overrides.doctorIds ?? [],
+      nurseIds:     [],
+      visitDate:    new Date(),
+      queueNumber:  1,
+      status:       overrides.status    ?? 'OPEN',
+      diagnosis:    null,
+      prescription: null,
+      notes:        null,
+    });
+  }
+
+  async function seedAdmission(tenantId: string, overrides: Partial<{
+    admissionId:       string;
+    patientId:         string;
+    status:            string;
+    assignedDoctorIds: string[];
+    dischargeDate:     Date | null;
+  }> = {}) {
+    return IPDAdmissionModel.create({
+      admissionId:       overrides.admissionId ?? `adm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      patientId:         overrides.patientId   ?? 'PAT-ROLE-0002',
+      wardId:            'ward-1',
+      bedId:             `bed-${Math.random().toString(36).slice(2, 8)}`,
+      bedNumber:         'B-01',
+      wardName:          'General Ward',
+      assignedDoctorIds: overrides.assignedDoctorIds ?? [],
+      status:            overrides.status          ?? 'ADMITTED',
+      admissionDate:     new Date(),
+      dischargeDate:     null,
+      progressNotes:     [],
+      tenantId,
+    });
+  }
+
+  function rolePatch(userId: string, token: string) {
+    return request(app)
+      .patch(`/api/users/${userId}/role`)
+      .set(bearer(token))
+      .send({ role: UserRole.NURSE });
+  }
+
+  test('409 — doctor with an active OPD visit is blocked; role and audit untouched', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    await seedVisit(tenantId, { doctorIds: [doctor._id.toString()], status: 'OPEN' });
+
+    (auditService.log as jest.Mock).mockClear();
+    const res = await rolePatch(doctor._id.toString(), token);
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      status:  'error',
+      details: {
+        code:           'DOCTOR_ACTIVE_PATIENTS',
+        activePatients: 1,
+        breakdown:      { opd: 1, ipd: 0 },
+        userId:         doctor._id.toString(),
+        currentRole:    UserRole.DOCTOR,
+        requestedRole:  UserRole.NURSE,
+      },
+    });
+    expect(res.body.message).toContain('active patient');
+
+    const after = await UserModel.findById(doctor._id);
+    expect(after?.role).toBe(UserRole.DOCTOR);
+    expect(auditService.log).not.toHaveBeenCalled();
+  });
+
+  test('409 — doctor with an ADMITTED IPD admission is blocked, breakdown reflects ipd source', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    await seedAdmission(tenantId, { assignedDoctorIds: [doctor._id.toString()] });
+
+    const res = await rolePatch(doctor._id.toString(), token);
+
+    expect(res.status).toBe(409);
+    expect(res.body.details).toMatchObject({
+      code:           'DOCTOR_ACTIVE_PATIENTS',
+      activePatients: 1,
+      breakdown:      { opd: 0, ipd: 1 },
+    });
+  });
+
+  test('409 — one patient active via both OPD and IPD is deduplicated in activePatients', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+    const doctorIdStr = doctor._id.toString();
+
+    await seedVisit(tenantId, { patientId: 'PAT-SHARED-01', doctorIds: [doctorIdStr] });
+    await seedAdmission(tenantId, { patientId: 'PAT-SHARED-01', assignedDoctorIds: [doctorIdStr] });
+
+    const res = await rolePatch(doctorIdStr, token);
+
+    expect(res.status).toBe(409);
+    expect(res.body.details.activePatients).toBe(1);
+    expect(res.body.details.breakdown).toEqual({ opd: 1, ipd: 1 });
+  });
+
+  test('200 — completed/cancelled/no-show visits and discharged admissions never block', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+    const doctorIdStr = doctor._id.toString();
+
+    await seedVisit(tenantId, { visitId: 'OPD-DONE-01', patientId: 'PAT-HIST-01', doctorIds: [doctorIdStr], status: 'COMPLETED' });
+    await seedVisit(tenantId, { visitId: 'OPD-CANCEL-01', patientId: 'PAT-HIST-02', doctorIds: [doctorIdStr], status: 'CANCELLED' });
+    await seedVisit(tenantId, { visitId: 'OPD-NOSHOW-01', patientId: 'PAT-HIST-03', doctorIds: [doctorIdStr], status: 'NO_SHOW' });
+    await seedAdmission(tenantId, {
+      admissionId: 'adm-hist-01',
+      patientId:   'PAT-HIST-01',
+      assignedDoctorIds: [doctorIdStr],
+      status:     'DISCHARGED',
+      dischargeDate: new Date(),
+    });
+
+    const res = await rolePatch(doctorIdStr, token);
+
+    expect(res.status).toBe(200);
+    const after = await UserModel.findById(doctor._id);
+    expect(after?.role).toBe(UserRole.NURSE);
+  });
+
+  test('200 — role change writes the existing audit entry (previousValue DOCTOR → NURSE)', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    (auditService.log as jest.Mock).mockClear();
+    const res = await rolePatch(doctor._id.toString(), token);
+
+    expect(res.status).toBe(200);
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType:    AuditEntityType.USER_ACCOUNT,
+        entityId:      doctor._id.toString(),
+        action:        'UPDATE',
+        previousValue: { role: UserRole.DOCTOR },
+        newValue:      { role: UserRole.NURSE },
+      }),
+    );
+  });
+
+  test('409 — non-doctor with encounter-like rows is never blocked (restriction is doctor-only)', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenantId, 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    // Nurse ids on OPD nurse assignments are out of scope here; the point is
+    // the guard only queries encounters for current doctors — a NURSE with a
+    // matching id inside doctorIds-style rows would still not be consulted.
+    // Seed a visit whose doctorIds happens to contain the nurse's id: it must
+    // NOT block the nurse's role change.
+    await seedVisit(tenantId, { doctorIds: [nurse._id.toString()] });
+
+    const res = await rolePatch(nurse._id.toString(), token);
+
+    expect(res.status).toBe(200);
+  });
+
+  test('200 — changing INTO DOCTOR is never blocked, even with rows naming the user', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const recep  = await seedUser(tenantId, 'recep@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    await seedVisit(tenantId, { doctorIds: [recep._id.toString()] });
+
+    const res = await request(app)
+      .patch(`/api/users/${recep._id}/role`)
+      .set(bearer(token))
+      .send({ role: UserRole.DOCTOR });
+
+    expect(res.status).toBe(200);
+  });
+
+  test('409 — inactive doctor with active assignments is still blocked (fail-closed)', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'inactive-doc@h.com', UserRole.DOCTOR);
+    await UserModel.findByIdAndUpdate(doctor._id, { isActive: false });
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+
+    await seedVisit(tenantId, { doctorIds: [doctor._id.toString()] });
+
+    const res = await rolePatch(doctor._id.toString(), token);
+
+    expect(res.status).toBe(409);
+    expect(res.body.details.code).toBe('DOCTOR_ACTIVE_PATIENTS');
+  });
+
+  test('409 — last-admin guard still fires (existing behavior regression guard)', async () => {
+    const tenant  = await seedTenant();
+    const admin   = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const hr      = await seedUser(tenant._id.toString(), 'hr@h.com', UserRole.HR);
+    const hrToken = tokenFor(hr._id.toString(), tenant._id.toString(), UserRole.HR);
+
+    const res = await request(app)
+      .patch(`/api/users/${admin._id}/role`)
+      .set(bearer(hrToken))
+      .send({ role: UserRole.NURSE });
+
+    expect(res.status).toBe(409);
+    // No details.code — the last-admin conflict is unstructured (pre-existing).
+    expect(res.body.details?.code).toBeUndefined();
+  });
+
+  test('200 — historical doctor references intact after a successful role change', async () => {
+    const tenant = await seedTenant();
+    const tenantId = tenant._id.toString();
+    const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenantId, 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenantId, UserRole.HOSPITAL_ADMIN);
+    const doctorIdStr = doctor._id.toString();
+
+    // One completed visit + one discharged admission pre-date the role change.
+    await seedVisit(tenantId, { visitId: 'OPD-HIST-01', patientId: 'PAT-HIST-01', doctorIds: [doctorIdStr], status: 'COMPLETED' });
+    await seedAdmission(tenantId, {
+      admissionId: 'adm-hist-02',
+      patientId:   'PAT-HIST-02',
+      assignedDoctorIds: [doctorIdStr],
+      status:      'DISCHARGED',
+      dischargeDate: new Date(),
+    });
+
+    const res = await rolePatch(doctorIdStr, token);
+    expect(res.status).toBe(200);
+
+    // The user row keeps its identity fields; only the role moved.
+    const after = await UserModel.findById(doctor._id);
+    expect(after?.role).toBe(UserRole.NURSE);
+    expect(after?._id.toString()).toBe(doctorIdStr);
+    expect(after?.name).toBe('doc'); // seedUser derives name from the email prefix — identity untouched
+
+    // Historical encounter documents were never rewritten and still name the
+    // (former) doctor by id — future read-time name resolution keeps working.
+    const visit = await OPDVisitModel.findOne({ tenantId, visitId: 'OPD-HIST-01' });
+    expect(visit?.doctorIds).toEqual([doctorIdStr]);
+    const admission = await IPDAdmissionModel.findOne({ tenantId, admissionId: 'adm-hist-02' });
+    expect(admission?.assignedDoctorIds).toEqual([doctorIdStr]);
   });
 });
