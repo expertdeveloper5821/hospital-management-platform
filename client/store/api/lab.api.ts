@@ -14,6 +14,8 @@ import type {
   CollectLabPaymentRequest,
   PaymentResponse,
   SubmitPathologyTestReportRequest,
+  PathologyTestMasterEntry,
+  UpdatePathologyTestMasterRequest,
 } from '../types';
 
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
@@ -85,6 +87,26 @@ export const labApi = baseApi.injectEndpoints({
       }),
       transformResponse: (raw: ApiSuccess<PathologyRequestResponse>) => raw.data,
       invalidatesTags: ['Lab'],
+    }),
+
+    // ─── Pathology Test Master (lab staff, online-only) ──────────────────────
+
+    listPathologyTestMaster: build.query<PathologyTestMasterEntry[], void>({
+      query: () => '/api/lab/pathology/test-master',
+      transformResponse: (raw: ApiSuccess<PathologyTestMasterEntry[]>) => raw.data,
+      providesTags: ['LabTestMaster'],
+    }),
+
+    // Also invalidates 'Lab' — request details carry each test's content.
+    updatePathologyTestMaster: build.mutation<
+      PathologyTestMasterEntry,
+      { templateKey: string } & UpdatePathologyTestMasterRequest
+    >({
+      query: ({ templateKey, ...body }) => ({
+        url: `/api/lab/pathology/test-master/${encodeURIComponent(templateKey)}`, method: 'PATCH', body,
+      }),
+      transformResponse: (raw: ApiSuccess<PathologyTestMasterEntry>) => raw.data,
+      invalidatesTags: ['LabTestMaster', 'Lab'],
     }),
 
     // One test's report PDF as a blob object URL (the endpoint returns a raw
@@ -247,6 +269,8 @@ export const labApi = baseApi.injectEndpoints({
 });
 
 export const {
+  useListPathologyTestMasterQuery,
+  useUpdatePathologyTestMasterMutation,
   useListPathologyRequestsQuery,
   useGetPathologyRequestQuery,
   useCreatePathologyRequestMutation,

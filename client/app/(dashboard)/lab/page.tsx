@@ -40,6 +40,7 @@ import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import { PathologyTestReportModal } from '@/components/lab/pathology-test-report-modal';
 import { PathologyReportsBulkActions } from '@/components/lab/pathology-reports-bulk-actions';
+import { PathologyTestMaster } from '@/components/lab/pathology-test-master';
 import {
   FlaskConical,
   Plus,
@@ -54,6 +55,7 @@ import {
   IndianRupee,
   Download,
   CheckCircle2,
+  ClipboardList,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NavForm } from '@/components/ui/form';
@@ -1642,7 +1644,13 @@ function RequestsTable({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type TabType = 'pathology' | 'radiology';
+type TabType = 'pathology' | 'radiology' | 'test-master';
+
+const TAB_LABEL: Record<TabType, string> = {
+  pathology:     'Pathology',
+  radiology:     'Radiology',
+  'test-master': 'Test Master',
+};
 
 const LAB_ALLOWED_ROLES = ['DOCTOR', 'HOSPITAL_ADMIN', 'ADMIN', 'MANAGER', 'NURSE', 'PATHOLOGIST', 'RADIOLOGIST', 'RECEPTIONIST'];
 
@@ -1653,10 +1661,15 @@ export default function LabPage() {
 
   // PATHOLOGIST sees only Pathology and RADIOLOGIST only Radiology — mirrors
   // the backend, where each lab role is excluded from the other type's routes.
-  const visibleTabs: TabType[] =
-    role === 'PATHOLOGIST' ? ['pathology']
-    : role === 'RADIOLOGIST' ? ['radiology']
-    : ['pathology', 'radiology'];
+  // The pathology Test Master is edited by lab staff only — mirrors the
+  // backend's requireRole on /api/lab/pathology/test-master.
+  const canManageTestMaster = ['PATHOLOGIST', 'HOSPITAL_ADMIN'].includes(role ?? '');
+  const visibleTabs: TabType[] = [
+    ...(role === 'PATHOLOGIST' ? ['pathology' as const]
+      : role === 'RADIOLOGIST' ? ['radiology' as const]
+      : ['pathology' as const, 'radiology' as const]),
+    ...(canManageTestMaster ? ['test-master' as const] : []),
+  ];
   const activeTab = visibleTabs.includes(selectedTab) ? selectedTab : visibleTabs[0];
 
   useEffect(() => {
@@ -1709,24 +1722,30 @@ export default function LabPage() {
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            <FlaskConical className="inline h-4 w-4 mr-1.5 -mt-0.5" />
-            {tab === 'pathology' ? 'Pathology' : 'Radiology'}
+            {tab === 'test-master'
+              ? <ClipboardList className="inline h-4 w-4 mr-1.5 -mt-0.5" />
+              : <FlaskConical className="inline h-4 w-4 mr-1.5 -mt-0.5" />}
+            {TAB_LABEL[tab]}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
-      <RequestsTable
-        key={activeTab}
-        type={activeTab}
-        canCreate={canCreate}
-        canUpload={canUpload}
-        canUploadFile={canUploadFile}
-        canEdit={canEdit}
-        canDelete={canDelete}
-        canCollectPayment={canCollectPayment}
-        canDownloadReceipt={canDownloadReceipt}
-      />
+      {activeTab === 'test-master' ? (
+        <PathologyTestMaster />
+      ) : (
+        <RequestsTable
+          key={activeTab}
+          type={activeTab}
+          canCreate={canCreate}
+          canUpload={canUpload}
+          canUploadFile={canUploadFile}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          canCollectPayment={canCollectPayment}
+          canDownloadReceipt={canDownloadReceipt}
+        />
+      )}
     </div>
   );
 }

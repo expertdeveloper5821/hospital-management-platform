@@ -159,7 +159,70 @@ describe('POST /api/patients', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data.fullName).toBe('Priya Sharma');
-    expect(res.body.data.patientId).toMatch(/^PAT-[A-F0-9]{8}$/);
+    expect(res.body.data.patientId).toBe('PAT-TH01');
+  });
+
+  test('UHIDs are sequential per hospital and independent across hospitals', async () => {
+    const narayan = await seedTenant('Narayan Hospital');
+    const nova    = await seedTenant('Nova Hospital'); // same initials, own sequence
+    const tokenA  = tokenFor((await seedUser(narayan._id.toString(), 'a@nh.com', UserRole.RECEPTIONIST))._id.toString(), narayan._id.toString(), UserRole.RECEPTIONIST);
+    const tokenB  = tokenFor((await seedUser(nova._id.toString(),    'b@nh.com', UserRole.RECEPTIONIST))._id.toString(), nova._id.toString(),    UserRole.RECEPTIONIST);
+
+    const create = (token: string, i: number) => request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, fullName: `Patient ${i}`, mobileNumber: `91000000${String(i).padStart(2, '0')}` });
+
+    const a1 = await create(tokenA, 1);
+    const a2 = await create(tokenA, 2);
+    const b1 = await create(tokenB, 3);
+    const a3 = await create(tokenA, 4);
+
+    expect([a1, a2, b1, a3].map((r) => r.status)).toEqual([201, 201, 201, 201]);
+    expect(a1.body.data.patientId).toBe('PAT-NH01');
+    expect(a2.body.data.patientId).toBe('PAT-NH02');
+    expect(b1.body.data.patientId).toBe('PAT-NH01');
+    expect(a3.body.data.patientId).toBe('PAT-NH03');
+
+    // The new-format UHID passes route validation for the per-patient endpoints.
+    const get = await request(app).get('/api/patients/PAT-NH02').set(bearer(tokenA));
+    expect(get.status).toBe(200);
+    expect(get.body.data.fullName).toBe('Patient 2');
+  });
+
+  test('concurrent registrations never receive the same UHID', async () => {
+    const tenant = await seedTenant('Narayan Hospital');
+    const user   = await seedUser(tenant._id.toString(), 'rc@nh.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(user._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const N = 15;
+    const results = await Promise.all(Array.from({ length: N }, (_, i) => request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({ ...VALID_PATIENT_BODY, fullName: `Concurrent ${i}`, mobileNumber: `92000000${String(i).padStart(2, '0')}` })));
+
+    expect(results.every((r) => r.status === 201)).toBe(true);
+    const ids = results.map((r) => r.body.data.patientId as string).sort();
+    expect(new Set(ids).size).toBe(N);
+    expect(ids).toEqual(Array.from({ length: N }, (_, i) => `PAT-NH${String(i + 1).padStart(2, '0')}`).sort());
+  });
+
+  test('existing legacy-format UHIDs are left untouched', async () => {
+    const tenant = await seedTenant('Narayan Hospital');
+    const legacy = await PatientModel.create({
+      patientId: 'PAT-ABCD1234', tenantId: tenant._id.toString(), fullName: 'Old Patient',
+      gender: Gender.MALE, mobileNumber: '9333333333', address: 'Somewhere',
+    });
+    const user  = await seedUser(tenant._id.toString(), 'rc2@nh.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(user._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app).post('/api/patients').set(bearer(token)).send(VALID_PATIENT_BODY);
+
+    expect(res.body.data.patientId).toBe('PAT-NH01');
+    const reloaded = await PatientModel.findById(legacy._id).lean();
+    expect(reloaded!.patientId).toBe('PAT-ABCD1234');
+    const get = await request(app).get('/api/patients/PAT-ABCD1234').set(bearer(token));
+    expect(get.status).toBe(200);
   });
 
   test('201 — Nurse can register a patient', async () => {

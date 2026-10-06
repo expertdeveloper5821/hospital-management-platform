@@ -20,6 +20,9 @@ import {
   SubmitPathologyTestReportInput,
   PathologyResultValue,
   PathologyTestReportResponse,
+  PathologyTestMasterResponse,
+  UpdatePathologyTestMasterInput,
+  PathologyTestClinicalContent,
 } from './lab.types';
 import {
   findReportTemplate,
@@ -28,6 +31,8 @@ import {
   computeFlag,
 } from './pathology-report-templates';
 import { buildPathologyReportPdf } from './pathology-report.pdf';
+import { pathologyTestMasterService } from './pathology-test-master.service';
+import { IPathologyTestMaster } from './pathology-test-master.model';
 import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { fetchImageBuffer } from '../../shared/services/report-letterhead.pdf';
 import { patientRepository }   from '../patient/patient.repository';
@@ -431,21 +436,49 @@ async function resolveEncounterConditions(
 // ─── Structured Pathology test reports ────────────────────────────────────────
 
 // Plaintext JSON held (encrypted at rest) in IPathologyTestReport.resultData.
+// `clinicalNote` / `comment` are this report's own Clinical Notes / Comment;
+// absent (undefined) on a report submitted before they were saved per report,
+// which then keeps showing the Test Master's content (see resolveReportText).
 interface StoredPathologyResult {
-  values:  PathologyResultValue[];
-  remarks: string | null;
+  values:        PathologyResultValue[];
+  remarks:       string | null;
+  clinicalNote?: string | null;
+  comment?:      string | null;
+}
+
+function parseStoredText(v: unknown): string | null | undefined {
+  if (typeof v === 'string') return v;
+  return v === null ? null : undefined;
 }
 
 function parseResultData(raw: string): StoredPathologyResult {
   try {
-    const parsed = JSON.parse(raw) as Partial<StoredPathologyResult>;
-    return {
-      values:  Array.isArray(parsed.values) ? parsed.values : [],
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const result: StoredPathologyResult = {
+      values:  Array.isArray(parsed.values) ? parsed.values as PathologyResultValue[] : [],
       remarks: typeof parsed.remarks === 'string' ? parsed.remarks : null,
     };
+    const clinicalNote = parseStoredText(parsed.clinicalNote);
+    const comment      = parseStoredText(parsed.comment);
+    if (clinicalNote !== undefined) result.clinicalNote = clinicalNote;
+    if (comment      !== undefined) result.comment      = comment;
+    return result;
   } catch {
     return { values: [], remarks: null };
   }
+}
+
+// The Clinical Notes / Comment a submitted report shows and prints: its own
+// saved text, or — for a report saved before these were per-report — the
+// Test Master's current content.
+function resolveReportText(
+  data:    StoredPathologyResult,
+  content: PathologyTestClinicalContent,
+): { clinicalNote: string | null; comment: string | null } {
+  return {
+    clinicalNote: data.clinicalNote !== undefined ? data.clinicalNote : content.clinicalNote,
+    comment:      data.comment      !== undefined ? data.comment      : content.comment,
+  };
 }
 
 const NUMERIC_RESULT = /^[-+]?(\d+(\.\d*)?|\.\d+)$/;
@@ -491,11 +524,13 @@ function buildResultValues(
 }
 
 // One entry per test in testType (in order): its entry form (template fields
-// with this patient's reference ranges) and its submitted result, if any.
+// with this patient's reference ranges), its Test Master clinical content and
+// its submitted result, if any.
 // A result stored under a test name no longer in testType is not returned.
 async function buildTestReports(
-  doc:    IPathologyRequest,
-  gender: string | null | undefined,
+  doc:     IPathologyRequest,
+  gender:  string | null | undefined,
+  masters: Map<string, IPathologyTestMaster>,
 ): Promise<PathologyTestReportResponse[]> {
   const stored = new Map((doc.testReports ?? []).map((r) => [r.testName, r]));
   const names  = stored.size
@@ -505,10 +540,12 @@ async function buildTestReports(
     const template = findReportTemplate(testName);
     const report   = stored.get(testName);
     const data     = report ? parseResultData(report.resultData) : null;
+    const content  = pathologyTestMasterService.contentFor(masters, template.key);
     return {
       testIndex,
       testName,
       templateKey: template.key,
+      clinicalContent: content,
       fields: template.parameters.map((p) => ({
         key:            p.key,
         name:           p.name,
@@ -521,6 +558,7 @@ async function buildTestReports(
       result: report && data ? {
         values:          data.values,
         remarks:         data.remarks,
+        ...resolveReportText(data, content),
         submittedBy:     report.submittedBy,
         submittedByName: names.get(report.submittedBy) ?? 'Lab Staff',
         submittedAt:     report.submittedAt.toISOString(),
@@ -703,11 +741,14 @@ export class LabService {
   // Single-request view: the list shape plus the linked encounter and the
   // structured per-test reports.
   private async toPathologyDetail(doc: IPathologyRequest): Promise<PathologyRequestResponse> {
-    const patient = await patientRepository.findByPatientId(doc.tenantId, doc.patientId);
+    const [patient, masters] = await Promise.all([
+      patientRepository.findByPatientId(doc.tenantId, doc.patientId),
+      pathologyTestMasterService.loadMasterMap(doc.tenantId),
+    ]);
     const [response, encounter, testReports] = await Promise.all([
       toPathologyResponse(doc, patient?.fullName),
       getEncounterSummary(doc),
-      buildTestReports(doc, patient?.gender),
+      buildTestReports(doc, patient?.gender, masters),
     ]);
     return { ...response, encounter, testReports };
   }
@@ -720,6 +761,21 @@ export class LabService {
   ): Promise<PathologyRequestResponse> {
     const doc = await this.findReadablePathology(requestId, tenantId, allowedPatientIds, referredByDoctorId);
     return this.toPathologyDetail(doc);
+  }
+
+  // ─── Pathology Test Master ────────────────────────────────────────────────
+
+  async listPathologyTestMaster(tenantId: string): Promise<PathologyTestMasterResponse[]> {
+    return pathologyTestMasterService.list(tenantId);
+  }
+
+  async updatePathologyTestMaster(
+    tenantId:    string,
+    templateKey: string,
+    userId:      string,
+    input:       UpdatePathologyTestMasterInput,
+  ): Promise<PathologyTestMasterResponse> {
+    return pathologyTestMasterService.update(tenantId, templateKey, userId, input);
   }
 
   // ─── Structured test reports ──────────────────────────────────────────────
@@ -755,11 +811,22 @@ export class LabService {
       throw new ValidationError('Enter at least one result before submitting the report.');
     }
 
-    const isAmendment = (doc.testReports ?? []).some((r) => r.testName === testName);
+    // Clinical Notes / Comment entered with the report are stored on it (the
+    // Test Master is never changed from here). Omitted → an amendment keeps
+    // the report's saved text; still absent → the report follows the master.
+    const previous    = (doc.testReports ?? []).find((r) => r.testName === testName);
+    const prevData    = previous ? parseResultData(previous.resultData) : null;
+    const isAmendment = !!previous;
+    const stored: StoredPathologyResult = { values, remarks };
+    const clinicalNote = input.clinicalNote !== undefined ? input.clinicalNote : prevData?.clinicalNote;
+    const comment      = input.comment      !== undefined ? input.comment      : prevData?.comment;
+    if (clinicalNote !== undefined) stored.clinicalNote = clinicalNote;
+    if (comment      !== undefined) stored.comment      = comment;
+
     const saved = await labRepository.upsertPathologyTestReport(requestId, tenantId, {
       testName,
       templateKey: findReportTemplate(testName).key,
-      resultData:  JSON.stringify({ values, remarks }),
+      resultData:  JSON.stringify(stored),
       submittedBy: userId,
       submittedAt: new Date(),
     });
@@ -872,12 +939,15 @@ export class LabService {
 
   // Everything a report PDF needs besides the test itself — shared by all
   // tests of one request, so the bulk PDF looks each value up only once.
+  // `masters` is the tenant's Test Master, read at render time so every PDF
+  // prints the currently saved clinical content.
   private async loadPathologyReportContext(doc: IPathologyRequest, tenantId: string, letterhead: boolean) {
-    const [patient, tenant, encounter, referredByName] = await Promise.all([
+    const [patient, tenant, encounter, referredByName, masters] = await Promise.all([
       patientRepository.findByPatientId(tenantId, doc.patientId),
       tenantRepository.findById(tenantId),
       getEncounterSummary(doc),
       getReferredByName(tenantId, doc.referredBy),
+      pathologyTestMasterService.loadMasterMap(tenantId),
     ]);
     if (!patient) throw new NotFoundError('Patient not found');
     const logoUrl = tenant?.branding?.logoUrl
@@ -909,6 +979,7 @@ export class LabService {
         referredByName,
       },
       encounter,
+      masters,
       letterhead: letterhead ? { logo } : null,
     };
   }
@@ -920,12 +991,18 @@ export class LabService {
   ): Promise<Buffer> {
     const result   = parseResultData(report.resultData);
     const reporter = await userRepository.findById(context.tenantId, report.submittedBy);
+    const content  = pathologyTestMasterService.contentFor(context.masters, findReportTemplate(testName).key);
     return buildPathologyReportPdf({
       hospital:       context.hospital,
       patient:        context.patient,
       request:        context.request,
       encounter:      context.encounter,
-      test:           { testName, values: result.values, remarks: result.remarks },
+      test:           {
+        testName,
+        values:       result.values,
+        ...resolveReportText(result, content),
+      },
+      correlateClinically: content.correlateClinically,
       reportedByName: reporter?.name ?? reporter?.email ?? 'Lab Staff',
       reportedAt:     report.submittedAt.toISOString(),
       ...(context.letterhead ? { letterhead: context.letterhead } : {}),

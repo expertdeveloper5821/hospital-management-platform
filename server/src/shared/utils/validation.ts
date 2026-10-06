@@ -8,11 +8,13 @@ export const objectIdSchema = z
   .regex(/^[0-9a-fA-F]{24}$/, 'Invalid ID format');
 
 /**
- * Validates the custom UHID format (PAT-XXXXXXXX), stored as `patientId`.
+ * Validates a UHID, stored as `patientId`: either the per-hospital sequential
+ * format (PAT-<INITIALS><SEQ>, e.g. PAT-NH01) or the legacy random format
+ * (PAT-XXXXXXXX) still carried by patients registered before it.
  */
 export const patientIdSchema = z
   .string()
-  .regex(/^PAT-[0-9A-Z]{8}$/, 'Invalid UHID format');
+  .regex(/^PAT-(?:[0-9A-Z]{8}|[A-Z]{1,10}[0-9]{2,9})$/, 'Invalid UHID format');
 
 /**
  * Validates a UUID v4 string.

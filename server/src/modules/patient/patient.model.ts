@@ -38,10 +38,14 @@ export interface IPatient extends Document {
 
 const PatientSchema = new Schema<IPatient>(
   {
+    // UHID. Unique per tenant only (compound index below) — each hospital runs
+    // its own PAT-<INITIALS><SEQ> sequence, so two hospitals with the same
+    // initials legitimately issue the same UHID. PatientService.createPatient
+    // always sets it; the random default only covers direct model writes
+    // (e.g. seed scripts) and matches the legacy format.
     patientId: {
       type:     String,
       required: true,
-      unique:   true,
       default:  () => `PAT-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`,
     },
     tenantId:               { type: String, required: true, index: true },

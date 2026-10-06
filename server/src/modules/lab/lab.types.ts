@@ -161,6 +161,13 @@ export interface LabEncounterSummary {
 // (number / allowed option) happen in LabService against the template.
 export const PATHOLOGY_RESULT_VALUE_MAX = 500;
 export const PATHOLOGY_REPORT_REMARKS_MAX = 2000;
+export const PATHOLOGY_CLINICAL_NOTE_MAX = 2000;
+export const PATHOLOGY_COMMENT_MAX       = 2000;
+
+// Empty / whitespace-only clears the field (stored as null).
+const optionalReportText = (max: number, label: string) =>
+  z.string().max(max, `${label} cannot exceed ${max} characters.`).trim().nullable().optional()
+    .transform((v) => (v === '' ? null : v));
 
 export const SubmitPathologyTestReportSchema = z.object({
   // The test name the form was opened for — rejected with 409 if the request's
@@ -171,6 +178,11 @@ export const SubmitPathologyTestReportSchema = z.object({
     z.string().max(PATHOLOGY_RESULT_VALUE_MAX, `Each result cannot exceed ${PATHOLOGY_RESULT_VALUE_MAX} characters.`).trim().nullable(),
   ).default({}),
   remarks:  z.string().max(PATHOLOGY_REPORT_REMARKS_MAX, `Remarks cannot exceed ${PATHOLOGY_REPORT_REMARKS_MAX} characters.`).trim().nullable().optional(),
+  // This report's Clinical Notes / Comment, pre-filled in the form from the
+  // Test Master and saved with the report (never written back to the master).
+  // Empty clears it for this report; omitted keeps the report's saved value.
+  clinicalNote: optionalReportText(PATHOLOGY_CLINICAL_NOTE_MAX, 'Clinical note'),
+  comment:      optionalReportText(PATHOLOGY_COMMENT_MAX, 'Comment'),
 }).strict();
 
 export type SubmitPathologyTestReportInput = z.infer<typeof SubmitPathologyTestReportSchema>;
@@ -199,16 +211,58 @@ export interface PathologyResultValue {
   flag:           PathologyResultFlagValue | null;
 }
 
+// ─── Pathology Test Master (per-test clinical content) ───────────────────────
+// Printed on each test's report from the currently saved master row:
+// clinicalNote → "Clinical Notes", comment → "Comment" (only when set),
+// correlateClinically → the "Please Correlate Clinically" footer.
+export const PATHOLOGY_CORRELATE_MAX     = 1000;
+
+export const UpdatePathologyTestMasterSchema = z.object({
+  clinicalNote: optionalReportText(PATHOLOGY_CLINICAL_NOTE_MAX, 'Clinical note'),
+  comment:      optionalReportText(PATHOLOGY_COMMENT_MAX, 'Comment'),
+  // Printed at the bottom of every report, so it can be edited but never cleared.
+  correlateClinically: z.string().trim()
+    .min(1, 'Please Correlate Clinically text is required.')
+    .max(PATHOLOGY_CORRELATE_MAX, `Please Correlate Clinically text cannot exceed ${PATHOLOGY_CORRELATE_MAX} characters.`)
+    .optional(),
+}).strict().refine(
+  (v) => v.clinicalNote !== undefined || v.comment !== undefined || v.correlateClinically !== undefined,
+  'Provide at least one field to update.',
+);
+
+export type UpdatePathologyTestMasterInput = z.infer<typeof UpdatePathologyTestMasterSchema>;
+
+export interface PathologyTestClinicalContent {
+  clinicalNote:        string | null;
+  comment:             string | null;
+  correlateClinically: string | null;
+}
+
+export interface PathologyTestMasterResponse extends PathologyTestClinicalContent {
+  templateKey:   string;
+  testName:      string;
+  // null on a seeded row that has never been edited.
+  updatedBy:     string | null;
+  updatedByName: string | null;
+  updatedAt:     string;
+}
+
 export interface PathologyTestReportResponse {
   testIndex:   number;
   testName:    string;
   templateKey: string;
+  // The test's Test Master content, as it prints on the report.
+  clinicalContent: PathologyTestClinicalContent;
   // The structured entry form for this test.
   fields:      PathologyReportParameterField[];
   // null until the test's report has been submitted.
   result: {
     values:          PathologyResultValue[];
     remarks:         string | null;
+    // As saved with this report (Test Master content for a report submitted
+    // before these were editable per report) — what its PDF prints.
+    clinicalNote:    string | null;
+    comment:         string | null;
     submittedBy:     string;
     submittedByName: string;
     submittedAt:     string;

@@ -27,6 +27,13 @@ jest.mock('../../../src/modules/ipd/ipd.repository', () => ({
 jest.mock('../../../src/modules/department/department.repository', () => ({
   departmentRepository: { findById: jest.fn().mockResolvedValue(null) },
 }));
+// Pathology Test Master (per-test clinical content) — empty, seeding is a no-op.
+jest.mock('../../../src/modules/lab/pathology-test-master.repository', () => ({
+  pathologyTestMasterRepository: {
+    findAll:       jest.fn().mockResolvedValue([]),
+    insertMissing: jest.fn().mockResolvedValue(undefined),
+  },
+}));
 import { auditService } from '../../../src/shared/services/audit.service';
 import { opdRepository }        from '../../../src/modules/opd/opd.repository';
 import { ipdRepository }        from '../../../src/modules/ipd/ipd.repository';
@@ -36,6 +43,7 @@ import { paymentRepository } from '../../../src/modules/payment/payment.reposito
 
 import { labRepository }        from '../../../src/modules/lab/lab.repository';
 import { patientRepository }    from '../../../src/modules/patient/patient.repository';
+import { pathologyTestMasterRepository } from '../../../src/modules/lab/pathology-test-master.repository';
 import { notificationService }  from '../../../src/modules/notification/notification.service';
 import { s3Service }            from '../../../src/shared/services/s3.service';
 import { LabService }           from '../../../src/modules/lab/lab.service';
@@ -899,6 +907,73 @@ describe('LabService — submitPathologyTestReport', () => {
     const stored = (mockLabRepo.upsertPathologyTestReport as jest.Mock).mock.calls[0][2];
     expect(stored.templateKey).toBe('GENERIC');
     expect(JSON.parse(stored.resultData).values[0]).toMatchObject({ key: 'result', value: 'Normal study', flag: null });
+  });
+
+  describe('per-report Clinical Notes / Comment', () => {
+    const masterRow = {
+      templateKey: 'CBC', testName: CBC, clinicalNote: 'Master note.', comment: null,
+      correlateClinically: 'Correlate.', updatedBy: null, updatedAt: new Date(),
+    };
+    const storedData = () => JSON.parse((mockLabRepo.upsertPathologyTestReport as jest.Mock).mock.calls[0][2].resultData);
+    const withStored = (doc: IPathologyRequest, data: Record<string, unknown>) => ({
+      ...doc,
+      testReports: [{ testName: CBC, templateKey: 'CBC', resultData: JSON.stringify(data), submittedBy: 'path-1', submittedAt: new Date() }],
+    }) as unknown as IPathologyRequest;
+
+    beforeEach(() => {
+      (pathologyTestMasterRepository.findAll as jest.Mock).mockResolvedValue([masterRow]);
+    });
+    afterEach(() => {
+      (pathologyTestMasterRepository.findAll as jest.Mock).mockResolvedValue([]);
+    });
+
+    test('stores the entered text with the report (encrypted resultData), never in the Test Master or audit', async () => {
+      const doc = makePathologyDoc({ testType: CBC });
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+      lastSaved = withStored(doc, { values: [], remarks: null, clinicalNote: 'Edited note.', comment: 'Repeat in 2 weeks.' });
+      mockLabRepo.upsertPathologyTestReport = jest.fn().mockResolvedValue(lastSaved);
+
+      const result = await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', {
+        testName: CBC, values: { hemoglobin: '12.5' }, clinicalNote: 'Edited note.', comment: 'Repeat in 2 weeks.',
+      });
+
+      expect(storedData()).toMatchObject({ clinicalNote: 'Edited note.', comment: 'Repeat in 2 weeks.' });
+      expect(result.testReports?.[0].result).toMatchObject({ clinicalNote: 'Edited note.', comment: 'Repeat in 2 weeks.' });
+      // The Test Master default is unchanged.
+      expect(result.testReports?.[0].clinicalContent.clinicalNote).toBe('Master note.');
+      const audit = JSON.stringify((auditService.log as jest.Mock).mock.calls);
+      expect(audit).not.toContain('Edited note.');
+      expect(audit).not.toContain('Repeat in 2 weeks.');
+    });
+
+    test('an amendment that omits them keeps the saved text; an explicit null clears it', async () => {
+      const doc = withStored(makePathologyDoc({ testType: CBC }), { values: [], remarks: null, clinicalNote: 'Saved note.', comment: 'Saved comment.' });
+      arrange(doc, [CBC]);
+
+      await service.submitPathologyTestReport('req-path-001', 0, TENANT, 'path-1', {
+        testName: CBC, values: { hemoglobin: '12.5' }, comment: null,
+      });
+
+      expect(storedData()).toMatchObject({ clinicalNote: 'Saved note.', comment: null });
+    });
+
+    test('a report saved before per-report text existed shows the Test Master content', async () => {
+      const doc = withStored(makePathologyDoc({ testType: CBC }), { values: [], remarks: 'Old remark' });
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+
+      const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+      expect(result.testReports?.[0].result).toMatchObject({ clinicalNote: 'Master note.', comment: null, remarks: 'Old remark' });
+    });
+
+    test('a saved empty (null) Clinical Note stays empty rather than falling back to the master', async () => {
+      const doc = withStored(makePathologyDoc({ testType: CBC }), { values: [], remarks: null, clinicalNote: null, comment: null });
+      mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(doc);
+
+      const result = await service.getPathologyRequest('req-path-001', TENANT);
+
+      expect(result.testReports?.[0].result).toMatchObject({ clinicalNote: null, comment: null });
+    });
   });
 
   test('notifies the requester and referring doctor (not the submitter) and never audits values', async () => {
