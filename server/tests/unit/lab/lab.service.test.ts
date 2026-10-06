@@ -148,6 +148,28 @@ describe('LabService — createPathologyRequest', () => {
       expect.any(String),
     );
   });
+
+  test('accepts an "Other" typed-in referrer and returns the typed name as referredByName', async () => {
+    mockLabRepo.savePathology = jest.fn().mockResolvedValue(makePathologyDoc({ referredBy: 'OTHER:Dr. Mehta' }));
+
+    const result = await service.createPathologyRequest(
+      { patientId: 'patient-001', testType: 'Blood CBC', referredBy: 'OTHER:Dr. Mehta' },
+      TENANT,
+      DOCTOR,
+    );
+
+    expect((mockLabRepo.savePathology as jest.Mock).mock.calls[0][0]).toMatchObject({ referredBy: 'OTHER:Dr. Mehta' });
+    expect(result.referredByName).toBe('Dr. Mehta');
+  });
+
+  test('rejects an "Other" referrer with a blank name (400)', async () => {
+    mockLabRepo.savePathology = jest.fn();
+
+    await expect(
+      service.createPathologyRequest({ patientId: 'patient-001', testType: 'CBC', referredBy: 'OTHER:   ' }, TENANT, DOCTOR),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockLabRepo.savePathology).not.toHaveBeenCalled();
+  });
 });
 
 describe('LabService — Pathology report file upload (removed)', () => {

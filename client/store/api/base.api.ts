@@ -9,6 +9,7 @@ import type { RootState } from '../index';
 import { toastError, toastSuccess } from '@/lib/toast';
 import { planOfflineMutation, applyOptimisticPatch, planOfflineCreate, planOfflineAddBed, buildCreateOptimisticRecord } from '@/lib/offline/mutation-policy';
 import { findCachedEntityById } from '@/lib/offline/cache-lookup';
+import { LAB_REFERRED_BY_OTHER_PREFIX } from '../types';
 import { getSessionFromToken, type OfflineSession } from '@/lib/offline/session';
 import { getOrCreateClientKey, encryptClientField } from '@/lib/offline/crypto';
 import { openOfflineDb } from '@/lib/offline/db';
@@ -157,7 +158,9 @@ async function tryQueueOfflineCreate(
     const myName = (me && typeof me.name === 'string' && me.name) || state.auth.profile?.email || null;
     if (myName) optimisticData.requestedByName = myName;
     const referredBy = String(plan.body.referredBy ?? 'SELF');
-    if (referredBy !== 'SELF') {
+    if (referredBy.startsWith(LAB_REFERRED_BY_OTHER_PREFIX)) {
+      optimisticData.referredByName = referredBy.slice(LAB_REFERRED_BY_OTHER_PREFIX.length).trim();
+    } else if (referredBy !== 'SELF') {
       const doctor = findCachedEntityById(state, 'userId', referredBy);
       const doctorName = (doctor && typeof doctor.name === 'string' && doctor.name)
         || (doctor && typeof doctor.email === 'string' && doctor.email)

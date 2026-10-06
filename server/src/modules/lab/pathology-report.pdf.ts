@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { ReportHospitalInfo } from '../../shared/services/report-letterhead.pdf';
 import { LabEncounterSummary, PathologyResultValue } from './lab.types';
+import { DOCTOR_SIGNATURE_IMAGE, SIGNING_DOCTOR } from './doctor-signature.image';
 
 // ─── Pathology test report PDF ───────────────────────────────────────────────
 // One PDF per test of a Pathology request — never several tests combined.
@@ -14,8 +15,10 @@ import { LabEncounterSummary, PathologyResultValue } from './lab.types';
 // page with the table header repeated. `hospital` / `reportedByName` stay in the data
 // contract (PDF metadata only) so the service is unchanged.
 //
-// Every copy (Download and Print) closes with a Doctor Signature block at the
-// bottom-right. Downloaded copy only (`letterhead` set): the blank top 3.5 cm
+// Every copy (Download and Print) closes with a bold "End of Report" line
+// (short rule either side) and
+// a Doctor Signature block at the bottom-right (signature image, doctor's name
+// and designation — see doctor-signature.image.ts). Downloaded copy only (`letterhead` set): the blank top 3.5 cm
 // of every page also carries a black-text, no-fill hospital letterhead (logo,
 // name, registration number, address). Everything else is identical.
 
@@ -42,7 +45,6 @@ export interface PathologyReportPdfData {
   };
   reportedByName: string;
   reportedAt:     string;   // test report submission time = report date
-  generatedAt:    string;
   // Set only for the downloaded copy — see the header comment.
   letterhead?:    { logo: Buffer | null } | null;
 }
@@ -53,7 +55,7 @@ const TOP_MARGIN    = 35 * MM;  // 3.5 cm blank for the letterhead (OPD/IPD slip
 const BOTTOM_MARGIN = 20 * MM;  // 2 cm blank (OPD/IPD slips: pb-[20mm])
 const PAGE_WIDTH    = 595.28;   // A4
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
-const FOOTER_SPACE  = 24;       // kept clear above the bottom margin for the footer
+const FOOTER_SPACE  = 24;       // kept clear above the bottom margin (below the signature)
 const TEXT          = '#000000';
 const RULE          = '#000000';
 const REPORT_TZ     = 'Asia/Kolkata';
@@ -61,15 +63,6 @@ const REPORT_TZ     = 'Asia/Kolkata';
 function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: REPORT_TZ, day: '2-digit', month: 'short', year: 'numeric' })
     .format(new Date(iso));
-}
-
-function formatDateTime(iso: string): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: REPORT_TZ, day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
-  }).formatToParts(new Date(iso));
-  const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? '';
-  return `${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')} ${get('dayPeriod').toUpperCase()}`;
 }
 
 function toDisplay(str: string): string {
@@ -241,7 +234,6 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         ['Report Date',   formatDate(data.reportedAt)],
         ['Age / Gender',  ageGender || null],
         ['Mobile Number', p.mobileNumber],
-        ['Doctor',        enc?.doctorNames.length ? enc.doctorNames.join(', ') : null],
         ['Department',    enc?.departmentName ?? null],
         ['Referred By',   data.request.referredByName],
       ];
@@ -390,34 +382,52 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         writeText(doc, data.test.remarks, 'Helvetica', 9.5, PAGE_MARGIN, doc.y, { width: CONTENT_WIDTH });
       }
 
-      // ── Doctor Signature (every copy), bottom-right ────────────────────────
+      // ── End of Report + Doctor Signature (every copy), bottom-right ────────
       {
-        const SIG_W = 170;
-        const SIG_SPACE = 40;   // blank space left above the line for the signature
-        ensureSpace(SIG_SPACE + 24);
-        const sigX = PAGE_MARGIN + CONTENT_WIDTH - SIG_W;
-        const lineY = Math.max(doc.y + SIG_SPACE, pageBottom() - 20);
+        const END_H   = 24;    // "End of Report" line plus the gap below it
+        const SIG_W   = 170;
+        const IMG_H   = 42;    // signature image box height (image fitted, never stretched)
+        const IMG_GAP = 4;     // image bottom → signature line
+        const NAME_H  = 28;    // name + designation below the line
+        ensureSpace(END_H + IMG_H + IMG_GAP + NAME_H);
+        doc.y += 6;
+        // Bold, centred, with a short rule on each side: ──── End of Report ────
+        const END_RULE_W = 60;
+        const END_RULE_GAP = 8;
+        const endY = doc.y;
+        doc.font('Helvetica-Bold').fontSize(9.5);
+        const endTextW = doc.widthOfString('End of Report');
+        const endTextX = PAGE_MARGIN + (CONTENT_WIDTH - endTextW) / 2;
+        const endRuleY = endY + 5.5;   // vertical middle of the 9.5pt capitals
+        doc.strokeColor(RULE).lineWidth(0.75)
+          .moveTo(endTextX - END_RULE_GAP - END_RULE_W, endRuleY).lineTo(endTextX - END_RULE_GAP, endRuleY).stroke()
+          .moveTo(endTextX + endTextW + END_RULE_GAP, endRuleY).lineTo(endTextX + endTextW + END_RULE_GAP + END_RULE_W, endRuleY).stroke();
+        doc.fillColor(TEXT)
+          .text('End of Report', PAGE_MARGIN, endY, { width: CONTENT_WIDTH, align: 'center', lineBreak: false });
+        const sigX  = PAGE_MARGIN + CONTENT_WIDTH - SIG_W;
+        const lineY = Math.max(doc.y + END_H + IMG_H + IMG_GAP, pageBottom() - NAME_H);
+        if (DOCTOR_SIGNATURE_IMAGE) {
+          try {
+            doc.image(DOCTOR_SIGNATURE_IMAGE, sigX, lineY - IMG_GAP - IMG_H, {
+              fit: [SIG_W, IMG_H], align: 'center', valign: 'bottom',
+            });
+          } catch { /* unreadable image — name/designation still print */ }
+        }
         doc.strokeColor(RULE).lineWidth(0.5).moveTo(sigX, lineY).lineTo(sigX + SIG_W, lineY).stroke();
-        doc.font('Helvetica-Bold').fontSize(9).fillColor(TEXT)
-          .text('Doctor Signature', sigX, lineY + 5, { width: SIG_W, align: 'center', lineBreak: false });
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor(TEXT)
+          .text(SIGNING_DOCTOR.name, sigX, lineY + 4, { width: SIG_W, align: 'center', lineBreak: false });
+        doc.font('Helvetica').fontSize(9).fillColor(TEXT)
+          .text(SIGNING_DOCTOR.designation, sigX, lineY + 16, { width: SIG_W, align: 'center', lineBreak: false });
         doc.x = PAGE_MARGIN;
       }
 
-      // ── Footer: generation notice + page numbers ───────────────────────────
-      const range = doc.bufferedPageRange();
-      for (let i = range.start; i < range.start + range.count; i++) {
-        doc.switchToPage(i);
-        if (data.letterhead) drawLetterhead(doc, data.hospital, data.letterhead.logo);
-        // The footer sits in the FOOTER_SPACE strip reserved just above the
-        // blank bottom 2 cm — never inside it. Lift the margin while drawing
-        // so PDFKit doesn't treat it as overflow and add a page.
-        doc.page.margins.bottom = 0;
-        doc.font('Helvetica').fontSize(7.5).fillColor(TEXT)
-          .text(
-            `Computer-generated report. Generated on ${formatDateTime(data.generatedAt)} — Page ${i - range.start + 1} of ${range.count}`,
-            PAGE_MARGIN, doc.page.height - BOTTOM_MARGIN - 12,
-            { width: CONTENT_WIDTH, align: 'center', lineBreak: false },
-          );
+      // ── Letterhead (downloaded copy) on every page ─────────────────────────
+      if (data.letterhead) {
+        const range = doc.bufferedPageRange();
+        for (let i = range.start; i < range.start + range.count; i++) {
+          doc.switchToPage(i);
+          drawLetterhead(doc, data.hospital, data.letterhead.logo);
+        }
       }
 
       doc.end();

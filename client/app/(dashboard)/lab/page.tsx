@@ -28,7 +28,7 @@ import type {
   LabRequestPriority,
   PatientResponse,
 } from '@/store/types';
-import { LAB_REFERRED_BY_SELF } from '@/store/types';
+import { LAB_REFERRED_BY_SELF, LAB_REFERRED_BY_OTHER_PREFIX } from '@/store/types';
 import { Button }                        from '@/components/ui/button';
 import { Input }                         from '@/components/ui/input';
 import { Label }                         from '@/components/ui/label';
@@ -278,6 +278,11 @@ const pathologyTestIdFor = (name: string) =>
 // Mirrors the backend's CreatePathologyRequestSchema testType max length.
 const TEST_TYPE_MAX_LENGTH = 200;
 
+// Dropdown-only sentinel for "Other" — submitted as 'OTHER:<typed name>'.
+// The backend's referredBy max length (120) includes the prefix.
+const REFERRED_BY_OTHER_OPTION = '__OTHER__';
+const REFERRER_NAME_MAX_LENGTH = 120 - LAB_REFERRED_BY_OTHER_PREFIX.length;
+
 // ─── New Request Modal ────────────────────────────────────────────────────────
 
 interface NewRequestModalProps {
@@ -292,15 +297,18 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
   const profile = useAppSelector((s) => s.auth.profile);
   // A Doctor referring their own lab request has no "Self" concept — the
   // referring doctor IS the logged-in user, so the Self option is hidden and
-  // their own name is defaulted/pinned to the top instead. Every other role
-  // that can create a request (Pathologist/Radiologist/Receptionist/
-  // Hospital Admin/Nurse) keeps the existing Self-first behavior unchanged.
+  // their own name is defaulted/pinned to the top instead (unchanged). Every
+  // other role that can create a request (Pathologist/Radiologist/
+  // Receptionist/Hospital Admin/Nurse) picks a doctor or "Other" (a typed-in
+  // referrer name) — no preselected default.
   const isDoctorSelf = profile?.role === 'DOCTOR';
 
   const [patient,    setPatient]    = useState<PatientResponse | null>(null);
   const [testType,   setTestType]   = useState('');
   const [testIds,    setTestIds]    = useState<string[]>([]);
-  const [referredBy, setReferredBy] = useState(isDoctorSelf ? (profile?.userId ?? LAB_REFERRED_BY_SELF) : LAB_REFERRED_BY_SELF);
+  const [referredBy, setReferredBy] = useState(isDoctorSelf ? (profile?.userId ?? LAB_REFERRED_BY_SELF) : '');
+  const [referrerName, setReferrerName] = useState('');
+  const isOtherReferrer = !isDoctorSelf && referredBy === REFERRED_BY_OTHER_OPTION;
   const [notes,      setNotes]      = useState('');
   const [error,      setError]      = useState('');
 
@@ -330,19 +338,24 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
         return;
       }
     } else if (!testType.trim()) { setError(`${fieldLabel} is required.`); return; }
+    if (!isDoctorSelf && !referredBy) { setError('Please select who referred this request.'); return; }
+    if (isOtherReferrer && !referrerName.trim()) { setError('Please enter the referrer’s name.'); return; }
+    const submittedReferredBy = isOtherReferrer
+      ? `${LAB_REFERRED_BY_OTHER_PREFIX}${referrerName.trim()}`
+      : referredBy;
 
     try {
       const created: LabRequest = type === 'pathology'
         ? await createPathology({
           patientId:  patient.patientId,
           testType:   pathologyTestType,
-          referredBy,
+          referredBy: submittedReferredBy,
           notes:      notes.trim() || undefined,
         }).unwrap()
         : await createRadiology({
           patientId:   patient.patientId,
           imagingType: testType.trim(),
-          referredBy,
+          referredBy:  submittedReferredBy,
           notes:       notes.trim() || undefined,
         }).unwrap();
       onCreated?.(created);
@@ -380,19 +393,34 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="nr-referredby">Referred By</Label>
+              <Label htmlFor="nr-referredby">{isDoctorSelf ? 'Referred By' : 'Referred By *'}</Label>
               <select
                 id="nr-referredby"
                 value={referredBy}
                 onChange={(e) => setReferredBy(e.target.value)}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                {!isDoctorSelf && <option value={LAB_REFERRED_BY_SELF}>Self</option>}
+                {!isDoctorSelf && <option value="" disabled>Select referrer…</option>}
                 {doctors.map((d) => (
                   <option key={d.userId} value={d.userId}>{d.name}</option>
                 ))}
+                {!isDoctorSelf && <option value={REFERRED_BY_OTHER_OPTION}>Other</option>}
               </select>
             </div>
+
+            {isOtherReferrer && (
+              <div className="space-y-1.5">
+                <Label htmlFor="nr-referrer-name">Referrer Name *</Label>
+                <Input
+                  id="nr-referrer-name"
+                  value={referrerName}
+                  onChange={(e) => setReferrerName(e.target.value)}
+                  placeholder="Enter referrer’s name"
+                  maxLength={REFERRER_NAME_MAX_LENGTH}
+                  required
+                />
+              </div>
+            )}
 
             {type === 'pathology' ? (
               <div className="space-y-1.5">

@@ -69,6 +69,11 @@ async function openNewPathologyRequest(user: ReturnType<typeof userEvent.setup>)
   await user.click(await screen.findByRole('button', { name: /John Doe/ }));
 }
 
+async function referOther(user: ReturnType<typeof userEvent.setup>, name = 'Dr. Mehta') {
+  await user.selectOptions(screen.getByLabelText('Referred By *'), 'Other');
+  await user.type(screen.getByLabelText('Referrer Name *'), name);
+}
+
 describe('New Pathology Request — Test Type multi-select', () => {
   test('offers the 40 catalog tests (original 20 + 20 added, names exact) and is searchable', async () => {
     const user = userEvent.setup();
@@ -108,6 +113,7 @@ describe('New Pathology Request — Test Type multi-select', () => {
     expect(within(combobox).getByText('Lipid Profile')).toBeInTheDocument();
     expect(within(combobox).queryByText('ESR')).not.toBeInTheDocument();
 
+    await referOther(user);
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));
     expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({
       patientId: 'PAT-001',
@@ -128,6 +134,7 @@ describe('New Pathology Request — Test Type multi-select', () => {
     await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'pregnancy');
     await user.click(screen.getByRole('option', { name: 'Pregnancy Test (Urine β-hCG)' }));
 
+    await referOther(user);
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));
     expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({
       testType: 'Stool Occult Blood Test (FOBT), Pregnancy Test (Urine β-hCG)',
@@ -151,5 +158,40 @@ describe('New Pathology Request — Test Type multi-select', () => {
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));
     expect(screen.getByText(/Too many tests selected/)).toBeInTheDocument();
     expect(mockCreatePathology).not.toHaveBeenCalled();
+  });
+});
+
+describe('New Pathology Request — Referred By "Other"', () => {
+  async function pickOneTest(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
+    await user.click(screen.getByRole('option', { name: 'ESR' }));
+  }
+
+  test('requires a referrer selection', async () => {
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await pickOneTest(user);
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }));
+    expect(screen.getByText('Please select who referred this request.')).toBeInTheDocument();
+    expect(mockCreatePathology).not.toHaveBeenCalled();
+  });
+
+  test('requires the referrer name when Other is selected', async () => {
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await pickOneTest(user);
+    await referOther(user, '   ');
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }));
+    expect(screen.getByText('Please enter the referrer’s name.')).toBeInTheDocument();
+    expect(mockCreatePathology).not.toHaveBeenCalled();
+  });
+
+  test('submits the trimmed typed name as the referredBy value', async () => {
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await pickOneTest(user);
+    await referOther(user, '  Dr. Mehta  ');
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }));
+    expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({ referredBy: 'OTHER:Dr. Mehta' }));
   });
 });
