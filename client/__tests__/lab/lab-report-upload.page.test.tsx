@@ -35,7 +35,6 @@ function requestsFor(field: 'testType' | 'imagingType', prefix: string) {
 const PATHOLOGY_REQUESTS = requestsFor('testType',    'path');
 const RADIOLOGY_REQUESTS = requestsFor('imagingType', 'rad');
 
-const mockUploadPathology = jest.fn();
 const mockUploadRadiology = jest.fn();
 
 jest.mock('@/store/api/lab.api', () => ({
@@ -47,7 +46,6 @@ jest.mock('@/store/api/lab.api', () => ({
   }),
   useCreatePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useCreateRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
-  useUploadPathologyReportMutation:   () => [mockUploadPathology, { isLoading: false }],
   useUploadRadiologyReportMutation:   () => [mockUploadRadiology, { isLoading: false }],
   useEditPathologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
@@ -84,9 +82,8 @@ import LabPage from '@/app/(dashboard)/lab/page';
 const unwrapping = <T,>(value: T) => ({ unwrap: () => Promise.resolve(value) });
 const rejecting  = (error: unknown) => ({ unwrap: () => Promise.reject(error) });
 
+// Radiology only — Pathology has no file upload for any role (structured reports only).
 const CASES = [
-  // Pathology file upload is Hospital Admin only (Pathologists use the structured report form).
-  { type: 'pathology' as const, role: 'HOSPITAL_ADMIN', prefix: 'path', upload: mockUploadPathology },
   { type: 'radiology' as const, role: 'RADIOLOGIST', prefix: 'rad',  upload: mockUploadRadiology },
 ];
 
@@ -103,31 +100,38 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe('Lab pathology — Pathologist', () => {
-  beforeEach(() => { mockRole = 'PATHOLOGIST'; });
+// Every role that can see the Pathology tab (RADIOLOGIST never does).
+describe.each(['HOSPITAL_ADMIN', 'NURSE', 'PATHOLOGIST', 'DOCTOR', 'MANAGER', 'RECEPTIONIST', 'ADMIN'])(
+  'Lab pathology — %s', (role) => {
+    beforeEach(() => { mockRole = role; });
 
-  test.each(['Unpaid Test', 'Paid Test'])('%s: no Upload Report option at all (structured reports only)', async (label) => {
-    await openDetail('pathology', label);
-    expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/can be uploaded once payment has been collected/i)).not.toBeInTheDocument();
-    expect(document.querySelector('input[type="file"]')).toBeNull();
-  });
-});
+    test.each(['Unpaid Test', 'Paid Test', 'Reported Test'])('%s: no Upload Report option at all (structured reports only)', async (label) => {
+      await openDetail('pathology', label);
+      expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/can be uploaded once payment has been collected/i)).not.toBeInTheDocument();
+      expect(document.querySelector('input[type="file"]')).toBeNull();
+      // Pathology reports are viewed per test — no uploaded-file row or link.
+      expect(screen.queryByText('No report uploaded')).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /view report/i })).not.toBeInTheDocument();
+    });
+  },
+);
 
 describe.each(CASES)('Lab $type — report upload & display', ({ type, role, prefix, upload }) => {
   beforeEach(() => { mockRole = role; });
 
-  test('unpaid request: shows "No report uploaded" and no Upload Report button', async () => {
+  test('unpaid request: "No report uploaded" (Radiology only) and no Upload Report button', async () => {
     await openDetail(type, 'Unpaid Test');
-    expect(screen.getByText('No report uploaded')).toBeInTheDocument();
+    // Pathology has no uploaded-report row at all (reports are viewed per test).
+    expect(screen.queryByText('No report uploaded') !== null).toBe(type === 'radiology');
     expect(screen.queryByRole('link', { name: /view report/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
     expect(screen.getByText(/can be uploaded once payment has been collected/i)).toBeInTheDocument();
   });
 
-  test('paid request without a report: shows "No report uploaded" and allows upload', async () => {
+  test('paid request without a report: "No report uploaded" (Radiology only) and allows upload', async () => {
     await openDetail(type, 'Paid Test');
-    expect(screen.getByText('No report uploaded')).toBeInTheDocument();
+    expect(screen.queryByText('No report uploaded') !== null).toBe(type === 'radiology');
     expect(screen.getByRole('button', { name: /upload report/i })).toBeInTheDocument();
     expect(screen.queryByText(/can be uploaded once payment has been collected/i)).not.toBeInTheDocument();
   });
@@ -158,7 +162,7 @@ describe.each(CASES)('Lab $type — report upload & display', ({ type, role, pre
     expect(await screen.findByText(/payment must be collected/i)).toBeInTheDocument();
   });
 
-  test('uploaded report: shows "View Report" linking to that request\'s report', async () => {
+  test('uploaded report: shows "View Report" linking to the report', async () => {
     await openDetail(type, 'Reported Test');
     const link = screen.getByRole('link', { name: /view report/i });
     expect(link).toHaveAttribute('href', `https://s3.test/${prefix}-done/report.pdf`);
@@ -170,7 +174,7 @@ describe.each(CASES)('Lab $type — report upload & display', ({ type, role, pre
 
 test('roles without upload permission never see Upload Report, even when paid', async () => {
   mockRole = 'RECEPTIONIST';
-  await openDetail('pathology', 'Paid Test');
+  await openDetail('radiology', 'Paid Test');
   expect(screen.queryByRole('button', { name: /upload report/i })).not.toBeInTheDocument();
   expect(screen.queryByText(/can be uploaded once payment has been collected/i)).not.toBeInTheDocument();
 });

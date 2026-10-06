@@ -7,12 +7,11 @@ import {
   idempotencyGuard,
 } from '../../shared/middleware';
 import { UserRole } from '../../shared/types/common.types';
-import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from './lab.types';
+import { RADIOLOGY_REPORT_MAX_BYTES } from './lab.types';
 import {
   createPathologyRequest,
   listPathologyRequests,
   getPathologyRequest,
-  uploadPathologyReport,
   editPathologyRequest,
   deletePathologyRequest,
   createRadiologyRequest,
@@ -26,6 +25,7 @@ import {
   collectRadiologyPayment,
   submitPathologyTestReport,
   getPathologyTestReportPdf,
+  getAllPathologyTestReportsPdf,
 } from './lab.controller';
 
 const router = express.Router();
@@ -33,12 +33,7 @@ const router = express.Router();
 router.use(authenticateJWT, scopeTenant);
 
 // Multer with memory storage — file lands in req.file.buffer, ready to pipe to S3.
-// Separate instances enforce different size caps per report type.
-const pathologyUpload = multer({
-  storage: multer.memoryStorage(),
-  limits:  { fileSize: PATHOLOGY_REPORT_MAX_BYTES },   // 10 MB
-});
-
+// Radiology only: Pathology has no file upload.
 const radiologyUpload = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: RADIOLOGY_REPORT_MAX_BYTES },   // 20 MB
@@ -81,16 +76,8 @@ router.delete(
   deletePathologyRequest,
 );
 
-// multipart/form-data — field name: "report"
-// Multer rejects files > 10 MB with a MulterError (LIMIT_FILE_SIZE → 413).
-// No PATHOLOGIST: Pathologists create reports only through the structured
-// per-test report form below.
-router.patch(
-  '/pathology/:requestId/report',
-  requireRole(UserRole.HOSPITAL_ADMIN, UserRole.NURSE),
-  pathologyUpload.single('report'),
-  uploadPathologyReport,
-);
+// No Pathology report file upload for any role — Pathology reports are created
+// only through the structured per-test report form below.
 
 // Structured per-test report entry — lab staff only (no Doctor/Nurse/
 // Receptionist). Re-submitting the same test amends its report.
@@ -105,6 +92,14 @@ router.get(
   '/pathology/:requestId/reports/:testIndex/pdf',
   requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
   getPathologyTestReportPdf,
+);
+
+// Every submitted test report of the request as one PDF (bulk Download / Print)
+// — same readers as the per-test PDF.
+router.get(
+  '/pathology/:requestId/reports/pdf',
+  requireRole(UserRole.DOCTOR, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST),
+  getAllPathologyTestReportsPdf,
 );
 
 // ─── Radiology ────────────────────────────────────────────────────────────────

@@ -73,19 +73,6 @@ export const labApi = baseApi.injectEndpoints({
       invalidatesTags: ['Lab'],
     }),
 
-    uploadPathologyReport: build.mutation<
-      PathologyRequestResponse,
-      { requestId: string; file: File }
-    >({
-      query: ({ requestId, file }) => {
-        const formData = new FormData();
-        formData.append('report', file);
-        return { url: `/api/lab/pathology/${requestId}/report`, method: 'PATCH', body: formData };
-      },
-      transformResponse: (raw: ApiSuccess<PathologyRequestResponse>) => raw.data,
-      invalidatesTags: ['Lab'],
-    }),
-
     // ─── Structured Pathology test reports (online-only) ─────────────────────
 
     // Submits — or amends — one test's structured results (lab staff only).
@@ -102,15 +89,41 @@ export const labApi = baseApi.injectEndpoints({
 
     // One test's report PDF as a blob object URL (the endpoint returns a raw
     // PDF, not JSON) — same queryFn pattern as ipd.api's downloadDischargeSummary.
-    getPathologyTestReportPdf: build.mutation<string, { requestId: string; testIndex: number }>({
-      queryFn: async ({ requestId, testIndex }, { getState }) => {
+    // `letterhead` (Download only) asks for the letterhead + Doctor Signature copy.
+    getPathologyTestReportPdf: build.mutation<string, { requestId: string; testIndex: number; letterhead?: boolean }>({
+      queryFn: async ({ requestId, testIndex, letterhead }, { getState }) => {
         const token = (getState() as RootState).auth.token;
+        const qs = letterhead ? '?letterhead=true' : '';
         try {
-          const res = await fetch(`${BASE_URL}/api/lab/pathology/${requestId}/reports/${testIndex}/pdf`, {
+          const res = await fetch(`${BASE_URL}/api/lab/pathology/${requestId}/reports/${testIndex}/pdf${qs}`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           });
           if (!res.ok) {
             const err: FetchBaseQueryError = { status: res.status, data: 'Failed to load the report PDF' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          return { data: URL.createObjectURL(blob) };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
+
+    // Every submitted test report of the request combined into one PDF (bulk
+    // Download / Print), as a blob object URL. `letterhead` (Download only) asks
+    // for the letterhead + Doctor Signature copy, same as the per-test PDF.
+    getAllPathologyTestReportsPdf: build.mutation<string, { requestId: string; letterhead?: boolean }>({
+      queryFn: async ({ requestId, letterhead }, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        const qs = letterhead ? '?letterhead=true' : '';
+        try {
+          const res = await fetch(`${BASE_URL}/api/lab/pathology/${requestId}/reports/pdf${qs}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'Failed to load the reports PDF' };
             return { error: err };
           }
           const blob = await res.blob();
@@ -237,7 +250,6 @@ export const {
   useListPathologyRequestsQuery,
   useGetPathologyRequestQuery,
   useCreatePathologyRequestMutation,
-  useUploadPathologyReportMutation,
   useEditPathologyRequestMutation,
   useDeletePathologyRequestMutation,
   useListRadiologyRequestsQuery,
@@ -251,4 +263,5 @@ export const {
   useCollectRadiologyPaymentMutation,
   useSubmitPathologyTestReportMutation,
   useGetPathologyTestReportPdfMutation,
+  useGetAllPathologyTestReportsPdfMutation,
 } = labApi;

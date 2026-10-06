@@ -276,9 +276,9 @@ function ReportView({
   const [pdfError, setPdfError] = useState('');
   const result = report.result;
 
-  async function loadPdf(): Promise<string | null> {
+  async function loadPdf(letterhead = false): Promise<string | null> {
     setPdfError('');
-    const res = await getPdf({ requestId, testIndex: report.testIndex });
+    const res = await getPdf({ requestId, testIndex: report.testIndex, ...(letterhead ? { letterhead: true } : {}) });
     if ('data' in res && res.data) return res.data;
     setPdfError('Could not load the report PDF. Please try again.');
     return null;
@@ -293,7 +293,8 @@ function ReportView({
   }
 
   async function handleDownload() {
-    const url = await loadPdf();
+    // The downloaded copy carries the hospital letterhead + Doctor Signature.
+    const url = await loadPdf(true);
     if (!url) return;
     const a = document.createElement('a');
     a.href = url;

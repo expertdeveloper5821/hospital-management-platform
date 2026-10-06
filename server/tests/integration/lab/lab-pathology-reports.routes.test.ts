@@ -4,6 +4,7 @@ import request                from 'supertest';
 import jwt                    from 'jsonwebtoken';
 import zlib                   from 'zlib';
 import { v4 as uuidv4 }      from 'uuid';
+import { PDFDocument }      from 'pdf-lib';
 
 jest.mock('../../../src/shared/services/email.service', () => ({
   emailService: { sendInviteEmail: jest.fn(), sendWelcomeEmail: jest.fn() },
@@ -134,14 +135,25 @@ function getDetail(requestId: string, role: string = UserRole.DOCTOR) {
   return request(app).get(`/api/lab/pathology/${requestId}`).set(auth(role));
 }
 
-function getPdf(requestId: string, testIndex: number, role: string = UserRole.DOCTOR) {
-  return request(app).get(`/api/lab/pathology/${requestId}/reports/${testIndex}/pdf`).set(auth(role))
+function getPdf(requestId: string, testIndex: number, role: string = UserRole.DOCTOR, query = '') {
+  return request(app).get(`/api/lab/pathology/${requestId}/reports/${testIndex}/pdf${query}`).set(auth(role))
     .buffer(true).parse((res, cb) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => cb(null, Buffer.concat(chunks)));
     });
 }
+
+function getAllPdf(requestId: string, role: string = UserRole.DOCTOR, query = '') {
+  return request(app).get(`/api/lab/pathology/${requestId}/reports/pdf${query}`).set(auth(role))
+    .buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+}
+
+const pageCount = async (buf: Buffer) => (await PDFDocument.load(buf)).getPageCount();
 
 // Decoded drawn text of a PDF (see tests/unit/lab/pathology-report.pdf.test.ts).
 function pdfText(buf: Buffer): string {
@@ -414,6 +426,23 @@ describe('GET /api/lab/pathology/:requestId/reports/:testIndex/pdf', () => {
     }
   });
 
+  test('?letterhead=true (downloaded copy) adds the hospital letterhead and Doctor Signature', async () => {
+    const id = await createRequest(CBC);
+    await markPaid(id);
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '10.5' } }).expect(200);
+
+    const res = await getPdf(id, 0, UserRole.DOCTOR, '?letterhead=true');
+    expect(res.status).toBe(200);
+    const text = pdfText(res.body as Buffer);
+    for (const t of ['Lab Test Hospital', 'Doctor Signature', 'John Doe', 'Haemoglobin (Hb)']) {
+      expect({ t, found: text.includes(t) }).toEqual({ t, found: true });
+    }
+    // The Print copy has no letterhead but keeps the Doctor Signature.
+    const plain = pdfText((await getPdf(id, 0)).body as Buffer);
+    expect(plain.includes('Lab Test Hospital')).toBe(false);
+    expect(plain.includes('Doctor Signature')).toBe(true);
+  });
+
   test('a test whose report has not been submitted has no PDF (404)', async () => {
     const id = await createRequest(`${CBC}, ${LFT}`);
     await markPaid(id);
@@ -437,17 +466,99 @@ describe('GET /api/lab/pathology/:requestId/reports/:testIndex/pdf', () => {
   });
 });
 
+describe('GET /api/lab/pathology/:requestId/reports/pdf — bulk Download / Print', () => {
+  test('combines every submitted test report, in test order, into one PDF — each report unchanged', async () => {
+    const id = await createRequest(`${CBC}, ${LFT}, ${KFT}`);
+    await markPaid(id);
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '10.5' } }).expect(200);
+    await submit(id, 1, { testName: LFT, values: { sgpt: '55' } }).expect(200);
+    await submit(id, 2, { testName: KFT, values: { urea: '30' } }).expect(200);
+
+    const res = await getAllPdf(id);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.headers['content-disposition']).toMatch(/^inline; filename="pathology-reports-PAT-001-.+\.pdf"$/);
+    const pdf = res.body as Buffer;
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+
+    // Page count = sum of the individual per-test PDFs.
+    let expectedPages = 0;
+    for (const i of [0, 1, 2]) expectedPages += await pageCount((await getPdf(id, i)).body as Buffer);
+    expect(await pageCount(pdf)).toBe(expectedPages);
+
+    const text = pdfText(pdf);
+    const order = ['Haemoglobin (Hb)', 'SGPT (ALT)', 'Blood Urea'].map((t) => text.indexOf(t));
+    expect(order.every((pos) => pos >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // Print copy — no letterhead, but a Doctor Signature closes each report.
+    expect(text.includes('Lab Test Hospital')).toBe(false);
+    expect(text.split('Doctor Signature').length - 1).toBe(3);
+  });
+
+  test('?letterhead=true adds the letterhead to every page and a Doctor Signature to each report', async () => {
+    const id = await createRequest(`${CBC}, ${LFT}`);
+    await markPaid(id);
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '10.5' } }).expect(200);
+    await submit(id, 1, { testName: LFT, values: { sgpt: '55' } }).expect(200);
+
+    const res = await getAllPdf(id, UserRole.DOCTOR, '?letterhead=true');
+    expect(res.status).toBe(200);
+    const pdf  = res.body as Buffer;
+    const text = pdfText(pdf);
+    expect(text.split('Lab Test Hospital').length - 1).toBe(await pageCount(pdf));
+    expect(text.split('Doctor Signature').length - 1).toBe(2);
+  });
+
+  test('skips tests whose report has not been submitted', async () => {
+    const id = await createRequest(`${CBC}, ${LFT}`);
+    await markPaid(id);
+    await submit(id, 1, { testName: LFT, values: { sgpt: '55' } }).expect(200);
+
+    const res = await getAllPdf(id);
+    expect(res.status).toBe(200);
+    const text = pdfText(res.body as Buffer);
+    expect(text.includes('SGPT (ALT)')).toBe(true);
+    expect(text.includes('Haemoglobin (Hb)')).toBe(false);
+  });
+
+  test('404 when no test report has been submitted yet', async () => {
+    const id = await createRequest(`${CBC}, ${LFT}`);
+    expect((await getAllPdf(id)).status).toBe(404);
+  });
+
+  test('400 for a malformed requestId', async () => {
+    expect((await getAllPdf('not-a-uuid')).status).toBe(400);
+  });
+
+  test.each([UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.NURSE, UserRole.RECEPTIONIST])(
+    '%s can download the combined PDF', async (role) => {
+      const id = await createRequest(CBC);
+      await markPaid(id);
+      await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' } }).expect(200);
+      expect((await getAllPdf(id, role)).status).toBe(200);
+    },
+  );
+
+  test('Radiologist is excluded (403); an unassigned doctor cannot read it (404)', async () => {
+    const id = await createRequest(CBC, UserRole.HOSPITAL_ADMIN);
+    await mongoose.connection.collection('pathology_requests').updateOne({ requestId: id }, { $set: { referredBy: 'SELF' } });
+    await markPaid(id);
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' } }).expect(200);
+    expect((await getAllPdf(id, UserRole.RADIOLOGIST)).status).toBe(403);
+    expect((await getAllPdf(id, 'OTHER_DOCTOR')).status).toBe(404);
+  });
+});
+
 // ─── Existing workflow is unchanged ───────────────────────────────────────────
 
 describe('Existing Pathology workflow alongside structured reports', () => {
-  test('Hospital Admin file upload still works on a request with a partially submitted structured report', async () => {
+  test('Hospital Admin cannot file-upload over a partially submitted structured report — structured entry completes it', async () => {
     const id = await createRequest(`${CBC}, ${LFT}`);
     await markPaid(id);
     await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' } }).expect(200);
     const res = await request(app).patch(`/api/lab/pathology/${id}/report`).set(auth(UserRole.HOSPITAL_ADMIN))
       .attach('report', Buffer.from('%PDF-1.4 test'), { filename: 'r.pdf', contentType: 'application/pdf' });
-    expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('COMPLETED');
+    expect(res.status).toBe(404);
     // The structured CBC report is preserved, and LFT can still be submitted afterwards.
     const after = await submit(id, 1, { testName: LFT, values: { sgpt: '30' } });
     expect(after.status).toBe(200);

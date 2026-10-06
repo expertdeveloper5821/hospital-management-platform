@@ -32,7 +32,7 @@ import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { PaymentModel } from '../../../src/modules/payment/payment.model';
 import { TenantStatus, UserRole }     from '../../../src/shared/types/common.types';
-import { PATHOLOGY_REPORT_MAX_BYTES, RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
+import { RADIOLOGY_REPORT_MAX_BYTES } from '../../../src/modules/lab/lab.types';
 import { toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -355,7 +355,7 @@ describe('GET /api/lab/{pathology,radiology} — pagination', () => {
   });
 });
 
-describe('PATCH /api/lab/pathology/:requestId/report', () => {
+describe('PATCH /api/lab/pathology/:requestId/report — Pathology file upload is removed', () => {
   let requestId: string;
 
   beforeEach(async () => {
@@ -368,78 +368,27 @@ describe('PATCH /api/lab/pathology/:requestId/report', () => {
     await markPaid('pathology', requestId);
   });
 
-  test('a Pathologist cannot upload a report file — structured reports only (403)', async () => {
+  test.each([
+    UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.DOCTOR,
+    UserRole.MANAGER, UserRole.RECEPTIONIST, UserRole.RADIOLOGIST, UserRole.ADMIN,
+  ])('%s cannot upload a Pathology report file on a paid request (404, nothing stored)', async (role) => {
+    const token = jwt.sign(
+      { userId: new mongoose.Types.ObjectId().toString(), tenantId, role, email: 'x@x.com', isFirstLogin: false },
+      JWT_SECRET,
+    );
+    const { s3Service } = jest.requireMock('../../../src/shared/services/s3.service');
+    (s3Service.uploadFile as jest.Mock).mockClear();
+
     const res = await request(app)
       .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${pathologistToken}`)
-      .attach('report', Buffer.from('PDF content'), { filename: 'r.pdf', contentType: 'application/pdf' });
+      .set('Authorization', `Bearer ${token}`)
+      .attach('report', Buffer.from('%PDF-1.4 test'), { filename: 'r.pdf', contentType: 'application/pdf' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
+    expect(s3Service.uploadFile).not.toHaveBeenCalled();
     const doc = await PathologyRequestModel.findOne({ requestId, tenantId }).lean();
     expect(doc?.status).toBe('PENDING');
     expect(doc?.reportS3Key ?? null).toBeNull();
-  });
-
-  test('uploads a pathology report and sets status to COMPLETED (200)', async () => {
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .attach('report', Buffer.from('PDF content for blood test results'), {
-        filename:    'blood_test.pdf',
-        contentType: 'application/pdf',
-      });
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('COMPLETED');
-    expect(res.body.data.reportUrl).toBeTruthy();
-  });
-
-  test('rejects pathology report > 10 MB with 413 (multer limit)', async () => {
-    const oversized = Buffer.alloc(PATHOLOGY_REPORT_MAX_BYTES + 1, 'x');
-
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .attach('report', oversized, { filename: 'big.pdf', contentType: 'application/pdf' });
-
-    expect(res.status).toBe(413);
-  });
-
-  test('returns 400 when no file is attached', async () => {
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .field('note', 'missing file');
-
-    expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/no file/i);
-  });
-
-  test('returns 404 for unknown request ID', async () => {
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${uuidv4()}/report`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .attach('report', Buffer.from('content'), {
-        filename: 'report.pdf', contentType: 'application/pdf',
-      });
-
-    expect(res.status).toBe(404);
-  });
-
-  test('returns 409 when report already uploaded', async () => {
-    await PathologyRequestModel.findOneAndUpdate(
-      { requestId, tenantId },
-      { status: 'COMPLETED', reportS3Key: 'existing-key' },
-    );
-
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${requestId}/report`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .attach('report', Buffer.from('new content'), {
-        filename: 'report.pdf', contentType: 'application/pdf',
-      });
-
-    expect(res.status).toBe(409);
   });
 });
 
@@ -1442,15 +1391,6 @@ describe('Receptionist Lab access', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.requestId).toBe(radiologyRequestId);
-  });
-
-  test('403 — receptionist cannot upload a pathology report', async () => {
-    const res = await request(app)
-      .patch(`/api/lab/pathology/${pathologyRequestId}/report`)
-      .set('Authorization', `Bearer ${receptionistToken}`)
-      .attach('report', Buffer.from('%PDF-1.4 test'), { filename: 'r.pdf', contentType: 'application/pdf' });
-
-    expect(res.status).toBe(403);
   });
 
   test('403 — receptionist cannot upload a radiology report', async () => {
