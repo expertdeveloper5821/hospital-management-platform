@@ -239,6 +239,30 @@ export const ipdApi = baseApi.injectEndpoints({
       },
     }),
 
+    // The Print copy of the Discharge Summary PDF (`?print=true`: same content,
+    // no letterhead, blank 3.5 cm top / 2 cm bottom bands) as a blob object
+    // URL for a hidden print <iframe> — same queryFn pattern as above.
+    printDischargeSummary: build.mutation<string, string>({
+      queryFn: async (admissionId, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        try {
+          const res = await fetch(`${BASE_URL}/api/ipd/admissions/${admissionId}/discharge-summary?print=true`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) {
+            const err: FetchBaseQueryError = { status: res.status, data: 'Failed to load discharge summary' };
+            return { error: err };
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          return { data: url };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
+
     // GET /api/ipd/admissions/:admissionId/parcha-pdf — the uploaded PDF
     // parcha template merged with this admission's data, server-side. Only
     // meaningful when the hospital's parcha template is a PDF
@@ -319,6 +343,7 @@ export const {
   useUpdateAdmissionPrescriptionMutation,
   useDischargePatientMutation,
   useDownloadDischargeSummaryMutation,
+  usePrintDischargeSummaryMutation,
   useGetIPDParchaPdfMutation,
   useGetIPDPatientHistoryQuery,
   useGetBedOccupancySummaryQuery,

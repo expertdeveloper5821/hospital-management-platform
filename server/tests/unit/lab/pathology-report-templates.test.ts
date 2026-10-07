@@ -125,7 +125,7 @@ describe('Pathology report templates — catalog coverage', () => {
     ['Anti-HCV (Hepatitis C Antibody)',     ['antiHcv']],
     ['HIV 1 & 2 Screening',                 ['hiv']],
     ['Widal Test',                          ['typhiO', 'typhiH', 'paratyphiAH', 'paratyphiBH']],
-    ['Typhoid IgM',                         ['typhoidIgm']],
+    ['Typhoid IgM',                         ['typhoidIgm', 'typhoidIgg']],
     ['Pregnancy Test (Urine β-hCG)',        ['urineHcg']],
     ['Stool Routine & Microscopy',          ['colour', 'consistency', 'mucus', 'visibleBlood', 'occultBlood', 'pusCells', 'rbcs', 'ova', 'cysts']],
     ['Stool Occult Blood Test (FOBT)',      ['fobt']],

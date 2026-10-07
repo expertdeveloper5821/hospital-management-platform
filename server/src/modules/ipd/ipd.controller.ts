@@ -380,12 +380,15 @@ export async function getDischargeSummaryPdf(
       nurseWardIds,
       doctorPatientIds,
     );
-    const pdfBuffer = await buildDischargeSummaryPdf(data);
+    // `?print=true` → the Print copy (no letterhead, blank 3.5 cm / 2 cm
+    // bands); default is the downloaded copy with the hospital letterhead.
+    const print = req.query['print'] === 'true';
+    const pdfBuffer = await buildDischargeSummaryPdf(data, { print });
 
     res.status(200)
       .set({
         'Content-Type':        'application/pdf',
-        'Content-Disposition': `attachment; filename="discharge-summary-${idResult.data}.pdf"`,
+        'Content-Disposition': `${print ? 'inline' : 'attachment'}; filename="discharge-summary-${idResult.data}.pdf"`,
         'Content-Length':      pdfBuffer.length.toString(),
       })
       .send(pdfBuffer);

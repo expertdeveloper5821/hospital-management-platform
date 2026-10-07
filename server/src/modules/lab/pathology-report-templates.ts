@@ -399,7 +399,10 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
   },
   {
     key: 'TYPHOID_IGM', testName: 'Typhoid IgM',
-    parameters: [select('typhoidIgm', 'Salmonella Typhi IgM', NEG_POS, ['Negative'])],
+    parameters: [
+      select('typhoidIgm', 'Salmonella Typhi IgM', NEG_POS, ['Negative']),
+      select('typhoidIgg', 'Salmonella Typhi IgG', NEG_POS, ['Negative']),
+    ],
   },
   {
     // A positive pregnancy test is reported, not flagged as abnormal.

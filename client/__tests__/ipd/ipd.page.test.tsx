@@ -29,6 +29,7 @@ jest.mock('@/store/api/ipd.api', () => ({
   useUpdateAdmissionPrescriptionMutation: () => [jest.fn(), { isLoading: false }],
   useDischargePatientMutation: () => [mockDischarge, { isLoading: false }],
   useDownloadDischargeSummaryMutation: () => [jest.fn(), { isLoading: false }],
+  usePrintDischargeSummaryMutation:    () => [jest.fn(), { isLoading: false }],
 }));
 
 jest.mock('@/store/api/payment.api', () => ({

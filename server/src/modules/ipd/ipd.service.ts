@@ -1060,6 +1060,16 @@ export class IPDService {
             timestamp:  n.timestamp.toISOString(),
             noteHtml:   n.note,
           })),
+        // Explicit shape — never spread the Mongoose subdocument.
+        vitals: {
+          weight:          admission.vitals?.weight          ?? null,
+          height:          admission.vitals?.height          ?? null,
+          bloodPressure:   admission.vitals?.bloodPressure   ?? null,
+          sugar:           admission.vitals?.sugar           ?? null,
+          bodyTemperature: admission.vitals?.bodyTemperature ?? null,
+          spo2:            admission.vitals?.spo2            ?? null,
+          pulse:           admission.vitals?.pulse           ?? null,
+        },
       },
       labRequests,
       billing,
