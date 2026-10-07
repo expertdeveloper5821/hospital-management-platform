@@ -85,11 +85,11 @@ describe('buildPathologyReportPdf', () => {
     expect(pdf.toString('latin1')).toMatch(/\/MediaBox \[0 0 595\.28 841\.89\]/);
   });
 
-  test('carries the patient/UHID, encounter, test, results, units, ranges and report date', async () => {
+  test('carries the patient/UHID, encounter, test, results, units, ranges and dates', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
     for (const text of [
-      'John Doe', 'PAT-001', '45 years / Male', '1234567890', 'Lab Doctor', 'Cardiology', 'OPD', 'OPD-LABTEST01',
-      'Report Date', '20 May 2026', '123 Test Street',
+      'John Doe 45/M', 'PAT-001', 'Lab Doctor', 'Cardiology',
+      'Collection Date', '19 May 2026', 'Reporting Date', '20 May 2026',
       'CBC (Complete Blood Count)', 'Haemoglobin (Hb)', '10.2', 'g/dL', '13.0 - 17.0',
       'Differential Leucocyte Count', 'Clinical Notes', 'Values may vary with hydration status.',
       'Please Correlate Clinically', 'Findings pertain only to the sample tested; interpret with clinical history.',
@@ -144,19 +144,46 @@ describe('buildPathologyReportPdf', () => {
       },
     }));
     expect(has(pdf, 'Ward A / B-12')).toBe(true);
-    expect(has(pdf, 'Patient Type')).toBe(true);
     expect(has(pdf, 'Admission Date')).toBe(false);
     expect(has(pdf, '18 May 2026')).toBe(false);
     expect(has(pdf, 'OPD Visit ID')).toBe(false);
   });
 
-  test('omits empty optional rows (no encounter, no clinical note / comment, no address)', async () => {
+  test('patient details are a fixed 4-row, 2-column grid in reading order', async () => {
+    const content = contentOf(await buildPathologyReportPdf(makeData()));
+    // Text-matrix (x, y — PDF y-up) of each label's run. Kerning splits a run
+    // into TJ fragments, so match the fragments in order.
+    const at = (label: string) => {
+      const frags = Buffer.from(label).toString('hex').match(/../g)!.join(String.raw`(?:> -?[\d.]+ <)?`);
+      const m = content.match(new RegExp(String.raw`1 0 0 1 ([\d.]+) ([\d.]+) Tm\s+/F\d+ [\d.]+ Tf\s+\[<${frags}`));
+      expect({ label, found: !!m }).toEqual({ label, found: true });
+      return m!.slice(1, 3).map(Number);
+    };
+    const rows = [
+      ['Patient Name', 'Collection Date'],
+      ['UHID', 'Reporting Date'],
+      ['Referred By', 'Ward/Bed'],
+      ['Department'],
+    ].map((labels) => labels.map(at));
+    rows.forEach((row, r) => {
+      expect(row[0][0]).toBeCloseTo(40, 0);                           // left column at the margin
+      if (row[1]) {
+        expect(row[1][1]).toBeCloseTo(row[0][1], 1);                  // same baseline
+        expect(row[1][0]).toBeGreaterThan(595.28 / 2 - 10);           // right column
+      }
+      if (r > 0) expect(row[0][1]).toBeLessThan(rows[r - 1][0][1]);   // each row below the previous
+    });
+  });
+
+  test('missing detail values print "—" and no extra rows (no encounter, no clinical note / comment, no address)', async () => {
     const pdf = await buildPathologyReportPdf(makeData({
       encounter: null,
       patient: { fullName: 'John Doe', patientId: 'PAT-001', age: null, gender: null, mobileNumber: null, address: null },
       test: { testName: 'ESR', values: [value({ key: 'esr', name: 'ESR (Westergren)', value: '12', unit: 'mm/hr', referenceRange: '0 - 15' })], clinicalNote: null, comment: '  ' },
     }));
     expect(has(pdf, 'Patient Type')).toBe(false);
+    expect(has(pdf, 'Ward/Bed: ')).toBe(true);
+    expect(has(pdf, 'Department: ')).toBe(true);
     expect(has(pdf, 'Clinical Notes')).toBe(false);
     expect(has(pdf, 'Comment')).toBe(false);
     expect(has(pdf, 'Address')).toBe(false);

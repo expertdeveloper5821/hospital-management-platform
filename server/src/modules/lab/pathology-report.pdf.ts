@@ -8,8 +8,9 @@ import { DOCTOR_SIGNATURE_IMAGE, SIGNING_DOCTOR } from './doctor-signature.image
 // Plain A4, black text and thin black rules only — no hospital header/logo,
 // colours or fills (the sheet may be printed on the
 // hospital's own letterhead, so the top 3.5 cm and bottom 2 cm of every page
-// stay blank, same as the OPD/IPD slips). The patient / encounter grid laid
-// out like the OPD slip, the centred test name, then the structured results
+// stay blank, same as the OPD/IPD slips). A fixed 2-column patient / encounter
+// grid (Name Age/Gender | Collection Date, UHID | Reporting Date, Referred By |
+// Ward/Bed, Department), the centred test name, then the structured results
 // table — rows separated by spacing only, out-of-range results in bold. Every
 // cell wraps (never truncated) and a row that doesn't fit moves to the next
 // page with the table header repeated. `hospital` / `reportedByName` stay in the data
@@ -73,10 +74,6 @@ const REPORT_TZ     = 'Asia/Kolkata';
 function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('en-GB', { timeZone: REPORT_TZ, day: '2-digit', month: 'short', year: 'numeric' })
     .format(new Date(iso));
-}
-
-function toDisplay(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 // Parameter | Value | Unit | Bio. Ref. Interval
@@ -231,35 +228,34 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
       doc.x = PAGE_MARGIN;
       doc.y = TOP_MARGIN;
 
-      // ── Patient / encounter grid (OPD slip layout, 3 columns) ──────────────
+      // ── Patient / encounter grid (fixed 2-column layout) ───────────────────
+      //   Patient Name (Name Age/G) | Collection Date
+      //   UHID                      | Reporting Date
+      //   Referred By               | Ward/Bed
+      //   Department
+      // Every label always prints (unrecorded → "—") so the rows stay aligned.
       const p = data.patient;
       const enc = data.encounter;
       const ageGender = [
-        p.age !== null ? `${p.age} years` : null,
-        p.gender ? toDisplay(p.gender) : null,
-      ].filter(Boolean).join(' / ');
-      const cells: Array<[string, string | null]> = [
-        ['Patient Name',  p.fullName],
-        ['UHID',          p.patientId],
-        ['Report Date',   formatDate(data.reportedAt)],
-        ['Age / Gender',  ageGender || null],
-        ['Mobile Number', p.mobileNumber],
-        ['Department',    enc?.departmentName ?? null],
-        ['Referred By',   data.request.referredByName],
+        p.age !== null ? String(p.age) : null,
+        p.gender ? p.gender.trim().charAt(0).toUpperCase() : null,
+      ].filter(Boolean).join('/');
+      const wardBed = enc?.type === 'IPD'
+        ? [enc.wardName, enc.bedNumber].filter(Boolean).join(' / ')
+        : '';
+      const gridCells: Array<[string, string]> = [
+        ['Patient Name',    [p.fullName, ageGender].filter(Boolean).join(' ')],
+        ['Collection Date', formatDate(data.request.requestedAt)],
+        ['UHID',            p.patientId],
+        ['Reporting Date',  formatDate(data.reportedAt)],
+        ['Referred By',     data.request.referredByName || '—'],
+        ['Ward/Bed',        wardBed || '—'],
+        ['Department',      enc?.departmentName || '—'],
       ];
-      if (enc) {
-        cells.push(['Patient Type', enc.type]);
-        if (enc.type === 'IPD') {
-          cells.push(['Ward / Bed', [enc.wardName, enc.bedNumber].filter(Boolean).join(' / ') || null]);
-        } else {
-          cells.push(['OPD Visit Date', formatDate(enc.date)]);
-          cells.push(['OPD Visit ID', enc.encounterId]);
-        }
-      }
-      const gridCells = cells.filter((c): c is [string, string] => !!c[1]);
 
-      const COL_GAP = 12;
-      const colWidth = (CONTENT_WIDTH - COL_GAP * 2) / 3;
+      const GRID_COLS = 2;
+      const COL_GAP = 16;
+      const colWidth = (CONTENT_WIDTH - COL_GAP * (GRID_COLS - 1)) / GRID_COLS;
       const cellText = (label: string, value: string, x: number, y: number, width: number, draw: boolean): number => {
         doc.font('Helvetica').fontSize(9);
         const labelText = `${label}: `;
@@ -271,26 +267,15 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
         }
         return h;
       };
-      for (let i = 0; i < gridCells.length; i += 3) {
-        const row = gridCells.slice(i, i + 3);
+      for (let i = 0; i < gridCells.length; i += GRID_COLS) {
+        const row = gridCells.slice(i, i + GRID_COLS);
         const rowY = doc.y;
         const heights = row.map(([l, v], c) => cellText(l, v, PAGE_MARGIN + c * (colWidth + COL_GAP), rowY, colWidth, false));
         const rowH = Math.max(...heights);
-        ensureSpace(rowH + 4);
+        ensureSpace(rowH + 5);
         const y = doc.y;
         row.forEach(([l, v], c) => cellText(l, v, PAGE_MARGIN + c * (colWidth + COL_GAP), y, colWidth, true));
-        doc.y = y + rowH + 4;
-      }
-      const spanRows: Array<[string, string | null]> = [
-        ['Address', p.address],
-      ];
-      for (const [label, value] of spanRows) {
-        if (!value) continue;
-        const h = cellText(label, value, PAGE_MARGIN, doc.y, CONTENT_WIDTH, false);
-        ensureSpace(h + 4);
-        const y = doc.y;
-        cellText(label, value, PAGE_MARGIN, y, CONTENT_WIDTH, true);
-        doc.y = y + h + 4;
+        doc.y = y + rowH + 5;
       }
       doc.x = PAGE_MARGIN;
 
