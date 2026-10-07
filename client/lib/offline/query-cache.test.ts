@@ -465,13 +465,25 @@ describe('keyed singleton cache — getMyAttendance/listAttendance/getPaymentSum
     expect(jan).toEqual({ CASH: 100, CHEQUE: 0, UPI: 0, CARD: 0, total: 100 });
 
     await cacheSingletonQueryResult(
-      'getDepartmentRevenue', { departments: [], other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 }, grandTotal: 0 },
+      'getDepartmentRevenue', {
+        departments: [],
+        other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        grandTotal: 0,
+      },
       { tenantId, userId }, '/api/payments/summary/by-department?dateFrom=2026-01-01&dateTo=2026-01-31',
     );
     const revenue = await readCachedSingletonQueryResult(
       'getDepartmentRevenue', { tenantId, userId }, '/api/payments/summary/by-department?dateFrom=2026-01-01&dateTo=2026-01-31',
     );
-    expect(revenue).toEqual({ departments: [], other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 }, grandTotal: 0 });
+    expect(revenue).toEqual({
+      departments: [],
+      other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+      pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+      radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+      grandTotal: 0,
+    });
   });
 
   test('getMyProfile and getOccupancySummary ignore args — one shared cache entry, matching getDashboardStats', async () => {

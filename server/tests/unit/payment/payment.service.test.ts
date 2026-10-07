@@ -560,8 +560,40 @@ describe('PaymentService — getDepartmentRevenue', () => {
     expect(result).toEqual({
       departments: [],
       other:       { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+      pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+      radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
       grandTotal:  0,
     });
+  });
+
+  test('separates unassigned pathology and radiology revenue from Other Revenue and reconciles all totals', async () => {
+    mockDeptRepo.findAll = jest.fn().mockResolvedValue([
+      makeDepartment({ departmentId: 'dept-cardio', name: 'Cardiology' }),
+    ]);
+    mockPayRepo.sumByResolvedDepartment = jest.fn().mockResolvedValue([
+      { departmentId: 'dept-cardio', referenceType: 'OPD_VISIT', total: 100 },
+      { departmentId: 'dept-cardio', referenceType: 'IPD_ADMISSION', total: 200 },
+      { departmentId: null, referenceType: 'PATHOLOGY_REQUEST', total: 300 },
+      { departmentId: null, referenceType: 'RADIOLOGY_REQUEST', total: 400 },
+      { departmentId: null, referenceType: 'REGISTRATION', total: 50 },
+    ]);
+
+    const result = await service.getDepartmentRevenue(TENANT, {});
+
+    expect(result.departments[0]).toEqual({
+      departmentId: 'dept-cardio', name: 'Cardiology',
+      opdRevenue: 100, ipdRevenue: 200, directPayment: 0, total: 300,
+    });
+    expect(result.pathologist).toEqual({
+      opdRevenue: 0, ipdRevenue: 0, directPayment: 300, total: 300,
+    });
+    expect(result.radiologist).toEqual({
+      opdRevenue: 0, ipdRevenue: 0, directPayment: 400, total: 400,
+    });
+    expect(result.other).toEqual({
+      opdRevenue: 0, ipdRevenue: 0, directPayment: 50, total: 50,
+    });
+    expect(result.grandTotal).toBe(1050);
   });
 
   test('does not double-count a department bucket that appears in the resolved rows more than once', async () => {

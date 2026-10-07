@@ -42,6 +42,8 @@ export interface PathologyParameterTemplate {
   rangeFemale?: PathologyReferenceRange;
   // Reference text for 'text'/'select' parameters.
   referenceText?: string;
+  readOnly?: boolean;
+  calculationType?: 'calculated' | 'estimated' | 'conversion';
 }
 
 export interface PathologyReportTemplate {
@@ -127,8 +129,8 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
       num('platelets', 'Platelet Count', '×10³/µL', r(150, 410, '150 - 410')),
       sexed('hematocrit', 'Haematocrit (PCV)', '%', r(40, 50, '40 - 50'), r(36, 46, '36 - 46'), { section: RBC_INDICES }),
       num('mcv',  'MCV',    'fL',   r(83, 101, '83 - 101'),       { section: RBC_INDICES }),
-      num('mch',  'MCH',    'pg',   r(27, 32, '27 - 32'),         { section: RBC_INDICES }),
-      num('mchc', 'MCHC',   'g/dL', r(31.5, 34.5, '31.5 - 34.5'), { section: RBC_INDICES }),
+      num('mch',  'MCH',    'pg',   r(27, 32, '27 - 32'),         { section: RBC_INDICES, readOnly: true, calculationType: 'calculated' }),
+      num('mchc', 'MCHC',   'g/dL', r(31.5, 34.5, '31.5 - 34.5'), { section: RBC_INDICES, readOnly: true, calculationType: 'calculated' }),
       num('rdw',  'RDW-CV', '%',    r(11.6, 14.0, '11.6 - 14.0'), { section: RBC_INDICES }),
       num('neutrophils', 'Neutrophils', '%', r(40, 80, '40 - 80'), { section: DIFFERENTIAL }),
       num('lymphocytes', 'Lymphocytes', '%', r(20, 40, '20 - 40'), { section: DIFFERENTIAL }),
@@ -156,7 +158,7 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
     parameters: [
       num('hba1c', 'HbA1c (Glycated Haemoglobin)', '%',
         below(5.7, 'Normal: < 5.7; Prediabetes: 5.7 - 6.4; Diabetes: 6.5 and above')),
-      num('eag', 'Estimated Average Glucose (eAG)', 'mg/dL', below(117, '< 117')),
+      num('eag', 'Estimated Average Glucose (eAG)', 'mg/dL', below(117, '< 117'), { readOnly: true, calculationType: 'estimated' }),
     ],
   },
   {
@@ -164,22 +166,22 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
     parameters: [
       BILIRUBIN_TOTAL,
       BILIRUBIN_DIRECT,
-      BILIRUBIN_INDIRECT,
+      { ...BILIRUBIN_INDIRECT, readOnly: true, calculationType: 'calculated' },
       num('sgot',              'SGOT (AST)',               'U/L',   r(0, 40, '0 - 40')),
       num('sgpt',              'SGPT (ALT)',               'U/L',   r(0, 41, '0 - 41')),
       ALP,
       num('ggt',               'Gamma GT (GGT)',           'U/L',   r(8, 61, '8 - 61')),
       num('totalProtein',      'Total Protein',            'g/dL',  r(6.4, 8.3, '6.4 - 8.3')),
       num('albumin',           'Albumin',                  'g/dL',  r(3.5, 5.2, '3.5 - 5.2')),
-      num('globulin',          'Globulin',                 'g/dL',  r(2.0, 3.5, '2.0 - 3.5')),
-      num('agRatio',           'A/G Ratio',                null,    r(1.0, 2.1, '1.0 - 2.1')),
+      num('globulin',          'Globulin',                 'g/dL',  r(2.0, 3.5, '2.0 - 3.5'), { readOnly: true, calculationType: 'calculated' }),
+      num('agRatio',           'A/G Ratio',                null,    r(1.0, 2.1, '1.0 - 2.1'), { readOnly: true, calculationType: 'calculated' }),
     ],
   },
   {
     key: 'KFT', testName: 'KFT / RFT (Kidney / Renal Function Test)',
     parameters: [
       num('urea',       'Blood Urea',                'mg/dL', r(17, 43, '17 - 43')),
-      num('bun',        'Blood Urea Nitrogen (BUN)', 'mg/dL', r(7, 20, '7 - 20')),
+      num('bun',        'Blood Urea Nitrogen (BUN)', 'mg/dL', r(7, 20, '7 - 20'), { readOnly: true, calculationType: 'conversion' }),
       sexed('creatinine', 'Serum Creatinine', 'mg/dL', r(0.7, 1.3, '0.7 - 1.3'), r(0.6, 1.1, '0.6 - 1.1')),
       URIC_ACID,
       CALCIUM,
@@ -195,9 +197,9 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
       num('triglycerides',    'Triglycerides',          'mg/dL', below(150, 'Normal: < 150')),
       sexed('hdl', 'HDL Cholesterol', 'mg/dL', above(40, '> 40'), above(50, '> 50')),
       num('ldl',              'LDL Cholesterol',        'mg/dL', below(100, 'Optimal: < 100')),
-      num('vldl',             'VLDL Cholesterol',       'mg/dL', r(2, 30, '2 - 30')),
-      num('cholHdlRatio',     'Total Cholesterol / HDL Ratio', null, below(5.0, '< 5.0')),
-      num('ldlHdlRatio',      'LDL / HDL Ratio',        null,    below(3.5, '< 3.5')),
+      num('vldl',             'VLDL Cholesterol',       'mg/dL', r(2, 30, '2 - 30'), { readOnly: true, calculationType: 'calculated' }),
+      num('cholHdlRatio',     'Total Cholesterol / HDL Ratio', null, below(5.0, '< 5.0'), { readOnly: true, calculationType: 'calculated' }),
+      num('ldlHdlRatio',      'LDL / HDL Ratio',        null,    below(3.5, '< 3.5'), { readOnly: true, calculationType: 'calculated' }),
     ],
   },
   {
@@ -322,7 +324,7 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
     key: 'RETIC', testName: 'Reticulocyte Count',
     parameters: [
       num('reticulocytes', 'Reticulocyte Count',          '%',       r(0.5, 2.5, '0.5 - 2.5')),
-      num('absoluteRetic', 'Absolute Reticulocyte Count', '×10³/µL', r(25, 75, '25 - 75')),
+      num('absoluteRetic', 'Absolute Reticulocyte Count', '×10³/µL', r(25, 75, '25 - 75'), { readOnly: true, calculationType: 'calculated' }),
     ],
   },
   {
@@ -330,8 +332,8 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
     parameters: [
       sexed('serumIron', 'Serum Iron', 'µg/dL', r(65, 175, '65 - 175'), r(50, 170, '50 - 170')),
       num('tibc', 'Total Iron Binding Capacity (TIBC)',       'µg/dL', r(250, 450, '250 - 450')),
-      num('uibc', 'Unsaturated Iron Binding Capacity (UIBC)', 'µg/dL', r(110, 370, '110 - 370')),
-      num('transferrinSaturation', 'Transferrin Saturation',  '%',     r(20, 50, '20 - 50')),
+      num('uibc', 'Unsaturated Iron Binding Capacity (UIBC)', 'µg/dL', r(110, 370, '110 - 370'), { calculationType: 'calculated' }),
+      num('transferrinSaturation', 'Transferrin Saturation',  '%',     r(20, 50, '20 - 50'), { readOnly: true, calculationType: 'calculated' }),
     ],
   },
   {
@@ -362,7 +364,7 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
   },
   {
     key: 'BILIRUBIN', testName: 'Total & Direct Bilirubin',
-    parameters: [BILIRUBIN_TOTAL, BILIRUBIN_DIRECT, BILIRUBIN_INDIRECT],
+    parameters: [BILIRUBIN_TOTAL, BILIRUBIN_DIRECT, { ...BILIRUBIN_INDIRECT, readOnly: true, calculationType: 'calculated' }],
   },
   {
     key: 'ALP', testName: 'Alkaline Phosphatase (ALP)',

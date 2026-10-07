@@ -29,7 +29,7 @@ import { departmentRepository } from '../department/department.repository';
 import { userRepository }       from '../user/user.repository';
 import { IPatient }             from '../patient/patient.model';
 import { pdfService }        from '../../shared/services/pdf.service';
-import { resolveReceiptHospitalDetails, resolvePatientAge } from '../../shared/utils/receipt-details';
+import { resolveReceiptHospitalDetails, resolvePatientAge, generateInvoiceNumber } from '../../shared/utils/receipt-details';
 import { s3Service }         from '../../shared/services/s3.service';
 import { auditService }      from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
@@ -57,6 +57,7 @@ async function resolveReceiptUrl(s3Key: string | null): Promise<string | null> {
 // Generic A5 receipt for every non-Lab payment (manual, Billing charge,
 // Razorpay). Hospital letterhead comes from the payment's own tenant and the
 // patient block from its patient record — never from the client.
+// receiptKind='billing' → BILLING RECEIPT title; 'payment' → PAYMENT RECEIPT.
 async function buildPaymentReceipt(input: {
   tenantId:      string;
   paymentId:     string;
@@ -67,16 +68,21 @@ async function buildPaymentReceipt(input: {
   description:   string;
   transactionId: string | null;
   createdBy:     string;
+  receiptKind?:  'billing' | 'payment';
 }): Promise<Buffer> {
   const [tenant, creator] = await Promise.all([
     tenantRepository.findById(input.tenantId),
     // The creator's name is a nice-to-have — a lookup failure only drops the row.
     userRepository.findById(input.tenantId, input.createdBy).catch(() => null),
   ]);
+  const hospitalDetails = resolveReceiptHospitalDetails(tenant);
+  const invoiceCounter  = await tenantRepository.incrementInvoiceCounter(input.tenantId);
+  const invoiceNumber   = generateInvoiceNumber(hospitalDetails.hospitalName, invoiceCounter);
   return pdfService.generateReceipt({
     receiptNumber: input.paymentId,
+    invoiceNumber,
     paymentDate:   input.paymentDate,
-    ...resolveReceiptHospitalDetails(tenant),
+    ...hospitalDetails,
     patientName:   input.patient.fullName,
     patientId:     input.patient.patientId,
     patientAge:    resolvePatientAge(input.patient),
@@ -87,6 +93,7 @@ async function buildPaymentReceipt(input: {
     paymentMethod: input.paymentMethod,
     transactionId: input.transactionId,
     createdBy:     creator?.name || creator?.email || null,
+    receiptKind:   input.receiptKind ?? 'payment',
   });
 }
 
@@ -164,6 +171,8 @@ export class PaymentService {
           description:   input.description,
           transactionId: input.transactionId || null,
           createdBy:     userId,
+          // A CHARGE reference → Billing section receipt; everything else → Payment receipt.
+          receiptKind: input.referenceType === PaymentReferenceType.CHARGE ? 'billing' : 'payment',
         });
       const key = `org/${tenantId}/payments/${paymentId}/receipt.pdf`;
       await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
@@ -346,6 +355,7 @@ export class PaymentService {
               description:   record.description,
               transactionId: record.transactionId ?? null,
               createdBy:     userId, // the user marking the charge paid
+              receiptKind:   'billing', // settled via Billing section → BILLING RECEIPT
             });
           const key = `org/${record.tenantId}/payments/${record.paymentId}/receipt.pdf`;
           await s3Service.uploadFile(key, receiptBuffer, 'application/pdf');
@@ -619,10 +629,9 @@ export class PaymentService {
   }
 
   // ─── Department-wise revenue report ────────────────────────────────────────
-  // Every active department is included (₹0 if it has no matching revenue);
-  // revenue that couldn't be mapped to a department (or maps to a department
-  // that no longer exists) is folded into `otherTotal` so `grandTotal`
-  // always equals the sum of the whole breakdown — never computed separately.
+  // Every active department is included (₹0 if it has no matching revenue).
+  // Unassigned pathology/radiology requests have dedicated category buckets;
+  // other unresolved revenue is folded into `other`.
 
   async getDepartmentRevenue(
     tenantId: string,
@@ -645,37 +654,33 @@ export class PaymentService {
 
     const breakdownByDepartmentId = new Map<string, DepartmentRevenueBreakdown>();
     const other = emptyBreakdown();
+    const pathologist = emptyBreakdown();
+    const radiologist = emptyBreakdown();
+    const knownDepartmentIds = new Set(departments.map((d) => d.departmentId));
     for (const row of resolvedSums) {
-      if (row.departmentId) {
+      if (row.departmentId && knownDepartmentIds.has(row.departmentId)) {
         const bucket = breakdownByDepartmentId.get(row.departmentId) ?? emptyBreakdown();
         addToBreakdown(bucket, row.referenceType, row.total);
         breakdownByDepartmentId.set(row.departmentId, bucket);
+      } else if (row.referenceType === PaymentReferenceType.PATHOLOGY_REQUEST) {
+        addToBreakdown(pathologist, row.referenceType, row.total);
+      } else if (row.referenceType === PaymentReferenceType.RADIOLOGY_REQUEST) {
+        addToBreakdown(radiologist, row.referenceType, row.total);
       } else {
         addToBreakdown(other, row.referenceType, row.total);
       }
     }
 
-    const knownDepartmentIds = new Set(departments.map((d) => d.departmentId));
     const departmentEntries: DepartmentRevenueEntry[] = departments.map((d) => ({
       departmentId: d.departmentId,
       name:         d.name,
       ...(breakdownByDepartmentId.get(d.departmentId) ?? emptyBreakdown()),
     }));
 
-    // Revenue resolved to a departmentId that isn't (or no longer is) an
-    // active department — e.g. it was deleted after the payment was made.
-    for (const [departmentId, bucket] of breakdownByDepartmentId) {
-      if (!knownDepartmentIds.has(departmentId)) {
-        other.opdRevenue    += bucket.opdRevenue;
-        other.ipdRevenue    += bucket.ipdRevenue;
-        other.directPayment += bucket.directPayment;
-        other.total         += bucket.total;
-      }
-    }
+    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0)
+      + other.total + pathologist.total + radiologist.total;
 
-    const grandTotal = departmentEntries.reduce((sum, d) => sum + d.total, 0) + other.total;
-
-    return { departments: departmentEntries, other, grandTotal };
+    return { departments: departmentEntries, other, pathologist, radiologist, grandTotal };
   }
 }
 

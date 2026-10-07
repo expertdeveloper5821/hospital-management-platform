@@ -79,6 +79,21 @@ export class TenantRepository {
       { new: true },
     );
   }
+
+  // Atomically increments the tenant's invoice counter and returns the new
+  // sequential number. Safe under concurrent receipt generation — MongoDB
+  // $inc + findOneAndUpdate with { new: true } is atomic.
+  async incrementInvoiceCounter(tenantId: string): Promise<number> {
+    assertDbConnected();
+    const updated = await TenantModel.findByIdAndUpdate(
+      tenantId,
+      { $inc: { invoiceCounter: 1 } },
+      { new: true, upsert: false },
+    ).lean();
+    // Fall back to a timestamp-based pseudo-counter if the tenant record is
+    // somehow not found (should not happen in normal operation).
+    return updated?.invoiceCounter ?? Date.now() % 10000;
+  }
 }
 
 export const tenantRepository = new TenantRepository();

@@ -1383,11 +1383,7 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
             patientId:     selectedPatient.patientId,
             amount,
             paymentMethod: mode,
-            description:   validity?.reason === 'DIFFERENT_DOCTOR'
-              ? `OPD Consultation – ${visitLabel} (New Doctor)`
-              : paymentForced
-              ? `OPD Consultation – ${visitLabel} (OPD Renewal)`
-              : `OPD Consultation – ${visitLabel}`,
+            description:   `OPD Consultation – ${visitLabel}`,
             referenceType: 'OPD_VISIT',
             referenceId:   visit.visitId,
             transactionId: (mode === 'UPI' || mode === 'CARD') && transactionId.trim()

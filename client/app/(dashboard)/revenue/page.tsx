@@ -44,6 +44,8 @@ const FILTER_OPTIONS: Array<{ value: RevenueFilterType; label: string }> = [
   { value: "CUSTOM", label: "Custom Date Range" },
 ];
 
+const EMPTY_BREAKDOWN = { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 };
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function RevenuePage() {
@@ -63,7 +65,7 @@ export default function RevenuePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  // "ALL" | a departmentId | "OTHER" — filters which row(s) the table shows;
+  // "ALL" | a departmentId | a revenue category — filters which row(s) the table shows;
   // it never affects the underlying date-filtered query or the grand total.
   const [departmentFilter, setDepartmentFilter] = useState("ALL");
 
@@ -94,6 +96,8 @@ export default function RevenuePage() {
     { dateFrom: dateFrom || undefined, dateTo: dateTo || undefined },
     { skip: !canView },
   );
+  const pathologist = data?.pathologist ?? EMPTY_BREAKDOWN;
+  const radiologist = data?.radiologist ?? EMPTY_BREAKDOWN;
 
   if (!canView) {
     return (
@@ -104,15 +108,32 @@ export default function RevenuePage() {
     );
   }
 
-  const showEmptyState = !isFetching && !isError && data && data.departments.length === 0 && data.other.total === 0;
+  const showEmptyState = !isFetching && !isError && data
+    && data.departments.length === 0 && data.other.total === 0
+    && pathologist.total === 0 && radiologist.total === 0;
 
   const allRows = useMemo(() => {
     if (!data) return [];
     return [
       ...data.departments.map((dept) => ({ ...dept, key: dept.departmentId, id: dept.departmentId })),
+      { key: "PATHOLOGIST", id: "PATHOLOGIST", name: "Pathologist", ...(data.pathologist ?? EMPTY_BREAKDOWN) },
+      { key: "RADIOLOGIST", id: "RADIOLOGIST", name: "Radiologist", ...(data.radiologist ?? EMPTY_BREAKDOWN) },
       { key: "OTHER", id: "OTHER", name: "Other Revenue", ...data.other },
     ];
   }, [data]);
+
+  const columnTotals = useMemo(
+    () => allRows.reduce(
+      (totals, row) => ({
+        opdRevenue: totals.opdRevenue + row.opdRevenue,
+        ipdRevenue: totals.ipdRevenue + row.ipdRevenue,
+        directPayment: totals.directPayment + row.directPayment,
+        total: totals.total + row.total,
+      }),
+      { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+    ),
+    [allRows],
+  );
 
   const visibleRows = useMemo(
     () => (departmentFilter === "ALL" ? allRows : allRows.filter((row) => row.id === departmentFilter)),
@@ -236,6 +257,8 @@ export default function RevenuePage() {
                     <option key={dept.departmentId} value={dept.departmentId}>{dept.name}</option>
                   ))}
                   <option value="OTHER">Other Revenue</option>
+                  <option value="PATHOLOGIST">Pathologist</option>
+                  <option value="RADIOLOGIST">Radiologist</option>
                 </select>
               </div>
             )}
@@ -285,12 +308,21 @@ export default function RevenuePage() {
                         ))
                       )}
                     </tbody>
+                    <tfoot className="border-t bg-muted/30 font-semibold">
+                      <tr>
+                        <td className="px-4 py-2.5">Total</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(columnTotals.opdRevenue)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(columnTotals.ipdRevenue)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(columnTotals.directPayment)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatINR(columnTotals.total)}</td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
               <div className="flex items-center justify-between rounded-md border px-4 py-3 bg-muted/30">
                 <span className="text-sm font-medium">Total Revenue</span>
-                <span className="text-xl font-bold tabular-nums">{formatINR(data.grandTotal)}</span>
+                <span className="text-xl font-bold tabular-nums">{formatINR(columnTotals.total)}</span>
               </div>
             </div>
           ) : null}

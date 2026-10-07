@@ -23,6 +23,8 @@ export interface MedicalCardData {
 // the tenant (see shared/utils/receipt-details.ts), never hardcoded.
 export interface ReceiptData {
   receiptNumber:              string;
+  /** Sequential invoice number, e.g. "INV-NH0001". Falls back to receiptNumber. */
+  invoiceNumber?:             string;
   paymentDate:                Date;
   hospitalName:               string;
   hospitalRegistrationNumber: string | null;
@@ -37,12 +39,16 @@ export interface ReceiptData {
   paymentMethod:              string;
   transactionId:              string | null;   // manual transaction ID or Razorpay payment ID
   createdBy:                  string | null;   // name of the user who recorded the payment
+  /** 'billing' → BILLING RECEIPT title; anything else → PAYMENT RECEIPT. */
+  receiptKind?:               'billing' | 'payment';
 }
 
 // Lab (Pathology/Radiology) payment receipt — same layout as ReceiptData plus
 // a LAB REQUEST section.
 export interface LabReceiptData {
   receiptNumber:              string;
+  /** Sequential invoice number, e.g. "INV-NH0001". Falls back to receiptNumber. */
+  invoiceNumber?:             string;
   paymentDate:                Date;
   hospitalName:               string;
   hospitalRegistrationNumber: string | null;
@@ -67,6 +73,8 @@ export interface GeneratePDFOptions {
 }
 
 // Content of one monochrome A5 receipt — see PdfService.renderA5Receipt.
+// Kept for backwards compatibility but renderA5LandscapeReceipt is now used
+// for all three receipt types (Lab, Billing, Payment).
 interface A5ReceiptSpec {
   docTitle:                   string;
   subject:                    string;
@@ -78,6 +86,38 @@ interface A5ReceiptSpec {
   hospitalAddress:            string | null;
   amountInr:                  number;
   sections:                   Array<{ heading: string; rows: Array<[label: string, value: string]> }>;
+}
+
+// A single service/test/charge line for the A5 landscape receipt table.
+interface A5LandscapeTableRow {
+  description: string;
+  quantity:    number;
+  unitPrice:   number;
+  amount:      number;
+}
+
+// Content spec for the A5 landscape (210 × 148 mm / 595 × 419 pt) receipt.
+interface A5LandscapeReceiptSpec {
+  docTitle:                   string;
+  subject:                    string;
+  title:                      string;          // e.g. "BILLING RECEIPT" / "PATHOLOGY RECEIPT"
+  receiptNumber:              string;
+  invoiceNumber:              string;
+  paymentDate:                Date;
+  hospitalName:               string;
+  hospitalRegistrationNumber: string | null;
+  hospitalAddress:            string | null;
+  patientName:                string;
+  patientId:                  string;          // UHID
+  patientAge:                 number | null;
+  patientGender:              string | null;
+  patientMobile:              string | null;
+  serviceRows:                A5LandscapeTableRow[];
+  // Key-value rows shown in the payment info section (left of totals)
+  metaRows:                   Array<[label: string, value: string]>;
+  // Key-value rows shown in the footer area (created-by, etc.)
+  footerRows:                 Array<[label: string, value: string]>;
+  amountInr:                  number;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -159,17 +199,18 @@ export function amountInWords(amount: number): string {
   return `Rupees ${rupeeWords}${paiseWords} Only`;
 }
 
-// e.g. "19 May 2026, 03:30 PM IST"
+// e.g. "19 May 2026, 15:30"
 function formatReceiptDateTime(date: Date): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: RECEIPT_TZ, day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: true,
+    hour: '2-digit', minute: '2-digit', hour12: false,
   }).formatToParts(date);
   const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? '';
-  return `${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')} ${get('dayPeriod').toUpperCase()} IST`;
+  return `${get('day')} ${get('month')} ${get('year')}, ${get('hour')}:${get('minute')}`;
 }
 
 // PATIENT DETAILS rows shared by every receipt layout.
+// Kept for backwards compatibility with any code that may call it.
 function patientRows(p: {
   patientName: string; patientId: string; patientAge: number | null;
   patientGender: string | null; patientMobile: string | null;
@@ -183,6 +224,9 @@ function patientRows(p: {
   if (p.patientMobile) rows.push(['Mobile', p.patientMobile]);
   return rows;
 }
+
+// Keep patientRows referenced to avoid dead-code warnings.
+void patientRows;
 
 export class PdfService {
   /**
@@ -341,8 +385,8 @@ export class PdfService {
           ? (METHOD_LABELS[data.registrationPaymentMethod] ?? data.registrationPaymentMethod)
           : '';
         const feeText = methodLabel
-          ? `Registration Fee: ₹${data.registrationFee.toLocaleString('en-IN')}  |  Mode: ${methodLabel}`
-          : `Registration Fee: ₹${data.registrationFee.toLocaleString('en-IN')}`;
+          ? `Registration Fee: Rs.${data.registrationFee.toLocaleString('en-IN')}  |  Mode: ${methodLabel}`
+          : `Registration Fee: Rs.${data.registrationFee.toLocaleString('en-IN')}`;
 
         doc.moveTo(M, y).lineTo(R, y)
           .strokeColor('#CCCCCC').lineWidth(0.5).stroke();
@@ -355,83 +399,123 @@ export class PdfService {
     });
   }
 
-  // ─── U5-A-01: Payment Receipt PDF ────────────────────────────────────────────
-  // Same A5 print layout as the Lab receipt (see renderA5Receipt).
+  // ─── U5-A-01: Payment Receipt PDF (Billing / Payment Sections) ──────────────
+  // A5 landscape professional receipt. Title is "BILLING RECEIPT" when
+  // receiptKind === 'billing' (Billing charges), "PAYMENT RECEIPT" otherwise
+  // (direct payments, Razorpay, OPD/IPD registration, etc.).
   generateReceipt(data: ReceiptData, options: GeneratePDFOptions = {}): Promise<Buffer> {
-    const payment: Array<[string, string]> = [
-      ['Description', data.description],
-      ['Payment Method', toDisplayPaymentMethod(data.paymentMethod)],
-    ];
-    if (data.transactionId) payment.push(['Transaction ID', data.transactionId]);
-    if (data.createdBy)     payment.push(['Created By', data.createdBy]);
+    const isBilling = data.receiptKind === 'billing';
+    const title     = isBilling ? 'BILLING RECEIPT' : 'PAYMENT RECEIPT';
 
-    return this.renderA5Receipt({
-      docTitle:                   `Receipt - ${data.receiptNumber}`,
-      subject:                    'Payment Receipt',
-      title:                      'PAYMENT RECEIPT',
+    const serviceRows: A5LandscapeTableRow[] = [
+      {
+        description: data.description,
+        quantity:    1,
+        unitPrice:   data.amountInr,
+        amount:      data.amountInr,
+      },
+    ];
+
+    const metaRows: Array<[string, string]> = [
+      ['Payment Mode',   toDisplayPaymentMethod(data.paymentMethod)],
+      ['Payment Status', 'Paid'],
+    ];
+    if (data.transactionId) metaRows.push(['Transaction ID', data.transactionId]);
+
+    const footerRows: Array<[string, string]> = [];
+    if (data.createdBy) footerRows.push(['Created By', data.createdBy]);
+
+    return this.renderA5LandscapeReceipt({
+      docTitle:                   `${title} - ${data.receiptNumber}`,
+      subject:                    isBilling ? 'Billing Receipt' : 'Payment Receipt',
+      title,
       receiptNumber:              data.receiptNumber,
+      invoiceNumber:              data.invoiceNumber ?? data.receiptNumber,
       paymentDate:                data.paymentDate,
       hospitalName:               data.hospitalName,
       hospitalRegistrationNumber: data.hospitalRegistrationNumber,
       hospitalAddress:            data.hospitalAddress,
+      patientName:                data.patientName,
+      patientId:                  data.patientId,
+      patientAge:                 data.patientAge,
+      patientGender:              data.patientGender,
+      patientMobile:              data.patientMobile,
+      serviceRows,
+      metaRows,
+      footerRows,
       amountInr:                  data.amountInr,
-      sections: [
-        { heading: 'PATIENT DETAILS', rows: patientRows(data) },
-        { heading: 'PAYMENT DETAILS', rows: payment },
-      ],
     }, options);
   }
 
-  // Single-page A5 Lab (Pathology/Radiology) payment receipt.
+  // ─── Lab Receipt PDF (Lab Section) ──────────────────────────────────────────
+  // A5 landscape professional receipt for Lab section payments.
   generateLabReceipt(data: LabReceiptData, options: GeneratePDFOptions = {}): Promise<Buffer> {
-    const payment: Array<[string, string]> = [['Payment Method', toDisplayPaymentMethod(data.paymentMethod)]];
-    if (data.transactionId) payment.push(['Transaction ID', data.transactionId]);
-    payment.push(['Created By', data.createdBy]);
+    const testLabel = data.labCategory === 'PATHOLOGY' ? 'Pathology Test' : 'Imaging Test';
+    const serviceRows: A5LandscapeTableRow[] = [
+      {
+        description: `${testLabel}: ${data.testName}`,
+        quantity:    1,
+        unitPrice:   data.amountInr,
+        amount:      data.amountInr,
+      },
+    ];
 
-    return this.renderA5Receipt({
-      docTitle:                   `Lab Payment Receipt - ${data.receiptNumber}`,
+    const metaRows: Array<[string, string]> = [
+      ['Lab Request No.', data.labRequestId],
+      ['Payment Mode',    toDisplayPaymentMethod(data.paymentMethod)],
+      ['Payment Status',  data.amountInr === 0 ? 'Free' : 'Paid'],
+    ];
+    if (data.transactionId) metaRows.push(['Transaction ID', data.transactionId]);
+
+    const footerRows: Array<[string, string]> = [
+      ['Created By', data.createdBy],
+    ];
+
+    const receiptTitle = data.labCategory === 'PATHOLOGY' ? 'PATHOLOGY RECEIPT' : 'RADIOLOGY RECEIPT';
+
+    return this.renderA5LandscapeReceipt({
+      docTitle:                   `Lab Receipt - ${data.receiptNumber}`,
       subject:                    'Lab Payment Receipt',
-      title:                      `${data.labCategory === 'PATHOLOGY' ? 'PATHOLOGY' : 'RADIOLOGY'} PAYMENT RECEIPT`,
+      title:                      receiptTitle,
       receiptNumber:              data.receiptNumber,
+      invoiceNumber:              data.invoiceNumber ?? data.receiptNumber,
       paymentDate:                data.paymentDate,
       hospitalName:               data.hospitalName,
       hospitalRegistrationNumber: data.hospitalRegistrationNumber,
       hospitalAddress:            data.hospitalAddress,
+      patientName:                data.patientName,
+      patientId:                  data.patientId,
+      patientAge:                 data.patientAge,
+      patientGender:              data.patientGender,
+      patientMobile:              data.patientMobile,
+      serviceRows,
+      metaRows,
+      footerRows,
       amountInr:                  data.amountInr,
-      sections: [
-        { heading: 'PATIENT DETAILS', rows: patientRows(data) },
-        { heading: 'LAB REQUEST', rows: [
-          ['Lab Request ID', data.labRequestId],
-          [data.labCategory === 'PATHOLOGY' ? 'Pathology Test' : 'Imaging Type', data.testName],
-          ['Referred By', data.referredBy],
-        ] },
-        { heading: 'PAYMENT DETAILS', rows: payment },
-      ],
     }, options);
   }
 
   /**
-   * Renders a single-page A5 portrait (419 × 595 pt) receipt: letterhead
-   * (hospital name, "Reg. No.", "Address - …"), title, receipt number and
-   * date/time, label/value sections, amount box, signature and footer.
-   * Shared by the generic and Lab receipts so both look identical.
+   * Renders a single-page A5 landscape (595 × 419 pt / 210 × 148 mm) receipt.
    *
-   * Print-oriented, monochrome layout: plain white paper, black text and thin
-   * black rules only — no brand colour, fills, frames or decorative boxes, so
-   * it prints identically on any (including black-and-white) printer. Every
-   * mark sits inside a ~11 mm safe margin so desktop printers' unprintable
-   * edges never clip it.
-   *
-   * Overflow-proof: the body is laid out once as a measuring pass. If it would
-   * reach the signature/footer block (pinned to the bottom margin), it is laid
-   * out again in a compact mode — values clamped to one line with an ellipsis,
-   * tighter spacing — which fits even with every field at its maximum length.
+   * Layout:
+   *   Header        — Hospital details (LEFT) | RECEIPT centered | Invoice No. + Date/Time (RIGHT)
+   *   Heavy divider
+   *   Patient block — Row 1: Patient Name | UHID
+   *                   Row 2: Age/Gender   | Mobile No.
+   *                   Row 3: Payment Status | Payment Mode
+   *   Heavy divider
+   *   Service table — # | Item Name | Unit Price | Qty | Amount
+   *   Totals        — Subtotal / Discount / Total Amount (right-aligned)
+   *   Payment bar   — Amount Paid | Amount in Words
+   *   Footer        — Created By (left) | Authorized Signature (right)
+   *   Thin rule + "Thank you for visiting [Hospital Name]"
    */
-  private renderA5Receipt(data: A5ReceiptSpec, options: GeneratePDFOptions): Promise<Buffer> {
+  private renderA5LandscapeReceipt(data: A5LandscapeReceiptSpec, options: GeneratePDFOptions): Promise<Buffer> {
     const { compress = true } = options;
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({
-        size:    [419, 595],
+        size:    [595, 419], // A5 Landscape: 210 × 148 mm
         margins: { top: 0, bottom: 0, left: 0, right: 0 },
         compress,
         info: {
@@ -447,150 +531,285 @@ export class PdfService {
       doc.on('end',   () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
-      const W   = doc.page.width;   // 419
-      const H   = doc.page.height;  // 595
-      const M   = 32;               // content margin (~11.3 mm)
-      const CW  = W - M * 2;        // 355
-      const INK = '#000000';        // every glyph and rule is pure black
+      const W   = doc.page.width;   // 595
+      const H   = doc.page.height;  // 419
+      const M   = 20;               // side margin (~7 mm)
+      const CW  = W - M * 2;        // 555
+      const R   = W - M;            // 575 — right content edge
+      const INK = '#000000';
 
-      // Signature + footer are pinned to the bottom margin; the body must end
-      // at least BODY_GAP above the signature line (room to sign).
-      const footerY  = H - M - 8;
-      const sigY     = footerY - 34;
-      const BODY_GAP = 24;
+      const fmt       = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const amountStr = fmt.format(data.amountInr);
+      const words     = amountInWords(data.amountInr);
 
-      const amountStr = new Intl.NumberFormat('en-IN', {
-        minimumFractionDigits: 2, maximumFractionDigits: 2,
-      }).format(data.amountInr);
-      const words = amountInWords(data.amountInr);
-
-      // Lays out the letterhead + body; draws only when `draw` is true.
-      // Returns the y where the amount box ends.
-      const layout = (draw: boolean, compact: boolean): number => {
-        const valueLines = compact ? 1 : 2;
-        const rowPad     = compact ? 3 : 4;
-        const sectionGap = compact ? 3 : 6;
-
-        // Measures `text` clamped to `maxLines` lines and (when drawing)
-        // renders it with an ellipsis beyond that; returns the height used.
-        const boxed = (
-          text: string, x: number, y: number, width: number, font: string, size: number,
-          opts: { align?: 'left' | 'center' | 'right'; maxLines?: number } = {},
-        ): number => {
-          doc.font(font).fontSize(size);
-          const lineH = doc.currentLineHeight(true);
-          const h = Math.min(doc.heightOfString(text, { width }), lineH * (opts.maxLines ?? 2));
-          if (draw) {
-            doc.fillColor(INK).text(text, x, y, {
-              width, height: h + 0.5, ellipsis: true, align: opts.align ?? 'left',
-            });
-          }
-          return h;
-        };
-        const hRule = (y: number, width = 0.75): void => {
-          if (draw) doc.moveTo(M, y).lineTo(W - M, y).strokeColor(INK).lineWidth(width).stroke();
-        };
-
-        // ── Letterhead: hospital name, registration number, address ──────────
-        let y = M;
-        y += boxed(data.hospitalName, M, y, CW, 'Helvetica-Bold', 15, { align: 'center' });
-        if (data.hospitalRegistrationNumber) {
-          y += 4;
-          y += boxed(`Reg. No.: ${data.hospitalRegistrationNumber}`, M, y, CW, 'Helvetica', 8.5, {
-            align: 'center', maxLines: 1,
-          });
-        }
-        if (data.hospitalAddress) {
-          y += 3;
-          y += boxed(`Address - ${data.hospitalAddress}`, M, y, CW, 'Helvetica', 8.5, { align: 'center' });
-        }
-        y += 8;
-        hRule(y, 1);
-        y += 12;
-
-        // ── Title ────────────────────────────────────────────────────────────
-        if (draw) {
-          doc.fillColor(INK).font('Helvetica-Bold').fontSize(10.5).text(data.title, M, y, {
-            width: CW, align: 'center', lineBreak: false, characterSpacing: 1,
-          });
-        }
-        y += compact ? 20 : 24;
-
-        // ── Receipt number (left) / date & time (right) ──────────────────────
-        if (draw) {
-          const half = CW / 2;
-          doc.fillColor(INK).font('Helvetica').fontSize(7.5)
-            .text('RECEIPT NO.', M, y, { width: half, lineBreak: false, characterSpacing: 0.4 });
-          doc.text('DATE & TIME', M + half, y, { width: half, align: 'right', lineBreak: false, characterSpacing: 0.4 });
-          doc.font('Helvetica-Bold').fontSize(8.5)
-            .text(data.receiptNumber, M, y + 11, { width: CW * 0.62, lineBreak: false, ellipsis: true });
-          doc.text(formatReceiptDateTime(data.paymentDate), M + CW * 0.5, y + 11, {
-            width: CW * 0.5, align: 'right', lineBreak: false,
-          });
-        }
-        y += compact ? 26 : 29;
-
-        // ── Label/value sections ─────────────────────────────────────────────
-        const LW = 104;           // label column
-        const VW = CW - LW;       // value column
-        const section = (heading: string): void => {
-          if (draw) {
-            doc.fillColor(INK).font('Helvetica-Bold').fontSize(8.5)
-              .text(heading, M, y, { width: CW, lineBreak: false, characterSpacing: 0.6 });
-          }
-          y += 12;
-          hRule(y);
-          y += 5;
-        };
-        // Label column in regular weight, value column in bold — alignment
-        // and weight separate the two, so no per-row rules are needed.
-        const row = (label: string, value: string): void => {
-          if (draw) {
-            doc.fillColor(INK).font('Helvetica').fontSize(8.5)
-              .text(label, M, y, { width: LW - 8, lineBreak: false });
-          }
-          const h = boxed(value || '—', M + LW, y, VW, 'Helvetica-Bold', 9, { maxLines: valueLines });
-          y += Math.max(h, 11) + rowPad * 2;
-        };
-
-        data.sections.forEach(({ heading, rows }, i) => {
-          if (i > 0) y += sectionGap;
-          section(heading);
-          rows.forEach(([label, value]) => row(label, value));
-        });
-
-        // ── Amount box ───────────────────────────────────────────────────────
-        y += compact ? 6 : 8;
-        doc.font('Helvetica-Oblique').fontSize(8);
-        const wordsH = Math.min(doc.heightOfString(words, { width: CW - 20 }), doc.currentLineHeight(true) * 2);
-        const boxH = 40 + wordsH;
-        if (draw) {
-          doc.rect(M, y, CW, boxH).strokeColor(INK).lineWidth(1).stroke();
-          doc.fillColor(INK).font('Helvetica-Bold').fontSize(10)
-            .text('AMOUNT PAID', M + 10, y + 12, { width: CW / 2, lineBreak: false, characterSpacing: 0.6 });
-          doc.fontSize(15)
-            .text(`Rs. ${amountStr}`, M + 10, y + 9, { width: CW - 20, align: 'right', lineBreak: false });
-        }
-        boxed(words, M + 10, y + 31, CW - 20, 'Helvetica-Oblique', 8);
-        return y + boxH;
+      // ── helpers ──────────────────────────────────────────────────────────────
+      const txt = (
+        str: string, x: number, y: number, w: number,
+        font: string, size: number,
+        opts: { align?: 'left' | 'center' | 'right'; maxLines?: number } = {},
+      ): number => {
+        doc.font(font).fontSize(size);
+        const lineH = doc.currentLineHeight(true);
+        const max   = opts.maxLines ?? 1;
+        const h     = Math.min(doc.heightOfString(str, { width: w }), lineH * max);
+        doc.fillColor(INK).text(str, x, y, { width: w, height: h + 0.5, ellipsis: true, align: opts.align ?? 'left' });
+        return h;
       };
 
-      // ── Plain white paper (no frame) ─────────────────────────────────────────
+      const rule = (y: number, lw = 0.5): void => {
+        doc.moveTo(M, y).lineTo(R, y).strokeColor(INK).lineWidth(lw).stroke();
+      };
+
+      // ── White background ─────────────────────────────────────────────────────
       doc.rect(0, 0, W, H).fill('white');
 
-      // ── Body: measure first, fall back to compact mode if it would overflow ──
-      const compact = layout(false, false) > sigY - BODY_GAP;
-      layout(true, compact);
+      let y = M;
 
-      // ── Signature + footer (pinned to the bottom margin) ─────────────────────
-      const sigW = 130;
-      doc.moveTo(W - M - sigW, sigY).lineTo(W - M, sigY).strokeColor(INK).lineWidth(0.75).stroke();
-      doc.fillColor(INK).font('Helvetica').fontSize(8)
-        .text('Authorised Signatory', W - M - sigW, sigY + 4, { width: sigW, align: 'center', lineBreak: false });
-      doc.fontSize(7.5)
-        .text('This is a computer-generated receipt. Thank you for your payment.', M, footerY, {
-          width: CW, align: 'center', lineBreak: false,
+      // ── Header: Hospital details (LEFT) | RECEIPT centred | Invoice No. + Date/Time (RIGHT) ──
+      // Left column: hospital name, reg no, address
+      // Centre: "RECEIPT" in large bold
+      // Right column: Invoice No. on top, Date & Time directly below
+
+      const hdrRightW = 130;                        // width reserved for the right column
+      const hdrCentreW = 80;                        // width reserved for "RECEIPT"
+      const hdrLeftW  = CW - hdrCentreW - hdrRightW - 8; // remaining left width
+      // Centre "RECEIPT" on the full page width, not relative to the left column.
+      const hdrCentreX = (W - hdrCentreW) / 2;
+      const hdrRightX  = R - hdrRightW;
+
+      // Right column values
+      const invoiceDateStr = formatReceiptDateTime(data.paymentDate);
+
+      // Draw left: hospital name
+      txt(data.hospitalName, M, y, hdrLeftW, 'Helvetica-Bold', 10, { maxLines: 1 });
+      // Draw centre: RECEIPT — horizontally centred on the full A5 page width
+      doc.font('Helvetica-Bold').fontSize(14).fillColor(INK)
+        .text('RECEIPT', hdrCentreX, y, { width: hdrCentreW, align: 'center', lineBreak: false });
+      // Draw right: Invoice No.
+      const invLblW = 58;
+      const invValX = hdrRightX + invLblW + 4;
+      const invValW = R - invValX;
+      doc.font('Helvetica').fontSize(7.5).fillColor(INK)
+        .text('Invoice No.', hdrRightX, y, { width: invLblW, lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(INK)
+        .text(data.invoiceNumber, invValX, y, { width: invValW, lineBreak: false, ellipsis: true });
+      y += 11;
+
+      // Draw left: reg no + address (up to 2 lines total)
+      let hdrLeftY = y;
+      if (data.hospitalRegistrationNumber) {
+        txt(`Reg. No.: ${data.hospitalRegistrationNumber}`, M, hdrLeftY, hdrLeftW, 'Helvetica', 7, { maxLines: 1 });
+        hdrLeftY += 9;
+      }
+      if (data.hospitalAddress) {
+        txt(data.hospitalAddress, M, hdrLeftY, hdrLeftW, 'Helvetica', 7, { maxLines: 2 });
+      }
+      // Draw right: Date & Time directly below Invoice No.
+      doc.font('Helvetica').fontSize(7.5).fillColor(INK)
+        .text('Date & Time', hdrRightX, y, { width: invLblW, lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(INK)
+        .text(invoiceDateStr, invValX, y, { width: invValW, lineBreak: false, ellipsis: true });
+
+      // Advance y past header content (reg+address can be 2 lines = ~18pt)
+      y += 20;
+
+      rule(y, 1.5);
+      y += 6;
+
+      // ── Patient / payment details (3 rows × 2 columns) ────────────────────────
+      // Row 1: Patient Name  | UHID
+      // Row 2: Age / Gender  | Mobile No.
+      // Row 3: Payment Status | Payment Mode
+
+      const payStatusRow = data.metaRows.find(([l]) => l === 'Payment Status');
+      const payModeRow   = data.metaRows.find(([l]) => l === 'Payment Mode');
+
+      const ageGender = [
+        data.patientAge !== null ? `${data.patientAge} yrs` : null,
+        data.patientGender ? toDisplay(data.patientGender) : null,
+      ].filter(Boolean).join(' / ');
+
+      const patLblW = 72;
+      const patLCol = M;
+      const patRCol = M + Math.floor(CW / 2) + 10;
+      const patLW   = patRCol - patLCol - 10;
+      const patRW   = R - patRCol;
+
+      const patDraw = (label: string, value: string, x: number, maxW: number, rowY: number) => {
+        doc.font('Helvetica').fontSize(7.5).fillColor(INK)
+          .text(label, x, rowY, { width: patLblW, lineBreak: false });
+        doc.font('Helvetica').fontSize(7.5)
+          .text(':', x + patLblW, rowY, { width: 8, lineBreak: false });
+        doc.font('Helvetica-Bold').fontSize(7.5)
+          .text(value || '—', x + patLblW + 10, rowY,
+            { width: maxW - patLblW - 12, lineBreak: false, ellipsis: true });
+      };
+
+      // Row 1: Patient Name | UHID
+      patDraw('Patient Name', data.patientName, patLCol, patLW, y);
+      patDraw('UHID', data.patientId, patRCol, patRW, y);
+      y += 11;
+
+      // Row 2: Age / Gender | Mobile No.
+      if (ageGender) patDraw('Age / Gender', ageGender, patLCol, patLW, y);
+      if (data.patientMobile) patDraw('Mobile No.', data.patientMobile, patRCol, patRW, y);
+      y += 11;
+
+      // Row 3: Payment Status | Payment Mode
+      patDraw('Payment Status', payStatusRow ? payStatusRow[1] : 'Paid', patLCol, patLW, y);
+      patDraw('Payment Mode', payModeRow ? payModeRow[1] : '—', patRCol, patRW, y);
+      y += 11;
+
+      y += 2;
+      rule(y, 1);
+      y += 5;
+
+      // ── Service table ─────────────────────────────────────────────────────────
+      // Columns: # | Item Name | Unit Price | Qty | Amount
+      // Within CW = 555:
+      //   #          M+0  … 22 pt
+      //   Item Name  M+26 … 295 pt
+      //   Unit Price M+325… 75 pt  (right-aligned)
+      //   Qty        M+404… 42 pt  (center-aligned)
+      //   Amount     M+450… to R   (right-aligned)
+      const cNo   = M;
+      const wNo   = 22;
+      const cDesc = M + 26;
+      const wDesc = 295;
+      const cUP   = M + 325;
+      const wUP   = 75;
+      const cQty  = M + 404;
+      const wQty  = 42;
+      const cAmt  = M + 450;
+      const wAmt  = R - (M + 450);
+
+      // Header row with light grey fill
+      doc.rect(M, y, CW, 13).fillColor('#f0f0f0').fill();
+      rule(y, 0.75);
+      doc.font('Helvetica-Bold').fontSize(7.5).fillColor(INK);
+      doc.text('#',               cNo,   y + 3, { width: wNo,   align: 'center', lineBreak: false });
+      doc.text('Item Name',       cDesc, y + 3, { width: wDesc, lineBreak: false });
+      doc.text('Unit Price (Rs.)', cUP,   y + 3, { width: wUP,   align: 'right',  lineBreak: false });
+      doc.text('Qty',              cQty,  y + 3, { width: wQty,  align: 'center', lineBreak: false });
+      doc.text('Amount (Rs.)',     cAmt,  y + 3, { width: wAmt,  align: 'right',  lineBreak: false });
+      y += 13;
+      rule(y, 0.75);
+      y += 3;
+
+      // Table rows
+      data.serviceRows.forEach((row, idx) => {
+        const rowY   = y;
+        const upStr  = fmt.format(row.unitPrice);
+        const amtStr = fmt.format(row.amount);
+
+        // Strip "Pathology Test: " / "Imaging Test: " prefix — test name is enough
+        const desc = row.description.replace(/^(Pathology Test|Imaging Test|Radiology Test):\s*/i, '');
+
+        doc.font('Helvetica').fontSize(7.5);
+        const lineH = doc.currentLineHeight(true);
+        const descH = Math.min(doc.heightOfString(desc, { width: wDesc }), lineH * 2);
+
+        doc.fillColor(INK).text(String(idx + 1), cNo, rowY + (descH - lineH) / 2,
+          { width: wNo, align: 'center', lineBreak: false });
+        doc.fillColor(INK).text(desc, cDesc, rowY,
+          { width: wDesc, height: descH + 0.5, ellipsis: true });
+
+        const mid = rowY + (descH - lineH) / 2;
+        doc.font('Helvetica').fontSize(7.5).fillColor(INK);
+        doc.text(upStr,           cUP,  mid, { width: wUP,  align: 'right',  lineBreak: false });
+        doc.text(String(row.quantity), cQty, mid, { width: wQty, align: 'center', lineBreak: false });
+        doc.font('Helvetica-Bold').fontSize(7.5).fillColor(INK);
+        doc.text(amtStr,          cAmt, mid, { width: wAmt, align: 'right',  lineBreak: false });
+
+        y += descH + 4;
+      });
+
+      y += 2;
+      rule(y, 0.75);
+      y += 4;
+
+      // ── Totals (right-aligned) ────────────────────────────────────────────────
+      const totX  = M + 388;
+      const totLW = 92;
+      const totVX = totX + totLW + 4;
+      const totVW = R - totVX;
+
+      const totRow = (label: string, val: string, bold = false): void => {
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(7.5).fillColor(INK);
+        doc.text(label, totX, y, { width: totLW, align: 'right', lineBreak: false });
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(7.5).fillColor(INK);
+        doc.text(val,   totVX, y, { width: totVW, align: 'right', lineBreak: false });
+        y += 11;
+      };
+
+      totRow('Subtotal',     amountStr);
+      totRow('Discount',     '0.00');
+      totRow('Total Amount', amountStr, true);
+      y += 4;
+
+      // ── Payment summary bar: Amount Paid | Amount in Words (Balance Due removed) ──
+      rule(y, 0.75);
+      const barH   = 22;
+      const barY   = y;
+      const c1W    = 150;
+      const c2W    = CW - c1W;
+      const c1x    = M;
+      const c2x    = M + c1W;
+
+      doc.moveTo(c2x, barY).lineTo(c2x, barY + barH).strokeColor(INK).lineWidth(0.5).stroke();
+
+      doc.font('Helvetica').fontSize(7).fillColor(INK)
+        .text('Amount Paid', c1x + 4, barY + 3, { width: c1W - 8, lineBreak: false });
+      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(INK)
+        .text(`Rs. ${amountStr}`, c1x + 4, barY + 11, { width: c1W - 8, lineBreak: false });
+
+      doc.font('Helvetica').fontSize(7).fillColor(INK)
+        .text('Amount in Words', c2x + 4, barY + 3, { width: c2W - 8, lineBreak: false });
+      doc.font('Helvetica-Oblique').fontSize(7).fillColor(INK);
+      const wordsH = Math.min(
+        doc.heightOfString(words, { width: c2W - 8 }), doc.currentLineHeight(true) * 2,
+      );
+      doc.text(words, c2x + 4, barY + 12, { width: c2W - 8, height: wordsH + 0.5, ellipsis: true });
+
+      y = barY + barH;
+      rule(y, 0.75);
+      y += 6;
+
+      // ── Footer: Created By (left) + Authorized Signature (right) ─────────────
+      const sigLineW = 110;
+      const sigLineX = R - sigLineW;
+      const footerStartY = y;
+
+      if (data.footerRows.length > 0) {
+        data.footerRows.forEach(([label, val]) => {
+          const fl = `${label}: `;
+          doc.font('Helvetica').fontSize(7).fillColor(INK).text(fl, M, y, { lineBreak: false });
+          doc.font('Helvetica-Bold').fontSize(7).fillColor(INK)
+            .text(val || '—', M + doc.widthOfString(fl), y, { lineBreak: false });
+          y += 10;
         });
+      }
+
+      // Authorized Signature — right side, anchored above the thank-you rule
+      const footerRuleY = H - 14;
+      const authSigLineY = footerRuleY - 13;
+      const authSigLabelY = authSigLineY + 3;
+
+      doc.strokeColor(INK).lineWidth(0.5)
+        .moveTo(sigLineX, authSigLineY).lineTo(R, authSigLineY).stroke();
+      doc.font('Helvetica').fontSize(7).fillColor(INK)
+        .text('Authorized Signature', sigLineX, authSigLabelY,
+          { width: sigLineW, align: 'center', lineBreak: false });
+
+      void footerStartY; // suppress unused-var warning
+
+      // ── Footer rule + thank-you line ──────────────────────────────────────────
+      rule(footerRuleY);
+      doc.font('Helvetica').fontSize(7).fillColor(INK)
+        .text(
+          `Thank you for visiting ${data.hospitalName}`,
+          M, footerRuleY + 4, { width: CW, align: 'center', lineBreak: false },
+        );
 
       doc.end();
     });
