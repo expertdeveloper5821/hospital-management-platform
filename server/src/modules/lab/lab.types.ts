@@ -92,10 +92,8 @@ export const ListLabRequestsQuerySchema = z.object({
   patientId: z.string().min(1).optional(),
   search:    z.string().max(200).trim().optional(),
   status:    z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED']).optional(),
-  // Linked-encounter filters (IST calendar days) — matched against the OPD
-  // visit / IPD admission each request was raised during, never the patient's
-  // latest encounter. visitDate narrows to OPD requests; the other three to IPD.
-  // date matches the encounter's own date: OPD visit date or IPD admission date.
+  // date filters by the lab request's own createdAt (IST calendar day, YYYY-MM-DD).
+  // visitDate narrows to OPD requests; admissionDate / wardName / bedNumber narrow to IPD.
   date:          z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   visitDate:     z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   admissionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
@@ -198,6 +196,8 @@ export interface PathologyReportParameterField {
   section:        string | null;
   options:        string[] | null;
   referenceRange: string | null;
+  readOnly:       boolean;
+  calculationType: 'calculated' | 'estimated' | 'conversion' | null;
 }
 
 // One stored (non-empty) result value, with its unit/range snapshotted at submission.

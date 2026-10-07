@@ -206,14 +206,13 @@ export interface DepartmentRevenueEntry extends DepartmentRevenueBreakdown {
   name:         string;
 }
 
-// `other` covers payments that could not be mapped to any active
-// department — e.g. registration fees, payments predating department
-// tracking, or a payment whose linked OPD visit/IPD admission had no
-// department assigned. `grandTotal` is always the sum of the department
-// totals plus `other.total`, so the breakdown reconciles with the filtered
-// payment total by construction.
+// `other` covers unresolved revenue other than unassigned pathology/radiology
+// payments, which receive their own category buckets. `grandTotal` is always
+// the sum of all department and category totals.
 export interface DepartmentRevenueResponse {
   departments: DepartmentRevenueEntry[];
   other:       DepartmentRevenueBreakdown;
+  pathologist: DepartmentRevenueBreakdown;
+  radiologist: DepartmentRevenueBreakdown;
   grandTotal:  number;
 }

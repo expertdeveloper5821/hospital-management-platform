@@ -51,3 +51,38 @@ function calculateAge(dob: Date): number | null {
 export function resolvePatientAge(patient: Pick<IPatient, 'age' | 'dateOfBirth'>): number | null {
   return patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : null);
 }
+
+// Derives 2-4 uppercase initials from the hospital display name for use in
+// invoice numbers, e.g.:
+//   "Narayan Hospital"        → "NH"
+//   "City Care Hospital"      → "CCH"
+//   "Apollo Multi-Speciality" → "AM"
+// Single-word names use the first two characters ("Apollo" → "AP").
+export function hospitalInitials(name: string): string {
+  const words = name
+    .replace(/[^a-zA-Z\s]/g, ' ')  // strip punctuation/numbers
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 0) return 'HO';
+  if (words.length === 1) return (words[0].slice(0, 2)).toUpperCase();
+
+  // Up to 4 initials from the first characters of each word (skip very short
+  // connector words — "of", "and", "the", etc. — so they don't pollute the code).
+  const SKIP = new Set(['OF', 'AND', 'THE', 'FOR', 'AT', 'IN', 'BY', 'TO', 'A']);
+  const initials = words
+    .filter((w) => !SKIP.has(w.toUpperCase()))
+    .slice(0, 4)
+    .map((w) => w[0].toUpperCase())
+    .join('');
+
+  return initials || words.map((w) => w[0].toUpperCase()).join('').slice(0, 4) || 'HO';
+}
+
+// e.g. hospitalInitials("Narayan Hospital") = "NH", counter = 1 → "INV-NH0001"
+export function generateInvoiceNumber(hospitalName: string, counter: number): string {
+  const initials = hospitalInitials(hospitalName);
+  const padded   = String(counter).padStart(4, '0');
+  return `INV-${initials}${padded}`;
+}

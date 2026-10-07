@@ -50,7 +50,7 @@ import { IPayment }          from '../payment/payment.model';
 import { IPatient }          from '../patient/patient.model';
 import { PaymentReferenceType, PaymentResponse } from '../payment/payment.types';
 import { pdfService }        from '../../shared/services/pdf.service';
-import { resolveReceiptHospitalDetails, resolvePatientAge, formatHospitalAddress } from '../../shared/utils/receipt-details';
+import { resolveReceiptHospitalDetails, resolvePatientAge, formatHospitalAddress, generateInvoiceNumber } from '../../shared/utils/receipt-details';
 import { opdRepository }        from '../opd/opd.repository';
 import { ipdRepository }        from '../ipd/ipd.repository';
 import { departmentRepository } from '../department/department.repository';
@@ -207,10 +207,14 @@ async function renderLabReceipt(input: {
     userRepository.findById(tenantId, input.collectedBy),
     getReferredByName(tenantId, labRequest.referredBy),
   ]);
+  const hospitalDetails = resolveReceiptHospitalDetails(tenant);
+  const invoiceCounter  = await tenantRepository.incrementInvoiceCounter(tenantId);
+  const invoiceNumber   = generateInvoiceNumber(hospitalDetails.hospitalName, invoiceCounter);
   return pdfService.generateLabReceipt({
     receiptNumber:              input.paymentId,
+    invoiceNumber,
     paymentDate:                input.paymentDate,
-    ...resolveReceiptHospitalDetails(tenant),
+    ...hospitalDetails,
     patientName:                patient.fullName,
     patientId:                  patient.patientId,
     patientAge:                 resolvePatientAge(patient),
@@ -339,6 +343,13 @@ async function getEncounterSummary(doc: LabEncounterSource): Promise<LabEncounte
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// [00:00 IST, next 00:00 IST) of a YYYY-MM-DD date, used by the createdAt
+// date filter so requests are bucketed by their IST calendar day.
+function istCreatedAtRange(date: string): { $gte: Date; $lt: Date } {
+  const { start, end } = istDayRange(date);
+  return { $gte: start, $lt: end };
+}
+
 // [00:00 IST, next 00:00 IST) of a YYYY-MM-DD hospital-local date.
 function istDayRange(date: string): { start: Date; end: Date } {
   const [y, m, d] = date.split('-').map(Number);
@@ -355,13 +366,15 @@ function admissionCovers(
   return a.status === 'ADMITTED' || (!!a.dischargeDate && a.dischargeDate > at);
 }
 
-// Turns the Date / Visit Date / Admission Date / Ward / Bed filters into
-// conditions on the request's OWN linked encounter (opdVisitId /
-// ipdAdmissionId), never the patient's latest one. Legacy rows with no stored
-// link are resolved from their requestedAt exactly as getEncounterSummary
-// does, so the list filter and the View always agree. `date` matches the
-// encounter's own date — the OPD visit date or the IPD admission date.
-// Returns undefined when no encounter filter is set.
+// Turns the Ward / Bed / visitDate / admissionDate filters into conditions on
+// the request's OWN linked encounter (opdVisitId / ipdAdmissionId), never the
+// patient's latest one. Legacy rows with no stored link are resolved from their
+// requestedAt exactly as getEncounterSummary does, so the list filter and the
+// View always agree.
+// `date` filters by the request's own createdAt (IST calendar day) — it is
+// NOT an encounter date filter and is handled separately below as a direct
+// createdAt range condition.
+// Returns undefined when no filter is set.
 async function resolveEncounterConditions(
   type:     'pathology' | 'radiology',
   tenantId: string,
@@ -414,20 +427,15 @@ async function resolveEncounterConditions(
   const wardName  = query.wardName  || undefined;
   const bedNumber = query.bedNumber || undefined;
 
+  // `date` filters by the lab request's own createdAt (IST calendar day).
+  if (query.date) {
+    conds.push({ createdAt: istCreatedAtRange(query.date) });
+  }
+
   if (query.visitDate) conds.push(await opdOnDay(query.visitDate));
 
   if (query.admissionDate || wardName || bedNumber) {
     conds.push(await ipdMatching(query.admissionDate, wardName, bedNumber));
-  }
-
-  if (query.date) {
-    // Ward / Bed only exist on IPD admissions — with either set, the date can
-    // only match an admission in that ward/bed.
-    const [opd, ipd] = await Promise.all([
-      wardName || bedNumber ? Promise.resolve(null) : opdOnDay(query.date),
-      ipdMatching(query.date, wardName, bedNumber),
-    ]);
-    conds.push(opd ? { $or: [opd, ipd] } : ipd);
   }
 
   return conds.length ? conds : undefined;
@@ -483,6 +491,137 @@ function resolveReportText(
 
 const NUMERIC_RESULT = /^[-+]?(\d+(\.\d*)?|\.\d+)$/;
 
+const roundResult = (n: number, digits = 2): string =>
+  Number(n.toFixed(digits)).toString();
+
+const nvalue = (values: Record<string, string | null>, key: string): number | null => {
+  const raw = values[key]?.trim();
+  if (!raw || !NUMERIC_RESULT.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+};
+
+function applyPathologyCalculations(
+  testName: string,
+  input: SubmitPathologyTestReportInput['values'],
+  linkedCbcRbc: number | null,
+): SubmitPathologyTestReportInput['values'] {
+  const template = findReportTemplate(testName);
+  const values = { ...input };
+  const val = (key: string) => nvalue(values, key);
+  // Only fill a derived field when the client left it blank — a non-empty
+  // submitted value means the user intentionally overrode it and must be kept.
+  const setIfBlank = (key: string, value: number, digits = 2) => {
+    if ((values[key] ?? '').trim() === '') values[key] = roundResult(value, digits);
+  };
+  const requireNonNegative = (key: string, label: string, errors: string[]) => {
+    const n = val(key);
+    if (n !== null && n < 0) errors.push(`${label} cannot be negative.`);
+    return n;
+  };
+
+  const errors: string[] = [];
+
+  if (template.key === 'CBC') {
+    const hb = val('hemoglobin');
+    const rbc = val('rbc');
+    const hct = val('hematocrit');
+    const mcv = val('mcv');
+    if (hb !== null && rbc !== null && rbc > 0) setIfBlank('mch', (hb * 10) / rbc);
+    if (hb !== null && hct !== null && hct > 0) setIfBlank('mchc', (hb * 100) / hct);
+    if ((values.hematocrit ?? '').trim() === '' && rbc !== null && mcv !== null) setIfBlank('hematocrit', (rbc * mcv) / 10);
+    const diffKeys = ['neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils'];
+    const diff = diffKeys
+      .map((key) => val(key))
+      .filter((v): v is number => v !== null);
+    if (diff.length === diffKeys.length) {
+      const total = diff.reduce((sum, v) => sum + v, 0);
+      if (total < 99 || total > 101) errors.push('CBC differential total must be between 99% and 101%.');
+    }
+  }
+
+  if (template.key === 'HBA1C') {
+    const a1c = val('hba1c');
+    if (a1c !== null) setIfBlank('eag', (28.7 * a1c) - 46.7);
+  }
+
+  if (template.key === 'LFT' || template.key === 'BILIRUBIN') {
+    const total = requireNonNegative('totalBilirubin', 'Bilirubin - Total', errors);
+    const direct = requireNonNegative('directBilirubin', 'Bilirubin - Direct', errors);
+    if (total !== null && direct !== null) {
+      if (direct > total) errors.push('Bilirubin - Direct cannot exceed Bilirubin - Total.');
+      else setIfBlank('indirectBilirubin', total - direct);
+    }
+  }
+
+  if (template.key === 'LFT') {
+    const protein = requireNonNegative('totalProtein', 'Total Protein', errors);
+    const albumin = requireNonNegative('albumin', 'Albumin', errors);
+    if (protein !== null && albumin !== null) {
+      if (albumin > protein) errors.push('Albumin cannot exceed Total Protein.');
+      else {
+        const globulin = protein - albumin;
+        setIfBlank('globulin', globulin);
+        if (globulin > 0) setIfBlank('agRatio', albumin / globulin);
+      }
+    }
+  }
+
+  if (template.key === 'KFT') {
+    const urea = val('urea');
+    if (urea !== null) setIfBlank('bun', urea * 28 / 60);
+  }
+
+  if (template.key === 'LIPID') {
+    const tc = val('totalCholesterol');
+    const tg = val('triglycerides');
+    const hdl = val('hdl');
+    const ldl = val('ldl');
+    if (tg !== null && tg < 400) setIfBlank('vldl', tg / 5);
+    if ((values.ldl ?? '').trim() === '' && tc !== null && hdl !== null && tg !== null && tg < 400) {
+      setIfBlank('ldl', tc - hdl - tg / 5);
+    }
+    const finalLdl = val('ldl');
+    if (tc !== null && hdl !== null && hdl > 0) setIfBlank('cholHdlRatio', tc / hdl);
+    if (finalLdl !== null && hdl !== null && hdl > 0) setIfBlank('ldlHdlRatio', finalLdl / hdl);
+    if (tg !== null && tg >= 400) values.vldl = null;
+    void ldl;
+  }
+
+  if (template.key === 'RETIC') {
+    const retic = val('reticulocytes');
+    if (retic !== null && linkedCbcRbc !== null) setIfBlank('absoluteRetic', retic * linkedCbcRbc * 10);
+    else values.absoluteRetic = null;
+  }
+
+  if (template.key === 'IRON_PROFILE') {
+    const iron = requireNonNegative('serumIron', 'Serum Iron', errors);
+    const tibc = requireNonNegative('tibc', 'TIBC', errors);
+    const uibc = requireNonNegative('uibc', 'UIBC', errors);
+    if (iron !== null && tibc !== null) {
+      if (iron > tibc) errors.push('Serum Iron cannot exceed TIBC.');
+      else if ((values.uibc ?? '').trim() === '') setIfBlank('uibc', tibc - iron);
+    } else if (iron !== null && uibc !== null && (values.tibc ?? '').trim() === '') {
+      setIfBlank('tibc', iron + uibc);
+    }
+    const finalTibc = val('tibc');
+    if (iron !== null && finalTibc !== null && finalTibc > 0) setIfBlank('transferrinSaturation', (iron / finalTibc) * 100);
+  }
+
+  if (errors.length) throw new ValidationError(errors.join(' '));
+  return values;
+}
+
+function linkedCbcRbcFromReports(reports: IPathologyTestReport[] | undefined): number | null {
+  const cbc = reports?.find((r) => r.templateKey === 'CBC' || findReportTemplate(r.testName).key === 'CBC');
+  if (!cbc) return null;
+  const data = parseResultData(cbc.resultData);
+  const rbc = data.values.find((v) => v.key === 'rbc')?.value;
+  if (!rbc || !NUMERIC_RESULT.test(rbc)) return null;
+  const n = Number(rbc);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Validates the submitted values against the test's template and returns only
 // the filled ones, in template order, each with the unit and this patient's
 // reference range snapshotted and its HIGH/LOW/ABNORMAL flag computed.
@@ -490,16 +629,18 @@ function buildResultValues(
   testName: string,
   input:    SubmitPathologyTestReportInput['values'],
   gender:   string | null | undefined,
+  linkedCbcRbc: number | null = null,
 ): PathologyResultValue[] {
   const template = findReportTemplate(testName);
+  const calculatedInput = applyPathologyCalculations(testName, input, linkedCbcRbc);
   const known    = new Set(template.parameters.map((p) => p.key));
-  const unknown  = Object.keys(input).filter((k) => !known.has(k));
+  const unknown  = Object.keys(calculatedInput).filter((k) => !known.has(k));
   if (unknown.length) throw new ValidationError(`Unknown result field(s) for ${testName}: ${unknown.join(', ')}`);
 
   const errors: string[] = [];
   const values: PathologyResultValue[] = [];
   for (const param of template.parameters) {
-    const value = input[param.key]?.trim();
+    const value = calculatedInput[param.key]?.trim();
     if (!value) continue;   // every field is optional
     if (param.inputType === 'number' && !NUMERIC_RESULT.test(value)) {
       errors.push(`${param.name} must be a number.`);
@@ -554,6 +695,8 @@ async function buildTestReports(
         section:        p.section ?? null,
         options:        p.options ?? null,
         referenceRange: resolveReferenceText(p, gender),
+        readOnly:       p.readOnly === true,
+        calculationType: p.calculationType ?? null,
       })),
       result: report && data ? {
         values:          data.values,
@@ -805,7 +948,7 @@ export class LabService {
     await this.assertPaid(tenantId, 'pathology', doc, 'Payment must be collected before the report can be submitted.');
 
     const patient = await patientRepository.findByPatientId(tenantId, doc.patientId);
-    const values  = buildResultValues(testName, input.values, patient?.gender);
+    const values  = buildResultValues(testName, input.values, patient?.gender, linkedCbcRbcFromReports(doc.testReports));
     const remarks = input.remarks?.trim() || null;
     if (values.length === 0 && !remarks) {
       throw new ValidationError('Enter at least one result before submitting the report.');

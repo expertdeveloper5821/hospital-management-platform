@@ -265,7 +265,7 @@ describe('PUT /api/lab/pathology/:requestId/reports/:testIndex — submit a test
     const res = await submit(id, 0, { testName: CBC, values: { hemoglobin: '13.2', rbc: '4.9' }, remarks: 'Corrected' });
     expect(res.status).toBe(200);
     const [cbc, lft] = res.body.data.testReports;
-    expect(cbc.result.values.map((v: { value: string }) => v.value)).toEqual(['13.2', '4.9']);
+    expect(cbc.result.values.map((v: { value: string }) => v.value)).toEqual(['13.2', '4.9', '26.94']);
     expect(cbc.result.remarks).toBe('Corrected');
     expect(lft.result.values.map((v: { value: string }) => v.value)).toEqual(['30']);
     const stored = await PathologyRequestModel.findOne({ requestId: id });
@@ -654,7 +654,12 @@ describe('Additional catalog tests — same structured workflow', () => {
     expect(byName[HBSAG]).toEqual([['hbsag', 'Non-Reactive', null, 'Non-Reactive']]);
     expect(byName[PREG]).toEqual([['urineHcg', 'Positive', null, 'Negative']]);
     // PAT-001 is MALE → male serum-iron range.
-    expect(byName[IRON]).toEqual([['serumIron', '40', 'LOW', '65 - 175'], ['tibc', '420', null, '250 - 450']]);
+    expect(byName[IRON]).toEqual([
+      ['serumIron', '40', 'LOW', '65 - 175'],
+      ['tibc', '420', null, '250 - 450'],
+      ['uibc', '380', 'HIGH', '110 - 370'],
+      ['transferrinSaturation', '9.52', 'LOW', '20 - 50'],
+    ]);
 
     const raw = await mongoose.connection.collection('pathology_requests').findOne({ requestId: id });
     expect(raw!.testReports.map((r: { testName: string }) => r.testName)).toEqual([WIDAL, HBSAG, PREG, IRON]);

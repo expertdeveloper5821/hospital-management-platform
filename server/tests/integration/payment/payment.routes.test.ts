@@ -937,7 +937,7 @@ describe('GET /api/payments/summary/by-department', () => {
     expect(res.body.data.grandTotal).toBe(1000);
   });
 
-  test('a pathology/radiology request with no department assigned is safely bucketed as unassigned', async () => {
+  test('unassigned pathology payments appear in Pathologist rather than Other Revenue', async () => {
     await seedPathologyRequest(null, 'PATH-NODEPT01');
     await PaymentModel.create({
       paymentId: 'p1', tenantId, patientId, amount: 275, paymentMethod: 'CASH', description: 'Pathology',
@@ -949,7 +949,11 @@ describe('GET /api/payments/summary/by-department', () => {
       .set('Authorization', `Bearer ${managerToken}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.other.total).toBe(275);
+    expect(res.body.data.pathologist).toEqual({
+      opdRevenue: 0, ipdRevenue: 0, directPayment: 275, total: 275,
+    });
+    expect(res.body.data.radiologist.total).toBe(0);
+    expect(res.body.data.other.total).toBe(0);
     expect(res.body.data.grandTotal).toBe(275);
   });
 

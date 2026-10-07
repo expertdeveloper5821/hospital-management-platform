@@ -117,22 +117,32 @@ describe('RevenuePage', () => {
           { departmentId: 'd2', name: 'Neurology', opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
         ],
         other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 300, total: 300 },
-        grandTotal: 5300,
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 400, total: 400 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 500, total: 500 },
+        grandTotal: 6200,
       });
       render(<RevenuePage />);
 
       expect(screen.getByRole('cell', { name: 'Cardiology' })).toBeInTheDocument();
-      expect(screen.getByRole('cell', { name: '₹3,000.00' })).toBeInTheDocument();
-      expect(screen.getByRole('cell', { name: '₹2,000.00' })).toBeInTheDocument();
+      expect(screen.getAllByRole('cell', { name: '₹3,000.00' })).toHaveLength(2);
+      expect(screen.getAllByRole('cell', { name: '₹2,000.00' })).toHaveLength(2);
       expect(screen.getByRole('cell', { name: '₹5,000.00' })).toBeInTheDocument();
       expect(screen.getByRole('cell', { name: 'Neurology' })).toBeInTheDocument();
       expect(screen.getAllByRole('cell', { name: '₹0.00' }).length).toBeGreaterThan(0);
       expect(screen.getByRole('cell', { name: 'Other Revenue' })).toBeInTheDocument();
-      // Other Revenue row shows ₹300.00 in both Direct Payment and Total Revenue cells.
+      expect(screen.getByRole('cell', { name: 'Pathologist' })).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: 'Radiologist' })).toBeInTheDocument();
+      expect(
+        Array.from(document.querySelectorAll('tbody tr')).map((row) => row.querySelector('td')?.textContent),
+      ).toEqual(['Cardiology', 'Neurology', 'Pathologist', 'Radiologist', 'Other Revenue']);
+      // Each direct-payment category has matching Direct Payment and Total Revenue cells.
       expect(screen.getAllByRole('cell', { name: '₹300.00' }).length).toBe(2);
+      expect(screen.getAllByRole('cell', { name: '₹400.00' }).length).toBe(2);
+      expect(screen.getAllByRole('cell', { name: '₹500.00' }).length).toBe(2);
       // "Total Revenue" appears as both the table column header and the footer summary label.
       expect(screen.getAllByText('Total Revenue').length).toBe(2);
-      expect(screen.getByText('₹5,300.00')).toBeInTheDocument();
+      expect(screen.getAllByText('₹6,200.00')).toHaveLength(2);
+      expect(screen.getByText('Total', { selector: 'td' })).toBeInTheDocument();
       expect(screen.queryByText(/unassigned/i)).not.toBeInTheDocument();
     });
 
@@ -142,6 +152,8 @@ describe('RevenuePage', () => {
           { departmentId: 'd1', name: 'Cardiology', opdRevenue: 100, ipdRevenue: 0, directPayment: 0, total: 100 },
         ],
         other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
         grandTotal: 100,
       });
       render(<RevenuePage />);
@@ -160,6 +172,8 @@ describe('RevenuePage', () => {
           { departmentId: 'd2', name: 'Neurology', opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
         ],
         other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 300, total: 300 },
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
         grandTotal: 5300,
       });
       render(<RevenuePage />);
@@ -170,7 +184,29 @@ describe('RevenuePage', () => {
       expect(screen.queryByRole('cell', { name: 'Neurology' })).not.toBeInTheDocument();
       expect(screen.queryByRole('cell', { name: 'Other Revenue' })).not.toBeInTheDocument();
       // Grand total keeps reflecting the full, unfiltered revenue.
-      expect(screen.getByText('₹5,300.00')).toBeInTheDocument();
+      expect(screen.getAllByText('₹5,300.00')).toHaveLength(2);
+    });
+
+    test('row filter does not change the column totals or overall total', () => {
+      setQueryResult({
+        departments: [
+          { departmentId: 'd1', name: 'Cardiology', opdRevenue: 100, ipdRevenue: 200, directPayment: 0, total: 300 },
+        ],
+        other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 50, total: 50 },
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 25, total: 25 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 75, total: 75 },
+        grandTotal: 450,
+      });
+      render(<RevenuePage />);
+
+      fireEvent.change(screen.getByLabelText('Department'), { target: { value: 'PATHOLOGIST' } });
+
+      expect(screen.getByRole('cell', { name: 'Pathologist' })).toBeInTheDocument();
+      expect(screen.queryByRole('cell', { name: 'Cardiology' })).not.toBeInTheDocument();
+      expect(screen.getAllByText('₹450.00')).toHaveLength(2);
+      expect(screen.getByRole('cell', { name: '₹100.00' })).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: '₹200.00' })).toBeInTheDocument();
+      expect(screen.getByRole('cell', { name: '₹150.00' })).toBeInTheDocument();
     });
 
     test('shows a loading state while fetching', () => {
@@ -186,7 +222,13 @@ describe('RevenuePage', () => {
     });
 
     test('shows an empty state when there are no departments and no other revenue', () => {
-      setQueryResult({ departments: [], other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 }, grandTotal: 0 });
+      setQueryResult({
+        departments: [],
+        other: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        pathologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        radiologist: { opdRevenue: 0, ipdRevenue: 0, directPayment: 0, total: 0 },
+        grandTotal: 0,
+      });
       render(<RevenuePage />);
       expect(screen.getByText(/no departments have been created yet/i)).toBeInTheDocument();
     });

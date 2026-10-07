@@ -20,8 +20,8 @@ import type {
 
 const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
 
-// List filters. date / visitDate / admissionDate are YYYY-MM-DD (date matches
-// the encounter's own date: OPD visit date or IPD admission date); they and wardName /
+// List filters. date is YYYY-MM-DD and filters by the lab request's own
+// createdAt (IST calendar day). visitDate / admissionDate / wardName /
 // bedNumber match the OPD visit / IPD admission each request is linked to.
 interface LabListParams {
   patientId?:     string;

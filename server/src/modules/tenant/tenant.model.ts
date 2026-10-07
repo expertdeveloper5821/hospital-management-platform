@@ -12,6 +12,10 @@ export interface ITenant extends Document {
   opdSettings:         OPDSettingsConfig;
   inviteToken:         string | null;
   inviteTokenExpiry:   Date | null;
+  // Monotonically increasing counter used to generate human-readable sequential
+  // invoice numbers (INV-NH0001, INV-NH0002, …). Atomically incremented via
+  // $inc in tenantRepository.incrementInvoiceCounter — never decremented.
+  invoiceCounter:      number;
   createdAt:           Date;
   updatedAt:           Date;
 }
@@ -44,6 +48,9 @@ const TenantSchema = new Schema<ITenant>(
     },
     inviteToken:       { type: String, default: null },
     inviteTokenExpiry: { type: Date,   default: null },
+    // Sequential invoice counter — incremented atomically per receipt generation.
+    // Default 0; new tenants start at 1 with their first receipt.
+    invoiceCounter:    { type: Number, default: 0, min: 0 },
   },
   { timestamps: true, collection: 'tenants' },
 );

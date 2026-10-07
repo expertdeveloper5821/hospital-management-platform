@@ -352,6 +352,8 @@ export interface PathologyReportField {
   section:        string | null;
   options:        string[] | null;
   referenceRange: string | null;
+  readOnly?:      boolean;
+  calculationType?: 'calculated' | 'estimated' | 'conversion' | null;
 }
 
 // A stored (non-empty) result, unit/range snapshotted at submission.
@@ -756,6 +758,8 @@ export interface DepartmentRevenueEntry extends DepartmentRevenueBreakdown {
 export interface DepartmentRevenueResponse {
   departments: DepartmentRevenueEntry[];
   other:       DepartmentRevenueBreakdown;
+  pathologist?: DepartmentRevenueBreakdown;
+  radiologist?: DepartmentRevenueBreakdown;
   grandTotal:  number;
 }
 

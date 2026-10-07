@@ -1307,8 +1307,8 @@ function RequestsTable({
   });
   const [searchFilter,  setSearchFilter]  = useState('');
   const [searchInput,   setSearchInput]   = useState('');
-  // Linked-encounter filters: Date (the request's own encounter date — OPD
-  // visit date or IPD admission date), Ward / Bed (IPD).
+  // Date filter: filters by the lab request's own createdAt (IST calendar day).
+  // Ward / Bed are IPD-encounter filters.
   const [encounterDate, setEncounterDate] = useState('');
   const [wardFilter,    setWardFilter]    = useState('');
   const [wardInput,     setWardInput]     = useState('');
@@ -1422,11 +1422,11 @@ function RequestsTable({
         </div>
 
         <div className="space-y-1">
-          <Label htmlFor={`${type}-date`} className="text-xs">Date</Label>
+          <Label htmlFor={`${type}-date`} className="text-xs">Request Date</Label>
           <Input
             id={`${type}-date`}
             type="date"
-            title="OPD visit date or IPD admission date"
+            title="Lab request created date (IST)"
             value={encounterDate}
             onChange={(e) => { setEncounterDate(e.target.value); setPage(1); }}
             className="h-9 w-40"
