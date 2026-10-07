@@ -415,7 +415,7 @@ describe('GET /api/lab/pathology/:requestId/reports/:testIndex/pdf', () => {
       const pdf = res.body as Buffer;
       expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
       const text = pdfText(pdf);
-      for (const t of ['John Doe', 'PAT-001', testName, param, 'OPD-LABTEST01']) {
+      for (const t of ['John Doe', 'PAT-001', 'Collection Date', 'Reporting Date', testName, param]) {
         expect({ t, found: text.includes(t) }).toEqual({ t, found: true });
       }
       // Plain layout: no hospital header, request id, reporter block, Doctor field,
