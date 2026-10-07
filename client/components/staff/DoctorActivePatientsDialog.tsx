@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { Button } from '@/components/ui/button';
 import { X, AlertTriangle } from 'lucide-react';
@@ -31,13 +31,21 @@ export function DoctorActivePatientsDialog({ blocked, onClose, onGoToPatients }:
   // Escape closes regardless of where focus sits — a portal-rendered overlay
   // cannot rely on keydown bubbling from the backdrop. Focus lands on Close so
   // keyboard users can dismiss immediately without stepping over content.
+  //
+  // DialogOverlay renders null on the first commit and mounts its portal in
+  // its own effect, so a plain mount effect runs while closeRef is still null
+  // and focus silently never lands. Key the effect on a mounted flag that
+  // flips in the commit AFTER the portal's, when the ref exists.
   const closeRef = useRef<HTMLButtonElement>(null);
+  const [portalMounted, setPortalMounted] = useState(false);
+  useEffect(() => { setPortalMounted(true); }, []);
   useEffect(() => {
+    if (!portalMounted) return;
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [portalMounted, onClose]);
 
   return (
     <DialogOverlay

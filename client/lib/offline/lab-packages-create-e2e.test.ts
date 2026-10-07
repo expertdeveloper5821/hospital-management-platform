@@ -234,7 +234,7 @@ describe('offline CREATE for Pathology / Radiology / Packages — end to end', (
       patientId: 'PAT-1', testType: 'CBC', referredBy: 'SELF', notes: 'fasting sample',
     }));
     expect('error' in createResult).toBe(false);
-    const created = (createResult as { data: Row }).data;
+    const created = (createResult as unknown as { data: Row }).data;
     const tempId = String(created.requestId);
     expect(tempId.startsWith('temp-')).toBe(true);
     expect(created).toMatchObject({
@@ -317,14 +317,14 @@ describe('offline CREATE for Pathology / Radiology / Packages — end to end', (
     const patientResult = await store.dispatch(patientApi.endpoints.createPatient.initiate({
       fullName: 'Ravi Kumar', dateOfBirth: '1985-05-05', gender: 'MALE', mobileNumber: '9999900000', address: 'Addr',
     } as never));
-    const tempPatientId = String((patientResult as { data: Row }).data.patientId);
+    const tempPatientId = String((patientResult as unknown as { data: Row }).data.patientId);
     expect(tempPatientId.startsWith('temp-')).toBe(true);
 
     const createResult = await store.dispatch(labApi.endpoints.createRadiologyRequest.initiate({
       patientId: tempPatientId, imagingType: 'Chest X-Ray', referredBy: 'DOC-9',
     }));
     expect('error' in createResult).toBe(false);
-    const created = (createResult as { data: Row }).data;
+    const created = (createResult as unknown as { data: Row }).data;
     const tempId = String(created.requestId);
     expect(created).toMatchObject({
       patientId: tempPatientId, imagingType: 'Chest X-Ray', referredBy: 'DOC-9', referredByName: 'Dr. Rao', status: 'PENDING',
@@ -390,7 +390,7 @@ describe('offline CREATE for Pathology / Radiology / Packages — end to end', (
       name: 'Diabetes Care', description: 'Quarterly', price: 1500, includedServices: ['HbA1c', 'Consultation'],
     }));
     expect('error' in createResult).toBe(false);
-    const tempId = String((createResult as { data: Row }).data.packageId);
+    const tempId = String((createResult as unknown as { data: Row }).data.packageId);
     expect(tempId.startsWith('temp-')).toBe(true);
 
     const [entry] = await db.getAll('outbox');

@@ -91,6 +91,22 @@ export class IPDRepository {
     return patientIds as string[];
   }
 
+  // Active (ADMITTED) admissions in the given ward(s) — the IPD half of the
+  // nurse role-change restriction's active-load check (see
+  // UserService.updateUserRole): a nurse rostered onto a ward with in-treatment
+  // patients has live IPD duty. Each admission is one duty entry; no dedupe
+  // across wards (an admission lives in exactly one ward). All keys are
+  // plaintext fields — no encrypted field is filtered.
+  async countActiveAdmissionsByWards(tenantId: string, wardIds: string[]): Promise<number> {
+    assertDbConnected();
+    if (wardIds.length === 0) return 0;
+    return IPDAdmissionModel.countDocuments({
+      tenantId,
+      status: AdmissionStatus.ADMITTED,
+      wardId: { $in: wardIds },
+    });
+  }
+
   // The patient's admission in effect at `at` (admitted on/before it and not yet
   // discharged by then). At most one can match, since a patient can only hold
   // one ADMITTED admission at a time (uniq_active_admission_per_patient).

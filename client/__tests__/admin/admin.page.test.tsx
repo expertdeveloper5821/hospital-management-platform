@@ -410,3 +410,166 @@ describe('AdminPage — doctor role-change blocked modal', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+// ─── Generic structured conflict dialog (non-doctor 409s) ─────────────────────
+// EVERY structured 409 (details.code present) must open the generic
+// RoleChangeConflictDialog showing the exact counts/breakdown/error code the
+// backend returned — never a bare inline message. Unstructured 409s (no
+// details) keep the inline error fallback.
+describe('AdminPage — generic structured conflict dialog', () => {
+  const reject409 = (payload: unknown) =>
+    mockUpdateUserRole.mockImplementationOnce(() => ({ unwrap: () => Promise.reject(payload) }));
+  const rejectDeactivate409 = (payload: unknown) =>
+    mockDeactivateUser.mockImplementationOnce(() => ({ unwrap: () => Promise.reject(payload) }));
+
+  async function saveRoleOn(user: ReturnType<typeof userEvent.setup>, u: { userId: string; role: string }, newRole: string) {
+    await openFirstKebab(user);
+    await user.click(menuItems(/edit role/i)[0]);
+    const selects = screen.getAllByDisplayValue(u.role) as HTMLSelectElement[];
+    await user.selectOptions(selects[0], newRole);
+    await user.click(screen.getAllByRole('button', { name: /^save$/i })[0]);
+  }
+
+  test('NURSE_ACTIVE_ENTRIES opens the dialog with code, entries and breakdown', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-nurse', email: 'n@h.com', name: 'Nina Rao', role: 'NURSE', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    reject409({
+      status: 409,
+      data: {
+        status: 'error',
+        message: 'Cannot change role: Nina Rao still has 4 active OPD visit(s) and 2 active IPD admission(s). Take them off duty first, then retry.',
+        details: {
+          code: 'NURSE_ACTIVE_ENTRIES',
+          activeEntries: 6,
+          breakdown: { opd: 4, ipd: 2 },
+          userId: 'u-nurse', currentRole: 'NURSE', requestedRole: 'RECEPTIONIST',
+        },
+      },
+    });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await saveRoleOn(user, { userId: 'u-nurse', role: 'NURSE' }, 'RECEPTIONIST');
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog.textContent).toContain('Nina Rao');
+    expect(dialog.textContent).toContain('NURSE_ACTIVE_ENTRIES');
+    expect(dialog.textContent).toContain('6'); // activeEntries
+    expect(dialog.textContent).toContain('OPD 4 · IPD 2'); // breakdown
+    expect(dialog.textContent).toContain('RECEPTIONIST');
+    expect(screen.queryByText(/failed to update role/i)).not.toBeInTheDocument();
+  });
+
+  test('PATHOLOGY_ACTIVE_REQUEST shows the unpaid flag and request count', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-path', email: 'p@h.com', name: 'Pankaj Lab', role: 'PATHOLOGIST', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    reject409({
+      status: 409,
+      data: {
+        status: 'error',
+        message: 'Cannot change role: Pankaj Lab still has 2 active pathology request(s). Finalize or hand them over first, then retry.',
+        details: { code: 'PATHOLOGY_ACTIVE_REQUEST', activeRequests: 2, unpaidPayment: true, userId: 'u-path', currentRole: 'PATHOLOGIST', requestedRole: 'NURSE' },
+      },
+    });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await saveRoleOn(user, { userId: 'u-path', role: 'PATHOLOGIST' }, 'NURSE');
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog.textContent).toContain('PATHOLOGY_ACTIVE_REQUEST');
+    expect(dialog.textContent).toContain('2');
+    expect(dialog.textContent).toContain('Yes'); // unpaidPayment: true
+  });
+
+  test('STAFF_ACTIVE_SESSION shows the dangling attendance id', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-staff', email: 's@h.com', name: 'Sam Staff', role: 'STAFF', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    reject409({
+      status: 409,
+      data: {
+        status: 'error',
+        message: 'Cannot change role: Sam Staff has an open attendance session. Finalize it first, then retry.',
+        details: { code: 'STAFF_ACTIVE_SESSION', attendanceId: 'att-9', userId: 'u-staff', currentRole: 'STAFF', requestedRole: 'RECEPTIONIST' },
+      },
+    });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await saveRoleOn(user, { userId: 'u-staff', role: 'STAFF' }, 'RECEPTIONIST');
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog.textContent).toContain('STAFF_ACTIVE_SESSION');
+    expect(dialog.textContent).toContain('att-9');
+  });
+
+  test('structured LAST_ADMIN_CONFLICT on role change opens the dialog (not the inline error)', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-admin2', email: 'a@h.com', name: 'Ada Admin', role: 'HOSPITAL_ADMIN', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    reject409({
+      status: 409,
+      data: {
+        status: 'error',
+        message: 'Cannot change role of the last active Hospital Admin. Assign another admin first.',
+        details: { code: 'LAST_ADMIN_CONFLICT', userId: 'u-admin2', currentRole: 'HOSPITAL_ADMIN', requestedRole: 'MANAGER' },
+      },
+    });
+    render(<AdminPage />);
+
+    // The editor <select> only lists ASSIGNABLE_ROLES (HOSPITAL_ADMIN is not
+    // assignable), so there is no option to switch to — just save the editor
+    // as-is; the backend guard fires on the current role either way.
+    const user = userEvent.setup();
+    await openFirstKebab(user);
+    await user.click(menuItems(/edit role/i)[0]);
+    await user.click(screen.getAllByRole('button', { name: /^save$/i })[0]);
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog.textContent).toContain('LAST_ADMIN_CONFLICT');
+    expect(dialog.textContent).toContain('Ada Admin');
+    // The inline error path was not taken (no generic fallback text; the
+    // backend message legitimately appears inside the dialog itself).
+    expect(screen.queryByText(/failed to update role/i)).not.toBeInTheDocument();
+  });
+
+  test('deactivation 409 (WARD_ROSTER_CONFLICT) opens the dialog and closes the deactivate modal', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-nurse2', email: 'n2@h.com', name: 'Rita Nurse', role: 'NURSE', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    rejectDeactivate409({
+      status: 409,
+      data: {
+        status: 'error',
+        message: 'Cannot deactivate: Rita Nurse is still on the roster of 2 active ward(s). Remove them from the ward roster first, then retry.',
+        details: { code: 'WARD_ROSTER_CONFLICT', activeWards: 2, userId: 'u-nurse2' },
+      },
+    });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openFirstKebab(user);
+    await user.click(menuItems(/^deactivate$/i)[0]);
+    // DeactivateModal's destructive confirm button (the only rendered instance).
+    await user.click(screen.getAllByRole('button', { name: /^deactivate$/i })[0]);
+
+    const dialog = await screen.findByRole('dialog', { name: /role change blocked/i });
+    expect(dialog.textContent).toContain('WARD_ROSTER_CONFLICT');
+    expect(dialog.textContent).toContain('Rita Nurse');
+    expect(dialog.textContent).toContain('2');
+    // The deactivate confirm modal is gone; the conflict dialog replaced it.
+    expect(screen.queryByText(/are you sure you want to deactivate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed to deactivate/i)).not.toBeInTheDocument();
+  });
+
+  test('unstructured 409 (no details) still shows the inline error fallback', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [{ userId: 'u-nurse3', email: 'n3@h.com', name: 'Rima Nurse', role: 'NURSE', departmentIds: [], isActive: true, isFirstLogin: false, tenantId: 't1', createdAt: '2026-01-01' }];
+    reject409({ status: 409, data: { status: 'error', message: 'Some unexpected conflict.' } });
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await saveRoleOn(user, { userId: 'u-nurse3', role: 'NURSE' }, 'RECEPTIONIST');
+
+    expect(screen.queryByRole('dialog', { name: /role change blocked/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/some unexpected conflict/i).length).toBeGreaterThan(0);
+  });
+});

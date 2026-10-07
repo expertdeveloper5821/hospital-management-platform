@@ -1,6 +1,6 @@
 import { PathologyRequestModel, IPathologyRequest, IPathologyTestReport } from './lab.model';
 import { RadiologyRequestModel, IRadiologyRequest } from './lab.model';
-import { ListLabRequestsQuery } from './lab.types';
+import { ListLabRequestsQuery, LabRequestStatus } from './lab.types';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 
@@ -81,6 +81,27 @@ export class LabRepository {
       PathologyRequestModel.countDocuments(filter),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  // Active (PENDING / IN_PROGRESS) pathology requests this user authored —
+  // the pathologist role-change restriction's active-work check (see
+  // UserService.updateUserRole). Returns the requestIds (not a count) so the
+  // service can also resolve the "any associated unpaid payment" flag against
+  // payments' referenceIds. Soft-deleted rows are excluded; COMPLETED is
+  // terminal and never blocks. `requestedBy` is the authoring user's id and
+  // every other key is plaintext — no encrypted field is filtered.
+  async findActivePathologyIdsByRequester(tenantId: string, requestedBy: string): Promise<string[]> {
+    assertDbConnected();
+    const rows = await PathologyRequestModel.find(
+      {
+        tenantId,
+        requestedBy,
+        status:    { $in: [LabRequestStatus.PENDING, LabRequestStatus.IN_PROGRESS] },
+        isDeleted: { $ne: true },
+      },
+      { requestId: 1, _id: 0 },
+    ).lean();
+    return rows.map((r) => r.requestId);
   }
 
   async savePathology(data: Partial<IPathologyRequest>): Promise<IPathologyRequest> {
@@ -180,6 +201,21 @@ export class LabRepository {
       RadiologyRequestModel.countDocuments(filter),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  // Radiology twin of findActivePathologyIdsByRequester — see that method.
+  async findActiveRadiologyIdsByRequester(tenantId: string, requestedBy: string): Promise<string[]> {
+    assertDbConnected();
+    const rows = await RadiologyRequestModel.find(
+      {
+        tenantId,
+        requestedBy,
+        status:    { $in: [LabRequestStatus.PENDING, LabRequestStatus.IN_PROGRESS] },
+        isDeleted: { $ne: true },
+      },
+      { requestId: 1, _id: 0 },
+    ).lean();
+    return rows.map((r) => r.requestId);
   }
 
   async saveRadiology(data: Partial<IRadiologyRequest>): Promise<IRadiologyRequest> {

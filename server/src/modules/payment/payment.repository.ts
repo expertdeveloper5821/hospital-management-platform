@@ -94,6 +94,22 @@ export class PaymentRepository {
     );
   }
 
+  // Open (PENDING) payments this user recorded — the MANAGER / FINANCE_MANAGER
+  // role-change restriction's reconciliation check (see
+  // UserService.updateUserRole): a pending manual payment still awaiting
+  // completion/cancellation is unfinished finance work. Only `createdBy` and
+  // status are matched; description/transactionId (encrypted) are never
+  // touched. COMPLETED is the settled state, not an open balance; FAILED and
+  // CANCELLED are terminal and never block.
+  async countOpenPaymentsByCreator(tenantId: string, createdBy: string): Promise<number> {
+    assertDbConnected();
+    return PaymentModel.countDocuments({
+      tenantId,
+      createdBy,
+      status: PaymentStatus.PENDING,
+    });
+  }
+
   async findByFilters(
     tenantId: string,
     query: ListPaymentsQuery,

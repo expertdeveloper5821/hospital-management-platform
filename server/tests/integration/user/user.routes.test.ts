@@ -762,7 +762,7 @@ describe('PATCH /api/users/:userId/role — doctor restriction', () => {
       .send({ role: UserRole.NURSE });
   }
 
-  test('409 — doctor with an active OPD visit is blocked; role and audit untouched', async () => {
+  test('409 — doctor with an active OPD visit is blocked; role untouched, rejection audited (§4.4 ROLE_CHANGE_BLOCKED)', async () => {
     const tenant = await seedTenant();
     const tenantId = tenant._id.toString();
     const admin  = await seedUser(tenantId, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
@@ -790,7 +790,17 @@ describe('PATCH /api/users/:userId/role — doctor restriction', () => {
 
     const after = await UserModel.findById(doctor._id);
     expect(after?.role).toBe(UserRole.DOCTOR);
-    expect(auditService.log).not.toHaveBeenCalled();
+    // §4.4: every rejected role-change attempt is audited with the stable
+    // conflict code — the entity state itself is untouched.
+    expect(auditService.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType:    AuditEntityType.USER_ACCOUNT,
+        entityId:      doctor._id.toString(),
+        action:        'ROLE_CHANGE_BLOCKED',
+        newValue:      { requestedRole: UserRole.NURSE, conflictCode: 'DOCTOR_ACTIVE_PATIENTS' },
+        previousValue: { role: UserRole.DOCTOR },
+      }),
+    );
   });
 
   test('409 — doctor with an ADMITTED IPD admission is blocked, breakdown reflects ipd source', async () => {
@@ -927,7 +937,10 @@ describe('PATCH /api/users/:userId/role — doctor restriction', () => {
     const res = await rolePatch(doctor._id.toString(), token);
 
     expect(res.status).toBe(409);
-    expect(res.body.details.code).toBe('DOCTOR_ACTIVE_PATIENTS');
+    // §4.1 #6: fail-closed ordering — USER_INACTIVE fires before any workload
+    // check, so the code is USER_INACTIVE even for a doctor with active
+    // encounters (reactivate first; the workload guard still applies after).
+    expect(res.body.details.code).toBe('USER_INACTIVE');
   });
 
   test('409 — last-admin guard still fires (existing behavior regression guard)', async () => {
@@ -942,8 +955,8 @@ describe('PATCH /api/users/:userId/role — doctor restriction', () => {
       .send({ role: UserRole.NURSE });
 
     expect(res.status).toBe(409);
-    // No details.code — the last-admin conflict is unstructured (pre-existing).
-    expect(res.body.details?.code).toBeUndefined();
+    // §4.3/§9.1: the last-admin demotion conflict carries its stable code.
+    expect(res.body.details.code).toBe('LAST_ADMIN_CONFLICT');
   });
 
   test('200 — historical doctor references intact after a successful role change', async () => {

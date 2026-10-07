@@ -43,7 +43,7 @@ export const paymentApi = baseApi.injectEndpoints({
     createManualPayment: build.mutation<PaymentResponse, CreateManualPaymentRequest>({
       query: (body) => ({ url: '/api/payments/manual', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
-      invalidatesTags: ['Payment'],
+      invalidatesTags: ['Payment', 'Revenue'],
     }),
 
     createRazorpayOrder: build.mutation<RazorpayOrderResponse, CreateRazorpayOrderRequest>({
@@ -55,14 +55,14 @@ export const paymentApi = baseApi.injectEndpoints({
     verifyRazorpayPayment: build.mutation<PaymentResponse, { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string }>({
       query: (body) => ({ url: '/api/payments/razorpay/verify', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
-      invalidatesTags: ['Payment'],
+      invalidatesTags: ['Payment', 'Revenue'],
     }),
 
     // Mark an abandoned Razorpay checkout as CANCELLED (user dismissed the modal).
     cancelRazorpayOrder: build.mutation<PaymentResponse, { razorpayOrderId: string }>({
       query: (body) => ({ url: '/api/payments/razorpay/cancel', method: 'POST', body }),
       transformResponse: (raw: ApiSuccess<PaymentResponse>) => raw.data,
-      invalidatesTags: ['Payment'],
+      invalidatesTags: ['Payment', 'Revenue'],
     }),
 
     getReceiptUrl: build.query<string, string>({
@@ -81,7 +81,10 @@ export const paymentApi = baseApi.injectEndpoints({
         return `/api/payments/summary?${params.toString()}`;
       },
       transformResponse: (raw: ApiSuccess<PaymentSummaryResponse>) => raw.data,
-      providesTags: ['Payment'],
+      // Finance summaries are role-scoped reads (§5.2.1): 'Revenue' separates
+      // them from raw payment rows so payment mutations can invalidate both
+      // without also refetching every other summary consumer.
+      providesTags: ['Payment', 'Revenue'],
     }),
 
     // Revenue broken down by department — same filter set as the payments
@@ -100,7 +103,7 @@ export const paymentApi = baseApi.injectEndpoints({
         return `/api/payments/summary/by-department?${params.toString()}`;
       },
       transformResponse: (raw: ApiSuccess<DepartmentRevenueResponse>) => raw.data,
-      providesTags: ['Payment'],
+      providesTags: ['Payment', 'Revenue'],
     }),
   }),
 });

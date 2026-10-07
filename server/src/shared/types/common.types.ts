@@ -91,7 +91,12 @@ export type AuditAction =
   | 'LOGIN'
   | 'LOGOUT'
   | 'LOCKOUT'
-  | 'PASSWORD_RESET';
+  | 'PASSWORD_RESET'
+  // A role-change request rejected by a pre-flight guard in
+  // UserService.updateUserRole (§4.4 of the role-permission API governance
+  // reference) or deactivateUser's ward-roster guard. Audit-only action — no
+  // entity state changed; newValue carries the stable conflict code.
+  | 'ROLE_CHANGE_BLOCKED';
 
 export interface AuditLogEntry {
   entityType:     AuditEntityType;

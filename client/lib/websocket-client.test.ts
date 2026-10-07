@@ -35,6 +35,14 @@ jest.mock('@/store/api/notification.api', () => ({
   },
 }));
 
+jest.mock('@/lib/role-change', () => ({
+  endSessionAfterRoleChange: jest.fn(),
+  isRoleChangeRelogin:       jest.fn(() => false),
+}));
+
+import { endSessionAfterRoleChange } from '@/lib/role-change';
+const mockEndSession = endSessionAfterRoleChange as jest.Mock;
+
 import { notificationApi } from '@/store/api/notification.api';
 const mockUpsertQueryData = notificationApi.util.upsertQueryData as jest.Mock;
 
@@ -169,6 +177,36 @@ describe('websocket-client', () => {
     socket.onmessage?.({ data: JSON.stringify({ type: 'connected', userId: 'u1' }) });
 
     expect(mockDispatch).not.toHaveBeenCalled();
+  });
+
+  test('ends the session and redirects to /login on a role_changed frame (§5.3/§9.2 re-auth signal)', () => {
+    const socket = connectAndOpen();
+    const assign = jest.fn();
+    const originalLocation = window.location;
+    // jsdom forbids navigation; replace location so the redirect can be asserted.
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value:        { ...originalLocation, assign },
+      writable:     true,
+    });
+
+    try {
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: 'role_changed',
+          data: { relogin: true, rolesChanged: true, previousRole: 'NURSE', newRole: 'STAFF' },
+        }),
+      });
+
+      expect(mockEndSession).toHaveBeenCalledTimes(1);
+      expect(assign).toHaveBeenCalledWith('/login?relogin=1&rolesChanged=1');
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value:        originalLocation,
+        writable:     true,
+      });
+    }
   });
 
   test('dispatches setConnected(false) on close', () => {

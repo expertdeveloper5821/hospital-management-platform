@@ -36,6 +36,22 @@ export class AttendanceRepository {
     }).sort({ attendanceDate: 1 });
   }
 
+  // The user's open (checked-in, not yet checked-out) attendance session, if
+  // any — the STAFF role-change restriction's active-session check (see
+  // UserService.updateUserRole): an unfinalized shift must be closed (check-out
+  // or admin correction) before the role can move. Any day's dangling check-in
+  // counts, not just today's — a forgotten check-out is exactly the session
+  // that must be finalized first.
+  async findOpenSession(tenantId: string, userId: string): Promise<IAttendance | null> {
+    assertDbConnected();
+    return AttendanceModel.findOne({
+      tenantId,
+      userId,
+      checkIn:  { $ne: null },
+      checkOut: null,
+    }).sort({ attendanceDate: -1 });
+  }
+
   async findById(tenantId: string, attendanceId: string): Promise<IAttendance | null> {
     assertDbConnected();
     return AttendanceModel.findOne({ tenantId, attendanceId });

@@ -47,7 +47,14 @@ jest.mock('@/components/ui/card',     () => ({
 
 import PlatformSettingsPage from '@/app/(dashboard)/super-admin/platform-settings/page';
 
-const DEFAULTS = {
+// Explicit `string | null` types — bare `null` literals infer type `null`,
+// which would make Partial<typeof DEFAULTS> reject string overrides.
+const DEFAULTS: {
+  logoUrl:       string | null;
+  faviconUrl:    string | null;
+  platformTitle: string;
+  updatedAt:     string | null;
+} = {
   logoUrl:       null,
   faviconUrl:    null,
   platformTitle: 'MediCore HMS',

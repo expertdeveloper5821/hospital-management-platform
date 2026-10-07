@@ -48,6 +48,7 @@ import {
   hashVerificationToken,
 } from '../../../src/modules/staff-id-card/staff-id-card.token';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
+import config                from '../../../src/shared/config/env';
 
 const JWT_SECRET  = process.env.JWT_SECRET!;
 const VERIFY_BASE = '/api/public/staff-verification';
@@ -163,7 +164,10 @@ describe('POST /api/staff-id-cards/:userId/generate — token storage', () => {
     const ctx = await setup();
     const { card } = await generateViaApi(ctx);
     const url = mockBucket.get(card.s3Key)!.toString();
-    expect(url).toMatch(/^https:\/\/verify\.test\.example\.com\/verify-staff#[A-Za-z0-9_-]{43}$/);
+    // Derive the expected origin from the configured base URL (tests/setup.ts),
+    // not a hardcoded domain — the config value is environment-owned.
+    const base = config.staffVerification.baseUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(url).toMatch(new RegExp(`^${base}\\/verify-staff#[A-Za-z0-9_-]{43}$`));
     for (const secret of [ctx.sId, ctx.tId, 'nurse@t.com', '9876543210', 'Staff nurse']) {
       expect(url).not.toContain(secret);
     }
