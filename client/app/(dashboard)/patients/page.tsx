@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { opdStatusLabel, opdStatusVariant } from '@/lib/opd-status';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
+import { formatPatientResponseAge } from '@/lib/patient-age';
 import { CharCounter } from '@/components/ui/char-counter';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
@@ -49,14 +50,8 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function calcAge(dob: string) {
-  const diff = Date.now() - new Date(dob).getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24 * 365.25));
-}
-
-// Stored age wins; legacy patients registered before Age existed fall back to DOB.
-function patientAge(p: PatientResponse): number | null {
-  return p.age ?? (p.dateOfBirth ? calcAge(p.dateOfBirth) : null);
+function patientAge(p: PatientResponse): string | null {
+  return formatPatientResponseAge(p);
 }
 
 // Fixed size so every Blood Group pill (A+, A-, B+, B-, AB+, AB-, O+, O-)
@@ -189,7 +184,7 @@ function PatientDetailPanel({ patient, onClose, onEdit, onDeleted }: PatientDeta
         <div className="flex-1 overflow-y-auto">
           {tab === 'details' && (
             <div className="p-5 space-y-1">
-              {row('Age',           patientAge(patient) != null ? `${patientAge(patient)} years` : null)}
+              {row('Age',           patientAge(patient))}
               {row('Date of Birth', patient.dateOfBirth ? formatDate(patient.dateOfBirth) : null)}
               {row('Gender',        genderLabel(patient.gender))}
               {row('Mobile',        patient.mobileNumber)}
@@ -494,7 +489,7 @@ export default function PatientsPage() {
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{formatDate(p.createdAt)}</td>
                       <td className="px-4 py-3 font-medium max-w-[200px] truncate" title={p.fullName}>{p.fullName}</td>
                       <td className="px-4 py-3 hidden sm:table-cell text-muted-foreground">
-                        {patientAge(p) != null ? `${patientAge(p)} years · ` : ''}{genderLabel(p.gender)}
+                        {patientAge(p) != null ? `${patientAge(p)} · ` : ''}{genderLabel(p.gender)}
                       </td>
                       <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">{p.mobileNumber}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">

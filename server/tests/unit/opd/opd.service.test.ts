@@ -4,8 +4,11 @@ jest.mock('../../../src/modules/ipd/ipd.service');
 jest.mock('../../../src/modules/ipd/ipd.repository');
 jest.mock('../../../src/modules/payment/payment.repository');
 jest.mock('../../../src/modules/tenant/tenant.service');
+jest.mock('../../../src/modules/tenant/tenant.repository');
 jest.mock('../../../src/modules/department/department.service');
+jest.mock('../../../src/modules/department/department.repository');
 jest.mock('../../../src/modules/user/user.repository');
+jest.mock('../../../src/shared/services/s3.service');
 jest.mock('../../../src/shared/services/audit.service');
 
 import { opdRepository }     from '../../../src/modules/opd/opd.repository';
@@ -14,6 +17,7 @@ import { ipdService }        from '../../../src/modules/ipd/ipd.service';
 import { ipdRepository }     from '../../../src/modules/ipd/ipd.repository';
 import { paymentRepository } from '../../../src/modules/payment/payment.repository';
 import { tenantService }     from '../../../src/modules/tenant/tenant.service';
+import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
 import { departmentService } from '../../../src/modules/department/department.service';
 import { userRepository }    from '../../../src/modules/user/user.repository';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
@@ -22,6 +26,7 @@ import { UserRole }          from '../../../src/shared/types/common.types';
 import { NotFoundError, ConflictError, ValidationError } from '../../../src/shared/middleware/error-handler';
 import { toIstMidnight, toIstDateKey } from '../../../src/modules/attendance/attendance.timezone';
 import { auditService }      from '../../../src/shared/services/audit.service';
+import { s3Service }         from '../../../src/shared/services/s3.service';
 
 const mockAuditService = auditService as jest.Mocked<typeof auditService>;
 
@@ -31,8 +36,10 @@ const mockIpdService     = ipdService        as jest.Mocked<typeof ipdService>;
 const mockIpdRepo        = ipdRepository     as jest.Mocked<typeof ipdRepository>;
 const mockPaymentRepo    = paymentRepository as jest.Mocked<typeof paymentRepository>;
 const mockTenantSvc      = tenantService     as jest.Mocked<typeof tenantService>;
+const mockTenantRepo     = tenantRepository  as jest.Mocked<typeof tenantRepository>;
 const mockDepartmentSvc  = departmentService as jest.Mocked<typeof departmentService>;
 const mockUserRepo       = userRepository    as jest.Mocked<typeof userRepository>;
+const mockS3Service      = s3Service         as jest.Mocked<typeof s3Service>;
 
 const BASE_PATIENT = {
   patientId: 'PAT-ABCD1234',
@@ -1353,6 +1360,89 @@ describe('OPDService — example-based', () => {
       expect(result.nurses).toEqual([
         { nurseId: 'nurse-1', nurseName: 'Nurse XYZ', isAvailable: true },
         { nurseId: 'nurse-2', nurseName: 'Nurse PQR', isAvailable: false },
+      ]);
+    });
+  });
+
+  describe('getParchaPdfContext', () => {
+    test('uses configured inclusive validity days from OPD creation, not patient registration', async () => {
+      mockTenantRepo.findById.mockResolvedValue({
+        branding: { parchaTemplateUrl: 'parcha.pdf' },
+      } as never);
+      mockPatientRepo.findByPatientId.mockResolvedValue({
+        fullName: 'Ravi Kumar',
+        patientId: 'PAT-ABCD1234',
+        dateOfBirth: null,
+        gender: 'MALE',
+        mobileNumber: '9876543210',
+        address: '',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      } as never);
+      mockS3Service.getFile.mockResolvedValue(Buffer.from('pdf'));
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+
+      const visit = {
+        ...makeVisit(),
+        visitDate: new Date('2026-05-20T00:00:00.000Z'),
+        createdAt: new Date('2026-05-15T00:00:00.000Z'),
+        vitals: {
+          bloodPressure: '120/80', pulse: 76, respiratoryRate: null, spo2: 97,
+          sugar: 95, bodyTemperature: 98.6, height: 172, weight: 68.5, headCircumference: null,
+        },
+      };
+      const result = await service.getParchaPdfContext('t1', visit as never);
+
+      expect(result?.overlay.fieldRows).toContainEqual({ label: 'Valid Till', value: '19 May 2026' });
+      expect(result?.overlay.footerText).toBe('This is valid for 5 days.');
+      expect(result?.overlay.vitalsHeading).toBe('Vitals');
+      expect(result?.overlay.vitals).toEqual([
+        { label: 'BP', value: '120/80' },
+        { label: 'PR', value: '76' },
+        { label: 'SpO2', value: '97' },
+        { label: 'RBS', value: '95' },
+        { label: 'Temp', value: '98.6' },
+        { label: 'Weight', value: '68.5' },
+      ]);
+    });
+
+    test('formats pediatric slip vitals with short labels and no units', async () => {
+      mockTenantRepo.findById.mockResolvedValue({
+        branding: { parchaTemplateUrl: 'parcha.pdf' },
+      } as never);
+      mockPatientRepo.findByPatientId.mockResolvedValue({
+        fullName: 'Ravi Kumar',
+        patientId: 'PAT-ABCD1234',
+        dateOfBirth: null,
+        age: 18,
+        ageUnit: 'MONTHS',
+        gender: 'MALE',
+        mobileNumber: '9876543210',
+        address: '',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      } as never);
+      mockS3Service.getFile.mockResolvedValue(Buffer.from('pdf'));
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+
+      const visit = {
+        ...makeVisit(),
+        vitals: {
+          bloodPressure: '90/60', pulse: 120, respiratoryRate: 30, spo2: 98,
+          sugar: 95, bodyTemperature: 98.6, height: 65, weight: 6.5, headCircumference: 40,
+        },
+      };
+      const result = await service.getParchaPdfContext('t1', visit as never);
+
+      expect(result?.overlay.vitalsHeading).toBe('Vitals');
+      expect(result?.overlay.vitals).toEqual([
+        { label: 'PR', value: '120' },
+        { label: 'RR', value: '30' },
+        { label: 'SpO2', value: '98' },
+        { label: 'BP', value: '90/60' },
+        { label: 'Height', value: '65' },
+        { label: 'Weight', value: '6.5' },
+        { label: 'Head Circ.', value: '40' },
       ]);
     });
   });

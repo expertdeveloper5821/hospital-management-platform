@@ -10,11 +10,27 @@ import { UserRole } from '../../shared/types/common.types';
 
 const GENDER_VALUES       = ['MALE', 'FEMALE', 'OTHER']              as const;
 const BLOOD_GROUP_VALUES  = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] as const;
+const AGE_UNIT_VALUES     = ['YEARS', 'MONTHS', 'DAYS'] as const;
 
-const createPatientSchema = z.object({
+const ageMaxByUnit = { YEARS: 150, MONTHS: 1800, DAYS: 54787 } as const;
+const validateAge = <T extends { age?: number; ageUnit?: typeof AGE_UNIT_VALUES[number] }>(schema: z.ZodType<T>) =>
+  schema.superRefine(({ age, ageUnit }, ctx) => {
+    if (age === undefined) return;
+    const unit = ageUnit ?? 'YEARS';
+    if (age > ageMaxByUnit[unit]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['age'],
+        message: `Age must be between 0 and ${ageMaxByUnit[unit]} ${unit.toLowerCase()}.`,
+      });
+    }
+  });
+
+const createPatientSchema = validateAge(z.object({
   fullName:                  z.string().min(1).max(200).trim(),
   dateOfBirth:               z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-  age:                       z.number().int().min(0).max(150),
+  age:                       z.number().int().min(0).max(54787),
+  ageUnit:                   z.enum(AGE_UNIT_VALUES).optional(),
   gender:                    z.enum(GENDER_VALUES),
   mobileNumber:              z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits'),
   address:                   z.string().min(1).max(500).trim(),
@@ -32,12 +48,13 @@ const createPatientSchema = z.object({
   registrationFee:           z.number().positive().optional(),
   registrationPaymentMethod: z.enum([PaymentMethod.CASH, PaymentMethod.UPI, PaymentMethod.CARD]).optional(),
   forceCreate:               z.boolean().optional(),
-});
+}));
 
-const updatePatientSchema = z.object({
+const updatePatientSchema = validateAge(z.object({
   fullName:               z.string().min(1).max(200).trim().optional(),
   dateOfBirth:            z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  age:                    z.number().int().min(0).max(150).optional(),
+  age:                    z.number().int().min(0).max(54787).optional(),
+  ageUnit:                z.enum(AGE_UNIT_VALUES).optional(),
   gender:                 z.enum(GENDER_VALUES).optional(),
   mobileNumber:           z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits').optional(),
   address:                z.string().min(1).max(500).trim().optional(),
@@ -52,7 +69,7 @@ const updatePatientSchema = z.object({
   emergencyContactMobile: z.string().regex(/^\d{10}$/, 'Mobile number must be exactly 10 digits').optional(),
   bloodGroup:             z.enum(BLOOD_GROUP_VALUES).optional(),
   departmentId:           z.string().min(1).nullable().optional(),
-});
+}));
 
 function toResponse(p: IPatient) {
   return {
@@ -60,6 +77,7 @@ function toResponse(p: IPatient) {
     fullName:                  p.fullName,
     dateOfBirth:               p.dateOfBirth               ?? null,
     age:                       p.age                       ?? null,
+    ageUnit:                   p.ageUnit                   ?? 'YEARS',
     gender:                    p.gender,
     mobileNumber:              p.mobileNumber,
     address:                   p.address,

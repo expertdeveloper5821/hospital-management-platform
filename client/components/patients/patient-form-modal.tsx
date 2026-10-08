@@ -5,7 +5,7 @@ import {
   useCreatePatientMutation,
   useUpdatePatientMutation,
 } from '@/store/api/patient.api';
-import type { PatientResponse, Gender, BloodGroup, CreatePatientRequest, UpdatePatientRequest } from '@/store/types';
+import type { PatientResponse, Gender, BloodGroup, AgeUnit, CreatePatientRequest, UpdatePatientRequest } from '@/store/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +21,7 @@ export const BLOOD_GROUPS: BloodGroup[] = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-',
 // Matches backend: z.string().regex(/^\d{10}$/) — exactly 10 digits.
 // The national number is stored bare; the +91 country code is shown in the UI only.
 const MOBILE_RE   = /^\d{10}$/;
-const NAME_RE     = /^[a-zA-Z\s.\-']+$/;
+const NAME_RE     = /^[a-zA-Z\s./\-']+$/;
 const AADHAAR_RE  = /^\d{12}$/;
 // Emergency contact name: letters and spaces only — no digits or special characters.
 const ALPHA_SPACE_RE = /^[a-zA-Z\s]+$/;
@@ -72,8 +72,11 @@ function addressPayload(f: PatientFormState) {
 
 type PatientFormErrors = Partial<Record<string, string>>;
 
+const AGE_MAX_BY_UNIT: Record<AgeUnit, number> = { YEARS: 150, MONTHS: 1800, DAYS: 54787 };
+const AGE_UNIT_LABELS: Record<AgeUnit, string> = { YEARS: 'Years', MONTHS: 'Months', DAYS: 'Days' };
+
 // Age is held as the raw input string while editing and converted on submit.
-type PatientFormState = Omit<CreatePatientRequest, 'age'> & { age: string };
+type PatientFormState = Omit<CreatePatientRequest, 'age' | 'ageUnit'> & { age: string; ageUnit: AgeUnit };
 
 function validatePatientForm(form: PatientFormState): PatientFormErrors {
   const errors: PatientFormErrors = {};
@@ -86,7 +89,7 @@ function validatePatientForm(form: PatientFormState): PatientFormErrors {
   } else if (name.length > 100) {
     errors.fullName = 'Name must be 100 characters or fewer.';
   } else if (!NAME_RE.test(name)) {
-    errors.fullName = 'Name can only contain letters, spaces, dots, hyphens, and apostrophes.';
+    errors.fullName = 'Name can only contain letters, spaces, dots, slashes, hyphens, and apostrophes.';
   }
 
   if (form.dateOfBirth) {
@@ -103,8 +106,8 @@ function validatePatientForm(form: PatientFormState): PatientFormErrors {
 
   if (!form.age.trim()) {
     errors.age = 'Age is required.';
-  } else if (!/^\d+$/.test(form.age.trim()) || Number(form.age) > 150) {
-    errors.age = 'Enter a valid age between 0 and 150.';
+  } else if (!/^\d+$/.test(form.age.trim()) || Number(form.age) > AGE_MAX_BY_UNIT[form.ageUnit]) {
+    errors.age = `Enter a valid age between 0 and ${AGE_MAX_BY_UNIT[form.ageUnit]} ${AGE_UNIT_LABELS[form.ageUnit].toLowerCase()}.`;
   }
 
   if (!form.mobileNumber) {
@@ -163,6 +166,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
     fullName:               initial?.fullName               ?? '',
     dateOfBirth:            initial?.dateOfBirth ? initial.dateOfBirth.substring(0, 10) : '',
     age:                    initial?.age != null ? String(initial.age) : '',
+    ageUnit:                initial?.ageUnit ?? 'YEARS',
     gender:                 initial?.gender                 ?? 'MALE',
     mobileNumber:           sanitizeMobile(initial?.mobileNumber ?? ''),
     address:                initial?.address                ?? '',
@@ -223,6 +227,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
           fullName:               form.fullName,
           dateOfBirth:            form.dateOfBirth || undefined,
           age:                    Number(form.age),
+          ageUnit:                form.ageUnit,
           gender:                 form.gender,
           mobileNumber:           form.mobileNumber,
           ...addressPayload(form),
@@ -239,6 +244,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
           ...form,
           dateOfBirth:            form.dateOfBirth            || undefined,
           age:                    Number(form.age),
+          ageUnit:                form.ageUnit,
           aadhaarNumber:          form.aadhaarNumber          || undefined,
           emergencyContactName:   form.emergencyContactName   || undefined,
           emergencyContactMobile: form.emergencyContactMobile || undefined,
@@ -267,6 +273,7 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
         ...form,
         dateOfBirth:            form.dateOfBirth            || undefined,
         age:                    Number(form.age),
+        ageUnit:                form.ageUnit,
         aadhaarNumber:          form.aadhaarNumber          || undefined,
         emergencyContactName:   form.emergencyContactName   || undefined,
         emergencyContactMobile: form.emergencyContactMobile || undefined,
@@ -322,19 +329,49 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
 
             {/* Required fields */}
             <div className="space-y-4">
-              {/* Row 1: Full Name */}
-              <div className="space-y-1">
-                <Label htmlFor="fullName">Full Name *</Label>
-                <Input
-                  id="fullName"
-                  value={form.fullName}
-                  onChange={(e) => set('fullName', e.target.value)}
-                  onBlur={() => touch('fullName')}
-                  placeholder="Enter full name"
-                  aria-invalid={!!fe('fullName')}
-                  className={inputClass('fullName')}
-                />
-                {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
+              {/* Row 1: Full Name | Age */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor="fullName">Full Name *</Label>
+                  <Input
+                    id="fullName"
+                    value={form.fullName}
+                    onChange={(e) => set('fullName', e.target.value)}
+                    onBlur={() => touch('fullName')}
+                    placeholder="e.g. Rahul Mourya S/O Rajesh Mourya"
+                    aria-invalid={!!fe('fullName')}
+                    className={inputClass('fullName')}
+                  />
+                  {fe('fullName') && <p className="text-xs text-destructive">{fe('fullName')}</p>}
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="age">Age *</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="age"
+                      inputMode="numeric"
+                      value={form.age}
+                      onChange={(e) => set('age', e.target.value.replace(/\D/g, '').slice(0, 5))}
+                      onBlur={() => touch('age')}
+                      placeholder="Age"
+                      maxLength={5}
+                      aria-invalid={!!fe('age')}
+                      className={inputClass('age')}
+                    />
+                    <select
+                      aria-label="Age unit"
+                      value={form.ageUnit}
+                      onChange={(e) => set('ageUnit', e.target.value as AgeUnit)}
+                      className="h-10 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {(Object.keys(AGE_UNIT_LABELS) as AgeUnit[]).map((unit) => (
+                        <option key={unit} value={unit}>{AGE_UNIT_LABELS[unit]}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {fe('age') && <p className="text-xs text-destructive">{fe('age')}</p>}
+                </div>
               </div>
 
               {/* Row 2: Date of Birth | Mobile Number */}
@@ -375,24 +412,8 @@ export function PatientFormModal({ mode, initial, onClose, onSuccess }: PatientF
                 </div>
               </div>
 
-              {/* Row 3: Age | Gender | Blood Group */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="age">Age *</Label>
-                  <Input
-                    id="age"
-                    inputMode="numeric"
-                    value={form.age}
-                    onChange={(e) => set('age', e.target.value.replace(/\D/g, '').slice(0, 3))}
-                    onBlur={() => touch('age')}
-                    placeholder="Age in years"
-                    maxLength={3}
-                    aria-invalid={!!fe('age')}
-                    className={inputClass('age')}
-                  />
-                  {fe('age') && <p className="text-xs text-destructive">{fe('age')}</p>}
-                </div>
-
+              {/* Row 3: Gender | Blood Group */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <Label htmlFor="gender">Gender *</Label>
                   <select

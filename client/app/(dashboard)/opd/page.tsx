@@ -14,7 +14,7 @@ import {
   useGetDoctorNurseAssignmentsQuery,
 } from '@/store/api/opd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
-import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useGetPatientByIdQuery, useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListWardsQuery } from '@/store/api/ipd.api';
@@ -58,6 +58,13 @@ import { cn } from '@/lib/utils';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
 import { NavForm } from '@/components/ui/form';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
+import {
+  formatVitalValue,
+  getPatientCategory,
+  getVitalDefinitions,
+  parsePatientVital,
+  type VitalKey,
+} from '@/lib/patient-vitals';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -109,23 +116,11 @@ const TERMINAL: ReadonlySet<OPDVisitStatus> = new Set(['COMPLETED', 'CANCELLED',
 const DEPARTMENT_DOCTOR_MESSAGE = 'Changing the department requires selecting a doctor from the selected department.';
 
 // ─── Vitals (OPD Edit form) ─────────────────────────────────────────────────
-// Mirrors OPDService.updateVisit's DEFAULT_VITALS/merge contract on the
-// backend: weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>"
-// mmHg), sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input
-// strings here (empty string = not entered) and converted to number|null only
-// on submit — see parseVitalsInputs.
-interface VitalsInputState {
-  weight:          string;
-  height:          string;
-  bloodPressure:   string;
-  sugar:           string;
-  bodyTemperature: string;
-  spo2:            string;
-  pulse:           string;
-}
+type VitalsInputState = Record<VitalKey, string>;
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  spo2: '', pulse: '', respiratoryRate: '', headCircumference: '',
 };
 
 function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
@@ -138,49 +133,34 @@ function vitalsToInputs(vitals?: OPDVitals | null): VitalsInputState {
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
     spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
     pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
+    respiratoryRate: vitals.respiratoryRate != null ? String(vitals.respiratoryRate) : '',
+    headCircumference: vitals.headCircumference != null ? String(vitals.headCircumference) : '',
   };
 }
 
-const BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
-
 // Per-field validation messages, keyed by the input they belong to so each
 // one renders directly below its own field rather than in the form banner.
-type VitalsErrors = Partial<Record<keyof VitalsInputState, string>>;
+type VitalsErrors = Partial<Record<VitalKey, string>>;
 
 // Converts the controlled-input strings into the partial vitals payload the
 // PATCH endpoint expects — an empty field becomes `null` (explicitly clears
 // that reading server-side, never leaves it untouched), matching the same
 // ranges OPDController's vitalsSchema validates. Returns every failing field's
 // message instead of a payload when any field fails.
-function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<OPDVitals> } | { errors: VitalsErrors } {
-  const vitals: Partial<OPDVitals> = {};
+function parseVitalsInputs(
+  inputs: VitalsInputState,
+  category: ReturnType<typeof getPatientCategory>,
+): { vitals: Partial<OPDVitals> } | { errors: VitalsErrors } {
+  const vitals: Record<string, number | string | null> = {};
   const errors: VitalsErrors = {};
 
-  const numeric = (
-    key: 'weight' | 'height' | 'sugar' | 'bodyTemperature' | 'spo2' | 'pulse',
-    min: number, max: number, message: string,
-  ) => {
-    const raw = inputs[key].trim();
-    if (raw === '') { vitals[key] = null; return; }
-    const n = Number(raw);
-    if (isNaN(n) || n < min || n > max) errors[key] = message;
-    else vitals[key] = n;
-  };
+  getVitalDefinitions(category).forEach((definition) => {
+    const parsed = parsePatientVital(definition.key, inputs[definition.key], definition);
+    if (parsed.error) errors[definition.key] = parsed.error;
+    else vitals[definition.key] = parsed.value;
+  });
 
-  numeric('weight', 0.5, 500, 'Weight must be between 0.5 and 500 kg.');
-  numeric('height', 20, 300, 'Height must be between 20 and 300 cm.');
-
-  const bp = inputs.bloodPressure.trim();
-  if (bp === '') vitals.bloodPressure = null;
-  else if (!BLOOD_PRESSURE_PATTERN.test(bp)) errors.bloodPressure = 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.';
-  else vitals.bloodPressure = bp;
-
-  numeric('sugar', 10, 1000, 'Sugar must be between 10 and 1000 mg/dL.');
-  numeric('bodyTemperature', 80, 115, 'Body temperature must be between 80 and 115 °F.');
-  numeric('spo2', 50, 100, 'SpO2 must be between 50 and 100 %.');
-  numeric('pulse', 20, 250, 'Pulse must be between 20 and 250 bpm.');
-
-  return Object.keys(errors).length > 0 ? { errors } : { vitals };
+  return Object.keys(errors).length > 0 ? { errors } : { vitals: vitals as Partial<OPDVitals> };
 }
 
 // ─── Visit Detail Panel ───────────────────────────────────────────────────────
@@ -320,6 +300,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const vitalsPatientId = mode === 'edit' ? editPatient.patientId : visit.patientId;
+  const { data: vitalsPatient } = useGetPatientByIdQuery(vitalsPatientId, { skip: !vitalsPatientId });
+  const vitalsCategory = getPatientCategory(vitalsPatient?.patientId === vitalsPatientId ? vitalsPatient : null);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();
@@ -358,7 +341,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
       // the backend rejects any other field from a Receptionist (see
       // RECEPTIONIST_EDITABLE_FIELDS). Vitals are per visit, so they stay with
       // this visit (and are always sent) even when the patient is corrected.
-      const receptionistVitals = parseVitalsInputs(vitalsForm);
+      const receptionistVitals = parseVitalsInputs(vitalsForm, vitalsCategory);
       if ('errors' in receptionistVitals) {
         setVitalsErrors(receptionistVitals.errors);
         return;
@@ -406,7 +389,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
     // Vitals are editable by both the full edit form and the Nurse's
     // notes-only form (see the Vitals section rendered in each below), so
     // validate/include them regardless of which form is active.
-    const vitalsResult = parseVitalsInputs(vitalsForm);
+    const vitalsResult = parseVitalsInputs(vitalsForm, vitalsCategory);
     if ('errors' in vitalsResult) {
       setVitalsErrors(vitalsResult.errors);
       return;
@@ -570,78 +553,30 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
 
   const vitalsFields = (
     <div className="space-y-3 pt-2 border-t">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+      </p>
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-spo2">SpO2 (%)</Label>
-          <Input
-            id="ep-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
-            value={vitalsForm.spo2}
-            onChange={(e) => updateVital('spo2', e.target.value)}
-            {...vitalErrorProps('spo2', 'ep-spo2')}
-          />
-          {vitalError('spo2', 'ep-spo2')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-temp">Body Temperature (°F)</Label>
-          <Input
-            id="ep-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
-            value={vitalsForm.bodyTemperature}
-            onChange={(e) => updateVital('bodyTemperature', e.target.value)}
-            {...vitalErrorProps('bodyTemperature', 'ep-temp')}
-          />
-          {vitalError('bodyTemperature', 'ep-temp')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-bp">Blood Pressure (mmHg)</Label>
-          <Input
-            id="ep-bp" type="text" placeholder="e.g. 120/80"
-            value={vitalsForm.bloodPressure}
-            onChange={(e) => updateVital('bloodPressure', e.target.value)}
-            {...vitalErrorProps('bloodPressure', 'ep-bp')}
-          />
-          {vitalError('bloodPressure', 'ep-bp')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-pulse">Pulse (bpm)</Label>
-          <Input
-            id="ep-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
-            value={vitalsForm.pulse}
-            onChange={(e) => updateVital('pulse', e.target.value)}
-            {...vitalErrorProps('pulse', 'ep-pulse')}
-          />
-          {vitalError('pulse', 'ep-pulse')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-sugar">Sugar (mg/dL)</Label>
-          <Input
-            id="ep-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
-            value={vitalsForm.sugar}
-            onChange={(e) => updateVital('sugar', e.target.value)}
-            {...vitalErrorProps('sugar', 'ep-sugar')}
-          />
-          {vitalError('sugar', 'ep-sugar')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-height">Height (cm)</Label>
-          <Input
-            id="ep-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-            value={vitalsForm.height}
-            onChange={(e) => updateVital('height', e.target.value)}
-            {...vitalErrorProps('height', 'ep-height')}
-          />
-          {vitalError('height', 'ep-height')}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ep-weight">Weight (kg)</Label>
-          <Input
-            id="ep-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-            value={vitalsForm.weight}
-            onChange={(e) => updateVital('weight', e.target.value)}
-            {...vitalErrorProps('weight', 'ep-weight')}
-          />
-          {vitalError('weight', 'ep-weight')}
-        </div>
+        {getVitalDefinitions(vitalsCategory).map((definition) => {
+          const id = `ep-${definition.key}`;
+          return (
+            <div className="space-y-1.5" key={definition.key}>
+              <Label htmlFor={id}>{definition.label} ({definition.unit})</Label>
+              <Input
+                id={id}
+                type={definition.key === 'bloodPressure' ? 'text' : 'number'}
+                min={definition.min}
+                max={definition.max}
+                step={definition.step}
+                placeholder={definition.placeholder}
+                value={vitalsForm[definition.key]}
+                onChange={(e) => updateVital(definition.key, e.target.value)}
+                {...vitalErrorProps(definition.key, id)}
+              />
+              {vitalError(definition.key, id)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -740,14 +675,14 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               ) : null)}
               {f('Notes',           <RichTextDisplay value={visit.notes} />)}
               <div className="mt-3 pt-3 border-t space-y-0">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {f('SpO2',             visit.vitals?.spo2            != null ? `${visit.vitals.spo2} %`    : null)}
-                {f('Body Temperature', visit.vitals?.bodyTemperature != null ? `${visit.vitals.bodyTemperature} °F` : null)}
-                {f('Blood Pressure',   visit.vitals?.bloodPressure   ? `${visit.vitals.bloodPressure} mmHg` : null)}
-                {f('Pulse',            visit.vitals?.pulse           != null ? `${visit.vitals.pulse} bpm` : null)}
-                {f('Sugar',            visit.vitals?.sugar           != null ? `${visit.vitals.sugar} mg/dL` : null)}
-                {f('Height',           visit.vitals?.height          != null ? `${visit.vitals.height} cm`  : null)}
-                {f('Weight',           visit.vitals?.weight          != null ? `${visit.vitals.weight} kg`  : null)}
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                </p>
+                {getVitalDefinitions(vitalsCategory).map((definition) => (
+                  <div key={definition.key}>
+                    {f(definition.label, formatVitalValue(visit.vitals, definition))}
+                  </div>
+                ))}
               </div>
               {f('Visit ID',        <span className="font-mono text-xs">{visit.visitId}</span>)}
               {canViewPayment && (

@@ -40,10 +40,11 @@ export interface CreateOPDVisitRequest {
 // Recorded from the OPD View → Edit form only (not at visit creation, not on
 // Complete). Every field is independently optional/nullable — a doctor/nurse
 // may record only some of them, and any field can be cleared back to null.
-// Units are fixed (see OPDService.updateVisit's DEFAULT_VITALS and the
-// frontend's field labels): weight in kg, height in cm, blood pressure as a
-// "<systolic>/<diastolic>" string in mmHg, sugar in mg/dL, body temperature
-// in °F, SpO2 in %, pulse in bpm.
+// Vitals retain one stable API/storage shape for both age categories.
+// Pediatric-only values are respiratoryRate (/min) and headCircumference (cm);
+// RBS remains stored as `sugar` for compatibility. Units: weight/height/head
+// circumference in kg/cm/cm, blood pressure as "<systolic>/<diastolic>" mmHg,
+// RBS in mg/dL, temperature in °F, SpO2 in %, and pulse in bpm.
 export interface OPDVitals {
   weight:          number | null;
   height:          number | null;
@@ -52,6 +53,8 @@ export interface OPDVitals {
   bodyTemperature: number | null;
   spo2:            number | null;
   pulse:           number | null;
+  respiratoryRate: number | null;
+  headCircumference: number | null;
 }
 
 export interface UpdateOPDVisitRequest {

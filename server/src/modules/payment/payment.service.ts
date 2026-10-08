@@ -29,7 +29,7 @@ import { departmentRepository } from '../department/department.repository';
 import { userRepository }       from '../user/user.repository';
 import { IPatient }             from '../patient/patient.model';
 import { pdfService }        from '../../shared/services/pdf.service';
-import { resolveReceiptHospitalDetails, resolvePatientAge, generateInvoiceNumber } from '../../shared/utils/receipt-details';
+import { resolveReceiptHospitalDetails, resolvePatientAge, resolvePatientAgeUnit, generateInvoiceNumber } from '../../shared/utils/receipt-details';
 import { s3Service }         from '../../shared/services/s3.service';
 import { auditService }      from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
@@ -86,6 +86,7 @@ async function buildPaymentReceipt(input: {
     patientName:   input.patient.fullName,
     patientId:     input.patient.patientId,
     patientAge:    resolvePatientAge(input.patient),
+    patientAgeUnit: resolvePatientAgeUnit(input.patient),
     patientGender: input.patient.gender ?? null,
     patientMobile: input.patient.mobileNumber ?? null,
     description:   input.description,

@@ -111,12 +111,14 @@ export interface NotificationMessage {
  
 export type Gender     = 'MALE' | 'FEMALE' | 'OTHER';
 export type BloodGroup = 'A+' | 'A-' | 'B+' | 'B-' | 'AB+' | 'AB-' | 'O+' | 'O-';
+export type AgeUnit    = 'YEARS' | 'MONTHS' | 'DAYS';
  
 export interface PatientResponse {
   patientId:                 string;
   fullName:                  string;
   dateOfBirth:               string | null;
   age:                       number | null;
+  ageUnit?:                  AgeUnit;
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
@@ -142,6 +144,7 @@ export interface CreatePatientRequest {
   fullName:                  string;
   dateOfBirth?:              string; // YYYY-MM-DD
   age:                       number;
+  ageUnit?:                  AgeUnit;
   gender:                    Gender;
   mobileNumber:              string;
   address:                   string;
@@ -165,6 +168,7 @@ export interface UpdatePatientRequest {
   fullName?:               string;
   dateOfBirth?:            string;
   age?:                    number;
+  ageUnit?:                AgeUnit;
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;
@@ -193,11 +197,9 @@ export interface PatientSearchResult {
 export type OPDVisitStatus = 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
  
 // OPD Vitals — recorded via the OPD View → Edit form only (see
-// server opd.types.ts's OPDVitals for the field/unit contract): weight in kg,
-// height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
-// nullable — a visit with nothing recorded yet still reports the full shape
-// with every value null, never an undefined/missing field.
+// server opd.types.ts's OPDVitals for the field/unit contract). One stored
+// shape supports pediatric and non-pediatric sets; new pediatric fields are
+// optional for compatibility with older API responses.
 export interface OPDVitals {
   weight:          number | null;
   height:          number | null;
@@ -206,6 +208,8 @@ export interface OPDVitals {
   bodyTemperature: number | null;
   spo2:            number | null;
   pulse:           number | null;
+  respiratoryRate?: number | null;
+  headCircumference?: number | null;
 }
 
 export interface OPDVisitResponse {
@@ -558,12 +562,9 @@ export interface ProgressNote {
 }
 
 // IPD Vitals — recorded via the IPD Admission View → Edit form only (see
-// server ipd.types.ts's IPDVitals for the field/unit contract): weight in kg,
-// height in cm, blood pressure as a "<systolic>/<diastolic>" string in mmHg,
-// sugar in mg/dL, body temperature in °F, SpO2 in %, pulse in bpm. Every field is independently
-// nullable — an admission with nothing recorded yet still reports the full
-// shape with every value null, never an undefined/missing field. Mirrors
-// OPDVitals field-for-field.
+// server ipd.types.ts's IPDVitals for the field/unit contract). One stored
+// shape supports pediatric and non-pediatric sets; new pediatric fields are
+// optional for compatibility with older API responses.
 export interface IPDVitals {
   weight:          number | null;
   height:          number | null;
@@ -572,6 +573,8 @@ export interface IPDVitals {
   bodyTemperature: number | null;
   spo2:            number | null;
   pulse:           number | null;
+  respiratoryRate?: number | null;
+  headCircumference?: number | null;
 }
 
 export interface AdmissionResponse {

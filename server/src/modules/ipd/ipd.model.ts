@@ -19,6 +19,8 @@ export interface IIPDVitals {
   bodyTemperature: number | null; // °F
   spo2:            number | null; // %
   pulse:           number | null; // bpm
+  respiratoryRate: number | null; // breaths/min
+  headCircumference: number | null; // cm
 }
 
 const IPDVitalsSchema = new Schema<IIPDVitals>(
@@ -36,6 +38,8 @@ const IPDVitalsSchema = new Schema<IIPDVitals>(
     bodyTemperature: { type: Schema.Types.Mixed, default: null },
     spo2:            { type: Schema.Types.Mixed, default: null },
     pulse:           { type: Schema.Types.Mixed, default: null },
+    respiratoryRate: { type: Schema.Types.Mixed, default: null },
+    headCircumference: { type: Schema.Types.Mixed, default: null },
   },
   { _id: false },
 );
@@ -185,7 +189,7 @@ const ENCRYPTED_IPD_FIELDS = {
     {
       path:         'vitals',
       stringFields: ['bloodPressure'],
-      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature', 'spo2', 'pulse'],
+      numberFields: ['weight', 'height', 'sugar', 'bodyTemperature', 'spo2', 'pulse', 'respiratoryRate', 'headCircumference'],
     },
   ],
   purpose:     EncryptionKeyPurpose.MEDICAL,

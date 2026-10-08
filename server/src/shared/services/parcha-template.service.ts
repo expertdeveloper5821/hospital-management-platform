@@ -67,7 +67,8 @@ export interface ParchaBodySection {
 
 export interface ParchaOverlayInput {
   fieldRows:     ParchaFieldRow[];  // rendered as a 2-column grid, in order
-  vitals:        ParchaFieldRow[];  // always 5 rows (Weight/Height/BP/Sugar/Temp), blank value if unrecorded
+  vitals:        ParchaFieldRow[];  // patient-category vital set, blank value if unrecorded
+  vitalsHeading?: string;
   bodySections:  ParchaBodySection[];
   footerText:    string;
 }
@@ -187,12 +188,12 @@ function drawFieldGrid(
 // spread across whatever height the divider happens to run to), mirroring
 // the HTML print pages' `space-y-*` layout.
 function drawVitalsColumn(
-  page: PDFPage, font: PDFFont, boldFont: PDFFont, vitals: ParchaFieldRow[],
+  page: PDFPage, font: PDFFont, boldFont: PDFFont, heading: string, vitals: ParchaFieldRow[],
   x: number, top: number, width: number,
 ): void {
   const rightPad = 8; // keeps text clear of the divider immediately to its right
   const headingSize = 8;
-  page.drawText('VITALS', { x, y: top - headingSize, size: headingSize, font: boldFont, color: GRAY });
+  page.drawText(heading.toUpperCase(), { x, y: top - headingSize, size: headingSize, font: boldFont, color: GRAY });
 
   const rowHeight = 13;
   const size = 8.5;
@@ -265,7 +266,7 @@ export async function renderParchaOverlay(templateBytes: Buffer, input: ParchaOv
   const boxBottom = BOTTOM_RESERVE + SIGNATURE_RESERVE + FOOTER_RESERVE;
   const boxHeight = Math.max(20, boxTop - boxBottom);
 
-  drawVitalsColumn(page, font, boldFont, input.vitals, contentX, boxTop, VITALS_WIDTH);
+  drawVitalsColumn(page, font, boldFont, input.vitalsHeading ?? 'Vitals', input.vitals, contentX, boxTop, VITALS_WIDTH);
 
   // Single vertical divider between Vitals and the clinical column — spans
   // the full content-row height (boxHeight), from its top to its bottom,

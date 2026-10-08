@@ -418,9 +418,8 @@ function ParchaTemplateSection({ tenantId }: { tenantId?: string }) {
 
 // ─── OPD Payment Validity Settings ─────────────────────────────────────────────
 // Hospital-configurable: how many days a completed OPD payment covers further
-// OPD visits before a new payment is required (default 15, set on the backend
-// — see tenant.constants.ts). Drives OPDService.getPaymentValidity, consulted
-// by the New OPD Visit form.
+// OPD visits before a new payment is required (default 5, set on the backend
+// — see tenant.constants.ts). Also drives the OPD slip's Valid Till date.
 
 function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
   const { data: opdSettings, isLoading } = useGetOpdSettingsQuery(tenantId ?? '', { skip: !tenantId });
@@ -464,8 +463,9 @@ function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
         <h2 className="text-lg font-semibold tracking-tight">OPD Payment Validity</h2>
         <p className="text-sm text-muted-foreground mt-1">
           Number of days a completed OPD payment remains valid — a patient can have new OPD
-          visits created within this window without paying again. Once it lapses, the next
-          OPD visit requires a new payment.
+          visits created within this window without paying again. This period also controls
+          the OPD slip&apos;s Valid Till date, counting the OPD creation date as day one. Once it lapses,
+          the next OPD visit requires a new payment.
         </p>
       </div>
 

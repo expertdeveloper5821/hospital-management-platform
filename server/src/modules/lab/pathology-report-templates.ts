@@ -431,6 +431,79 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
     key: 'FOBT', testName: 'Stool Occult Blood Test (FOBT)',
     parameters: [select('fobt', 'Faecal Occult Blood', NEG_POS, ['Negative'])],
   },
+  // ─── New tests ────────────────────────────────────────────────────────────
+  {
+    key: 'DP_PROFILE', testName: 'DP Profile',
+    parameters: [
+      num('fbs',   'Fasting Blood Sugar (FBS)',       'mg/dL', r(70, 100, '70 - 100')),
+      num('ppbs',  'Post-Prandial Blood Sugar (PPBS)', 'mg/dL', r(70, 140, '70 - 140')),
+      num('hba1c', 'HbA1c (Glycated Haemoglobin)',   '%',     below(5.7, 'Normal: < 5.7; Prediabetes: 5.7 - 6.4; Diabetes: >= 6.5')),
+      num('eag',   'Estimated Average Glucose (eAG)', 'mg/dL', below(117, '< 117'), { readOnly: true, calculationType: 'estimated' }),
+      num('fastingInsulin', 'Fasting Insulin',        'µIU/mL', r(2.0, 25.0, '2.0 - 25.0')),
+      num('homaIr', 'HOMA-IR',                        null,    below(2.5, '< 2.5 (optimal < 1.0)'), { readOnly: true, calculationType: 'calculated' }),
+    ],
+  },
+  {
+    key: 'C_PEPTIDE', testName: 'C-Peptide',
+    parameters: [
+      num('cPeptideFasting',      'C-Peptide (Fasting)',           'ng/mL', r(1.1, 4.4, '1.1 - 4.4')),
+      num('cPeptideStimulated',   'C-Peptide (Stimulated / Random)', 'ng/mL', r(1.5, 6.0, '1.5 - 6.0')),
+    ],
+  },
+  {
+    key: 'FASTING_INSULIN', testName: 'Fasting Insulin',
+    parameters: [
+      num('fastingInsulin', 'Fasting Insulin',  'µIU/mL', r(2.0, 25.0, '2.0 - 25.0')),
+      num('fastingGlucose', 'Fasting Glucose',  'mg/dL',  r(70, 100, '70 - 100')),
+      num('homaIr',         'HOMA-IR',          null,     below(2.5, '< 2.5 (optimal < 1.0)'), { readOnly: true, calculationType: 'calculated' }),
+    ],
+  },
+  {
+    key: 'SPUTUM_AFB', testName: 'Sputum AFB',
+    parameters: [
+      select('specimenType', 'Specimen Type',
+        ['Sputum (Spot)', 'Sputum (Early Morning)', 'Sputum (Induced)', 'Bronchial Wash', 'BAL'],
+        undefined),
+      select('smearResult', 'Smear Result (ZN Stain)',
+        [
+          'No AFB Seen (0)',
+          'Scanty (1 - 9 AFB / 100 fields)',
+          '1+ (10 - 99 AFB / 100 fields)',
+          '2+ (1 - 10 AFB / field)',
+          '3+ (> 10 AFB / field)',
+        ],
+        ['No AFB Seen (0)']),
+      select('grading', 'RNTCP / NTEP Grading',
+        ['Negative', 'Scanty', '1+', '2+', '3+'],
+        ['Negative']),
+      text('remarks', 'Remarks', null, 'Negative'),
+    ],
+  },
+  {
+    key: 'UREA', testName: 'Urea',
+    parameters: [
+      num('bloodUrea', 'Blood Urea',                'mg/dL', r(17, 43, '17 - 43')),
+      num('bun',       'Blood Urea Nitrogen (BUN)', 'mg/dL', r(7, 20, '7 - 20'), { readOnly: true, calculationType: 'conversion' }),
+    ],
+  },
+  {
+    key: 'CREATININE', testName: 'Creatinine',
+    parameters: [
+      sexed('creatinine', 'Serum Creatinine', 'mg/dL', r(0.7, 1.3, '0.7 - 1.3'), r(0.6, 1.1, '0.6 - 1.1')),
+    ],
+  },
+  {
+    key: 'VITAMIN_PROFILE', testName: 'Vitamin Profile',
+    parameters: [
+      num('vitaminD',    '25-Hydroxy Vitamin D',           'ng/mL',
+        r(30, 100, 'Deficient: < 20; Insufficient: 20 - 29; Sufficient: 30 - 100; Toxic: > 100')),
+      num('vitaminB12',  'Vitamin B12 (Cyanocobalamin)',   'pg/mL',  r(211, 911, '211 - 911')),
+      num('vitaminB9',   'Folic Acid (Vitamin B9)',        'ng/mL',  r(3.1, 20.5, '3.1 - 20.5')),
+      num('vitaminA',    'Vitamin A (Retinol)',            'µg/dL',  r(30, 65, '30 - 65')),
+      num('vitaminE',    'Vitamin E (alpha-Tocopherol)',   'mg/L',   r(5.5, 17.0, '5.5 - 17.0')),
+      num('vitaminC',    'Vitamin C (Ascorbic Acid)',      'mg/dL',  r(0.4, 2.0, '0.4 - 2.0')),
+    ],
+  },
 ];
 
 // Any test name outside the catalog — a single free-text result line.

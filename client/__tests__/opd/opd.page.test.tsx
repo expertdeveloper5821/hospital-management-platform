@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 
 const mockGetOPDPaymentValidity    = jest.fn();
 const mockSearchPatients           = jest.fn();
+const mockGetPatientById            = jest.fn().mockReturnValue({ data: undefined });
 const mockUsers                    = jest.fn().mockReturnValue({ data: { data: [] }, isFetching: false });
 const mockListDepartments          = jest.fn().mockReturnValue({ data: undefined });
 const mockGetAvailableOpdNurses    = jest.fn().mockReturnValue({ data: [] });
@@ -55,6 +56,7 @@ jest.mock('@/store/api/payment.api', () => ({
 
 jest.mock('@/store/api/patient.api', () => ({
   useSearchPatientsQuery: (...args: unknown[]) => mockSearchPatients(...args),
+  useGetPatientByIdQuery: (...args: unknown[]) => mockGetPatientById(...args),
 }));
 
 jest.mock('@/store/api/user.api', () => ({
@@ -901,8 +903,8 @@ describe('OPDPage — Nurse notes-only Visit edit', () => {
     expect(screen.getByText('Notes')).toBeInTheDocument();
     // Vitals is editable for a Nurse, unlike diagnosis/prescription.
     expect(screen.getByLabelText(/weight/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/height/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/blood pressure/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('RBS (mg/dL)')).toBeInTheDocument();
+    expect(screen.getByLabelText('BP (mmHg)')).toBeInTheDocument();
     // Everything else from the full edit form must be absent, not just disabled.
     expect(screen.queryByLabelText(/department/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Assigned Doctors')).not.toBeInTheDocument();
@@ -976,6 +978,7 @@ describe('OPDPage — Diagnosis/Prescription persistence across Edit and Complet
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetPatientById.mockReturnValue({ data: undefined });
     mockRole = 'DOCTOR';
     mockUserId = 'doc-1';
     mockUsers.mockReturnValue({ data: { data: [DOCTOR_1] }, isFetching: false });
@@ -1048,6 +1051,7 @@ describe('OPDPage — View/Edit doctor & nurse multi-selects', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetPatientById.mockReturnValue({ data: undefined });
     mockRole = 'DOCTOR';
     mockUserId = 'doc-1';
     mockUsers.mockReturnValue({ data: { data: [DOCTOR_1, DOCTOR_2] }, isFetching: false });
@@ -1129,12 +1133,16 @@ describe('OPD Vitals — View/Edit', () => {
     doctorIds: ['doc-1'], nurseIds: [], departmentId: null,
     visitDate: '2026-05-15T00:00:00.000Z', queueNumber: 1, status: 'OPEN',
     diagnosis: null, prescription: null, notes: null,
-    vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72 },
+    vitals: {
+      weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95,
+      bodyTemperature: 98.6, spo2: 98, pulse: 72, respiratoryRate: 18, headCircumference: 55,
+    },
     createdAt: '2026-05-15T00:00:00.000Z', updatedAt: '2026-05-15T00:00:00.000Z',
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockGetPatientById.mockReturnValue({ data: undefined });
     mockRole = 'DOCTOR';
     mockUserId = 'doc-1';
     mockUsers.mockReturnValue({ data: { data: [DOCTOR_1] }, isFetching: false });
@@ -1150,10 +1158,33 @@ describe('OPD Vitals — View/Edit', () => {
     await user.click(screen.getByText('Ravi Kumar'));
 
     expect(await screen.findByText('68.5 kg')).toBeInTheDocument();
-    expect(screen.getByText('172 cm')).toBeInTheDocument();
+    expect(screen.queryByText('172 cm')).not.toBeInTheDocument();
     expect(screen.getByText('120/80 mmHg')).toBeInTheDocument();
     expect(screen.getByText('95 mg/dL')).toBeInTheDocument();
     expect(screen.getByText('98.6 °F')).toBeInTheDocument();
+    expect(screen.getByText('Non-Pediatric Vitals')).toBeInTheDocument();
+  });
+
+  test('selects the pediatric set for an infant and omits non-pediatric fields', async () => {
+    mockGetPatientById.mockReturnValue({
+      data: { patientId: 'PAT-1', age: 18, ageUnit: 'MONTHS', dateOfBirth: null },
+    });
+    const user = userEvent.setup();
+    render(<OPDPage />);
+
+    await user.click(screen.getByText('Ravi Kumar'));
+    await user.click(await screen.findByRole('button', { name: /edit visit/i }));
+
+    expect(screen.getByText('Pediatric Vitals')).toBeInTheDocument();
+    expect(screen.getByLabelText('PR (bpm)')).toHaveValue(72);
+    expect(screen.getByLabelText('RR (/min)')).toHaveValue(18);
+    expect(screen.getByLabelText('SpO₂ (%)')).toBeInTheDocument();
+    expect(screen.getByLabelText('BP (mmHg)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Height/Length (cm)')).toHaveValue(172);
+    expect(screen.getByLabelText('Weight (kg)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Head Circumference (cm)')).toHaveValue(55);
+    expect(screen.queryByLabelText('RBS (mg/dL)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Temperature (°F)')).not.toBeInTheDocument();
   });
 
   test('Edit mode pre-fills the Vitals inputs from previously saved values', async () => {
@@ -1164,10 +1195,10 @@ describe('OPD Vitals — View/Edit', () => {
     await user.click(await screen.findByRole('button', { name: /edit visit/i }));
 
     expect(screen.getByLabelText(/weight/i)).toHaveValue(68.5);
-    expect(screen.getByLabelText(/height/i)).toHaveValue(172);
-    expect(screen.getByLabelText(/blood pressure/i)).toHaveValue('120/80');
-    expect(screen.getByLabelText(/sugar/i)).toHaveValue(95);
-    expect(screen.getByLabelText(/body temperature/i)).toHaveValue(98.6);
+    expect(screen.getByLabelText('BP (mmHg)')).toHaveValue('120/80');
+    expect(screen.getByLabelText('RBS (mg/dL)')).toHaveValue(95);
+    expect(screen.getByLabelText('Temperature (°F)')).toHaveValue(98.6);
+    expect(screen.getByLabelText('PR (bpm)')).toHaveValue(72);
   });
 
   test('saving Vitals sends numeric fields as numbers and blank fields as null', async () => {
@@ -1180,13 +1211,13 @@ describe('OPD Vitals — View/Edit', () => {
 
     await user.clear(screen.getByLabelText(/weight/i));
     await user.type(screen.getByLabelText(/weight/i), '70.2');
-    await user.clear(screen.getByLabelText(/blood pressure/i)); // clear → should send null
+    await user.clear(screen.getByLabelText('BP (mmHg)')); // clear → should send null
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     await waitFor(() => expect(mockUpdateVisit).toHaveBeenCalled());
     const sentBody = mockUpdateVisit.mock.calls[0][0] as { vitals: Record<string, unknown> };
     expect(sentBody.vitals).toEqual({
-      weight: 70.2, height: 172, bloodPressure: null, sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
+      weight: 70.2, bloodPressure: null, sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
     });
   });
 
@@ -1220,18 +1251,18 @@ describe('OPD Vitals — View/Edit', () => {
 
     await user.clear(screen.getByLabelText(/weight/i));
     await user.type(screen.getByLabelText(/weight/i), '9999');
-    await user.clear(screen.getByLabelText(/pulse/i));
-    await user.type(screen.getByLabelText(/pulse/i), '5');
+    await user.clear(screen.getByLabelText('PR (bpm)'));
+    await user.type(screen.getByLabelText('PR (bpm)'), '5');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     const weightError = await screen.findByText(/weight must be between/i);
-    const pulseError  = screen.getByText(/pulse must be between/i);
+    const pulseError  = screen.getByText(/PR must be between/i);
     expect(screen.getByLabelText(/weight/i).parentElement).toContainElement(weightError);
-    expect(screen.getByLabelText(/pulse/i).parentElement).toContainElement(pulseError);
+    expect(screen.getByLabelText('PR (bpm)').parentElement).toContainElement(pulseError);
     expect(mockUpdateVisit).not.toHaveBeenCalled();
 
-    await user.type(screen.getByLabelText(/pulse/i), '0');
-    expect(screen.queryByText(/pulse must be between/i)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('PR (bpm)'), '0');
+    expect(screen.queryByText(/PR must be between/i)).not.toBeInTheDocument();
     expect(screen.getByText(/weight must be between/i)).toBeInTheDocument();
   });
 
@@ -1242,12 +1273,12 @@ describe('OPD Vitals — View/Edit', () => {
     await user.click(screen.getByText('Ravi Kumar'));
     await user.click(await screen.findByRole('button', { name: /edit visit/i }));
 
-    await user.clear(screen.getByLabelText(/blood pressure/i));
-    await user.type(screen.getByLabelText(/blood pressure/i), 'high');
+    await user.clear(screen.getByLabelText('BP (mmHg)'));
+    await user.type(screen.getByLabelText('BP (mmHg)'), 'high');
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     const bpError = await screen.findByText(/blood pressure must be in the format/i);
-    expect(screen.getByLabelText(/blood pressure/i).parentElement).toContainElement(bpError);
+    expect(screen.getByLabelText('BP (mmHg)').parentElement).toContainElement(bpError);
     expect(mockUpdateVisit).not.toHaveBeenCalled();
   });
 

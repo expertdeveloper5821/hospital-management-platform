@@ -162,6 +162,31 @@ describe('POST /api/patients', () => {
     expect(res.body.data.patientId).toBe('PAT-TH01');
   });
 
+  test('201 — stores a parent-relation name and infant age unit', async () => {
+    const tenant = await seedTenant();
+    const user   = await seedUser(tenant._id.toString(), 'infant@h.com', UserRole.RECEPTIONIST);
+    const token  = tokenFor(user._id.toString(), tenant._id.toString(), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .post('/api/patients')
+      .set(bearer(token))
+      .send({
+        ...VALID_PATIENT_BODY,
+        fullName: 'Rahul Mourya S/O Rajesh Mourya',
+        dateOfBirth: '2026-10-06',
+        age: 2,
+        ageUnit: 'DAYS',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.fullName).toBe('Rahul Mourya S/O Rajesh Mourya');
+    expect(res.body.data.age).toBe(2);
+    expect(res.body.data.ageUnit).toBe('DAYS');
+
+    const stored = await PatientModel.findOne({ patientId: res.body.data.patientId }).lean();
+    expect(stored?.ageUnit).toBe('DAYS');
+  });
+
   test('UHIDs are sequential per hospital and independent across hospitals', async () => {
     const narayan = await seedTenant('Narayan Hospital');
     const nova    = await seedTenant('Nova Hospital'); // same initials, own sequence

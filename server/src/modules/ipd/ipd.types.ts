@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AgeUnit } from '../patient/patient.types';
 import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
 
 // ─── AdmissionStatus ──────────────────────────────────────────────────────────
@@ -83,9 +84,9 @@ export type DischargePatientInput = z.infer<typeof DischargePatientSchema>;
 // creation, not on discharge) — mirrors OPD's vitals contract (see
 // opd.types.ts's OPDVitals) field-for-field. Every field is independently
 // optional/nullable, and any field can be cleared back to null. Units are
-// fixed: weight in kg, height in cm, blood pressure as a
-// "<systolic>/<diastolic>" string in mmHg, sugar in mg/dL, body temperature
-// in °F.
+// fixed: weight/height/head circumference in kg/cm/cm, blood pressure as a
+// "<systolic>/<diastolic>" string in mmHg, RBS (stored as sugar) in mg/dL,
+// body temperature in °F, SpO2 in %, pulse in bpm and respiratory rate /min.
 export interface IPDVitals {
   weight:          number | null;
   height:          number | null;
@@ -94,6 +95,8 @@ export interface IPDVitals {
   bodyTemperature: number | null;
   spo2:            number | null;
   pulse:           number | null;
+  respiratoryRate: number | null;
+  headCircumference: number | null;
 }
 
 export const ListAdmissionsQuerySchema = z.object({
@@ -174,6 +177,7 @@ export interface DischargeSummaryPatientInfo {
   patientId:        string;
   fullName:         string;
   age:              number;
+  ageUnit:          AgeUnit;
   gender:           string;
   mobileNumber:     string;
   address:          string | null;

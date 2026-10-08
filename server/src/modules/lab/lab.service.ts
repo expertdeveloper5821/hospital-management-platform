@@ -50,7 +50,7 @@ import { IPayment }          from '../payment/payment.model';
 import { IPatient }          from '../patient/patient.model';
 import { PaymentReferenceType, PaymentResponse } from '../payment/payment.types';
 import { pdfService }        from '../../shared/services/pdf.service';
-import { resolveReceiptHospitalDetails, resolvePatientAge, formatHospitalAddress, generateInvoiceNumber } from '../../shared/utils/receipt-details';
+import { resolveReceiptHospitalDetails, resolvePatientAge, resolvePatientAgeUnit, formatHospitalAddress, generateInvoiceNumber } from '../../shared/utils/receipt-details';
 import { opdRepository }        from '../opd/opd.repository';
 import { ipdRepository }        from '../ipd/ipd.repository';
 import { departmentRepository } from '../department/department.repository';
@@ -218,6 +218,7 @@ async function renderLabReceipt(input: {
     patientName:                patient.fullName,
     patientId:                  patient.patientId,
     patientAge:                 resolvePatientAge(patient),
+    patientAgeUnit:             resolvePatientAgeUnit(patient),
     patientGender:              patient.gender ?? null,
     patientMobile:              patient.mobileNumber ?? null,
     labCategory:                kind === 'pathology' ? 'PATHOLOGY' : 'RADIOLOGY',
@@ -570,6 +571,25 @@ function applyPathologyCalculations(
   if (template.key === 'KFT') {
     const urea = val('urea');
     if (urea !== null) setIfBlank('bun', urea * 28 / 60);
+  }
+
+  if (template.key === 'UREA') {
+    const urea = val('bloodUrea');
+    if (urea !== null) setIfBlank('bun', urea * 28 / 60);
+  }
+
+  if (template.key === 'DP_PROFILE') {
+    const a1c = val('hba1c');
+    if (a1c !== null) setIfBlank('eag', (28.7 * a1c) - 46.7);
+    const glucose = val('fbs');
+    const insulin = val('fastingInsulin');
+    if (glucose !== null && insulin !== null) setIfBlank('homaIr', (glucose * insulin) / 405, 3);
+  }
+
+  if (template.key === 'FASTING_INSULIN') {
+    const glucose = val('fastingGlucose');
+    const insulin = val('fastingInsulin');
+    if (glucose !== null && insulin !== null) setIfBlank('homaIr', (glucose * insulin) / 405, 3);
   }
 
   if (template.key === 'LIPID') {
@@ -1112,6 +1132,7 @@ export class LabService {
         fullName:     patient.fullName,
         patientId:    patient.patientId,
         age:          resolvePatientAge(patient),
+        ageUnit:      resolvePatientAgeUnit(patient),
         gender:       patient.gender ?? null,
         mobileNumber: patient.mobileNumber ?? null,
         address:      patient.address ?? null,

@@ -1331,10 +1331,12 @@ const ADM_RC_OLD   = 'b3000000-0000-0000-0000-000000000002';
 const ADM_RC_OTHER = 'b3000000-0000-0000-0000-000000000003';
 
 const RC_VITALS = {
-  weight: 70, height: 170, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
+  weight: 70, height: 170, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6,
+  spo2: 98, pulse: 72, respiratoryRate: null, headCircumference: null,
 };
 const EMPTY_VITALS = {
   weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+  respiratoryRate: null, headCircumference: null,
 };
 
 async function seedOtherTenant() {
@@ -1622,6 +1624,25 @@ describe('DELETE /api/ipd/admissions/:admissionId', () => {
 });
 
 describe('IPD vitals are per admission', () => {
+  test('allows a newborn weight below 0.5 kg when the age is recorded in days', async () => {
+    const tenant = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    await PatientModel.updateOne(
+      { tenantId: toId(tenant), patientId: patient.patientId },
+      { $set: { age: 1, ageUnit: 'DAYS' } },
+    );
+    await seedAdmission(toId(tenant));
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: { weight: 0.2 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals.weight).toBe(0.2);
+  });
+
   test('a new admission starts with empty vitals even when an earlier admission recorded them', async () => {
     const tenant  = await seedTenant();
     const patient = await seedPatient(toId(tenant));

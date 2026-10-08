@@ -6,6 +6,7 @@ import type { OPDVisitResponse, PatientResponse } from '@/store/types';
 
 const mockGetVisit   = jest.fn();
 const mockGetPatient = jest.fn();
+const mockGetOpdSettings = jest.fn();
 
 jest.mock('@/store/api/opd.api', () => ({
   useGetOPDVisitByIdQuery: (...args: unknown[]) => mockGetVisit(...args),
@@ -27,9 +28,13 @@ jest.mock('@/store/api/user.api', () => ({
   useListUsersQuery: () => ({ data: { data: [] } }),
 }));
 
+jest.mock('@/store/api/tenant.api', () => ({
+  useGetOpdSettingsQuery: (...args: unknown[]) => mockGetOpdSettings(...args),
+}));
+
 jest.mock('@/store/hooks', () => ({
   useAppSelector: (selector: (s: unknown) => unknown) =>
-    selector({ auth: { branding: { displayName: 'Test Hospital' } } }),
+    selector({ auth: { branding: { displayName: 'Test Hospital' }, profile: { tenantId: 't1' } } }),
 }));
 
 // The page auto-fires window.print() 300ms after data loads — jsdom has no
@@ -79,7 +84,10 @@ const BASE_VISIT: OPDVisitResponse = {
   diagnosis:    null,
   prescription: null,
   notes:        null,
-  vitals:       { weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null },
+  vitals:       {
+    weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null,
+    spo2: null, pulse: null, respiratoryRate: null, headCircumference: null,
+  },
   createdAt:    '2026-05-15T00:00:00.000Z',
   updatedAt:    '2026-05-15T00:00:00.000Z',
 };
@@ -87,6 +95,7 @@ const BASE_VISIT: OPDVisitResponse = {
 function setup(visitOverrides: Partial<OPDVisitResponse> = {}) {
   mockGetVisit.mockReturnValue({ data: { ...BASE_VISIT, ...visitOverrides }, isLoading: false, isError: false });
   mockGetPatient.mockReturnValue({ data: BASE_PATIENT, isLoading: false, isError: false });
+  mockGetOpdSettings.mockReturnValue({ data: { validityDays: 5 }, isLoading: false, isError: false });
 }
 
 describe('OPD Parcha print page — Vitals section', () => {
@@ -94,27 +103,49 @@ describe('OPD Parcha print page — Vitals section', () => {
     jest.clearAllMocks();
   });
 
-  test('renders the Vitals heading and every saved vital with its short label', () => {
+  test('renders the non-pediatric vitals set in order', () => {
     setup({
       vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 97, pulse: 76 },
     });
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
     expect(screen.getByText('Vitals')).toBeInTheDocument();
+    expect(screen.queryByText('Non-Pediatric Vitals')).not.toBeInTheDocument();
     expect(screen.getByText('Weight')).toBeInTheDocument();
     expect(screen.getByText('68.5')).toBeInTheDocument();
-    expect(screen.getByText('Height')).toBeInTheDocument();
-    expect(screen.getByText('172')).toBeInTheDocument();
     expect(screen.getByText('BP')).toBeInTheDocument();
     expect(screen.getByText('120/80')).toBeInTheDocument();
-    expect(screen.getByText('Sugar')).toBeInTheDocument();
+    expect(screen.getByText('RBS')).toBeInTheDocument();
     expect(screen.getByText('95')).toBeInTheDocument();
     expect(screen.getByText('Temp')).toBeInTheDocument();
     expect(screen.getByText('98.6')).toBeInTheDocument();
-    expect(screen.getByText('SpO2')).toBeInTheDocument();
+    expect(screen.getByText('SpO₂')).toBeInTheDocument();
     expect(screen.getByText('97')).toBeInTheDocument();
-    expect(screen.getByText('Pulse')).toBeInTheDocument();
+    expect(screen.getByText('PR')).toBeInTheDocument();
     expect(screen.getByText('76')).toBeInTheDocument();
+  });
+
+  test('renders the pediatric vitals set for a patient whose age is in months', () => {
+    setup({
+      vitals: {
+        weight: 6.5, height: 65, bloodPressure: '90/60', sugar: 95,
+        bodyTemperature: 98.6, spo2: 98, pulse: 120, respiratoryRate: 30, headCircumference: 40,
+      },
+    });
+    mockGetPatient.mockReturnValue({
+      data: { ...BASE_PATIENT, dateOfBirth: null, age: 18, ageUnit: 'MONTHS' },
+      isLoading: false,
+      isError: false,
+    });
+    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    expect(screen.getByText('Vitals')).toBeInTheDocument();
+    expect(screen.queryByText('Pediatric Vitals')).not.toBeInTheDocument();
+    for (const label of ['PR', 'RR', 'SpO₂', 'BP', 'Height', 'Weight', 'Head Circ.']) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText('RBS')).not.toBeInTheDocument();
+    expect(screen.queryByText('Temp')).not.toBeInTheDocument();
   });
 
   test('a vital that was never recorded renders as a blank line, not a placeholder like "N/A" or "—"', () => {
@@ -223,12 +254,22 @@ describe('OPD Parcha print page — unrelated content unchanged', () => {
     expect(screen.getByText('Test Hospital')).toBeInTheDocument();
     expect(screen.getByText('Ravi Kumar')).toBeInTheDocument();
     expect(screen.getByText('PAT-TEST0001')).toBeInTheDocument();
-    // Visit ID is no longer printed; "Valid Till" (registration + 5 days)
+    // Visit ID is no longer printed; "Valid Till" uses the OPD date and
+    // counts it as the first day of the configured validity period.
     // replaces "Registered On".
     expect(screen.queryByText('OPD-PRINT001')).not.toBeInTheDocument();
     expect(screen.queryByText(/Registered On/)).not.toBeInTheDocument();
-    expect(screen.getByText('06 Jan 2026')).toBeInTheDocument();
+    expect(screen.getByText('19 May 2026')).toBeInTheDocument();
     expect(screen.getByText(/Doctor's Signature/)).toBeInTheDocument();
-    expect(screen.getByText(/valid for 15 days/)).toBeInTheDocument();
+    expect(screen.getByText(/valid for 5 days/)).toBeInTheDocument();
+  });
+
+  test('Valid Till follows the validity period configured in Branding settings', () => {
+    setup();
+    mockGetOpdSettings.mockReturnValue({ data: { validityDays: 3 }, isLoading: false, isError: false });
+    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    expect(screen.getByText('17 May 2026')).toBeInTheDocument();
+    expect(screen.getByText(/valid for 3 days/)).toBeInTheDocument();
   });
 });

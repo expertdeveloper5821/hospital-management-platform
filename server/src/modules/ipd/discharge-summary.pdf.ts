@@ -4,6 +4,8 @@ import { parseRichTextToBlocks, renderRichTextBlocks } from '../../shared/servic
 import {
   hexToRgb, getContrastTextColor, fetchImageBuffer, ReportHospitalInfo,
 } from '../../shared/services/report-letterhead.pdf';
+import { formatPatientAge, isPediatricPatient } from '../../shared/utils/patient-age';
+import { getPatientVitalDefinitions } from '../../shared/utils/patient-vitals';
 
 // The letterhead helpers now live in shared/services/report-letterhead.pdf.ts
 // (reused by other report PDFs) — re-exported for existing importers.
@@ -232,7 +234,7 @@ export async function buildDischargeSummaryPdf(
       const cells: Array<[string, string | null]> = [
         ['Patient Name',   p.fullName],
         ['UHID',           p.patientId],
-        ['Age / Gender',   `${p.age} years / ${toDisplay(p.gender)}`],
+        ['Age / Gender',   `${formatPatientAge(p.age, p.ageUnit) ?? '—'} / ${toDisplay(p.gender)}`],
         ['Mobile Number',  p.mobileNumber],
         ['Admission Date', formatDate(a.admissionDate)],
         ['Discharge Date', formatDate(a.dischargeDate)],
@@ -296,13 +298,16 @@ export async function buildDischargeSummaryPdf(
       const v = a.vitals;
       const withUnit = (val: number | string | null | undefined, unit: string): string =>
         val === null || val === undefined || val === '' ? '—' : `${val} ${unit}`;
-      if (v && [v.spo2, v.bloodPressure, v.bodyTemperature, v.sugar, v.height, v.weight]
-        .some((x) => x !== null && x !== undefined && x !== '')) {
-        sectionHeading('Vitals');
-        const vitalRows: Array<Array<[string, string]>> = [
-          [['SpO2', withUnit(v.spo2, '%')], ['BP', withUnit(v.bloodPressure, 'mmHg')], ['Temperature', withUnit(v.bodyTemperature, '°F')]],
-          [['Sugar', withUnit(v.sugar, 'mg/dL')], ['Height', withUnit(v.height, 'cm')], ['Weight', withUnit(v.weight, 'kg')]],
-        ];
+      const pediatric = isPediatricPatient(p.age, p.ageUnit);
+      const vitalDefinitions = getPatientVitalDefinitions(pediatric);
+      if (v && vitalDefinitions.some(({ key }) => v[key] !== null && v[key] !== undefined && v[key] !== '')) {
+        sectionHeading(pediatric ? 'Pediatric Vitals' : 'Non-Pediatric Vitals');
+        const vitalCells: Array<[string, string]> = vitalDefinitions.map((definition) => [
+          definition.label,
+          withUnit(v[definition.key], definition.unit),
+        ]);
+        const vitalRows: Array<Array<[string, string]>> = [];
+        for (let i = 0; i < vitalCells.length; i += 3) vitalRows.push(vitalCells.slice(i, i + 3));
         const rowHeights = vitalRows.map((row) =>
           Math.max(...row.map(([l, val], c) => cellText(l, val, PAGE_MARGIN + c * (colWidth + COL_GAP), doc.y, colWidth, false))));
         ensureSpace(rowHeights.reduce((s, h) => s + h + 4, 0));

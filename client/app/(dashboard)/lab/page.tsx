@@ -264,6 +264,13 @@ const PATHOLOGY_TEST_TYPES = [
   'Pregnancy Test (Urine β-hCG)',
   'Stool Routine & Microscopy',
   'Stool Occult Blood Test (FOBT)',
+  'DP Profile',
+  'C-Peptide',
+  'Fasting Insulin',
+  'Sputum AFB',
+  'Urea',
+  'Creatinine',
+  'Vitamin Profile',
 ] as const;
 
 // Option ids are index-based so the listbox's DOM ids stay free of spaces/parens.
