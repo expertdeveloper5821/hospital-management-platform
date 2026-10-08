@@ -7,12 +7,20 @@ import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
 import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListUsersQuery } from '@/store/api/user.api';
+import { useGetOpdSettingsQuery } from '@/store/api/tenant.api';
 import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
+import { formatPatientResponseAge } from '@/lib/patient-age';
+import { getPatientCategory, getVitalDefinitions, getVitalSlipLabel } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
 }
 
 // True when a (possibly rich-text) value has visible text. Empty optional
@@ -21,25 +29,19 @@ function hasText(value: string | null | undefined): boolean {
   return !!value && value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim() !== '';
 }
 
-// Slip validity: 5 calendar days after the patient's registration date.
-// setDate() rolls over month/year boundaries using each month's real length
-// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
-const SLIP_VALIDITY_DAYS = 5;
-function computeValidTill(registeredAt: string): string {
-  const d = new Date(registeredAt);
-  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+// Count the OPD creation date as day one and do calendar arithmetic in the
+// hospital's timezone so the printed date is stable across browser locales.
+function computeValidTill(createdAt: string, validityDays: number): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(createdAt));
+  const datePart = (type: 'year' | 'month' | 'day') => Number(parts.find((part) => part.type === type)?.value);
+  const d = new Date(Date.UTC(datePart('year'), datePart('month') - 1, datePart('day')));
+  d.setUTCDate(d.getUTCDate() + validityDays - 1);
   return d.toISOString();
-}
-
-// Mirrors server/src/shared/services/pdf.service.ts calculateAge — kept in
-// sync manually since the client has no shared date-math utility yet.
-function calculateAge(dob: string): number {
-  const birth = new Date(dob);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return Math.max(0, age);
 }
 
 function toDisplay(str: string): string {
@@ -104,6 +106,7 @@ function ClinicalField({
 export default function OPDParchaPrintPage({ params }: { params: { visitId: string } }) {
   const { visitId } = params;
   const branding = useAppSelector((s) => s.auth.branding);
+  const tenantId = useAppSelector((s) => s.auth.profile?.tenantId);
 
   const { data: visit, isLoading: visitLoading, isError: visitError } = useGetOPDVisitByIdQuery(visitId);
   const { data: patient, isLoading: patientLoading, isError: patientError } = useGetPatientByIdQuery(
@@ -112,9 +115,15 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   );
   const { data: departments } = useListDepartmentsQuery();
   const { data: usersData } = useListUsersQuery({ role: 'DOCTOR', isActive: true, limit: 100 });
+  const {
+    data: opdSettings,
+    isLoading: opdSettingsLoading,
+    isError: opdSettingsError,
+  } = useGetOpdSettingsQuery(tenantId ?? '', { skip: !tenantId });
   const doctors = usersData?.data ?? [];
 
-  const ready = !visitLoading && !patientLoading && !!visit && !!patient;
+  const ready = !visitLoading && !patientLoading && !opdSettingsLoading && !!visit && !!patient && !!opdSettings;
+  const vitalsCategory = getPatientCategory(patient);
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own
@@ -143,10 +152,23 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
     window.print();
   }
 
-  if (visitLoading || patientLoading) {
+  if (visitLoading || patientLoading || opdSettingsLoading) {
     return (
       <div className="max-w-3xl mx-auto py-12 text-center text-sm text-muted-foreground print:hidden">
         Preparing 
+      </div>
+    );
+  }
+
+  if (opdSettingsError || !tenantId || !opdSettings) {
+    return (
+      <div className="max-w-lg mx-auto py-12 space-y-4 print:hidden">
+        <Link href="/opd" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" /> Back to OPD
+        </Link>
+        <div className="rounded-xl border bg-card p-6 text-center text-muted-foreground text-sm">
+          OPD validity settings could not be loaded. Please try again.
+        </div>
       </div>
     );
   }
@@ -216,9 +238,9 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             <Field label="Visit Date"   value={formatDate(visit.visitDate)} />
 
             {/* Row 2 */}
-            <Field label="Age / Gender"  value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
+            <Field label="Age / Gender"  value={`${formatPatientResponseAge(patient) ?? '—'} / ${toDisplay(patient.gender)}`} />
             <Field label="Mobile Number" value={patient.mobileNumber} />
-            <Field label="Valid Till"    value={formatDate(computeValidTill(patient.createdAt))} />
+            <Field label="Valid Till"    value={formatDate(computeValidTill(visit.createdAt, opdSettings.validityDays))} />
 
             {/* Row 3 — always rendered (blank when unassigned) so the
                 Address row below keeps its own line. */}
@@ -251,15 +273,17 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
           <div className="flex break-inside-avoid">
             {/* Vitals stays compact/top-aligned. */}
             <div className="w-[32mm] shrink-0 pr-3">
-              <p className="text-[15px] font-bold uppercase tracking-wide text-black mb-2">Vitals</p>
+              <p className="text-[15px] font-bold uppercase tracking-wide text-black mb-2">
+                Vitals
+              </p>
               <div className="space-y-1.5">
-                <VitalRow label="SpO2"   value={visit.vitals?.spo2            != null ? String(visit.vitals.spo2)            : ''} />
-                <VitalRow label="Temp"   value={visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : ''} />
-                <VitalRow label="BP"     value={visit.vitals?.bloodPressure   ?? ''} />
-                <VitalRow label="Pulse"  value={visit.vitals?.pulse           != null ? String(visit.vitals.pulse)           : ''} />
-                <VitalRow label="Sugar"  value={visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : ''} />
-                <VitalRow label="Height" value={visit.vitals?.height          != null ? String(visit.vitals.height)          : ''} />
-                <VitalRow label="Weight" value={visit.vitals?.weight          != null ? String(visit.vitals.weight)          : ''} />
+                {getVitalDefinitions(vitalsCategory).map((definition) => (
+                  <VitalRow
+                    key={definition.key}
+                    label={getVitalSlipLabel(definition, vitalsCategory)}
+                    value={visit.vitals?.[definition.key] != null ? String(visit.vitals[definition.key]) : ''}
+                  />
+                ))}
               </div>
             </div>
 
@@ -293,7 +317,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
 
           {/* Footer — not part of the slip, on screen or in print */}
           <div className="hidden">
-            This is valid for 15 days.
+            This is valid for {opdSettings.validityDays} days.
           </div>
           </div>
         </div>

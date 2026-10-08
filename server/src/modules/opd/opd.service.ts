@@ -17,6 +17,8 @@ import { auditService } from '../../shared/services/audit.service';
 import { s3Service } from '../../shared/services/s3.service';
 import { stripRichTextTags } from '../../shared/utils/validation';
 import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
+import { formatPatientAge, isPediatricPatient } from '../../shared/utils/patient-age';
+import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel } from '../../shared/utils/patient-vitals';
 import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import {
   OPDVisitStatus,
@@ -46,6 +48,8 @@ const DEFAULT_VITALS: OPDVitals = {
   bodyTemperature: null,
   spo2:            null,
   pulse:           null,
+  respiratoryRate: null,
+  headCircumference: null,
 };
 
 // Clinical free-text — and vitals, as of the objectFields encryption — is
@@ -127,74 +131,65 @@ function withFullName<T extends IOPDVisit>(visit: T, fullName?: string): T & { f
 // information the default/image layouts do — just assembled server-side
 // since a PDF template is merged with the visit's data on the server (see
 // OPDService.getParchaPdfContext) rather than composited client-side.
-function calculateAgeFromDob(dob: string): number {
-  const birth = new Date(dob);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return Math.max(0, age);
-}
-
 function toDisplayCase(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 function formatParchaDate(date: Date): string {
-  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
 }
 
-// Slip validity: 5 calendar days after the patient's registration date.
-// setDate() rolls over month/year boundaries using each month's real length
-// (e.g. 30 Sep -> 05 Oct, 31 Jan -> 05 Feb), never a naive day-number bump.
-// Mirrors computeValidTill in the client print page.
-const SLIP_VALIDITY_DAYS = 5;
-function computeValidTill(registeredAt: Date): Date {
-  const d = new Date(registeredAt);
-  d.setDate(d.getDate() + SLIP_VALIDITY_DAYS);
+// The OPD creation date counts as day one. Normalize to the hospital's IST
+// calendar date before adding the remaining configured days.
+function computeValidTill(createdAt: Date, validityDays: number): Date {
+  const d = toIstMidnight(createdAt);
+  d.setTime(d.getTime() + (validityDays - 1) * MS_PER_DAY);
   return d;
 }
 
 function buildOpdParchaOverlay(
   visit:          IOPDVisit,
-  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
+  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; ageUnit?: 'YEARS' | 'MONTHS' | 'DAYS'; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
   departmentName: string | null,
   doctorNames:    string,
+  validityDays:   number,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
     { label: 'UHID',         value: patient.patientId },
-    { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAgeFromDob(patient.dateOfBirth) : '—')} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Age / Gender', value: `${formatPatientAge(patient.age, patient.ageUnit, patient.dateOfBirth) ?? '—'} / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
   if (patient.address)   fieldRows.push({ label: 'Address',     value: patient.address });
   if (patient.bloodGroup) fieldRows.push({ label: 'Blood Group', value: patient.bloodGroup });
   fieldRows.push({ label: 'Visit Date', value: formatParchaDate(visit.visitDate) });
-  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(computeValidTill(patient.createdAt)) });
+  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(computeValidTill(visit.createdAt, validityDays)) });
   if (doctorNames || departmentName) {
     fieldRows.push({ label: 'Doctor / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  const vitals: ParchaOverlayInput['vitals'] = [
-    { label: 'SpO2',   value: visit.vitals?.spo2            != null ? String(visit.vitals.spo2)            : '' },
-    { label: 'Temp',   value: visit.vitals?.bodyTemperature != null ? String(visit.vitals.bodyTemperature) : '' },
-    { label: 'BP',     value: visit.vitals?.bloodPressure   ?? '' },
-    { label: 'Pulse',  value: visit.vitals?.pulse           != null ? String(visit.vitals.pulse)           : '' },
-    { label: 'Sugar',  value: visit.vitals?.sugar           != null ? String(visit.vitals.sugar)           : '' },
-    { label: 'Height', value: visit.vitals?.height          != null ? String(visit.vitals.height)          : '' },
-    { label: 'Weight', value: visit.vitals?.weight          != null ? String(visit.vitals.weight)          : '' },
-  ];
+  const pediatric = isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth);
+  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(pediatric).map((definition) => ({
+    label: getPatientVitalSlipLabel(definition, pediatric),
+    value: formatPatientVitalValue(visit.vitals, definition),
+  }));
 
   return {
     fieldRows,
     vitals,
+    vitalsHeading: 'Vitals',
     // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
       { heading: 'Diagnosis',    text: visit.diagnosis ?? '',                   weight: 1 },
       { heading: 'Prescription', text: visit.prescription ?? '',                weight: 5 },
       { heading: 'Notes',        text: stripRichTextTags(visit.notes ?? ''),    weight: 3 },
     ].filter((section) => section.text.trim() !== ''),
-    footerText: 'This is valid for 15 days.',
+    footerText: `This is valid for ${validityDays} days.`,
   };
 }
 
@@ -421,6 +416,12 @@ export class OPDService {
     // file. Role is not re-checked here: the route/controller already limit
     // vitals to DOCTOR/HOSPITAL_ADMIN/NURSE/RECEPTIONIST.
     if (data.vitals !== undefined) {
+      if (data.vitals.weight != null && data.vitals.weight < 0.5) {
+        const patient = await patientRepository.findByPatientId(tenantId, effectivePatientId);
+        if (!patient || !isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth)) {
+          throw new ValidationError('Weight must be at least 0.5 kg for non-pediatric patients.');
+        }
+      }
       // visit.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable
       // properties, so `{ ...visit.vitals }` silently picks up Mongoose's
@@ -437,6 +438,8 @@ export class OPDService {
         bodyTemperature: baseVitals?.bodyTemperature ?? null,
         spo2:            baseVitals?.spo2            ?? null,
         pulse:           baseVitals?.pulse           ?? null,
+        respiratoryRate: baseVitals?.respiratoryRate ?? null,
+        headCircumference: baseVitals?.headCircumference ?? null,
       };
       const mergedVitals: OPDVitals = { ...existingVitals, ...data.vitals };
       updateData.vitals = mergedVitals;
@@ -451,7 +454,9 @@ export class OPDService {
         existingVitals.sugar           !== mergedVitals.sugar           ||
         existingVitals.bodyTemperature !== mergedVitals.bodyTemperature ||
         existingVitals.spo2            !== mergedVitals.spo2            ||
-        existingVitals.pulse           !== mergedVitals.pulse
+        existingVitals.pulse           !== mergedVitals.pulse           ||
+        existingVitals.respiratoryRate !== mergedVitals.respiratoryRate ||
+        existingVitals.headCircumference !== mergedVitals.headCircumference
       ) {
         previousValue.vitals = existingVitals;
         newValue.vitals      = mergedVitals;
@@ -850,9 +855,10 @@ export class OPDService {
     const templateKey = tenant?.branding.parchaTemplateUrl ?? null;
     if (!templateKey || !/\.pdf$/i.test(templateKey)) return null;
 
-    const [patient, templateBytes] = await Promise.all([
+    const [patient, templateBytes, { validityDays }] = await Promise.all([
       patientRepository.findByPatientId(tenantId, visit.patientId),
       s3Service.getFile(templateKey),
+      tenantService.getOpdSettings(tenantId),
     ]);
     if (!patient) throw new NotFoundError('Patient not found');
 
@@ -865,7 +871,7 @@ export class OPDService {
       .filter((n): n is string => !!n)
       .join(', ');
 
-    const overlay = buildOpdParchaOverlay(visit, patient, departmentName, doctorNames);
+    const overlay = buildOpdParchaOverlay(visit, patient, departmentName, doctorNames, validityDays);
     return { templateBytes, overlay };
   }
 

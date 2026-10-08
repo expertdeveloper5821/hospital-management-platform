@@ -1,7 +1,9 @@
 import PDFDocument from 'pdfkit';
+import { AgeUnit } from '../patient/patient.types';
 import { ReportHospitalInfo } from '../../shared/services/report-letterhead.pdf';
 import { LabEncounterSummary, PathologyResultValue } from './lab.types';
 import { DOCTOR_SIGNATURE_IMAGE, SIGNING_DOCTOR } from './doctor-signature.image';
+import { formatPatientAge } from '../../shared/utils/patient-age';
 
 // ─── Pathology test report PDF ───────────────────────────────────────────────
 // One PDF per test of a Pathology request — never several tests combined.
@@ -35,6 +37,7 @@ export interface PathologyReportPdfData {
     fullName:     string;
     patientId:    string;   // UHID
     age:          number | null;
+    ageUnit?:     AgeUnit | null;
     gender:       string | null;
     mobileNumber: string | null;
     address:      string | null;
@@ -237,7 +240,7 @@ export async function buildPathologyReportPdf(data: PathologyReportPdfData): Pro
       const p = data.patient;
       const enc = data.encounter;
       const ageGender = [
-        p.age !== null ? String(p.age) : null,
+        formatPatientAge(p.age, p.ageUnit),
         p.gender ? p.gender.trim().charAt(0).toUpperCase() : null,
       ].filter(Boolean).join('/');
       const wardBed = enc?.type === 'IPD'

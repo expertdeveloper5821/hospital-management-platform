@@ -163,13 +163,15 @@ const ipdBloodPressureSchema = z.string()
   .optional();
 
 const ipdVitalsSchema = z.object({
-  weight:          z.number().min(0.5, 'Weight must be between 0.5 and 500 kg.').max(500, 'Weight must be between 0.5 and 500 kg.').nullable().optional(),
+  weight:          z.number().min(0.1, 'Weight must be between 0.1 and 500 kg.').max(500, 'Weight must be between 0.1 and 500 kg.').nullable().optional(),
   height:          z.number().min(20, 'Height must be between 20 and 300 cm.').max(300, 'Height must be between 20 and 300 cm.').nullable().optional(),
   bloodPressure:   ipdBloodPressureSchema,
   sugar:           z.number().min(10, 'Sugar must be between 10 and 1000 mg/dL.').max(1000, 'Sugar must be between 10 and 1000 mg/dL.').nullable().optional(),
   bodyTemperature: z.number().min(80, 'Body temperature must be between 80 and 115 °F.').max(115, 'Body temperature must be between 80 and 115 °F.').nullable().optional(),
   spo2:            z.number().min(50, 'SpO2 must be between 50 and 100 %.').max(100, 'SpO2 must be between 50 and 100 %.').nullable().optional(),
   pulse:           z.number().min(20, 'Pulse must be between 20 and 250 bpm.').max(250, 'Pulse must be between 20 and 250 bpm.').nullable().optional(),
+  respiratoryRate: z.number().min(1, 'RR must be between 1 and 150 per minute.').max(150, 'RR must be between 1 and 150 per minute.').nullable().optional(),
+  headCircumference: z.number().min(10, 'Head Circumference must be between 10 and 100 cm.').max(100, 'Head Circumference must be between 10 and 100 cm.').nullable().optional(),
 }).optional();
 
 const updateAdmissionSchema = z.object({

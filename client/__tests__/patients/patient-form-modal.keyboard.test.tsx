@@ -19,9 +19,10 @@ describe('PatientFormModal — keyboard navigation', () => {
     await waitFor(() => expect(screen.getByLabelText('Full Name *')).toHaveFocus());
 
     const order = [
+      'Age *',
+      'Age unit',
       'Date of Birth',
       'Mobile Number *',
-      'Age *',
       'Gender *',
       'Blood Group',
       'Address Line 1 *',
@@ -35,5 +36,26 @@ describe('PatientFormModal — keyboard navigation', () => {
       await waitFor(() => expect(screen.getByLabelText(label)).toHaveFocus());
     }
     expect(createPatient).not.toHaveBeenCalled();
+  });
+
+  it('submits relationship text in the name and preserves an infant age unit', async () => {
+    const user = userEvent.setup();
+    createPatient.mockReturnValue({ unwrap: async () => ({}) });
+    render(<PatientFormModal mode="register" onClose={jest.fn()} />);
+
+    await user.type(screen.getByLabelText('Full Name *'), 'Rahul Mourya S/O Rajesh Mourya');
+    await user.type(screen.getByLabelText('Age *'), '2');
+    await user.selectOptions(screen.getByLabelText('Age unit'), 'DAYS');
+    await user.type(screen.getByLabelText('Mobile Number *'), '9876543210');
+    await user.type(screen.getByLabelText('Address Line 1 *'), '12 Main Road');
+    await user.selectOptions(screen.getByLabelText('State *'), 'Maharashtra');
+    await user.type(screen.getByLabelText('City *'), 'Mumbai');
+    await user.click(screen.getByRole('button', { name: 'Register Patient' }));
+
+    await waitFor(() => expect(createPatient).toHaveBeenCalledWith(expect.objectContaining({
+      fullName: 'name r/n father name',
+      age: 2,
+      ageUnit: 'DAYS',
+    })));
   });
 });

@@ -11,6 +11,8 @@ import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import type { ProgressNote } from '@/store/types';
+import { formatPatientResponseAge } from '@/lib/patient-age';
+import { getPatientCategory, getVitalDefinitions, getVitalSlipLabel } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -36,18 +38,6 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-}
-
-// Mirrors server/src/shared/services/pdf.service.ts calculateAge — kept in
-// sync manually since the client has no shared date-math utility yet (same
-// duplication the OPD print page already carries).
-function calculateAge(dob: string): number {
-  const birth = new Date(dob);
-  const today = new Date();
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
-  return Math.max(0, age);
 }
 
 function toDisplay(str: string): string {
@@ -128,6 +118,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
   const doctors = usersData?.data ?? [];
 
   const ready = !admissionLoading && !patientLoading && !!admission && !!patient;
+  const vitalsCategory = getPatientCategory(patient);
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own
@@ -231,7 +222,7 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
             {/* Row 1 */}
             <Field label="Patient Name" value={patient.fullName} />
             <Field label="UHID"         value={patient.patientId} mono />
-            <Field label="Age / Gender" value={`${patient.age ?? (patient.dateOfBirth ? calculateAge(patient.dateOfBirth) : '—')} years / ${toDisplay(patient.gender)}`} />
+            <Field label="Age / Gender" value={`${formatPatientResponseAge(patient) ?? '—'} / ${toDisplay(patient.gender)}`} />
 
             {/* Row 2 */}
             <Field label="Mobile Number" value={patient.mobileNumber} />
@@ -272,15 +263,17 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
           <div className="flex">
             {/* Vitals stays compact/top-aligned. */}
             <div className="w-[32mm] shrink-0 pr-3 break-inside-avoid">
-              <p className="text-[15px] font-bold uppercase tracking-wide text-black mb-2">Vitals</p>
+              <p className="text-[15px] font-bold uppercase tracking-wide text-black mb-2">
+                Vitals
+              </p>
               <div className="space-y-1.5">
-                <VitalRow label="SpO2"   value={admission.vitals?.spo2            != null ? String(admission.vitals.spo2)            : ''} />
-                <VitalRow label="Temp"   value={admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : ''} />
-                <VitalRow label="BP"     value={admission.vitals?.bloodPressure   ?? ''} />
-                <VitalRow label="Pulse"  value={admission.vitals?.pulse           != null ? String(admission.vitals.pulse)           : ''} />
-                <VitalRow label="Sugar"  value={admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : ''} />
-                <VitalRow label="Height" value={admission.vitals?.height          != null ? String(admission.vitals.height)          : ''} />
-                <VitalRow label="Weight" value={admission.vitals?.weight          != null ? String(admission.vitals.weight)          : ''} />
+                {getVitalDefinitions(vitalsCategory).map((definition) => (
+                  <VitalRow
+                    key={definition.key}
+                    label={getVitalSlipLabel(definition, vitalsCategory)}
+                    value={admission.vitals?.[definition.key] != null ? String(admission.vitals[definition.key]) : ''}
+                  />
+                ))}
               </div>
             </div>
 

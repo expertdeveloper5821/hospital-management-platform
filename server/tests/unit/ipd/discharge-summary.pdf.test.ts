@@ -72,7 +72,7 @@ function makeData(overrides: Partial<DischargeSummaryData> = {}): DischargeSumma
       address: '123 Main St, Springfield', email: 'admin@cityhospital.test', registrationNumber: '22AAAAA0000A1Z5',
     },
     patient: {
-      patientId: 'PAT-ABCD1234', fullName: 'Ravi Kumar', age: 45, gender: 'MALE', mobileNumber: '9876543210',
+      patientId: 'PAT-ABCD1234', fullName: 'Ravi Kumar', age: 45, ageUnit: 'YEARS', gender: 'MALE', mobileNumber: '9876543210',
       address: '45 Park Lane', registeredAt: '2026-01-01T10:00:00.000Z', registeredByName: 'Reception Staff',
     },
     opdVisits: [
@@ -93,7 +93,10 @@ function makeData(overrides: Partial<DischargeSummaryData> = {}): DischargeSumma
         { authorName: 'Nurse Priya', authorRole: 'NURSE', timestamp: '2026-01-07T09:00:00.000Z', noteHtml: 'Vitals stable. <u>No complaints</u>.' },
         { authorName: null, authorRole: null, timestamp: '2026-01-08T09:00:00.000Z', noteHtml: 'Legacy plain-text note with no author on record.' },
       ],
-      vitals: { spo2: 98, bloodPressure: '120/80', bodyTemperature: 98.6, sugar: 110, height: 170, weight: 72, pulse: 76 },
+      vitals: {
+        spo2: 98, bloodPressure: '120/80', bodyTemperature: 98.6, sugar: 110,
+        height: 170, weight: 72, pulse: 76, respiratoryRate: null, headCircumference: null,
+      },
     },
     labRequests: [
       {
@@ -313,21 +316,48 @@ describe('Download / Print layout', () => {
   // a TJ array) removed, so whole words can be matched by their hex encoding.
   const unkerned = (buf: Buffer) => decompressContentStreams(buf).toLowerCase().replace(/>\s*-?[\d.]+\s*</g, '');
 
-  test('renders the Vitals grid in order SpO2 | BP | Temperature, Sugar | Height | Weight', async () => {
+  test('renders non-pediatric vitals in the required order', async () => {
     const content = unkerned(await buildDischargeSummaryPdf(makeData(), { print: true }));
-    const positions = ['SpO2', 'BP', 'Temperature', 'Sugar', 'Height', 'Weight', 'mmHg', 'mg/dL']
+    const positions = ['BP', 'PR', 'SpO2', 'RBS', 'Temperature', 'Weight']
       .map((label) => content.indexOf(hex(label)));
     positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
-    expect(positions.slice(0, 6)).toEqual([...positions.slice(0, 6)].sort((x, y) => x - y));
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
+  });
+
+  test('renders pediatric vitals in the required order for ages expressed in months', async () => {
+    const base = makeData({ opdVisits: [], labRequests: [] });
+    const data = {
+      ...base,
+      patient: { ...base.patient, age: 18, ageUnit: 'MONTHS' as const },
+      admission: {
+        ...base.admission,
+        vitals: {
+          ...base.admission.vitals!,
+          pulse: 120, respiratoryRate: 30, spo2: 98, bloodPressure: '90/60',
+          height: 65, weight: 6.5, headCircumference: 40,
+        },
+      },
+    };
+    const content = unkerned(await buildDischargeSummaryPdf(data, { print: true }));
+    const positions = ['PR', 'RR', 'SpO2', 'BP', 'Height/Length', 'Weight', 'Head Circumference']
+      .map((label) => content.indexOf(hex(label)));
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
   });
 
   test('a partially recorded vitals set keeps the grid; no recorded vitals omits the section', async () => {
     const base = makeData({ opdVisits: [], labRequests: [] });
-    const partial = { spo2: null, bloodPressure: '120/80', bodyTemperature: null, sugar: null, height: null, weight: 72, pulse: null };
-    const empty   = { spo2: null, bloodPressure: null, bodyTemperature: null, sugar: null, height: null, weight: null, pulse: null };
+    const partial = {
+      spo2: null, bloodPressure: '120/80', bodyTemperature: null, sugar: null,
+      height: null, weight: 72, pulse: null, respiratoryRate: null, headCircumference: null,
+    };
+    const empty   = {
+      spo2: null, bloodPressure: null, bodyTemperature: null, sugar: null,
+      height: null, weight: null, pulse: null, respiratoryRate: null, headCircumference: null,
+    };
     const withPartial = unkerned(await buildDischargeSummaryPdf({ ...base, admission: { ...base.admission, vitals: partial } }));
     expect(withPartial).toContain(hex('SpO2'));
-    expect(withPartial).toContain(hex('Height'));
+    expect(withPartial).toContain(hex('Weight'));
     for (const vitals of [empty, null, undefined]) {
       const buf = await buildDischargeSummaryPdf({ ...base, admission: { ...base.admission, vitals } });
       expect(unkerned(buf)).not.toContain(hex('SpO2'));

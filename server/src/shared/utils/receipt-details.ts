@@ -1,5 +1,7 @@
 import { ITenant }  from '../../modules/tenant/tenant.model';
 import { IPatient } from '../../modules/patient/patient.model';
+import { AgeUnit } from '../../modules/patient/patient.types';
+import { resolvePatientAge as resolveAge } from './patient-age';
 
 // Letterhead fields printed at the top of every A5 payment receipt (generic
 // and Lab), resolved from the payment's own tenant — never hardcoded.
@@ -38,18 +40,13 @@ export function resolveReceiptHospitalDetails(tenant: ITenant | null | undefined
   };
 }
 
-function calculateAge(dob: Date): number | null {
-  if (Number.isNaN(dob.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
-  return Math.max(0, age);
+// Stored age wins; otherwise derive an age with an appropriate infant unit from DOB.
+export function resolvePatientAge(patient: Pick<IPatient, 'age' | 'ageUnit' | 'dateOfBirth'>): number | null {
+  return resolveAge(patient.age, patient.ageUnit, patient.dateOfBirth)?.value ?? null;
 }
 
-// Stored age wins; otherwise derived from the (decrypted) date of birth.
-export function resolvePatientAge(patient: Pick<IPatient, 'age' | 'dateOfBirth'>): number | null {
-  return patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : null);
+export function resolvePatientAgeUnit(patient: Pick<IPatient, 'age' | 'ageUnit' | 'dateOfBirth'>): AgeUnit | null {
+  return resolveAge(patient.age, patient.ageUnit, patient.dateOfBirth)?.unit ?? null;
 }
 
 // Derives 2-4 uppercase initials from the hospital display name for use in

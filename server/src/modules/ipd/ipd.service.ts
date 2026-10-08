@@ -40,10 +40,13 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ValidationError,
 } from '../../shared/middleware/error-handler';
 import { PatientModel } from '../patient/patient.model';
 import { stripRichTextTags } from '../../shared/utils/validation';
 import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
+import { formatPatientAge, isPediatricPatient, resolvePatientAge } from '../../shared/utils/patient-age';
+import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel } from '../../shared/utils/patient-vitals';
 
 
 // Shape a partial (or missing) vitals update/read always merges onto — keeps
@@ -58,6 +61,8 @@ const DEFAULT_VITALS: IPDVitals = {
   bodyTemperature: null,
   spo2:            null,
   pulse:           null,
+  respiratoryRate: null,
+  headCircumference: null,
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -140,14 +145,6 @@ async function resolveProgressNoteStaffNames(
   return mapProgressNotes(notes, nameMap);
 }
 
-function calculateAge(dob: Date): number {
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
-  return Math.max(0, age);
-}
-
 // ─── Parcha PDF template overlay ────────────────────────────────────────────
 // Mirrors the IPD print page's (client/app/(dashboard)/ipd/[admissionId]/
 // print/page.tsx) field selection exactly, so a PDF template shows the same
@@ -181,7 +178,7 @@ function computeValidTill(registeredAt: Date): Date {
 
 function buildIpdParchaOverlay(
   admission:      IIPDAdmission,
-  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
+  patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; ageUnit?: 'YEARS' | 'MONTHS' | 'DAYS'; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
   departmentName: string | null,
   doctorNames:    string,
   staffNameMap:   Map<string, string>,
@@ -189,7 +186,7 @@ function buildIpdParchaOverlay(
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
     { label: 'UHID',         value: patient.patientId },
-    { label: 'Age / Gender', value: `${patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : '—')} years / ${toDisplayCase(patient.gender)}` },
+    { label: 'Age / Gender', value: `${formatPatientAge(patient.age, patient.ageUnit, patient.dateOfBirth) ?? '—'} / ${toDisplayCase(patient.gender)}` },
     { label: 'Mobile',       value: patient.mobileNumber },
   ];
   if (patient.address)    fieldRows.push({ label: 'Address',     value: patient.address });
@@ -204,15 +201,11 @@ function buildIpdParchaOverlay(
     fieldRows.push({ label: 'Doctor(s) / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  const vitals: ParchaOverlayInput['vitals'] = [
-    { label: 'SpO2',   value: admission.vitals?.spo2            != null ? String(admission.vitals.spo2)            : '' },
-    { label: 'Temp',   value: admission.vitals?.bodyTemperature != null ? String(admission.vitals.bodyTemperature) : '' },
-    { label: 'BP',     value: admission.vitals?.bloodPressure   ?? '' },
-    { label: 'Pulse',  value: admission.vitals?.pulse           != null ? String(admission.vitals.pulse)           : '' },
-    { label: 'Sugar',  value: admission.vitals?.sugar           != null ? String(admission.vitals.sugar)           : '' },
-    { label: 'Height', value: admission.vitals?.height          != null ? String(admission.vitals.height)          : '' },
-    { label: 'Weight', value: admission.vitals?.weight          != null ? String(admission.vitals.weight)          : '' },
-  ];
+  const pediatric = isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth);
+  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(pediatric).map((definition) => ({
+    label: getPatientVitalSlipLabel(definition, pediatric),
+    value: formatPatientVitalValue(admission.vitals, definition),
+  }));
 
   const sortedNotes = [...admission.progressNotes].sort(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
@@ -227,6 +220,7 @@ function buildIpdParchaOverlay(
   return {
     fieldRows,
     vitals,
+    vitalsHeading: 'Vitals',
     // Empty sections are dropped so the remaining ones move up (no blank gap).
     bodySections: [
       { heading: 'Progress Notes', text: notesText,                   weight: 1 },
@@ -376,6 +370,8 @@ async function toResponse(
       bodyTemperature: doc.vitals?.bodyTemperature ?? null,
       spo2:            doc.vitals?.spo2            ?? null,
       pulse:           doc.vitals?.pulse           ?? null,
+      respiratoryRate: doc.vitals?.respiratoryRate ?? null,
+      headCircumference: doc.vitals?.headCircumference ?? null,
     },
     prescription:          doc.prescription ?? null,
     dischargeSummaryNotes: doc.dischargeSummaryNotes ?? null,
@@ -668,6 +664,13 @@ export class IPDService {
     // re-checked here — the controller's VITALS_EDITABLE_ROLES gate is the
     // sole check on who may send this field.
     if (input.vitals !== undefined) {
+      if (input.vitals.weight != null && input.vitals.weight < 0.5) {
+        const patientId = input.patientId ?? admission.patientId;
+        const patient = await patientRepository.findByPatientId(tenantId, patientId);
+        if (!patient || !isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth)) {
+          throw new ValidationError('Weight must be at least 0.5 kg for non-pediatric patients.');
+        }
+      }
       // admission.vitals is a Mongoose subdocument, not a plain object — its
       // schema-defined fields are prototype getters, not own enumerable
       // properties, so `{ ...admission.vitals }` would silently pick up
@@ -680,6 +683,8 @@ export class IPDService {
         bodyTemperature: admission.vitals?.bodyTemperature ?? DEFAULT_VITALS.bodyTemperature,
         spo2:            admission.vitals?.spo2            ?? DEFAULT_VITALS.spo2,
         pulse:           admission.vitals?.pulse           ?? DEFAULT_VITALS.pulse,
+        respiratoryRate: admission.vitals?.respiratoryRate ?? DEFAULT_VITALS.respiratoryRate,
+        headCircumference: admission.vitals?.headCircumference ?? DEFAULT_VITALS.headCircumference,
       };
       const mergedVitals: IPDVitals = { ...existingVitals, ...input.vitals };
       prevValue.vitals = existingVitals;
@@ -1022,7 +1027,8 @@ export class IPDService {
       patient: {
         patientId:        patient.patientId,
         fullName:         patient.fullName,
-        age:              patient.age ?? (patient.dateOfBirth ? calculateAge(new Date(patient.dateOfBirth)) : 0),
+        age:              resolvePatientAge(patient.age, patient.ageUnit, patient.dateOfBirth)?.value ?? 0,
+        ageUnit:          resolvePatientAge(patient.age, patient.ageUnit, patient.dateOfBirth)?.unit ?? 'YEARS',
         gender:           patient.gender,
         mobileNumber:     patient.mobileNumber,
         address:          patient.address || null,
@@ -1069,6 +1075,8 @@ export class IPDService {
           bodyTemperature: admission.vitals?.bodyTemperature ?? null,
           spo2:            admission.vitals?.spo2            ?? null,
           pulse:           admission.vitals?.pulse           ?? null,
+          respiratoryRate: admission.vitals?.respiratoryRate ?? null,
+          headCircumference: admission.vitals?.headCircumference ?? null,
         },
       },
       labRequests,

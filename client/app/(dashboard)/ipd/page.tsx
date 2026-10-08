@@ -14,7 +14,7 @@ import {
 } from '@/store/api/ipd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useListUsersQuery }    from '@/store/api/user.api';
-import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useGetPatientByIdQuery, useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListPackagesQuery }    from '@/store/api/packages.api';
 import { useAppSelector }       from '@/store/hooks';
@@ -43,6 +43,13 @@ import {
 } from 'lucide-react';
 import { NavForm } from '@/components/ui/form';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
+import {
+  formatVitalValue,
+  getPatientCategory,
+  getVitalDefinitions,
+  parsePatientVital,
+  type VitalKey,
+} from '@/lib/patient-vitals';
 import { autoFocusFirstFieldRef, handleEnterNavigation } from '@/lib/form-navigation';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
 
@@ -62,22 +69,11 @@ const PAYMENT_VIEW_ROLES: UserRole[] = [
 // ─── Vitals (IPD Admission Edit form) ────────────────────────────────────────
 // Mirrors OPD's Vitals form (client/app/(dashboard)/opd/page.tsx) and
 // IPDService.updateAdmission's merge contract on the backend field-for-field:
-// weight (kg), height (cm), blood pressure ("<systolic>/<diastolic>" mmHg),
-// sugar (mg/dL), body temperature (°F), SpO2 (%), pulse (bpm). Kept as controlled-input strings here
-// (empty string = not entered) and converted to number|null only on submit —
-// see parseVitalsInputs.
-interface VitalsInputState {
-  weight:          string;
-  height:          string;
-  bloodPressure:   string;
-  sugar:           string;
-  bodyTemperature: string;
-  spo2:            string;
-  pulse:           string;
-}
+type VitalsInputState = Record<VitalKey, string>;
 
 const EMPTY_VITALS_INPUTS: VitalsInputState = {
-  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '', spo2: '', pulse: '',
+  weight: '', height: '', bloodPressure: '', sugar: '', bodyTemperature: '',
+  spo2: '', pulse: '', respiratoryRate: '', headCircumference: '',
 };
 
 function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
@@ -90,49 +86,34 @@ function vitalsToInputs(vitals?: IPDVitals | null): VitalsInputState {
     bodyTemperature: vitals.bodyTemperature != null ? String(vitals.bodyTemperature) : '',
     spo2:            vitals.spo2            != null ? String(vitals.spo2)            : '',
     pulse:           vitals.pulse           != null ? String(vitals.pulse)           : '',
+    respiratoryRate: vitals.respiratoryRate != null ? String(vitals.respiratoryRate) : '',
+    headCircumference: vitals.headCircumference != null ? String(vitals.headCircumference) : '',
   };
 }
 
-const IPD_BLOOD_PRESSURE_PATTERN = /^\d{2,3}\/\d{2,3}$/;
-
 // Per-field validation messages, keyed by the input they belong to so each
 // one renders directly below its own field rather than in the form banner.
-type VitalsErrors = Partial<Record<keyof VitalsInputState, string>>;
+type VitalsErrors = Partial<Record<VitalKey, string>>;
 
 // Converts the controlled-input strings into the partial vitals payload the
 // PATCH endpoint expects — an empty field becomes `null` (explicitly clears
 // that reading server-side, never leaves it untouched), matching the same
 // ranges the backend's vitals schema validates. Returns every failing field's
 // message instead of a payload when any field fails.
-function parseVitalsInputs(inputs: VitalsInputState): { vitals: Partial<IPDVitals> } | { errors: VitalsErrors } {
-  const vitals: Partial<IPDVitals> = {};
+function parseVitalsInputs(
+  inputs: VitalsInputState,
+  category: ReturnType<typeof getPatientCategory>,
+): { vitals: Partial<IPDVitals> } | { errors: VitalsErrors } {
+  const vitals: Record<string, number | string | null> = {};
   const errors: VitalsErrors = {};
 
-  const numeric = (
-    key: 'weight' | 'height' | 'sugar' | 'bodyTemperature' | 'spo2' | 'pulse',
-    min: number, max: number, message: string,
-  ) => {
-    const raw = inputs[key].trim();
-    if (raw === '') { vitals[key] = null; return; }
-    const n = Number(raw);
-    if (isNaN(n) || n < min || n > max) errors[key] = message;
-    else vitals[key] = n;
-  };
+  getVitalDefinitions(category).forEach((definition) => {
+    const parsed = parsePatientVital(definition.key, inputs[definition.key], definition);
+    if (parsed.error) errors[definition.key] = parsed.error;
+    else vitals[definition.key] = parsed.value;
+  });
 
-  numeric('weight', 0.5, 500, 'Weight must be between 0.5 and 500 kg.');
-  numeric('height', 20, 300, 'Height must be between 20 and 300 cm.');
-
-  const bp = inputs.bloodPressure.trim();
-  if (bp === '') vitals.bloodPressure = null;
-  else if (!IPD_BLOOD_PRESSURE_PATTERN.test(bp)) errors.bloodPressure = 'Blood pressure must be in the format systolic/diastolic, e.g. 120/80.';
-  else vitals.bloodPressure = bp;
-
-  numeric('sugar', 10, 1000, 'Sugar must be between 10 and 1000 mg/dL.');
-  numeric('bodyTemperature', 80, 115, 'Body temperature must be between 80 and 115 °F.');
-  numeric('spo2', 50, 100, 'SpO2 must be between 50 and 100 %.');
-  numeric('pulse', 20, 250, 'Pulse must be between 20 and 250 bpm.');
-
-  return Object.keys(errors).length > 0 ? { errors } : { vitals };
+  return Object.keys(errors).length > 0 ? { errors } : { vitals: vitals as Partial<IPDVitals> };
 }
 
 // ─── PatientSearch ────────────────────────────────────────────────────────────
@@ -430,6 +411,11 @@ function AdmissionPanel({
   // Receptionist-only patient correction — null means "unchanged".
   const [editPatient,    setEditPatient]    = useState<PatientResponse | null>(null);
   const [pickingPatient, setPickingPatient] = useState(false);
+  const vitalsPatientId = mode === 'edit' && editPatient
+    ? editPatient.patientId
+    : admission.patientId;
+  const { data: vitalsPatient } = useGetPatientByIdQuery(vitalsPatientId, { skip: !vitalsPatientId });
+  const vitalsCategory = getPatientCategory(vitalsPatient?.patientId === vitalsPatientId ? vitalsPatient : null);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteAdmission, { isLoading: deleting }] = useDeleteAdmissionMutation();
@@ -588,7 +574,7 @@ function AdmissionPanel({
     // to always include the current form state rather than diffing it first —
     // matches OPD's VisitPanel convention.
     if (canEditVitals) {
-      const vitalsResult = parseVitalsInputs(vitalsForm);
+      const vitalsResult = parseVitalsInputs(vitalsForm, vitalsCategory);
       if ('errors' in vitalsResult) {
         setVitalsErrors(vitalsResult.errors);
         return;
@@ -693,14 +679,14 @@ function AdmissionPanel({
                 </button>
               ))}
               <div className="mt-3 pt-3 border-t space-y-0">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vitals</p>
-                {row('SpO2',             admission.vitals?.spo2            != null ? `${admission.vitals.spo2} %`    : null)}
-                {row('Body Temperature', admission.vitals?.bodyTemperature != null ? `${admission.vitals.bodyTemperature} °F` : null)}
-                {row('Blood Pressure',   admission.vitals?.bloodPressure   ? `${admission.vitals.bloodPressure} mmHg` : null)}
-                {row('Pulse',            admission.vitals?.pulse           != null ? `${admission.vitals.pulse} bpm` : null)}
-                {row('Sugar',            admission.vitals?.sugar           != null ? `${admission.vitals.sugar} mg/dL` : null)}
-                {row('Height',           admission.vitals?.height          != null ? `${admission.vitals.height} cm`  : null)}
-                {row('Weight',           admission.vitals?.weight          != null ? `${admission.vitals.weight} kg`  : null)}
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                </p>
+                {getVitalDefinitions(vitalsCategory).map((definition) => (
+                  <div key={definition.key}>
+                    {row(definition.label, formatVitalValue(admission.vitals, definition))}
+                  </div>
+                ))}
               </div>
               {row('Admission ID',  <span className="font-mono text-xs">{admission.admissionId}</span>)}
               {canViewPayment && (
@@ -868,78 +854,30 @@ function AdmissionPanel({
                   can edit ward/bed/doctors above but not vitals (canEditVitals). */}
               {canEditVitals && (
                 <div className="space-y-3 pt-2 border-t">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Vitals</p>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                  </p>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-spo2">SpO2 (%)</Label>
-                      <Input
-                        id="ap-spo2" type="number" min="50" max="100" step="1" placeholder="e.g. 98"
-                        value={vitalsForm.spo2}
-                        onChange={(e) => updateVital('spo2', e.target.value)}
-                        {...vitalErrorProps('spo2', 'ap-spo2')}
-                      />
-                      {vitalError('spo2', 'ap-spo2')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-temp">Body Temperature (°F)</Label>
-                      <Input
-                        id="ap-temp" type="number" min="80" max="115" step="0.1" placeholder="e.g. 98.6"
-                        value={vitalsForm.bodyTemperature}
-                        onChange={(e) => updateVital('bodyTemperature', e.target.value)}
-                        {...vitalErrorProps('bodyTemperature', 'ap-temp')}
-                      />
-                      {vitalError('bodyTemperature', 'ap-temp')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-bp">Blood Pressure (mmHg)</Label>
-                      <Input
-                        id="ap-bp" type="text" placeholder="e.g. 120/80"
-                        value={vitalsForm.bloodPressure}
-                        onChange={(e) => updateVital('bloodPressure', e.target.value)}
-                        {...vitalErrorProps('bloodPressure', 'ap-bp')}
-                      />
-                      {vitalError('bloodPressure', 'ap-bp')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-pulse">Pulse (bpm)</Label>
-                      <Input
-                        id="ap-pulse" type="number" min="20" max="250" step="1" placeholder="e.g. 72"
-                        value={vitalsForm.pulse}
-                        onChange={(e) => updateVital('pulse', e.target.value)}
-                        {...vitalErrorProps('pulse', 'ap-pulse')}
-                      />
-                      {vitalError('pulse', 'ap-pulse')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-sugar">Sugar (mg/dL)</Label>
-                      <Input
-                        id="ap-sugar" type="number" min="10" max="1000" step="1" placeholder="e.g. 90"
-                        value={vitalsForm.sugar}
-                        onChange={(e) => updateVital('sugar', e.target.value)}
-                        {...vitalErrorProps('sugar', 'ap-sugar')}
-                      />
-                      {vitalError('sugar', 'ap-sugar')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-height">Height (cm)</Label>
-                      <Input
-                        id="ap-height" type="number" min="20" max="300" step="0.1" placeholder="e.g. 170"
-                        value={vitalsForm.height}
-                        onChange={(e) => updateVital('height', e.target.value)}
-                        {...vitalErrorProps('height', 'ap-height')}
-                      />
-                      {vitalError('height', 'ap-height')}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="ap-weight">Weight (kg)</Label>
-                      <Input
-                        id="ap-weight" type="number" min="0.5" max="500" step="0.1" placeholder="e.g. 65.5"
-                        value={vitalsForm.weight}
-                        onChange={(e) => updateVital('weight', e.target.value)}
-                        {...vitalErrorProps('weight', 'ap-weight')}
-                      />
-                      {vitalError('weight', 'ap-weight')}
-                    </div>
+                    {getVitalDefinitions(vitalsCategory).map((definition) => {
+                      const id = `ap-${definition.key}`;
+                      return (
+                        <div className="space-y-1.5" key={definition.key}>
+                          <Label htmlFor={id}>{definition.label} ({definition.unit})</Label>
+                          <Input
+                            id={id}
+                            type={definition.key === 'bloodPressure' ? 'text' : 'number'}
+                            min={definition.min}
+                            max={definition.max}
+                            step={definition.step}
+                            placeholder={definition.placeholder}
+                            value={vitalsForm[definition.key]}
+                            onChange={(e) => updateVital(definition.key, e.target.value)}
+                            {...vitalErrorProps(definition.key, id)}
+                          />
+                          {vitalError(definition.key, id)}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

@@ -106,6 +106,22 @@ function calculateReportValues(
     const urea = val('urea');
     if (urea !== null) set('bun', urea * 28 / 60); else clear('bun');
   }
+  if (report.templateKey === 'UREA') {
+    const urea = val('bloodUrea');
+    if (urea !== null) set('bun', urea * 28 / 60); else clear('bun');
+  }
+  if (report.templateKey === 'DP_PROFILE') {
+    const a1c = val('hba1c');
+    if (a1c !== null) set('eag', (28.7 * a1c) - 46.7); else clear('eag');
+    const glucose = val('fbs');
+    const insulin = val('fastingInsulin');
+    if (glucose !== null && insulin !== null) set('homaIr', (glucose * insulin) / 405, 3); else clear('homaIr');
+  }
+  if (report.templateKey === 'FASTING_INSULIN') {
+    const glucose = val('fastingGlucose');
+    const insulin = val('fastingInsulin');
+    if (glucose !== null && insulin !== null) set('homaIr', (glucose * insulin) / 405, 3); else clear('homaIr');
+  }
   if (report.templateKey === 'LIPID') {
     const tc = val('totalCholesterol');
     const tg = val('triglycerides');

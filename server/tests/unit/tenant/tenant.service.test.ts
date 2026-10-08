@@ -180,12 +180,12 @@ describe('TenantService — example-based', () => {
 
   // ── OPD settings ────────────────────────────────────────────────────────────
   describe('getOpdSettings / updateOpdSettings', () => {
-    test('getOpdSettings falls back to the default (15 days) when unset', async () => {
+    test('getOpdSettings falls back to the default (5 days) when unset', async () => {
       mockRepo.findById.mockResolvedValue({ _id: 'tid1', opdSettings: undefined, toString: () => 'tid1' } as never);
 
       const result = await service.getOpdSettings('tid1');
 
-      expect(result).toEqual({ validityDays: 15 });
+      expect(result).toEqual({ validityDays: 5 });
     });
 
     test('getOpdSettings returns the tenant-configured value when set', async () => {

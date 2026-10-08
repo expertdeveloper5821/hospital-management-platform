@@ -51,6 +51,14 @@ const CATALOG = [
   'Pregnancy Test (Urine β-hCG)',
   'Stool Routine & Microscopy',
   'Stool Occult Blood Test (FOBT)',
+  // Added in the third batch (catalog now 47 tests).
+  'DP Profile',
+  'C-Peptide',
+  'Fasting Insulin',
+  'Sputum AFB',
+  'Urea',
+  'Creatinine',
+  'Vitamin Profile',
 ];
 
 const keysOf = (testName: string) => findReportTemplate(testName).parameters.map((p) => p.key);
@@ -63,9 +71,9 @@ describe('Pathology report templates — catalog coverage', () => {
     expect(t.parameters.length).toBeGreaterThan(0);
   });
 
-  test('the catalog has 40 tests, each with a distinct template key', () => {
-    expect(CATALOG).toHaveLength(40);
-    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(40);
+  test('the catalog has 47 tests, each with a distinct template key', () => {
+    expect(CATALOG).toHaveLength(47);
+    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(47);
   });
 
   test('one template per catalog test, no extras, and unique parameter keys within each', () => {

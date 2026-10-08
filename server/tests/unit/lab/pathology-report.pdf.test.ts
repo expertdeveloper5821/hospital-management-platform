@@ -88,7 +88,7 @@ describe('buildPathologyReportPdf', () => {
   test('carries the patient/UHID, encounter, test, results, units, ranges and dates', async () => {
     const pdf = await buildPathologyReportPdf(makeData());
     for (const text of [
-      'John Doe 45/M', 'PAT-001', 'Lab Doctor', 'Cardiology',
+      'John Doe 45 years/M', 'PAT-001', 'Lab Doctor', 'Cardiology',
       'Collection Date', '19 May 2026', 'Reporting Date', '20 May 2026',
       'CBC (Complete Blood Count)', 'Haemoglobin (Hb)', '10.2', 'g/dL', '13.0 - 17.0',
       'Differential Leucocyte Count', 'Clinical Notes', 'Values may vary with hydration status.',

@@ -1,9 +1,13 @@
 import PDFDocument from 'pdfkit';
+import { AgeUnit } from '../../modules/patient/patient.types';
+import { formatPatientAge } from '../utils/patient-age';
 
 export interface MedicalCardData {
   patientId:                 string;
   fullName:                  string;
   dateOfBirth:               Date;
+  age?:                      number | null;
+  ageUnit?:                  AgeUnit | null;
   gender:                    string;
   mobileNumber:              string;
   address?:                  string;
@@ -32,6 +36,7 @@ export interface ReceiptData {
   patientName:                string;
   patientId:                  string;          // UHID
   patientAge:                 number | null;
+  patientAgeUnit?:            AgeUnit | null;
   patientGender:              string | null;
   patientMobile:              string | null;
   description:                string;
@@ -56,6 +61,7 @@ export interface LabReceiptData {
   patientName:                string;
   patientId:                  string;          // UHID
   patientAge:                 number | null;
+  patientAgeUnit?:            AgeUnit | null;
   patientGender:              string | null;
   patientMobile:              string | null;
   labCategory:                'PATHOLOGY' | 'RADIOLOGY';
@@ -110,6 +116,7 @@ interface A5LandscapeReceiptSpec {
   patientName:                string;
   patientId:                  string;          // UHID
   patientAge:                 number | null;
+  patientAgeUnit?:            AgeUnit | null;
   patientGender:              string | null;
   patientMobile:              string | null;
   serviceRows:                A5LandscapeTableRow[];
@@ -133,14 +140,6 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 function formatDate(date: Date): string {
   const d = String(date.getDate()).padStart(2, '0');
   return `${d} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-function calculateAge(dob: Date): number {
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) age--;
-  return Math.max(0, age);
 }
 
 function toDisplay(str: string): string {
@@ -212,11 +211,11 @@ function formatReceiptDateTime(date: Date): string {
 // PATIENT DETAILS rows shared by every receipt layout.
 // Kept for backwards compatibility with any code that may call it.
 function patientRows(p: {
-  patientName: string; patientId: string; patientAge: number | null;
+  patientName: string; patientId: string; patientAge: number | null; patientAgeUnit?: AgeUnit | null;
   patientGender: string | null; patientMobile: string | null;
 }): Array<[string, string]> {
   const ageGender = [
-    p.patientAge !== null ? `${p.patientAge} yrs` : null,
+    formatPatientAge(p.patientAge, p.patientAgeUnit),
     p.patientGender ? toDisplay(p.patientGender) : null,
   ].filter(Boolean).join(' / ');
   const rows: Array<[string, string]> = [['Patient Name', p.patientName], ['UHID', p.patientId]];
@@ -338,7 +337,7 @@ export class PdfService {
       // ── Field rows ───────────────────────────────────────────────────────────
       const ROW_H = 21;
       const MID   = M + Math.floor(CW * 0.52);   // ~260 — two-column split
-      const age   = calculateAge(data.dateOfBirth);
+      const age   = formatPatientAge(data.age, data.ageUnit, data.dateOfBirth) ?? '—';
 
       let y = SEP_Y + 8;   // 110
 
@@ -351,7 +350,7 @@ export class PdfService {
 
       // Row 2 — Birth Date | Age | Gender | Blood group
       drawField('Birth Date: ',  formatDate(data.dateOfBirth), M,        y, M + 116);
-      drawField('Age: ',         String(age),                  M + 122,  y, M + 157);
+      drawField('Age: ',         age,                          M + 122,  y, M + 157);
       drawField('Gender: ',      toDisplay(data.gender),       M + 163,  y, M + 238);
       drawField('Blood group: ', data.bloodGroup ?? '—',        M + 244,  y, R);
       y += ROW_H;
@@ -438,6 +437,7 @@ export class PdfService {
       patientName:                data.patientName,
       patientId:                  data.patientId,
       patientAge:                 data.patientAge,
+      patientAgeUnit:             data.patientAgeUnit,
       patientGender:              data.patientGender,
       patientMobile:              data.patientMobile,
       serviceRows,
@@ -486,6 +486,7 @@ export class PdfService {
       patientName:                data.patientName,
       patientId:                  data.patientId,
       patientAge:                 data.patientAge,
+      patientAgeUnit:             data.patientAgeUnit,
       patientGender:              data.patientGender,
       patientMobile:              data.patientMobile,
       serviceRows,
@@ -625,7 +626,7 @@ export class PdfService {
       const payModeRow   = data.metaRows.find(([l]) => l === 'Payment Mode');
 
       const ageGender = [
-        data.patientAge !== null ? `${data.patientAge} yrs` : null,
+        formatPatientAge(data.patientAge, data.patientAgeUnit),
         data.patientGender ? toDisplay(data.patientGender) : null,
       ].filter(Boolean).join(' / ');
 

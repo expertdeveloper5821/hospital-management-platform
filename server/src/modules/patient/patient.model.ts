@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
-import { Gender, BloodGroup } from './patient.types';
+import { Gender, BloodGroup, AgeUnit } from './patient.types';
 import { encryptedFieldsPlugin, wrapModelBulkWrite } from '../../shared/utils/encrypted-fields.plugin';
 import { EncryptionKeyPurpose, isEncryptedField } from '../../shared/utils/field-encryption';
 
@@ -11,9 +11,10 @@ export interface IPatient extends Document {
   // Stored (and returned) as an ISO-8601 string — the field is encrypted at
   // rest (see below) and ciphertext cannot live in a Date-typed path.
   dateOfBirth:            string | null;
-  // Age in years as entered at registration. Null only on legacy rows created
-  // before the field existed.
+  // Age value entered at registration. Null only on legacy rows created before
+  // the field existed; ageUnit defaults old records and API callers to years.
   age:                    number | null;
+  ageUnit:                AgeUnit;
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
@@ -68,6 +69,7 @@ const PatientSchema = new Schema<IPatient>(
       },
     },
     age:                    { type: Number, default: null, min: 0 },
+    ageUnit:                { type: String, enum: ['YEARS', 'MONTHS', 'DAYS'], default: 'YEARS' },
     gender:                 { type: String, required: true, enum: Object.values(Gender) },
     mobileNumber:           { type: String, required: true, trim: true },
     address:                { type: String, required: true, trim: true },

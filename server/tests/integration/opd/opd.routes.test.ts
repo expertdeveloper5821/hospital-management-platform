@@ -1631,7 +1631,8 @@ describe('PATCH /api/opd/visits/:visitId', () => {
 // ─── OPD Vitals (PATCH /api/opd/visits/:visitId) ──────────────────────────────
 describe('OPD Vitals', () => {
   const VITALS = {
-    weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 98, pulse: 72,
+    weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6,
+    spo2: 98, pulse: 72, respiratoryRate: null, headCircumference: null,
   };
 
   test('200 — a fresh visit reports the default (all-null) vitals shape', async () => {
@@ -1646,6 +1647,7 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.vitals).toEqual({
       weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+      respiratoryRate: null, headCircumference: null,
     });
   });
 
@@ -1838,6 +1840,27 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(400);
   });
 
+  test('200 — accepts a sub-0.5 kg weight for a pediatric patient recorded in days', async () => {
+    const tenant = await seedTenant();
+    const tid = tenant._id.toString();
+    const patient = await seedPatient(tid);
+    await PatientModel.updateOne(
+      { tenantId: tid, patientId: patient.patientId },
+      { $set: { age: 2, ageUnit: 'DAYS' } },
+    );
+    const doctor = await seedUser(tid, 'doc-vit-pediatric@h.com', UserRole.DOCTOR);
+    await seedVisit(tid, { visitId: 'OPD-VIT-PEDIATRIC', doctorIds: [doctor._id.toString()] });
+    const token = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-VIT-PEDIATRIC')
+      .set(bearer(token))
+      .send({ vitals: { weight: 0.2 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.vitals.weight).toBe(0.2);
+  });
+
   test('200 — a valid blood pressure with 3-digit systolic is accepted', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
@@ -1891,6 +1914,7 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.vitals).toEqual({
       weight: null, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: null,
+      respiratoryRate: null, headCircumference: null,
     });
   });
 
@@ -1918,6 +1942,7 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.vitals).toEqual({
       weight: 80, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: 90,
+      respiratoryRate: null, headCircumference: null,
     });
     const history = await OPDVisitModel.findOne({ tenantId: tid, visitId: 'OPD-VITHIST1' });
     expect(history?.vitals?.weight).toBe(VITALS.weight);

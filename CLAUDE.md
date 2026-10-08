@@ -166,3 +166,11 @@ Backend `.env` (see `server/.env.example`):
 Frontend `.env` (see `client/.env.example`):
 - `NEXT_PUBLIC_API_URL=http://localhost:5000`
 - `NEXT_PUBLIC_WS_URL=ws://localhost:5000`
+
+### Patient Vitals Categories
+This contract supersedes the earlier OPD/IPD Vitals field lists above. Vitals category is determined from patient age: under 18 years is Pediatric; 18 years and older is Non-Pediatric. Age units are respected (`DAYS` and `MONTHS` are converted to years), with date of birth used when age is absent.
+
+- **Non-Pediatric order:** BP → PR → SpO₂ → RBS → Temperature → Weight.
+- **Pediatric order:** PR → RR → SpO₂ → BP → Height/Length → Weight → Head Circumference.
+- OPD and IPD retain a single backward-compatible stored/API vitals shape. RBS remains stored as `sugar`; pediatric RR and Head Circumference are added as optional fields. Category-specific saves only update the fields shown, preserving any previously stored readings from the other category.
+- Edit forms, detail views, OPD/IPD print sheets, template-backed parchas, and the IPD discharge summary all use the patient's age and the corresponding order.

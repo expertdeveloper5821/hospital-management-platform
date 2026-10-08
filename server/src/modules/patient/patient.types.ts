@@ -19,10 +19,13 @@ export const BloodGroup = {
 
 export type BloodGroup = typeof BloodGroup[keyof typeof BloodGroup];
 
+export type AgeUnit = 'YEARS' | 'MONTHS' | 'DAYS';
+
 export interface CreatePatientRequest {
   fullName:               string;
   dateOfBirth?:           string; // YYYY-MM-DD
   age:                    number;
+  ageUnit?:               AgeUnit;
   gender:                 Gender;
   mobileNumber:           string;
   address:                string;
@@ -46,6 +49,7 @@ export interface UpdatePatientRequest {
   fullName?:               string;
   dateOfBirth?:            string;
   age?:                    number;
+  ageUnit?:                AgeUnit;
   gender?:                 Gender;
   mobileNumber?:           string;
   address?:                string;

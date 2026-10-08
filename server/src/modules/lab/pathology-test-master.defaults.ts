@@ -252,6 +252,56 @@ const CONTENT: Record<string, { clinicalNote: string | null; comment?: string }>
       'Dietary red meat, certain vegetables, iron supplements and NSAIDs may affect the result. A positive result ' +
       'requires further evaluation to determine the source of bleeding.',
   },
+  DP_PROFILE: {
+    clinicalNote:
+      'DP Profile (Diabetes Profile) combines fasting and post-prandial blood glucose, HbA1c and fasting insulin ' +
+      'to comprehensively assess glycaemic status and insulin resistance. A fasting sample of 8 - 10 hours is ' +
+      'required; results should be interpreted together with clinical history. HOMA-IR above 2.5 suggests insulin ' +
+      'resistance; values above 5.0 indicate significant resistance.',
+  },
+  C_PEPTIDE: {
+    clinicalNote:
+      'C-Peptide is co-secreted with insulin and reflects endogenous insulin production. It is useful to ' +
+      'distinguish Type 1 from Type 2 diabetes, assess residual beta-cell function, and evaluate hypoglycaemia. ' +
+      'Low values indicate reduced insulin secretion (Type 1 / advanced Type 2); high values may suggest ' +
+      'insulinoma or insulin resistance. Results should be interpreted in correlation with simultaneous blood ' +
+      'glucose levels.',
+  },
+  FASTING_INSULIN: {
+    clinicalNote:
+      'Fasting insulin is elevated in insulin resistance and early Type 2 diabetes. A fasting sample of at ' +
+      'least 8 hours is required. HOMA-IR (calculated from fasting insulin and fasting glucose) provides an ' +
+      'estimate of insulin resistance; values above 2.5 suggest resistance and values above 5.0 indicate ' +
+      'significant resistance. Results should be correlated with clinical history and other metabolic markers.',
+  },
+  SPUTUM_AFB: {
+    clinicalNote:
+      'Sputum AFB smear microscopy detects acid-fast bacilli (primarily Mycobacterium tuberculosis) using the ' +
+      'Ziehl-Neelsen (ZN) stain. A minimum of three specimens on consecutive days is recommended, including at ' +
+      'least one early-morning sample. A negative smear does not exclude tuberculosis; culture and CBNAAT / GeneXpert ' +
+      'should be performed if clinical suspicion is high. Results are graded per RNTCP / NTEP guidelines.',
+  },
+  UREA: {
+    clinicalNote:
+      'Blood urea reflects the end product of protein catabolism and is filtered by the kidneys. Raised values ' +
+      'are seen in renal impairment, dehydration, high-protein diet, gastrointestinal bleeding, and catabolic ' +
+      'states; low values may occur in liver failure or malnutrition. Blood Urea Nitrogen (BUN) is a calculated ' +
+      'conversion (Urea × 28/60).',
+  },
+  CREATININE: {
+    clinicalNote:
+      'Serum creatinine reflects glomerular filtration rate and is a more specific marker of renal function than ' +
+      'urea. Values are influenced by muscle mass, age, sex and diet. An eGFR should be calculated when ' +
+      'interpreting creatinine results. Serial values are more informative than a single measurement.',
+  },
+  VITAMIN_PROFILE: {
+    clinicalNote:
+      'Vitamin Profile measures levels of key fat-soluble (A, D, E) and water-soluble (B9/Folate, B12, C) ' +
+      'vitamins. Samples for fat-soluble vitamins and B12 should ideally be collected fasting; Vitamin C should ' +
+      'be processed promptly as it is unstable. Results may be affected by supplementation, diet, sun exposure, ' +
+      'medications and underlying illness. Deficiencies are common and may be subclinical; interpretation should ' +
+      'be correlated with clinical symptoms and dietary history.',
+  },
 };
 
 // One seed row per catalog test (catalog order), then GENERIC.

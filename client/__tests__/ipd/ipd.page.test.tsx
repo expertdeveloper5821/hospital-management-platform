@@ -14,6 +14,7 @@ const mockCreateManualPayment = jest.fn();
 let mockWards: unknown[] = [];
 let mockBeds: unknown[] = [];
 let mockDoctors: unknown[] = [];
+const mockGetPatientById = jest.fn().mockReturnValue({ data: undefined });
 // Simulates the doctor list still being fetched (RTK Query: no data yet).
 let mockDoctorsLoading = false;
 let mockDepartments: unknown[] | undefined;
@@ -46,6 +47,7 @@ jest.mock('@/store/api/user.api', () => ({
 let mockSearchPatients: unknown[] = [];
 const mockSearchResponses = new Map<string, unknown>();
 jest.mock('@/store/api/patient.api', () => ({
+  useGetPatientByIdQuery: (...args: unknown[]) => mockGetPatientById(...args),
   useSearchPatientsQuery: ({ q }: { q: string }, opts?: { skip?: boolean }) => {
     if (opts?.skip) return { data: undefined, isFetching: false };
     if (!mockSearchResponses.has(q)) mockSearchResponses.set(q, { data: mockSearchPatients });
@@ -99,6 +101,7 @@ beforeEach(() => {
   mockDoctors = [];
   mockDoctorsLoading = false;
   mockDepartments = undefined;
+  mockGetPatientById.mockReturnValue({ data: undefined });
   mockSearchPatients = [];
   mockSearchResponses.clear();
   mockUserId = undefined;
@@ -574,6 +577,25 @@ describe('IPDPage — Receptionist edit scope, delete and payment lookup', () =>
     expect(screen.getByText('Bed')).toBeInTheDocument();
   });
 
+  test('automatically shows pediatric vitals for an infant patient', () => {
+    mockGetPatientById.mockReturnValue({
+      data: { patientId: 'PAT-00000003', age: 5, ageUnit: 'MONTHS', dateOfBirth: null },
+    });
+    renderWith('RECEPTIONIST');
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+
+    expect(screen.getByText('Pediatric Vitals')).toBeInTheDocument();
+    expect(screen.getByLabelText('PR (bpm)')).toBeInTheDocument();
+    expect(screen.getByLabelText('RR (/min)')).toBeInTheDocument();
+    expect(screen.getByLabelText('SpO₂ (%)')).toBeInTheDocument();
+    expect(screen.getByLabelText('BP (mmHg)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Height/Length (cm)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Weight (kg)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Head Circumference (cm)')).toBeInTheDocument();
+    expect(screen.queryByLabelText('RBS (mg/dL)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Temperature (°F)')).not.toBeInTheDocument();
+  });
+
   test('RECEPTIONIST save with only a vitals change sends just vitals', async () => {
     mockUpdateAdmission.mockReturnValue({ unwrap: () => Promise.resolve({ ...admitted, vitals: { ...admitted.vitals, weight: 62 } }) });
     renderWith('RECEPTIONIST');
@@ -591,14 +613,14 @@ describe('IPDPage — Receptionist edit scope, delete and payment lookup', () =>
     renderWith('RECEPTIONIST');
     fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
     fireEvent.change(screen.getByLabelText('Weight (kg)'), { target: { value: '9999' } });
-    fireEvent.change(screen.getByLabelText('Blood Pressure (mmHg)'), { target: { value: 'high' } });
+    fireEvent.change(screen.getByLabelText('BP (mmHg)'), { target: { value: 'high' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
 
     const weightError = await screen.findByText(/weight must be between/i);
     const bpError     = screen.getByText(/blood pressure must be in the format/i);
     const weightInput = screen.getByLabelText('Weight (kg)');
     expect(weightInput.parentElement).toContainElement(weightError);
-    expect(screen.getByLabelText('Blood Pressure (mmHg)').parentElement).toContainElement(bpError);
+    expect(screen.getByLabelText('BP (mmHg)').parentElement).toContainElement(bpError);
     expect(weightInput).toHaveAttribute('aria-invalid', 'true');
     expect(weightInput).toHaveAttribute('aria-describedby', weightError.id);
     expect(weightError).not.toHaveClass('bg-destructive/10');
