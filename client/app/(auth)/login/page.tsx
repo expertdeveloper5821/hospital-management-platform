@@ -19,6 +19,7 @@ import { useLoginMutation } from '@/store/api/auth.api';
 import { useGetPlatformSettingsQuery } from '@/store/api/platformSettings.api';
 import { useAppSelector } from '@/store/hooks';
 import { NavForm } from '@/components/ui/form';
+import { isRoleChangeRelogin } from '@/lib/role-change';
 
 const schema = z.object({
   email:    z.string().email('Enter a valid email address'),
@@ -32,6 +33,11 @@ export default function LoginPage() {
   const [login, { isLoading, error }] = useLoginMutation();
   const profile  = useAppSelector((s) => s.auth.profile);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Set when the user was forcibly signed out because an administrator changed
+  // their role (§9.2 of Doc/hms-role-permission-api-governance.md): the old
+  // session is dead, this notice explains why they're back on the login page.
+  const [roleChanged] = useState(isRoleChangeRelogin);
 
   const { data: platformSettings, isLoading: settingsLoading } = useGetPlatformSettingsQuery();
 
@@ -120,6 +126,15 @@ export default function LoginPage() {
               className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
             >
               {apiError}
+            </div>
+          )}
+
+          {roleChanged && !apiError && (
+            <div
+              role="status"
+              className="rounded-md border border-blue-500/50 bg-blue-500/10 px-3 py-2 text-sm text-blue-700 dark:text-blue-300"
+            >
+              Your role was changed by an administrator. Please sign in again with your updated permissions.
             </div>
           )}
 

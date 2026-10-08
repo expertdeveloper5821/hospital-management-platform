@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { IPDAdmissionModel, IIPDAdmission } from './ipd.model';
-import { ProgressNote, ListAdmissionsQuery, StatusUpdate, IPDVitals } from './ipd.types';
+import { ProgressNote, ListAdmissionsQuery, StatusUpdate, IPDVitals, AdmissionStatus } from './ipd.types';
 import { PaginatedResult } from '../../shared/types/common.types';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { WardModel, IWard } from './ward.model';
@@ -72,6 +72,39 @@ export class IPDRepository {
   ): Promise<IIPDAdmission | null> {
     assertDbConnected();
     return IPDAdmissionModel.findOne({ patientId, tenantId, status: 'ADMITTED' });
+  }
+
+  // Distinct patients with an ADMITTED (in-treatment) IPD admission assigned
+  // to this doctor — the IPD half of the doctor role-change restriction's
+  // active-load check (see UserService.updateUserRole). DISCHARGED admissions
+  // are historical and must never block a role change. assignedDoctorIds is a
+  // multikey array-field equality match; distinct() dedupes patients with
+  // multiple active admissions server-side. All keys are plaintext fields —
+  // no encrypted field is filtered (see encrypted-fields conventions).
+  async countActivePatientsByDoctor(tenantId: string, doctorId: string): Promise<string[]> {
+    assertDbConnected();
+    const patientIds = await IPDAdmissionModel.distinct('patientId', {
+      tenantId,
+      status:            AdmissionStatus.ADMITTED,
+      assignedDoctorIds: doctorId,
+    });
+    return patientIds as string[];
+  }
+
+  // Active (ADMITTED) admissions in the given ward(s) — the IPD half of the
+  // nurse role-change restriction's active-load check (see
+  // UserService.updateUserRole): a nurse rostered onto a ward with in-treatment
+  // patients has live IPD duty. Each admission is one duty entry; no dedupe
+  // across wards (an admission lives in exactly one ward). All keys are
+  // plaintext fields — no encrypted field is filtered.
+  async countActiveAdmissionsByWards(tenantId: string, wardIds: string[]): Promise<number> {
+    assertDbConnected();
+    if (wardIds.length === 0) return 0;
+    return IPDAdmissionModel.countDocuments({
+      tenantId,
+      status: AdmissionStatus.ADMITTED,
+      wardId: { $in: wardIds },
+    });
   }
 
   // The patient's admission in effect at `at` (admitted on/before it and not yet

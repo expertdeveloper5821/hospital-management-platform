@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   useListUsersQuery,
   useCreateUserMutation,
@@ -18,6 +19,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
+import { DoctorActivePatientsDialog, type BlockedRoleChange } from '@/components/staff/DoctorActivePatientsDialog';
+import { RoleChangeConflictDialog, type RoleChangeConflict } from '@/components/staff/RoleChangeConflictDialog';
 import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
@@ -425,6 +428,15 @@ function UsersTab() {
   const [emailError,    setEmailError]    = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<UserResponse | null>(null);
   const [deactivateError,  setDeactivateError]  = useState<string | null>(null);
+  // Doctor role-change restriction — the structured 409 payload (one blocked
+  // attempt at a time; null = dialog closed). Branches on details.code, never
+  // on message text. See DoctorActivePatientsDialog.
+  const [blockedRoleChange, setBlockedRoleChange] = useState<BlockedRoleChange | null>(null);
+  // Every OTHER structured 409 (nurse duty, lab requests, open payments,
+  // attendance, ward roster, last-admin, inactive user) — same one-at-a-time
+  // contract, rendered through the generic RoleChangeConflictDialog which
+  // displays the exact conflict details the backend returned.
+  const [roleConflict, setRoleConflict] = useState<RoleChangeConflict | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const limit = 10;
@@ -450,6 +462,8 @@ function UsersTab() {
     sortBy,
     sortOrder,
   });
+
+  const router = useRouter();
 
   const [updateUserRole, { isLoading: updatingRole }] = useUpdateUserRoleMutation();
   const [updateUserEmail, { isLoading: updatingEmail }] = useUpdateUserEmailMutation();
@@ -484,6 +498,8 @@ function UsersTab() {
   function cancelRoleEdit() {
     setRoleError(null);
     setEditingRoleId(null);
+    setBlockedRoleChange(null);
+    setRoleConflict(null);
   }
 
   function openEmailEdit(user: UserResponse) {
@@ -526,9 +542,55 @@ function UsersTab() {
       await updateUserRole({ userId, role: newRole }).unwrap();
       setEditingRoleId(null);
     } catch (err: unknown) {
-      // Surface backend rejections (e.g. 403 self/escalation, 409 last-admin)
-      // instead of silently closing the editor as if the change succeeded.
-      const msg = (err as { data?: { message?: string } })?.data?.message;
+      const e = err as {
+        status?: number;
+        data?: { message?: string; details?: Record<string, unknown> };
+      };
+
+      // Structured 409: the doctor still has active patients. Open the modal
+      // instead of the inline error — detection is by details.code, never by
+      // message text. The inline editor stays open at the pre-save value so
+      // the admin can retry after reassignment.
+      const details = e.data?.details as Record<string, unknown> | undefined;
+      const code    = typeof details?.code === 'string' ? details.code : undefined;
+      if (e.status === 409 && code === 'DOCTOR_ACTIVE_PATIENTS' && typeof details!['activePatients'] === 'number') {
+        const user = users.find((u) => u.userId === userId);
+        if (user) {
+          const breakdown = details!['breakdown'] as { opd?: number; ipd?: number } | undefined;
+          setBlockedRoleChange({
+            userId:         user.userId,
+            userName:       user.name,
+            requestedRole:  newRole,
+            activePatients: details!['activePatients'] as number,
+            breakdown:      { opd: breakdown?.opd ?? 0, ipd: breakdown?.ipd ?? 0 },
+          });
+          return; // modal replaces the inline error for this case
+        }
+      }
+
+      // Every OTHER structured 409 (NURSE_ACTIVE_ENTRIES, WARD_ROSTER_CONFLICT,
+      // PATHOLOGY/RADIOLOGY_ACTIVE_REQUEST, FINANCE_UNRECONCILED,
+      // OPEN_PAYMENT_LEASE, STAFF_ACTIVE_SESSION, LAST_ADMIN_CONFLICT,
+      // USER_INACTIVE) opens the generic conflict dialog so the admin sees the
+      // exact counts/breakdown/error code the backend returned — same contract
+      // as the doctor dialog above, never a bare inline message.
+      if (e.status === 409 && code) {
+        const user = users.find((u) => u.userId === userId);
+        if (user) {
+          setRoleConflict({
+            userName:      user.name,
+            code,
+            message:       e.data?.message ?? 'The role change was rejected.',
+            details:       details ?? {},
+            requestedRole: newRole,
+          });
+          return; // dialog replaces the inline error for this case
+        }
+      }
+
+      // All other rejections (403 self/escalation, 404, unstructured 409, 500,
+      // network) keep the inline error behavior.
+      const msg = e.data?.message;
       setRoleError(msg ?? 'Failed to update role.');
     }
   }
@@ -540,7 +602,27 @@ function UsersTab() {
       await deactivateUser(deactivateTarget.userId).unwrap();
       setDeactivateTarget(null);
     } catch (err: unknown) {
-      const msg = (err as { data?: { message?: string } })?.data?.message;
+      // Structured 409 (LAST_ADMIN_CONFLICT, WARD_ROSTER_CONFLICT): show the
+      // exact conflict details in the generic dialog instead of a message-only
+      // inline error — same binding rule as role changes.
+      const e = err as {
+        status?: number;
+        data?: { message?: string; details?: Record<string, unknown> };
+      };
+      const details = e.data?.details;
+      const code    = typeof details?.code === 'string' ? details.code : undefined;
+      if (e.status === 409 && code) {
+        setDeactivateTarget(null);
+        setRoleConflict({
+          userName:      deactivateTarget.name,
+          code,
+          message:       e.data?.message ?? 'The deactivation was rejected.',
+          details:       details ?? {},
+          requestedRole: null, // deactivation block — no role requested
+        });
+        return;
+      }
+      const msg = e.data?.message;
       setDeactivateError(msg ?? 'Failed to deactivate user.');
     }
   }
@@ -868,6 +950,25 @@ function UsersTab() {
           onClose={() => setDeactivateTarget(null)}
           isLoading={deactivating}
           error={deactivateError}
+        />
+      )}
+
+      {blockedRoleChange && (
+        <DoctorActivePatientsDialog
+          blocked={blockedRoleChange}
+          onClose={() => setBlockedRoleChange(null)}
+          onGoToPatients={() => {
+            setBlockedRoleChange(null);
+            setEditingRoleId(null);
+            router.push('/patients');
+          }}
+        />
+      )}
+
+      {roleConflict && (
+        <RoleChangeConflictDialog
+          conflict={roleConflict}
+          onClose={() => setRoleConflict(null)}
         />
       )}
     </div>

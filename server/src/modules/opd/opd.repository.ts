@@ -343,6 +343,40 @@ export class OPDRepository {
     return patientIds as string[];
   }
 
+  // Distinct patients with an active (non-terminal) OPD visit assigned to this
+  // doctor — the OPD half of the doctor role-change restriction's active-load
+  // check (see UserService.updateUserRole). Only OPEN / IN_PROGRESS visits
+  // count (ACTIVE_STATUSES); COMPLETED / CANCELLED / NO_SHOW are terminal and
+  // must never block a role change. doctorIds is a multikey array field, so
+  // equality matches any visit naming the doctor; distinct() dedupes patients
+  // with multiple active visits server-side. All keys are plaintext fields —
+  // no encrypted field is filtered (see encrypted-fields conventions).
+  async countActivePatientsByDoctor(tenantId: string, doctorId: string): Promise<string[]> {
+    assertDbConnected();
+    const patientIds = await OPDVisitModel.distinct('patientId', {
+      tenantId,
+      doctorIds: doctorId,
+      status:    { $in: [...ACTIVE_STATUSES] }, // spread — Mongoose rejects a readonly array
+    });
+    return patientIds as string[];
+  }
+
+  // Active (non-terminal) OPD queue rows naming this nurse in their own
+  // nurseIds — the OPD half of the nurse role-change restriction's active-load
+  // check (see UserService.updateUserRole). "Queue rows", not distinct
+  // patients: each OPEN/IN_PROGRESS visit the nurse is personally assigned to
+  // is a real duty entry they must be taken off first. nurseIds is a
+  // multikey array field (equality matches any visit naming the nurse); all
+  // keys are plaintext — no encrypted field is filtered.
+  async countActiveVisitsByNurse(tenantId: string, nurseId: string): Promise<number> {
+    assertDbConnected();
+    return OPDVisitModel.countDocuments({
+      tenantId,
+      nurseIds: nurseId,
+      status:   { $in: [...ACTIVE_STATUSES] }, // spread — Mongoose rejects a readonly array
+    });
+  }
+
   async countByDate(tenantId: string, date: Date): Promise<number> {
     assertDbConnected();
     const start = toIstMidnight(date);

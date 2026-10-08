@@ -447,6 +447,7 @@ export const baseApi = createApi({
     'LabTestMaster',
     'Inventory',
     'Payment',
+    'Revenue',
     'Notification',
     'Audit',
     'Dashboard',

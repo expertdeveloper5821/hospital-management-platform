@@ -119,6 +119,18 @@ function upload(kind: 'pathology' | 'radiology', requestId: string, role: UserRo
     .attach('report', Buffer.from('%PDF-1.4 lab report'), { filename: 'report.pdf', contentType: 'application/pdf' });
 }
 
+// Pathology reports have no file-upload route — they are created only through
+// the structured per-test report form (PUT /pathology/:requestId/reports/:testIndex).
+// Charge-created pathology requests carry the charge's test name (e.g. 'Complete
+// Blood Count'), which is outside the catalog → the GENERIC template with a
+// single free-text 'result' parameter.
+function submitPathologyReport(requestId: string, role: UserRole, testName: string) {
+  return request(app)
+    .put(`/api/lab/pathology/${requestId}/reports/0`)
+    .set(auth(role))
+    .send({ testName, values: { result: 'Within normal limits' } });
+}
+
 describe('Billing LAB_TEST charge → Lab request', () => {
   test('a Pathology test charge creates a linked, unpaid pathology request visible in Lab', async () => {
     const res = await addLabCharge('PATHOLOGY:Complete Blood Count', 'Complete Blood Count', 300);
@@ -180,13 +192,13 @@ describe('Billing LAB_TEST charge → Lab request', () => {
 });
 
 describe('Billing payment → Lab paid status, receipt and report upload', () => {
-  test('report upload is blocked until Billing collects the payment', async () => {
+  test('report submission is blocked until Billing collects the payment', async () => {
     const charge = (await addLabCharge('PATHOLOGY:Complete Blood Count', 'Complete Blood Count', 300)).body.data;
-    const res = await upload('pathology', charge.labRequestId, UserRole.PATHOLOGIST);
+    const res = await submitPathologyReport(charge.labRequestId, UserRole.PATHOLOGIST, 'Complete Blood Count');
     expect(res.status).toBe(409);
   });
 
-  test('Mark Paid in Billing marks the same request Paid with one shared Lab receipt, and the Pathologist can upload', async () => {
+  test('Mark Paid in Billing marks the same request Paid with one shared Lab receipt, and the Pathologist can submit the report', async () => {
     const charge = (await addLabCharge('PATHOLOGY:Complete Blood Count', 'Complete Blood Count', 300)).body.data;
 
     const pay = await request(app).patch(`/api/charges/${charge.chargeId}/pay`).set(auth(UserRole.RECEPTIONIST));
@@ -216,7 +228,7 @@ describe('Billing payment → Lab paid status, receipt and report upload', () =>
       chargeId: charge.chargeId, status: 'PAID', paymentId: payments[0].paymentId, receiptAvailable: true,
     });
 
-    const up = await upload('pathology', charge.labRequestId, UserRole.PATHOLOGIST);
+    const up = await submitPathologyReport(charge.labRequestId, UserRole.PATHOLOGIST, 'Complete Blood Count');
     expect(up.status).toBe(200);
     expect(up.body.data.status).toBe('COMPLETED');
     expect(await PaymentModel.countDocuments({ tenantId })).toBe(1);
@@ -275,7 +287,7 @@ describe('Duplicate payment prevention', () => {
 });
 
 describe('Free (₹0) lab tests', () => {
-  test('a ₹0 Lab Test charge is Paid immediately with a ₹0 receipt, and the report can be uploaded', async () => {
+  test('a ₹0 Lab Test charge is Paid immediately with a ₹0 receipt, and the report can be submitted', async () => {
     const res = await addLabCharge('PATHOLOGY:Blood Sugar', 'Blood Sugar', 0);
     expect(res.status).toBe(201);
     const charge = res.body.data;
@@ -292,7 +304,7 @@ describe('Free (₹0) lab tests', () => {
     const [row] = await listLab('pathology');
     expect(row.payment).toMatchObject({ paymentId: payments[0].paymentId, amount: 0, receiptAvailable: true });
 
-    const up = await upload('pathology', charge.labRequestId, UserRole.PATHOLOGIST);
+    const up = await submitPathologyReport(charge.labRequestId, UserRole.PATHOLOGIST, 'Blood Sugar');
     expect(up.status).toBe(200);
   });
 

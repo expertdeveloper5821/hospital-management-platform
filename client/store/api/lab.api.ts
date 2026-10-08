@@ -86,7 +86,10 @@ export const labApi = baseApi.injectEndpoints({
         url: `/api/lab/pathology/${requestId}/reports/${testIndex}`, method: 'PUT', body,
       }),
       transformResponse: (raw: ApiSuccess<PathologyRequestResponse>) => raw.data,
-      invalidatesTags: ['Lab'],
+      // Report submit can complete a request → its linked payment/charge view
+      // may shift (§5.2.2 rule 3: invalidate PAYMENT when the payment view is
+      // linked to the lab request).
+      invalidatesTags: ['Lab', 'Payment'],
     }),
 
     // ─── Pathology Test Master (lab staff, online-only) ──────────────────────
@@ -203,7 +206,9 @@ export const labApi = baseApi.injectEndpoints({
         return { url: `/api/lab/radiology/${requestId}/report`, method: 'PATCH', body: formData };
       },
       transformResponse: (raw: ApiSuccess<RadiologyRequestResponse>) => raw.data,
-      invalidatesTags: ['Lab'],
+      // Report upload can complete a request → invalidate the linked payment
+      // view too (§6.3.2).
+      invalidatesTags: ['Lab', 'Payment'],
     }),
 
     // ─── Edit & Delete ────────────────────────────────────────────────────────

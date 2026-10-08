@@ -97,6 +97,8 @@ describe('New Pathology Request — Test Type multi-select', () => {
     expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Vitamin D (25-OH)', 'Vitamin B12']);
   });
 
+  // Heavy multi-select + combobox typing in jsdom regularly exceeds the 5s
+  // default on slower machines — generous per-test timeout, assertions unchanged.
   test('sends all selected tests (no duplicates) as the testType string', async () => {
     const user = userEvent.setup();
     await openNewPathologyRequest(user);
@@ -119,7 +121,7 @@ describe('New Pathology Request — Test Type multi-select', () => {
       patientId: 'PAT-001',
       testType:  'CBC (Complete Blood Count), Lipid Profile',
     }));
-  });
+  }, 20_000);
 
   test('new tests are searchable and sent with their exact names (including β)', async () => {
     const user = userEvent.setup();
@@ -139,7 +141,7 @@ describe('New Pathology Request — Test Type multi-select', () => {
     expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({
       testType: 'Stool Occult Blood Test (FOBT), Pregnancy Test (Urine β-hCG)',
     }));
-  });
+  }, 20_000);
 
   test('requires at least one test', async () => {
     const user = userEvent.setup();
@@ -158,7 +160,7 @@ describe('New Pathology Request — Test Type multi-select', () => {
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));
     expect(screen.getByText(/Too many tests selected/)).toBeInTheDocument();
     expect(mockCreatePathology).not.toHaveBeenCalled();
-  });
+  }, 20_000);
 });
 
 describe('New Pathology Request — Referred By "Other"', () => {

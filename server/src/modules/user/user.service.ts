@@ -12,6 +12,14 @@ import { addToDenylist } from '../../shared/middleware/token-denylist';
 import { JWTPayload, UserRole, AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, ValidationError } from '../../shared/middleware/error-handler';
 import { CreateUserRequest, ListUsersFilters, UpdateProfileRequest, UpdateMyProfileRequest, ChangeMyPasswordRequest } from './user.types';
+import { opdRepository } from '../opd/opd.repository';
+import { ipdRepository } from '../ipd/ipd.repository';
+import { labRepository } from '../lab/lab.repository';
+import { paymentRepository } from '../payment/payment.repository';
+import { PaymentReferenceType } from '../payment/payment.types';
+import { attendanceRepository } from '../attendance/attendance.repository';
+import { notificationService } from '../notification/notification.service';
+import { pushToUser } from '../../shared/services/websocket.service';
 import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 
 // Roles that must never be created or assigned through tenant user-management.
@@ -70,8 +78,26 @@ export class UserService {
     if (user.role === UserRole.HOSPITAL_ADMIN) {
       const activeAdminCount = await userRepository.countActiveAdmins(tenantId);
       if (activeAdminCount <= 1) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, null, requestedBy, 'LAST_ADMIN_CONFLICT');
         throw new ConflictError(
           'Cannot deactivate the last active Hospital Admin. Assign another admin first.',
+          { code: 'LAST_ADMIN_CONFLICT', userId, currentRole: user.role },
+        );
+      }
+    }
+
+    // Ward-roster origin guard (§4.2.1 of the role-permission API governance
+    // reference): a nurse still on any live ward's roster is on IPD duty —
+    // remove them from the roster first, then deactivate. Only active
+    // (non-deleted) wards count; a deleted ward's roster is historical.
+    if (user.role === UserRole.NURSE) {
+      const activeWardIds = await ipdRepository.findWardIdsByNurse(tenantId, userId, { activeOnly: true });
+      if (activeWardIds.length > 0) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, null, requestedBy, 'WARD_ROSTER_CONFLICT');
+        throw new ConflictError(
+          `Cannot deactivate: ${user.name} is still on the roster of ${activeWardIds.length} active ward(s). ` +
+          'Remove them from the ward roster first, then retry.',
+          { code: 'WARD_ROSTER_CONFLICT', activeWards: activeWardIds.length, userId },
         );
       }
     }
@@ -109,6 +135,185 @@ export class UserService {
     });
   }
 
+  /**
+   * Doctor role-change restriction — resolve the doctor's active patient load
+   * across OPD (OPEN / IN_PROGRESS visits) and IPD (ADMITTED admissions).
+   * Returns null for non-doctors: the restriction never applies to them, and
+   * no encounter query is issued at all. A patient active via both OPD and IPD
+   * is counted once in `total` (distinct patientId union) while `breakdown`
+   * keeps the per-source counts for the UI.
+   *
+   * NOTE: imports OPD/IPD repositories only — never their services — so the
+   * dependency graph stays acyclic (opd.service.ts imports userRepository).
+   */
+  private async resolveDoctorActiveLoad(
+    tenantId: string,
+    user: IUser,
+  ): Promise<{ total: number; opd: number; ipd: number } | null> {
+    if (user.role !== UserRole.DOCTOR) return null;
+
+    const [opdPatientIds, ipdPatientIds] = await Promise.all([
+      opdRepository.countActivePatientsByDoctor(tenantId, user._id.toString()),
+      ipdRepository.countActivePatientsByDoctor(tenantId, user._id.toString()),
+    ]);
+
+    return {
+      total: new Set([...opdPatientIds, ...ipdPatientIds]).size,
+      opd:   opdPatientIds.length,
+      ipd:   ipdPatientIds.length,
+    };
+  }
+
+  /**
+   * §4.4 (role-permission API governance): every rejected role-change or
+   * deactivation attempt is audited with the stable conflict code, the
+   * previous and requested roles, the target user, the tenant and the caller
+   * — identity fields (names, emails) stay out of audit values. Roles are
+   * non-sensitive; counts and ids are the only payload. `currentRole` and
+   * `requestedRole` are null when the guard fires before the target user is
+   * loaded, or when the rejected operation is a deactivation (no role
+   * requested).
+   */
+  private async logRoleChangeConflict(
+    tenantId:      string,
+    targetUserId:  string,
+    currentRole:   UserRole | null,
+    requestedRole: UserRole | null,
+    requestedBy:   string,
+    conflictCode:  string,
+  ): Promise<void> {
+    await auditService.log({
+      entityType:    AuditEntityType.USER_ACCOUNT,
+      entityId:      targetUserId,
+      action:        'ROLE_CHANGE_BLOCKED',
+      userId:        requestedBy,
+      tenantId,
+      previousValue: { role: currentRole },
+      newValue:      { requestedRole, conflictCode },
+    });
+  }
+
+  /**
+   * Role-specific pre-flight guards (§4.2 of the role-permission API
+   * governance reference): a user carrying live work in their current role
+   * cannot leave it until that work is handed over or finalized — the same
+   * principle as DOCTOR_ACTIVE_PATIENTS above. Every rejection is a 409 with
+   * a stable code and a data-driven payload (ids and counts only — no
+   * PHI/PII). Guards fire on the CURRENT role only; changing INTO any of
+   * these roles is never blocked (a fresh holder has no active work in it by
+   * definition).
+   *
+   * RECEPTIONIST is deliberately absent: §4.2.4's pending-registration /
+   * pending-OPD-visit signals live in the client-side offline outbox
+   * (client/lib/offline), which the backend cannot observe, and neither
+   * Patient nor OPDVisit records who created them. Ground rule §1.3(2)
+   * ("Forbidden is a state, not a guess") forbids blocking on a guessed
+   * proxy, so no server-side check exists for it today.
+   */
+  private async assertNoRoleSpecificActiveWork(
+    tenantId:    string,
+    user:        IUser,
+    newRole:     UserRole,
+    requestedBy: string,
+  ): Promise<void> {
+    const userId       = user._id.toString();
+    const conflictBase = { userId, currentRole: user.role, requestedRole: newRole };
+
+    switch (user.role) {
+      case UserRole.NURSE: {
+        // Active duty = personally assigned OPD queue rows (visit.nurseIds) +
+        // in-treatment patients on wards whose roster still lists the nurse
+        // (Ward.assignedNurseIds is the source of truth for IPD duty).
+        const [activeOpdVisits, activeWardIds] = await Promise.all([
+          opdRepository.countActiveVisitsByNurse(tenantId, userId),
+          ipdRepository.findWardIdsByNurse(tenantId, userId, { activeOnly: true }),
+        ]);
+        const activeIpdAdmissions = await ipdRepository.countActiveAdmissionsByWards(tenantId, activeWardIds);
+        if (activeOpdVisits + activeIpdAdmissions > 0) {
+          await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, 'NURSE_ACTIVE_ENTRIES');
+          throw new ConflictError(
+            `Cannot change role: ${user.name} still has ${activeOpdVisits} active OPD visit(s) and ` +
+            `${activeIpdAdmissions} active IPD admission(s). Take them off duty first, then retry.`,
+            {
+              code:          'NURSE_ACTIVE_ENTRIES',
+              activeEntries: activeOpdVisits + activeIpdAdmissions,
+              breakdown:     { opd: activeOpdVisits, ipd: activeIpdAdmissions },
+              ...conflictBase,
+            },
+          );
+        }
+        return;
+      }
+
+      case UserRole.PATHOLOGIST:
+      case UserRole.RADIOLOGIST: {
+        // Active authored work = PENDING/IN_PROGRESS lab requests of this
+        // user's own request type (requestedBy). An open request may also
+        // still be unpaid — surfaced as a flag so the UI can point at
+        // collection (§4.2.2's response shape).
+        const isPathology = user.role === UserRole.PATHOLOGIST;
+        const requestIds = isPathology
+          ? await labRepository.findActivePathologyIdsByRequester(tenantId, userId)
+          : await labRepository.findActiveRadiologyIdsByRequester(tenantId, userId);
+        if (requestIds.length > 0) {
+          const referenceType = isPathology
+            ? PaymentReferenceType.PATHOLOGY_REQUEST
+            : PaymentReferenceType.RADIOLOGY_REQUEST;
+          const completed = await paymentRepository.findCompletedByReferences(tenantId, referenceType, requestIds);
+          const paidReferenceIds = new Set(
+            completed.map((p) => p.referenceId).filter((id): id is string => id !== null),
+          );
+          const unpaidPayment = requestIds.some((id) => !paidReferenceIds.has(id));
+          const code = isPathology ? 'PATHOLOGY_ACTIVE_REQUEST' : 'RADIOLOGY_ACTIVE_REQUEST';
+          await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, code);
+          throw new ConflictError(
+            `Cannot change role: ${user.name} still has ${requestIds.length} active ` +
+            `${isPathology ? 'pathology' : 'radiology'} request(s). Finalize or hand them over first, then retry.`,
+            { code, activeRequests: requestIds.length, unpaidPayment, ...conflictBase },
+          );
+        }
+        return;
+      }
+
+      case UserRole.MANAGER:
+      case UserRole.FINANCE_MANAGER: {
+        // Open (PENDING) payments this user recorded are unfinished finance
+        // work (§4.2.3): settle or cancel them before the role moves.
+        // COMPLETED is the settled state; FAILED/CANCELLED are terminal and
+        // never block.
+        const openPayments = await paymentRepository.countOpenPaymentsByCreator(tenantId, userId);
+        if (openPayments > 0) {
+          const code = user.role === UserRole.MANAGER ? 'FINANCE_UNRECONCILED' : 'OPEN_PAYMENT_LEASE';
+          await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, code);
+          throw new ConflictError(
+            `Cannot change role: ${user.name} still has ${openPayments} open payment(s) awaiting reconciliation. ` +
+            'Reconcile them first, then retry.',
+            { code, openPayments, ...conflictBase },
+          );
+        }
+        return;
+      }
+
+      case UserRole.STAFF: {
+        // An unfinalized attendance shift (checked in, never checked out) must
+        // be closed — by check-out or admin correction — before the role
+        // moves. Any day's dangling check-in counts, not just today's.
+        const openSession = await attendanceRepository.findOpenSession(tenantId, userId);
+        if (openSession) {
+          await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, 'STAFF_ACTIVE_SESSION');
+          throw new ConflictError(
+            `Cannot change role: ${user.name} has an open attendance session. Finalize it first, then retry.`,
+            { code: 'STAFF_ACTIVE_SESSION', attendanceId: openSession.attendanceId, ...conflictBase },
+          );
+        }
+        return;
+      }
+
+      default:
+        return;
+    }
+  }
+
   async updateUserRole(
     tenantId: string,
     userId: string,
@@ -117,27 +322,83 @@ export class UserService {
   ): Promise<void> {
     // A user cannot change their own role.
     if (userId === requestedBy) {
+      await this.logRoleChangeConflict(tenantId, userId, null, newRole, requestedBy, 'SELF_ROLE_CHANGE');
       throw new ForbiddenError('You cannot change your own role.');
     }
     // SUPER_ADMIN / HOSPITAL_ADMIN cannot be assigned to any user (privilege
     // escalation / onboarding-only).
     if (NON_ASSIGNABLE_ROLES.includes(newRole)) {
+      await this.logRoleChangeConflict(tenantId, userId, null, newRole, requestedBy, 'ROLE_NOT_ASSIGNABLE');
       throw new ForbiddenError(`The ${newRole} role cannot be assigned to a user.`);
     }
 
     const user = await userRepository.findById(tenantId, userId);
     if (!user) throw new NotFoundError('User not found');
 
+    // Inactive users fail closed (§4.1 #6 of the governance reference): a
+    // role change on a deactivated account would silently hand the new
+    // role's permissions to whoever reactivates it later — force the explicit
+    // activation step first so the audit trail shows an intentional
+    // reactivation followed by the role move. (This is why an inactive doctor
+    // with active encounters surfaces USER_INACTIVE rather than
+    // DOCTOR_ACTIVE_PATIENTS — both are fail-closed; reactivate first, then
+    // the workload guard still applies.)
+    if (!user.isActive) {
+      await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, 'USER_INACTIVE');
+      throw new ConflictError(
+        'Cannot change the role of an inactive user. Reactivate them first, then retry.',
+        { code: 'USER_INACTIVE', userId, currentRole: user.role, requestedRole: newRole },
+      );
+    }
+
     // Last-admin guard when demoting an admin (FR-04.7). newRole can no longer be
     // HOSPITAL_ADMIN (blocked above), so any role change on an admin is a demotion.
     if (user.role === UserRole.HOSPITAL_ADMIN) {
       const activeAdminCount = await userRepository.countActiveAdmins(tenantId);
       if (activeAdminCount <= 1) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, 'LAST_ADMIN_CONFLICT');
         throw new ConflictError(
           'Cannot change role of the last active Hospital Admin. Assign another admin first.',
+          { code: 'LAST_ADMIN_CONFLICT', userId, currentRole: user.role, requestedRole: newRole },
         );
       }
     }
+
+    // Doctor role-change restriction: a doctor with active (non-terminal)
+    // assigned encounters cannot leave the DOCTOR role — their workload must
+    // be reassigned first. Applies even to inactive doctors (fail-closed: the
+    // encounters are real workload regardless of login state). Changing INTO
+    // DOCTOR is never blocked (a non-doctor has no doctor-encounters by
+    // definition; the helper returns null for them).
+    //
+    // Historical data integrity: this is the ONLY mutation updateUserRole
+    // makes, and it touches User.role alone. Completed visits'/discharged
+    // admissions' doctorIds / assignedDoctorIds are never rewritten, users are
+    // never hard-deleted (deactivation only flips isActive, and read-time name
+    // resolution via findNamesByIds matches on _id for any role), and doctor
+    // names are never denormalized onto encounter documents — so past records
+    // and their audit trail stay intact after any legitimate role change.
+    const activeLoad = await this.resolveDoctorActiveLoad(tenantId, user);
+    if (activeLoad && activeLoad.total > 0) {
+      await this.logRoleChangeConflict(tenantId, userId, user.role, newRole, requestedBy, 'DOCTOR_ACTIVE_PATIENTS');
+      throw new ConflictError(
+        `Cannot change role: ${user.name} still has ${activeLoad.total} active patient(s). ` +
+        'Reassign them first, then retry.',
+        {
+          code:           'DOCTOR_ACTIVE_PATIENTS',
+          activePatients: activeLoad.total,
+          breakdown:      { opd: activeLoad.opd, ipd: activeLoad.ipd },
+          userId,
+          currentRole:    user.role,
+          requestedRole:  newRole,
+        },
+      );
+    }
+
+    // Role-specific active-work guards (§4.2) — nurse duty, lab requests,
+    // open payments, attendance sessions. See the helper for the per-role
+    // rules and the deliberate RECEPTIONIST omission.
+    await this.assertNoRoleSpecificActiveWork(tenantId, user, newRole, requestedBy);
 
     await userRepository.updateRole(tenantId, userId, newRole);
 
@@ -149,6 +410,29 @@ export class UserService {
       tenantId,
       previousValue: { role: user.role },
       newValue:      { role: newRole },
+    });
+
+    // Re-auth signal (§4.4 / §5.3): the user's existing JWT keeps carrying
+    // the OLD role until it expires, so any live session for this user must
+    // end now — the frontend clears auth state + the RTK Query cache and
+    // forces /login?relogin=1&rolesChanged=1 when the 'role_changed' frame
+    // arrives (client/lib/websocket-client.ts). pushToUser is a no-op when
+    // the user is offline; the persisted notification covers that case on
+    // next login. Best-effort: a notification failure never rolls back the
+    // role change.
+    try {
+      await notificationService.sendNotification(
+        userId,
+        tenantId,
+        'Your role was changed',
+        `Your account role was changed to ${newRole} by an administrator. Please sign in again.`,
+        'USER_ACCOUNT',
+        userId,
+      );
+    } catch { /* best-effort — non-fatal */ }
+    pushToUser(userId, {
+      type: 'role_changed',
+      data: { relogin: true, rolesChanged: true, previousRole: user.role, newRole },
     });
   }
 

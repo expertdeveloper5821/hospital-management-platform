@@ -127,6 +127,7 @@ const ipdAdmissionSchema = new Schema<IIPDAdmission>(
 
 // tenantId first on all compound indexes (NFR-01)
 ipdAdmissionSchema.index({ tenantId: 1, status: 1 });
+ipdAdmissionSchema.index({ tenantId: 1, assignedDoctorIds: 1, status: 1 }); // doctor's active-patient load (role-change guard)
 ipdAdmissionSchema.index({ tenantId: 1, wardId: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, bedId: 1, status: 1 });
 ipdAdmissionSchema.index({ tenantId: 1, patientId: 1 });

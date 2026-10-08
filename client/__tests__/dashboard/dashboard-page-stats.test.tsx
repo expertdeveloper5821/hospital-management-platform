@@ -251,7 +251,9 @@ describe('DashboardPage — Hospital Overview splits into Today and This Month s
     // todayOpdCount value), so assert presence rather than a single match.
     expect(screen.getByText("Today's Appointments")).toBeInTheDocument();
     expect(screen.getAllByText('15').length).toBeGreaterThan(0);
-    expect(screen.getByText("This Month's Appointments")).toBeInTheDocument();
+    // Page ships the label "Month's Appointments" (see dashboard/page.tsx
+    // monthOverviewCards) — the test follows the shipped copy.
+    expect(screen.getByText("Month's Appointments")).toBeInTheDocument();
     expect(screen.getByText('200')).toBeInTheDocument();
   });
 

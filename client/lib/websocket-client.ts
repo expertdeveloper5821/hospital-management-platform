@@ -7,6 +7,7 @@
 import { store } from '@/store';
 import { messageReceived, setConnected } from '@/store/slices/notification.slice';
 import { notificationApi } from '@/store/api/notification.api';
+import { endSessionAfterRoleChange } from '@/lib/role-change';
 
 const WS_BASE = (process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:5000').replace(/\/$/, '');
 
@@ -57,20 +58,25 @@ class WebSocketClient {
 
     this.socket.onmessage = (event: MessageEvent) => {
       try {
+        // `data` is deliberately loose: the envelope type varies by frame —
+        // 'notification' frames carry a NotificationPayload, 'role_changed'
+        // frames carry the re-auth signal (§5.3 of the governance doc), and
+        // each handler narrows on `envelope.type` before reading its fields.
         const envelope = JSON.parse(event.data as string) as {
           type: string;
-          data?: {
-            notificationId: string;
-            title:          string;
-            message:        string;
-            entityType:     string | null;
-            entityId:       string | null;
-            isRead:         boolean;
-            createdAt:      string;
-          };
+          data?: Record<string, unknown>;
+        };
+        type NotificationPayload = {
+          notificationId: string;
+          title:          string;
+          message:        string;
+          entityType:     string | null;
+          entityId:       string | null;
+          isRead:         boolean;
+          createdAt:      string;
         };
         if (envelope.type === 'notification' && envelope.data) {
-          const n = envelope.data;
+          const n = envelope.data as NotificationPayload;
           store.dispatch(messageReceived({
             id:         n.notificationId,
             title:      n.title,
@@ -97,6 +103,18 @@ class WebSocketClient {
               typeof cached === 'number' && Number.isFinite(cached) ? cached + 1 : 1,
             ),
           );
+        }
+        // Role-change re-auth signal (§5.3/§9.2 of
+        // Doc/hms-role-permission-api-governance.md): the backend fires this
+        // right after a successful role change — the user's existing JWT still
+        // carries the OLD role until it expires, so the session must end now.
+        // Clears token + profile + the whole RTK Query cache, then the
+        // (dashboard) layout's auth guard redirects to /login; the layout
+        // appends relogin/rolesChanged so the login page can explain why.
+        if (envelope.type === 'role_changed') {
+          endSessionAfterRoleChange();
+          window.location.assign('/login?relogin=1&rolesChanged=1');
+          return;
         }
         // 'connected' frame is handled by onopen → setConnected(true); skip here
       } catch {
