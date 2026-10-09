@@ -59,18 +59,3 @@ export function formatPatientAge(
   const label = resolved.unit.toLowerCase().replace(/s$/, '');
   return `${resolved.value} ${label}${resolved.value === 1 ? '' : 's'}`;
 }
-
-export function isPediatricPatient(
-  age: number | null | undefined,
-  ageUnit: AgeUnit | null | undefined,
-  dateOfBirth?: string | Date | null,
-): boolean {
-  const resolved = resolvePatientAge(age, ageUnit, dateOfBirth);
-  if (!resolved) return false;
-  const ageInYears = resolved.unit === 'YEARS'
-    ? resolved.value
-    : resolved.unit === 'MONTHS'
-      ? resolved.value / 12
-      : resolved.value / 365.2425;
-  return ageInYears < 18;
-}

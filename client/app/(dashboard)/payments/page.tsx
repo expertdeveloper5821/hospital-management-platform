@@ -108,6 +108,124 @@ function loadRazorpayScript(): Promise<boolean> {
   });
 }
 
+// ─── UHID Filter Input ────────────────────────────────────────────────────────
+// A lightweight patient-picker for the filter bar. Selecting a patient sets the
+// resolved patientId used in the query; the display name is shown alongside a
+// clear button so the user knows which patient is currently filtered.
+
+interface UhidFilterInputProps {
+  patientId: string;
+  patientName: string;
+  onChange: (patientId: string, patientName: string) => void;
+}
+
+function UhidFilterInput({ patientId, patientName, onChange }: UhidFilterInputProps) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuRect, setMenuRect] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const [search, { data, isFetching }] = useLazySearchPatientsQuery();
+
+  useEffect(() => {
+    if (!query.trim()) { setOpen(false); return; }
+    const t = setTimeout(() => {
+      search({ q: query, limit: 10 });
+      setOpen(true);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, search]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (wrapperRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!open) { setMenuRect(null); return; }
+    const update = () => {
+      const el = wrapperRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setMenuRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
+
+  function handleSelect(patient: PatientResponse) {
+    onChange(patient.patientId, patient.fullName);
+    setQuery("");
+    setOpen(false);
+  }
+
+  function handleClear() {
+    onChange("", "");
+    setQuery("");
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      {patientId ? (
+        <div className="flex items-center gap-1.5 h-9 rounded-md border border-input bg-background px-3 text-sm w-52">
+          <span className="flex-1 truncate font-medium text-xs">{patientName}</span>
+          <span className="font-mono text-xs text-muted-foreground shrink-0">{patientId}</span>
+          <button type="button" onClick={handleClear} className="shrink-0 hover:text-destructive transition-colors ml-1">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => { if (query.trim()) setOpen(true); }}
+          placeholder="Filter by UHID or name…"
+          autoComplete="off"
+          className="h-9 w-52"
+        />
+      )}
+
+      {open && menuRect && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menuRect.top, left: menuRect.left, width: menuRect.width, zIndex: 60 }}
+          className="rounded-md border-2 border-border bg-background shadow-2xl max-h-52 overflow-y-auto"
+        >
+          {isFetching ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground">Searching…</p>
+          ) : (data?.data?.length ?? 0) === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground">No patients found.</p>
+          ) : (
+            data?.data.map((p) => (
+              <button
+                key={p.patientId}
+                type="button"
+                className="w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted text-left transition-colors"
+                onMouseDown={(e) => { e.preventDefault(); handleSelect(p); }}
+              >
+                <span className="flex-1 font-medium truncate">{p.fullName}</span>
+                <span className="text-xs text-muted-foreground font-mono shrink-0">{p.patientId}</span>
+              </button>
+            ))
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
 // ─── Patient Search Input ─────────────────────────────────────────────────────
 
 interface PatientSearchInputProps {
@@ -922,6 +1040,9 @@ export default function PaymentsPage() {
     const status = (new URLSearchParams(window.location.search).get("status") ?? "").toUpperCase();
     return ["PENDING", "COMPLETED", "FAILED", "CANCELLED"].includes(status) ? status : "";
   });
+  // UHID filter: resolved patientId sent to the API, display name shown in the input.
+  const [patientIdFilter, setPatientIdFilter] = useState("");
+  const [patientNameFilter, setPatientNameFilter] = useState("");
   const [page, setPage] = useState(1);
   const [showManual, setShowManual] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
@@ -947,6 +1068,7 @@ export default function PaymentsPage() {
 
   const { data, isFetching, refetch } = useListPaymentsQuery(
     {
+      patientId: patientIdFilter || undefined,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
       paymentMethod: methodFilter || undefined,
@@ -967,10 +1089,12 @@ export default function PaymentsPage() {
     setDateTo("");
     setMethodFilter("");
     setStatusFilter("");
+    setPatientIdFilter("");
+    setPatientNameFilter("");
     setPage(1);
   }
 
-  const hasFilters = !!(dateFrom || dateTo || methodFilter || statusFilter);
+  const hasFilters = !!(dateFrom || dateTo || methodFilter || statusFilter || patientIdFilter);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -1026,6 +1150,18 @@ export default function PaymentsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end">
+        <div className="space-y-1">
+          <Label className="text-xs">Patient (UHID)</Label>
+          <UhidFilterInput
+            patientId={patientIdFilter}
+            patientName={patientNameFilter}
+            onChange={(id, name) => {
+              setPatientIdFilter(id);
+              setPatientNameFilter(name);
+              setPage(1);
+            }}
+          />
+        </div>
         <div className="space-y-1">
           <Label className="text-xs">From Date</Label>
           <Input

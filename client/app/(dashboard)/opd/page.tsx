@@ -14,7 +14,7 @@ import {
   useGetDoctorNurseAssignmentsQuery,
 } from '@/store/api/opd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
-import { useGetPatientByIdQuery, useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListWardsQuery } from '@/store/api/ipd.api';
@@ -60,8 +60,9 @@ import { NavForm } from '@/components/ui/form';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import {
   formatVitalValue,
-  getPatientCategory,
   getVitalDefinitions,
+  getVitalsCategory,
+  getVitalsHeading,
   parsePatientVital,
   type VitalKey,
 } from '@/lib/patient-vitals';
@@ -149,7 +150,7 @@ type VitalsErrors = Partial<Record<VitalKey, string>>;
 // message instead of a payload when any field fails.
 function parseVitalsInputs(
   inputs: VitalsInputState,
-  category: ReturnType<typeof getPatientCategory>,
+  category: ReturnType<typeof getVitalsCategory>,
 ): { vitals: Partial<OPDVitals> } | { errors: VitalsErrors } {
   const vitals: Record<string, number | string | null> = {};
   const errors: VitalsErrors = {};
@@ -300,9 +301,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const vitalsPatientId = mode === 'edit' ? editPatient.patientId : visit.patientId;
-  const { data: vitalsPatient } = useGetPatientByIdQuery(vitalsPatientId, { skip: !vitalsPatientId });
-  const vitalsCategory = getPatientCategory(vitalsPatient?.patientId === vitalsPatientId ? vitalsPatient : null);
+  // Vitals set follows the department only — the one being picked while
+  // editing, the saved one otherwise — never the patient's age.
+  const vitalsCategory = getVitalsCategory(mode === 'edit' ? selectedDepartmentId : visit.departmentId, editDepartments);
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();
@@ -364,6 +365,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
         ...(notesChanged       ? { notes:     form.notes ?? '' }      : {}),
         ...(changed(editDoctorIds, visit.doctorIds ?? []) ? { doctorIds: editDoctorIds } : {}),
         ...(changed(editNurseIds,  visit.nurseIds  ?? []) ? { nurseIds:  editNurseIds  } : {}),
+        ...(departmentChanged && selectedDepartmentId ? { departmentId: selectedDepartmentId } : {}),
         vitals: receptionistVitals.vitals,
       };
       updatingRef.current = true;
@@ -425,6 +427,9 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
             // Like doctorIds, only sent when changed (keeps offline-queueable
             // diagnosis/prescription/notes/vitals edits unaffected).
             ...(nurseIdsChanged ? { nurseIds: editNurseIds } : {}),
+            // The picked department is saved as-is (Pediatric / Non-Pediatric
+            // pick the vitals set) — only sent when changed, like doctorIds.
+            ...(departmentChanged && selectedDepartmentId ? { departmentId: selectedDepartmentId } : {}),
             // Sent unconditionally (like prescription/notes below) so
             // intentionally clearing diagnosis down to blank is actually
             // submitted instead of silently dropped and left unchanged —
@@ -554,7 +559,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const vitalsFields = (
     <div className="space-y-3 pt-2 border-t">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-        {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+        {getVitalsHeading(vitalsCategory)}
       </p>
       <div className="grid grid-cols-2 gap-3">
         {getVitalDefinitions(vitalsCategory).map((definition) => {
@@ -676,7 +681,7 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
               {f('Notes',           <RichTextDisplay value={visit.notes} />)}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                  {getVitalsHeading(vitalsCategory)}
                 </p>
                 {getVitalDefinitions(vitalsCategory).map((definition) => (
                   <div key={definition.key}>
@@ -1298,6 +1303,8 @@ function NewVisitModal({ onClose }: NewVisitModalProps) {
           patientId:      selectedPatient.patientId,
           doctorIds:      selectedDoctorIds.length ? selectedDoctorIds : undefined,
           nurseIds:       selectedNurseIds.length ? selectedNurseIds : undefined,
+          // Saved as the visit's department (Pediatric / Non-Pediatric pick the vitals set).
+          departmentId:   selectedDepartmentId || undefined,
           visitDate:      form.visitDate || undefined,
           notes:          form.notes    || undefined,
         };

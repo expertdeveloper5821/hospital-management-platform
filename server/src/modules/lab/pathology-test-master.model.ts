@@ -8,7 +8,10 @@ import mongoose, { Schema, Document } from 'mongoose';
 // templateKey (pathology-report-templates.ts; 'GENERIC' covers every test
 // outside the catalog). Rows are seeded from pathology-test-master.defaults.ts
 // on first read and edited from Lab → Test Master; reports always use the
-// currently saved row. Not patient data — stored in plaintext.
+// currently saved row. `isEnabled` (default true — a row saved before the flag
+// existed reads as enabled) controls whether the test can be picked for a new
+// pathology request; disabling never touches existing requests or reports.
+// Not patient data — stored in plaintext.
 export interface IPathologyTestMaster extends Document {
   tenantId:            string;
   templateKey:         string;
@@ -16,6 +19,7 @@ export interface IPathologyTestMaster extends Document {
   clinicalNote:        string | null;
   comment:             string | null;
   correlateClinically: string | null;
+  isEnabled:           boolean;
   // null on a seeded row that has never been edited.
   updatedBy:           string | null;
   createdAt:           Date;
@@ -30,6 +34,7 @@ const pathologyTestMasterSchema = new Schema<IPathologyTestMaster>(
     clinicalNote:        { type: String, default: null },
     comment:             { type: String, default: null },
     correlateClinically: { type: String, default: null },
+    isEnabled:           { type: Boolean, default: true },
     updatedBy:           { type: String, default: null },
   },
   {

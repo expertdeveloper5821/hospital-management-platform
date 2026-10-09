@@ -504,6 +504,445 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
       num('vitaminC',    'Vitamin C (Ascorbic Acid)',      'mg/dL',  r(0.4, 2.0, '0.4 - 2.0')),
     ],
   },
+  // ─── Fourth batch: individually-orderable tests ──────────────────────────
+  // Standalone versions of parameters otherwise only orderable inside a panel
+  // (CBC, LFT, Lipid Profile, Electrolytes, Blood Sugar), plus new tests.
+  // Ranges match the panel's parameter so a value flags identically either way.
+  {
+    key: 'HB', testName: 'Haemoglobin (Hb)',
+    parameters: [
+      sexed('hemoglobin', 'Haemoglobin (Hb)', 'g/dL', r(13.0, 17.0, '13.0 - 17.0'), r(12.0, 15.0, '12.0 - 15.0')),
+    ],
+  },
+  {
+    key: 'TLC', testName: 'TLC (Total Leucocyte Count)',
+    parameters: [num('wbc', 'Total Leucocyte Count (TLC / WBC)', 'cells/µL', r(4000, 11000, '4000 - 11000'))],
+  },
+  {
+    key: 'DLC', testName: 'DLC (Differential Leucocyte Count)',
+    parameters: [
+      num('neutrophils', 'Neutrophils', '%', r(40, 80, '40 - 80')),
+      num('lymphocytes', 'Lymphocytes', '%', r(20, 40, '20 - 40')),
+      num('monocytes',   'Monocytes',   '%', r(2, 10, '2 - 10')),
+      num('eosinophils', 'Eosinophils', '%', r(1, 6, '1 - 6')),
+      num('basophils',   'Basophils',   '%', r(0, 2, '0 - 2')),
+    ],
+  },
+  {
+    key: 'PCV', testName: 'PCV / HCT (Packed Cell Volume / Haematocrit)',
+    parameters: [
+      sexed('hematocrit', 'Haematocrit (PCV)', '%', r(40, 50, '40 - 50'), r(36, 46, '36 - 46')),
+    ],
+  },
+  {
+    key: 'PLT', testName: 'Platelet Count (PLT)',
+    parameters: [num('platelets', 'Platelet Count', '×10³/µL', r(150, 410, '150 - 410'))],
+  },
+  {
+    key: 'AEC', testName: 'AEC (Absolute Eosinophil Count)',
+    parameters: [num('aec', 'Absolute Eosinophil Count', 'cells/µL', r(40, 440, '40 - 440'))],
+  },
+  {
+    key: 'BT', testName: 'BT (Bleeding Time)',
+    parameters: [num('bleedingTime', 'Bleeding Time (Duke Method)', 'min', r(1, 5, '1 - 5'))],
+  },
+  {
+    key: 'CT', testName: 'CT (Clotting Time)',
+    parameters: [num('clottingTime', 'Clotting Time (Lee-White Method)', 'min', r(5, 15, '5 - 15'))],
+  },
+  {
+    key: 'MP_SMEAR', testName: 'MP (Malaria Parasite - Peripheral Smear)',
+    parameters: [
+      select('smear', 'Malaria Parasite (Thick & Thin Smear)',
+        ['Not Seen', 'P. vivax Seen', 'P. falciparum Seen', 'Mixed Infection Seen'], ['Not Seen']),
+      text('stages', 'Stage(s) Seen', null, 'Not applicable'),
+    ],
+  },
+  {
+    key: 'MP_CARD', testName: 'MP Card (Malaria Rapid Antigen Test)',
+    parameters: [
+      select('pfAntigen', 'P. falciparum Antigen (HRP-2)', NEG_POS, ['Negative']),
+      select('pvAntigen', 'P. vivax Antigen (pLDH)',       NEG_POS, ['Negative']),
+    ],
+  },
+  {
+    key: 'SUGAR_FASTING', testName: 'Blood Sugar - Fasting',
+    parameters: [num('fasting', 'Blood Sugar - Fasting', 'mg/dL', r(70, 100, '70 - 100'))],
+  },
+  {
+    key: 'SUGAR_PP', testName: 'Blood Sugar - Post-Prandial (PP)',
+    parameters: [num('postPrandial', 'Blood Sugar - Post-Prandial (2 hr)', 'mg/dL', r(70, 140, '70 - 140'))],
+  },
+  {
+    key: 'SUGAR_RANDOM', testName: 'Blood Sugar - Random',
+    parameters: [num('random', 'Blood Sugar - Random', 'mg/dL', r(70, 140, '70 - 140'))],
+  },
+  {
+    key: 'SGOT', testName: 'SGOT (AST)',
+    parameters: [num('sgot', 'SGOT (AST)', 'U/L', r(0, 40, '0 - 40'))],
+  },
+  {
+    key: 'SGPT', testName: 'SGPT (ALT)',
+    parameters: [num('sgpt', 'SGPT (ALT)', 'U/L', r(0, 41, '0 - 41'))],
+  },
+  {
+    key: 'ALBUMIN', testName: 'Serum Albumin',
+    parameters: [num('albumin', 'Albumin', 'g/dL', r(3.5, 5.2, '3.5 - 5.2'))],
+  },
+  {
+    key: 'TOTAL_PROTEIN', testName: 'Total Protein',
+    parameters: [num('totalProtein', 'Total Protein', 'g/dL', r(6.4, 8.3, '6.4 - 8.3'))],
+  },
+  {
+    key: 'SODIUM', testName: 'Serum Sodium (Na+)',
+    parameters: [SODIUM],
+  },
+  {
+    key: 'POTASSIUM', testName: 'Serum Potassium (K+)',
+    parameters: [POTASSIUM],
+  },
+  {
+    key: 'TRIGLYCERIDES', testName: 'Serum Triglycerides',
+    parameters: [
+      num('triglycerides', 'Triglycerides', 'mg/dL',
+        below(150, 'Normal: < 150; Borderline High: 150 - 199; High: 200 - 499; Very High: 500 and above')),
+    ],
+  },
+  {
+    key: 'CHOLESTEROL', testName: 'Serum Cholesterol (Total)',
+    parameters: [
+      num('totalCholesterol', 'Total Cholesterol', 'mg/dL',
+        below(200, 'Desirable: < 200; Borderline High: 200 - 239; High: 240 and above')),
+    ],
+  },
+  {
+    key: 'D_DIMER', testName: 'D-Dimer',
+    parameters: [num('dDimer', 'D-Dimer (Quantitative)', 'µg/mL FEU', below(0.5, '< 0.50'))],
+  },
+  {
+    key: 'LDH', testName: 'LDH (Lactate Dehydrogenase)',
+    parameters: [
+      sexed('ldh', 'Lactate Dehydrogenase (LDH)', 'U/L', r(135, 225, '135 - 225'), r(135, 214, '135 - 214')),
+    ],
+  },
+  // ─── Fifth batch: serology, hormones, tumour markers, profiles ───────────
+  // Standalone T3 / T4 / TSH, Serum Iron and Folic Acid mirror the panel
+  // parameter (Thyroid Profile, Iron Profile, Vitamin Profile) exactly.
+  // Hormone ranges are Roche Elecsys adult intervals; phase-dependent female
+  // LH / FSH / E2 ranges are printed as text and not flagged. Semen Analysis
+  // uses WHO 2021 lower reference limits. Kit-specific screening values
+  // (marker MoMs / risks, IGRA tubes) carry no invented reference range.
+  {
+    key: 'VDRL', testName: 'VDRL (Syphilis Screening)',
+    parameters: [
+      select('vdrl', 'VDRL (Qualitative)', REACTIVITY, ['Non-Reactive']),
+      select('vdrlTitre', 'Titre (if Reactive)',
+        ['1:1', '1:2', '1:4', '1:8', '1:16', '1:32', '1:64', '1:128', '1:256'], undefined),
+    ],
+  },
+  {
+    key: 'RA_FACTOR', testName: 'RA Factor (Rheumatoid Factor)',
+    parameters: [
+      select('raLatex', 'RA Factor (Latex Agglutination)', NEG_POS, ['Negative']),
+      num('raFactor', 'Rheumatoid Factor (Quantitative)', 'IU/mL', below(14, '< 14')),
+    ],
+  },
+  {
+    key: 'ASO', testName: 'ASO Titer (Anti-Streptolysin O)',
+    parameters: [
+      select('asoLatex', 'ASO (Latex Agglutination)', NEG_POS, ['Negative']),
+      num('aso', 'Anti-Streptolysin O (Quantitative)', 'IU/mL', r(0, 200, 'Adults: up to 200')),
+    ],
+  },
+  {
+    key: 'H_PYLORI', testName: 'H. Pylori (Helicobacter pylori)',
+    parameters: [
+      select('method', 'Method', ['Serum Antibody (IgG)', 'Stool Antigen'], undefined),
+      select('hPylori', 'H. pylori', NEG_POS, ['Negative']),
+    ],
+  },
+  {
+    key: 'URINE_BS', testName: 'Urine Bile Salts (BS)',
+    parameters: [select('bileSalts', 'Bile Salts (Hay\'s Test)', ABSENT_PRESENT, ['Absent'])],
+  },
+  {
+    key: 'URINE_BP', testName: 'Urine Bile Pigments (BP)',
+    parameters: [select('bilePigments', 'Bile Pigments (Fouchet\'s Test)', ABSENT_PRESENT, ['Absent'])],
+  },
+  {
+    key: 'SEMEN', testName: 'Semen Analysis',
+    parameters: [
+      text('abstinence', 'Abstinence Period', 'days', '2 - 7', { section: 'Physical Examination' }),
+      num('volume', 'Volume', 'mL', r(1.4, undefined, '1.4 or more'), { section: 'Physical Examination' }),
+      select('appearance', 'Appearance', ['Grey-Opalescent', 'Whitish', 'Yellowish', 'Reddish-Brown'],
+        ['Grey-Opalescent', 'Whitish'], { section: 'Physical Examination' }),
+      num('liquefaction', 'Liquefaction Time', 'min', r(undefined, 60, 'Within 60'), { section: 'Physical Examination' }),
+      select('viscosity', 'Viscosity', ['Normal', 'Increased'], ['Normal'], { section: 'Physical Examination' }),
+      num('ph', 'pH', null, r(7.2, undefined, '7.2 or more'), { section: 'Physical Examination' }),
+      num('concentration', 'Sperm Concentration', 'million/mL', r(16, undefined, '16 or more'), { section: 'Sperm Count' }),
+      num('totalCount', 'Total Sperm Count', 'million/ejaculate', r(39, undefined, '39 or more'),
+        { section: 'Sperm Count', readOnly: true, calculationType: 'calculated' }),
+      num('progressive', 'Progressive Motility (PR)', '%', r(30, undefined, '30 or more'), { section: 'Motility' }),
+      text('nonProgressive', 'Non-Progressive Motility (NP)', '%', undefined, { section: 'Motility' }),
+      text('immotile', 'Immotile (IM)', '%', undefined, { section: 'Motility' }),
+      num('totalMotility', 'Total Motility (PR + NP)', '%', r(42, undefined, '42 or more'),
+        { section: 'Motility', readOnly: true, calculationType: 'calculated' }),
+      num('vitality', 'Vitality (Live Spermatozoa)', '%', r(54, undefined, '54 or more'), { section: 'Vitality & Morphology' }),
+      num('normalForms', 'Normal Morphology', '%', r(4, undefined, '4 or more'), { section: 'Vitality & Morphology' }),
+      num('leucocytes', 'Leucocytes (Peroxidase-positive)', 'million/mL', below(1.0, '< 1.0'), { section: 'Other Cells' }),
+      text('rbcs', 'RBCs', '/hpf', 'Nil', { section: 'Other Cells' }),
+      select('agglutination', 'Agglutination', ABSENT_PRESENT, ['Absent'], { section: 'Other Cells' }),
+    ],
+  },
+  {
+    key: 'T3', testName: 'T3 (Total Triiodothyronine)',
+    parameters: [num('t3', 'T3 (Total Triiodothyronine)', 'ng/dL', r(80, 200, '80 - 200'))],
+  },
+  {
+    key: 'T4', testName: 'T4 (Total Thyroxine)',
+    parameters: [num('t4', 'T4 (Total Thyroxine)', 'µg/dL', r(5.1, 14.1, '5.1 - 14.1'))],
+  },
+  {
+    key: 'TSH', testName: 'TSH (Thyroid Stimulating Hormone)',
+    parameters: [num('tsh', 'TSH (Thyroid Stimulating Hormone)', 'µIU/mL', r(0.27, 4.2, '0.27 - 4.20'))],
+  },
+  {
+    key: 'FT3', testName: 'FT3 (Free Triiodothyronine)',
+    parameters: [num('ft3', 'Free T3 (FT3)', 'pg/mL', r(2.0, 4.4, '2.0 - 4.4'))],
+  },
+  {
+    key: 'FT4', testName: 'FT4 (Free Thyroxine)',
+    parameters: [num('ft4', 'Free T4 (FT4)', 'ng/dL', r(0.93, 1.7, '0.93 - 1.70'))],
+  },
+  {
+    key: 'PROLACTIN', testName: 'Prolactin (PRL)',
+    parameters: [
+      sexed('prolactin', 'Prolactin', 'ng/mL', r(4.04, 15.2, '4.04 - 15.2'), r(4.79, 23.3, '4.79 - 23.3 (non-pregnant)')),
+    ],
+  },
+  {
+    key: 'LH', testName: 'LH (Luteinising Hormone)',
+    parameters: [
+      sexed('lh', 'Luteinising Hormone (LH)', 'mIU/mL', r(1.7, 8.6, '1.7 - 8.6'),
+        { text: 'Follicular: 2.4 - 12.6; Ovulation: 14.0 - 95.6; Luteal: 1.0 - 11.4; Postmenopause: 7.7 - 58.5' }),
+    ],
+  },
+  {
+    key: 'FSH', testName: 'FSH (Follicle Stimulating Hormone)',
+    parameters: [
+      sexed('fsh', 'Follicle Stimulating Hormone (FSH)', 'mIU/mL', r(1.5, 12.4, '1.5 - 12.4'),
+        { text: 'Follicular: 3.5 - 12.5; Ovulation: 4.7 - 21.5; Luteal: 1.7 - 7.7; Postmenopause: 25.8 - 134.8' }),
+    ],
+  },
+  {
+    // Flags against the widest adult interval; the age bands are printed.
+    key: 'TESTOSTERONE', testName: 'Testosterone (Total)',
+    parameters: [
+      sexed('testosterone', 'Testosterone (Total)', 'ng/mL',
+        r(1.93, 8.36, '20 - 49 yrs: 2.49 - 8.36; 50 yrs and above: 1.93 - 7.40'),
+        r(0.029, 0.481, '20 - 49 yrs: 0.084 - 0.481; 50 yrs and above: 0.029 - 0.408')),
+    ],
+  },
+  {
+    key: 'SERUM_IRON', testName: 'Serum Iron',
+    parameters: [sexed('serumIron', 'Serum Iron', 'µg/dL', r(65, 175, '65 - 175'), r(50, 170, '50 - 170'))],
+  },
+  {
+    key: 'TOTAL_IGE', testName: 'Total IgE',
+    parameters: [num('totalIge', 'Total IgE', 'IU/mL', r(0, 100, 'Adults: 0 - 100'))],
+  },
+  {
+    key: 'PSA_TOTAL', testName: 'PSA Total (Prostate Specific Antigen)',
+    parameters: [num('totalPsa', 'Total PSA', 'ng/mL', r(0, 4.0, '0 - 4.0'))],
+  },
+  {
+    key: 'PSA_FREE', testName: 'PSA Free (Free / Total PSA Ratio)',
+    parameters: [
+      num('totalPsa', 'Total PSA', 'ng/mL', r(0, 4.0, '0 - 4.0')),
+      text('freePsa', 'Free PSA', 'ng/mL', 'Interpret as % Free PSA'),
+      num('percentFreePsa', '% Free PSA (Free / Total)', '%',
+        above(25, '> 25: Lower risk; 10 - 25: Intermediate; < 10: Higher risk (for Total PSA 4 - 10)'),
+        { readOnly: true, calculationType: 'calculated' }),
+    ],
+  },
+  {
+    key: 'ACE', testName: 'ACE (Angiotensin Converting Enzyme)',
+    parameters: [num('ace', 'Angiotensin Converting Enzyme (ACE)', 'U/L', r(16, 85, 'Adults: 16 - 85'))],
+  },
+  {
+    key: 'ANA', testName: 'ANA (Antinuclear Antibody)',
+    parameters: [
+      select('method', 'Method', ['Indirect Immunofluorescence (HEp-2)', 'ELISA'], undefined),
+      select('ana', 'ANA', NEG_POS, ['Negative']),
+      select('titre', 'Titre (if Positive)', ['1:40', '1:80', '1:160', '1:320', '1:640', '1:1280', '1:2560'], undefined),
+      select('pattern', 'Pattern (if Positive)',
+        ['Homogeneous', 'Fine Speckled', 'Coarse Speckled', 'Nucleolar', 'Centromere', 'Nuclear Dots',
+          'Cytoplasmic', 'Mixed'],
+        undefined),
+    ],
+  },
+  {
+    key: 'CA_125', testName: 'CA-125',
+    parameters: [num('ca125', 'CA-125', 'U/mL', r(0, 35, '0 - 35'))],
+  },
+  {
+    key: 'ANTI_CCP', testName: 'Anti-CCP (Anti-Cyclic Citrullinated Peptide)',
+    parameters: [num('antiCcp', 'Anti-CCP Antibody', 'U/mL', below(17, '< 17'))],
+  },
+  {
+    key: 'E2', testName: 'E2 (Estradiol)',
+    parameters: [
+      sexed('estradiol', 'Estradiol (E2)', 'pg/mL', r(11.3, 43.2, '11.3 - 43.2'),
+        { text: 'Follicular: 30.9 - 90.4; Ovulation: 60.4 - 533; Luteal: 60.4 - 232; Postmenopause: < 5.0 - 138' }),
+    ],
+  },
+  {
+    key: 'HBSAG_QUANT', testName: 'HBsAg Quantitative (Surface Antigen)',
+    parameters: [
+      num('hbsagQuant', 'HBsAg (Quantitative)', 'IU/mL', below(0.05, '< 0.05: Non-Reactive; 0.05 and above: Reactive')),
+    ],
+  },
+  {
+    // A positive result is reported, not flagged as abnormal (as Pregnancy Test).
+    key: 'BETA_HCG', testName: 'Beta HCG (Serum Quantitative)',
+    parameters: [
+      num('betaHcg', 'Beta hCG (Total, Quantitative)', 'mIU/mL',
+        { text: 'Non-pregnant: < 5; 5 - 25: Equivocal (repeat after 48 hrs); > 25: Positive for pregnancy' }),
+    ],
+  },
+  {
+    // IgG reflects past infection / immunity, so only IgM is flagged.
+    key: 'TORCH', testName: 'TORCH Profile',
+    parameters: [
+      select('toxoIgg',    'Toxoplasma IgG',  ['Negative', 'Positive', 'Equivocal'], undefined,    { section: 'Toxoplasma' }),
+      select('toxoIgm',    'Toxoplasma IgM',  ['Negative', 'Positive', 'Equivocal'], ['Negative'], { section: 'Toxoplasma' }),
+      select('rubellaIgg', 'Rubella IgG',     ['Negative', 'Positive', 'Equivocal'], undefined,    { section: 'Rubella' }),
+      select('rubellaIgm', 'Rubella IgM',     ['Negative', 'Positive', 'Equivocal'], ['Negative'], { section: 'Rubella' }),
+      select('cmvIgg',     'CMV IgG',         ['Negative', 'Positive', 'Equivocal'], undefined,    { section: 'Cytomegalovirus (CMV)' }),
+      select('cmvIgm',     'CMV IgM',         ['Negative', 'Positive', 'Equivocal'], ['Negative'], { section: 'Cytomegalovirus (CMV)' }),
+      select('hsvIgg',     'HSV 1 & 2 IgG',   ['Negative', 'Positive', 'Equivocal'], undefined,    { section: 'Herpes Simplex Virus (HSV)' }),
+      select('hsvIgm',     'HSV 1 & 2 IgM',   ['Negative', 'Positive', 'Equivocal'], ['Negative'], { section: 'Herpes Simplex Virus (HSV)' }),
+    ],
+  },
+  {
+    // Interferon-gamma release assay (send-out test). Positive: TB Ag - Nil
+    // of 0.35 IU/mL or more; a Nil above 8.0 IU/mL makes the test indeterminate.
+    key: 'TB_PLATINUM', testName: 'TB Platinum (IGRA)',
+    parameters: [
+      num('nil', 'Nil (Negative Control)', 'IU/mL', r(undefined, 8.0, '8.0 or less')),
+      text('tbAntigen', 'TB Antigen', 'IU/mL'),
+      text('mitogen', 'Mitogen (Positive Control)', 'IU/mL'),
+      num('tbAgMinusNil', 'TB Antigen - Nil', 'IU/mL', below(0.35, '< 0.35'), { readOnly: true, calculationType: 'calculated' }),
+      select('result', 'Result', ['Negative', 'Positive', 'Indeterminate'], ['Negative']),
+    ],
+  },
+  {
+    key: 'MICROALBUMIN', testName: 'Microalbumin (Urine Albumin / Creatinine Ratio)',
+    parameters: [
+      text('urineAlbumin', 'Urine Microalbumin', 'mg/L', 'See ACR'),
+      text('urineCreatinine', 'Urine Creatinine', 'mg/dL', 'See ACR'),
+      num('acr', 'Albumin / Creatinine Ratio (ACR)', 'mg/g',
+        below(30, 'Normal: < 30; Microalbuminuria: 30 - 300; Macroalbuminuria: > 300'),
+        { readOnly: true, calculationType: 'calculated' }),
+    ],
+  },
+  {
+    // Allergen panels differ by laboratory, so the panel and its positive
+    // allergens are recorded as reported rather than as fixed parameters.
+    key: 'ALLERGY_PROFILE', testName: 'Allergy Profile',
+    parameters: [
+      num('totalIge', 'Total IgE', 'IU/mL', r(0, 100, 'Adults: 0 - 100')),
+      text('method', 'Method / Panel', null),
+      text('allergensTested', 'Allergens Tested', null),
+      text('positiveAllergens', 'Allergens Detected (Specific IgE Class 1 and above)', null, 'None detected'),
+      text('interpretation', 'Interpretation', null),
+    ],
+  },
+  {
+    // Routine antenatal investigations (MoHFW India ANC guidelines).
+    key: 'ANC_PROFILE', testName: 'ANC Profile (Antenatal)',
+    parameters: [
+      num('hemoglobin', 'Haemoglobin (Hb)', 'g/dL', r(11.0, undefined, '11.0 or more (pregnancy)'), { section: 'Haematology' }),
+      select('aboGroup', 'ABO Group', ['A', 'B', 'AB', 'O'], undefined, { section: 'Haematology' }),
+      select('rhType', 'Rh (D) Type', ['Positive', 'Negative'], undefined, { section: 'Haematology' }),
+      num('ogtt2h', 'Plasma Glucose - 2 hr after 75 g OGTT', 'mg/dL',
+        below(140, '< 140 (GDM: 140 and above)'), { section: 'Blood Sugar' }),
+      select('hiv',   'HIV 1 & 2 Antibodies', REACTIVITY, ['Non-Reactive'], { section: 'Serology' }),
+      select('hbsag', 'HBsAg',                REACTIVITY, ['Non-Reactive'], { section: 'Serology' }),
+      select('vdrl',  'VDRL',                 REACTIVITY, ['Non-Reactive'], { section: 'Serology' }),
+      select('urineAlbumin', 'Urine Albumin', URINE_DIPSTICK, ['Nil'], { section: 'Urine' }),
+      select('urineSugar',   'Urine Sugar',   URINE_DIPSTICK, ['Nil'], { section: 'Urine' }),
+    ],
+  },
+  {
+    key: 'DUAL_MARKER', testName: 'Dual Marker (First Trimester Screen)',
+    parameters: [
+      text('gestationalAge', 'Gestational Age (by USG)', null),
+      text('freeBhcg',    'Free Beta hCG', null),
+      text('freeBhcgMom', 'Free Beta hCG MoM', null),
+      text('pappA',       'PAPP-A', null),
+      text('pappAMom',    'PAPP-A MoM', null),
+      text('riskT21',     'Risk - Trisomy 21 (Down Syndrome)', null),
+      text('riskT18',     'Risk - Trisomy 18 / 13', null),
+      select('screenResult', 'Screening Result', ['Screen Negative', 'Screen Positive'], ['Screen Negative']),
+    ],
+  },
+  {
+    key: 'TRIPLE_MARKER', testName: 'Triple Marker (Second Trimester Screen)',
+    parameters: [
+      text('gestationalAge', 'Gestational Age (by USG)', null),
+      text('afp',    'AFP (Alpha-Fetoprotein)', null),
+      num('afpMom',  'AFP MoM', null, below(2.5, '< 2.5 (neural tube defect screen)')),
+      text('hcg',    'hCG (Total)', null),
+      text('hcgMom', 'hCG MoM', null),
+      text('ue3',    'Unconjugated Estriol (uE3)', null),
+      text('ue3Mom', 'uE3 MoM', null),
+      text('riskT21', 'Risk - Trisomy 21 (Down Syndrome)', null),
+      text('riskT18', 'Risk - Trisomy 18', null),
+      select('screenResult', 'Screening Result', ['Screen Negative', 'Screen Positive'], ['Screen Negative']),
+    ],
+  },
+  {
+    // Red cell indices + Hb HPLC; HbA2 above 3.5% suggests beta-thalassaemia trait.
+    key: 'THALASSEMIA', testName: 'Thalassemia Profile',
+    parameters: [
+      sexed('hemoglobin', 'Haemoglobin (Hb)', 'g/dL', r(13.0, 17.0, '13.0 - 17.0'), r(12.0, 15.0, '12.0 - 15.0'), { section: RBC_INDICES }),
+      sexed('rbc', 'Total RBC Count', 'million/µL', r(4.5, 5.5, '4.5 - 5.5'), r(3.8, 4.8, '3.8 - 4.8'), { section: RBC_INDICES }),
+      num('mcv',  'MCV',    'fL', r(83, 101, '83 - 101'),       { section: RBC_INDICES }),
+      num('mch',  'MCH',    'pg', r(27, 32, '27 - 32'),         { section: RBC_INDICES }),
+      num('rdw',  'RDW-CV', '%',  r(11.6, 14.0, '11.6 - 14.0'), { section: RBC_INDICES }),
+      num('mentzerIndex', 'Mentzer Index (MCV / RBC)', null, above(13, '> 13 (< 13 suggests thalassaemia trait)'),
+        { section: RBC_INDICES, readOnly: true, calculationType: 'calculated' }),
+      num('hbA',  'HbA',  '%', r(95, 98, '95 - 98'),   { section: 'Haemoglobin HPLC' }),
+      num('hbA2', 'HbA2', '%', r(1.5, 3.5, '1.5 - 3.5'), { section: 'Haemoglobin HPLC' }),
+      num('hbF',  'HbF',  '%', below(1.0, '< 1.0'),    { section: 'Haemoglobin HPLC' }),
+      text('abnormalHb', 'Abnormal Haemoglobin Variant', null, 'Not detected', { section: 'Haemoglobin HPLC' }),
+      text('interpretation', 'Interpretation', null, undefined, { section: 'Haemoglobin HPLC' }),
+    ],
+  },
+  {
+    key: 'LITHIUM', testName: 'Serum Lithium',
+    parameters: [num('lithium', 'Serum Lithium', 'mmol/L', r(0.6, 1.2, 'Therapeutic: 0.6 - 1.2; Toxic: > 1.5'))],
+  },
+  {
+    key: 'COOMBS_DIRECT', testName: 'Coombs Test - Direct (DAT)',
+    parameters: [
+      select('dat', 'Direct Antiglobulin Test (DAT)', NEG_POS, ['Negative']),
+      select('grade', 'Agglutination Grade (if Positive)', ['Weak (w+)', '1+', '2+', '3+', '4+'], undefined),
+    ],
+  },
+  {
+    key: 'COOMBS_INDIRECT', testName: 'Coombs Test - Indirect (IAT)',
+    parameters: [
+      select('iat', 'Indirect Antiglobulin Test (IAT)', NEG_POS, ['Negative']),
+      select('titre', 'Antibody Titre (if Positive)',
+        ['1:1', '1:2', '1:4', '1:8', '1:16', '1:32', '1:64', '1:128', '1:256', '1:512', '1:1024'], undefined),
+    ],
+  },
+  {
+    key: 'FOLIC_ACID', testName: 'Folic Acid (Vitamin B9)',
+    parameters: [num('vitaminB9', 'Folic Acid (Vitamin B9)', 'ng/mL', r(3.1, 20.5, '3.1 - 20.5'))],
+  },
 ];
 
 // Any test name outside the catalog — a single free-text result line.

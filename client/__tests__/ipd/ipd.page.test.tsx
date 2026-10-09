@@ -577,23 +577,42 @@ describe('IPDPage — Receptionist edit scope, delete and payment lookup', () =>
     expect(screen.getByText('Bed')).toBeInTheDocument();
   });
 
-  test('automatically shows pediatric vitals for an infant patient', () => {
-    mockGetPatientById.mockReturnValue({
-      data: { patientId: 'PAT-00000003', age: 5, ageUnit: 'MONTHS', dateOfBirth: null },
-    });
-    renderWith('RECEPTIONIST');
-    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+  test.each([['DEPT-DEN'], [null]] as const)(
+    'department %s shows SpO₂ → Temp → BP → Pulse → Height → Weight, never a Pediatric/Non-Pediatric set — even for an infant',
+    (departmentId) => {
+      const VITAL_LABELS = /^(PR \(bpm\)|Pulse \(bpm\)|RR \(\/min\)|SpO₂ \(%\)|BP \(mmHg\)|RBS \(mg\/dL\)|Temperature \(°F\)|Height(\/Length)? \(cm\)|Weight \(kg\)|Head Circumference \(cm\))$/;
+      mockDepartments = [{ departmentId: 'DEPT-DEN', name: 'Dental', vitalsProfile: null }];
+      mockGetPatientById.mockReturnValue({ data: { patientId: 'PAT-00000003', age: 5, ageUnit: 'MONTHS', dateOfBirth: null } });
+      renderWith('RECEPTIONIST', { ...admitted, departmentId });
+      expect(screen.getByText('Vitals')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
 
+      expect(screen.queryByText('Pediatric Vitals')).not.toBeInTheDocument();
+      expect(screen.queryByText('Non-Pediatric Vitals')).not.toBeInTheDocument();
+      expect(screen.getAllByText(VITAL_LABELS).map((el) => el.textContent)).toEqual([
+        'SpO₂ (%)', 'Temperature (°F)', 'BP (mmHg)', 'Pulse (bpm)', 'Height (cm)', 'Weight (kg)',
+      ]);
+    },
+  );
+
+  test('Pediatric department shows the pediatric set for an adult', () => {
+    const VITAL_LABELS = /^(PR \(bpm\)|RR \(\/min\)|SpO₂ \(%\)|BP \(mmHg\)|RBS \(mg\/dL\)|Temperature \(°F\)|Height\/Length \(cm\)|Weight \(kg\)|Head Circumference \(cm\))$/;
+    mockDepartments = [{ departmentId: 'DEPT-PED', name: 'Pediatric', vitalsProfile: 'PEDIATRIC' }];
+    mockGetPatientById.mockReturnValue({ data: { patientId: 'PAT-00000003', age: 40, ageUnit: 'YEARS', dateOfBirth: null } });
+    renderWith('RECEPTIONIST', { ...admitted, departmentId: 'DEPT-PED' });
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
     expect(screen.getByText('Pediatric Vitals')).toBeInTheDocument();
-    expect(screen.getByLabelText('PR (bpm)')).toBeInTheDocument();
-    expect(screen.getByLabelText('RR (/min)')).toBeInTheDocument();
-    expect(screen.getByLabelText('SpO₂ (%)')).toBeInTheDocument();
-    expect(screen.getByLabelText('BP (mmHg)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Height/Length (cm)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Weight (kg)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Head Circumference (cm)')).toBeInTheDocument();
-    expect(screen.queryByLabelText('RBS (mg/dL)')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Temperature (°F)')).not.toBeInTheDocument();
+    expect(screen.getAllByText(VITAL_LABELS).map((el) => el.textContent)).toEqual(['PR (bpm)', 'RR (/min)', 'SpO₂ (%)', 'BP (mmHg)', 'Height/Length (cm)', 'Weight (kg)', 'Head Circumference (cm)']);
+  });
+
+  test('Non-Pediatric department shows the non-pediatric set for an infant', () => {
+    const VITAL_LABELS = /^(PR \(bpm\)|RR \(\/min\)|SpO₂ \(%\)|BP \(mmHg\)|RBS \(mg\/dL\)|Temperature \(°F\)|Height\/Length \(cm\)|Weight \(kg\)|Head Circumference \(cm\))$/;
+    mockDepartments = [{ departmentId: 'DEPT-NON', name: 'Non-Pediatric', vitalsProfile: 'NON_PEDIATRIC' }];
+    mockGetPatientById.mockReturnValue({ data: { patientId: 'PAT-00000003', age: 5, ageUnit: 'MONTHS', dateOfBirth: null } });
+    renderWith('RECEPTIONIST', { ...admitted, departmentId: 'DEPT-NON' });
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    expect(screen.getByText('Non-Pediatric Vitals')).toBeInTheDocument();
+    expect(screen.getAllByText(VITAL_LABELS).map((el) => el.textContent)).toEqual(['BP (mmHg)', 'PR (bpm)', 'SpO₂ (%)', 'RBS (mg/dL)', 'Temperature (°F)', 'Weight (kg)']);
   });
 
   test('RECEPTIONIST save with only a vitals change sends just vitals', async () => {

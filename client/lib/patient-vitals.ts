@@ -1,7 +1,9 @@
-import type { AgeUnit } from '@/store/types';
-import { resolvePatientAge } from '@/lib/patient-age';
+import type { DepartmentResponse, VitalsProfile } from '@/store/types';
 
-export type PatientCategory = 'PEDIATRIC' | 'NON_PEDIATRIC';
+// The vitals set is decided only by the OPD visit's / IPD admission's
+// department, never by patient age: the Pediatric / Non-Pediatric system
+// departments get their own set, every other department (or none) DEFAULT.
+export type VitalsCategory = VitalsProfile | 'DEFAULT';
 
 export type VitalKey =
   | 'bloodPressure'
@@ -24,28 +26,30 @@ export interface VitalDefinition {
   placeholder: string;
 }
 
-export interface PatientVitalsAge {
-  age: number | null;
-  ageUnit?: AgeUnit | null;
-  dateOfBirth: string | null;
+// The vitals profile of the selected/saved department — set only on the
+// Pediatric / Non-Pediatric departments, null for any other (or none).
+export function getVitalsProfile(
+  departmentId: string | null | undefined,
+  departments: DepartmentResponse[] | null | undefined,
+): VitalsProfile | null {
+  if (!departmentId) return null;
+  return departments?.find((d) => d.departmentId === departmentId)?.vitalsProfile ?? null;
 }
 
-export function getPatientCategory(patient: PatientVitalsAge | null | undefined): PatientCategory {
-  const age = patient
-    ? resolvePatientAge(patient.age, patient.ageUnit, patient.dateOfBirth)
-    : null;
-
-  if (!age) return 'NON_PEDIATRIC';
-
-  const ageInYears = age.unit === 'YEARS'
-    ? age.value
-    : age.unit === 'MONTHS'
-      ? age.value / 12
-      : age.value / 365.2425;
-  return ageInYears < 18 ? 'PEDIATRIC' : 'NON_PEDIATRIC';
+export function getVitalsCategory(
+  departmentId: string | null | undefined,
+  departments: DepartmentResponse[] | null | undefined,
+): VitalsCategory {
+  return getVitalsProfile(departmentId, departments) ?? 'DEFAULT';
 }
 
-export function getVitalDefinitions(category: PatientCategory): VitalDefinition[] {
+export function getVitalsHeading(category: VitalsCategory): string {
+  if (category === 'PEDIATRIC') return 'Pediatric Vitals';
+  if (category === 'NON_PEDIATRIC') return 'Non-Pediatric Vitals';
+  return 'Vitals';
+}
+
+export function getVitalDefinitions(category: VitalsCategory): VitalDefinition[] {
   if (category === 'PEDIATRIC') {
     return [
       { key: 'pulse', label: 'PR', unit: 'bpm', min: 20, max: 250, step: 1, placeholder: 'e.g. 120' },
@@ -58,17 +62,28 @@ export function getVitalDefinitions(category: PatientCategory): VitalDefinition[
     ];
   }
 
+  if (category === 'NON_PEDIATRIC') {
+    return [
+      { key: 'bloodPressure', label: 'BP', unit: 'mmHg', placeholder: 'e.g. 120/80' },
+      { key: 'pulse', label: 'PR', unit: 'bpm', min: 20, max: 250, step: 1, placeholder: 'e.g. 72' },
+      { key: 'spo2', label: 'SpO₂', unit: '%', min: 50, max: 100, step: 1, placeholder: 'e.g. 98' },
+      { key: 'sugar', label: 'RBS', unit: 'mg/dL', min: 10, max: 1000, step: 1, placeholder: 'e.g. 90' },
+      { key: 'bodyTemperature', label: 'Temperature', unit: '°F', min: 80, max: 115, step: 0.1, placeholder: 'e.g. 98.6' },
+      { key: 'weight', label: 'Weight', unit: 'kg', min: 0.5, max: 500, step: 0.1, placeholder: 'e.g. 65.5' },
+    ];
+  }
+
   return [
-    { key: 'bloodPressure', label: 'BP', unit: 'mmHg', placeholder: 'e.g. 120/80' },
-    { key: 'pulse', label: 'PR', unit: 'bpm', min: 20, max: 250, step: 1, placeholder: 'e.g. 72' },
     { key: 'spo2', label: 'SpO₂', unit: '%', min: 50, max: 100, step: 1, placeholder: 'e.g. 98' },
-    { key: 'sugar', label: 'RBS', unit: 'mg/dL', min: 10, max: 1000, step: 1, placeholder: 'e.g. 90' },
     { key: 'bodyTemperature', label: 'Temperature', unit: '°F', min: 80, max: 115, step: 0.1, placeholder: 'e.g. 98.6' },
+    { key: 'bloodPressure', label: 'BP', unit: 'mmHg', placeholder: 'e.g. 120/80' },
+    { key: 'pulse', label: 'Pulse', unit: 'bpm', min: 20, max: 250, step: 1, placeholder: 'e.g. 72' },
+    { key: 'height', label: 'Height', unit: 'cm', min: 20, max: 300, step: 0.1, placeholder: 'e.g. 165' },
     { key: 'weight', label: 'Weight', unit: 'kg', min: 0.5, max: 500, step: 0.1, placeholder: 'e.g. 65.5' },
   ];
 }
 
-export function getVitalSlipLabel(definition: VitalDefinition, category: PatientCategory): string {
+export function getVitalSlipLabel(definition: VitalDefinition, category: VitalsCategory): string {
   if (category === 'PEDIATRIC') {
     if (definition.key === 'height') return 'Height';
     if (definition.key === 'headCircumference') return 'Head Circ.';

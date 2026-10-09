@@ -1,4 +1,4 @@
-import { DepartmentModel, IDepartment } from './department.model';
+import { DepartmentModel, IDepartment, VitalsProfile } from './department.model';
 import { assertDbConnected } from '../../shared/utils/db-guard';
 import { PaginatedResult } from '../../shared/types/common.types';
 
@@ -50,6 +50,27 @@ export class DepartmentRepository {
       DepartmentModel.countDocuments(query),
     ]);
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  // Vitals profiles already claimed in this tenant — soft-deleted rows
+  // included, so a department the hospital deleted is never re-seeded.
+  async findClaimedVitalsProfiles(tenantId: string): Promise<VitalsProfile[]> {
+    assertDbConnected();
+    const rows = await DepartmentModel.find(
+      { tenantId, vitalsProfile: { $type: 'string' } },
+      { vitalsProfile: 1 },
+    ).lean();
+    return rows.map((r) => r.vitalsProfile as VitalsProfile);
+  }
+
+  // Blanks the placeholder description an earlier seed wrote on the vitals
+  // departments; any other description (typed by the hospital) is kept.
+  async clearSeededVitalsDescriptions(tenantId: string, seededDescriptions: string[]): Promise<void> {
+    assertDbConnected();
+    await DepartmentModel.updateMany(
+      { tenantId, vitalsProfile: { $type: 'string' }, description: { $in: seededDescriptions } },
+      { $set: { description: null } },
+    );
   }
 
   async save(data: Partial<IDepartment>): Promise<IDepartment> {

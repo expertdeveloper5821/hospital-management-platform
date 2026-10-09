@@ -4,8 +4,8 @@ import { parseRichTextToBlocks, renderRichTextBlocks } from '../../shared/servic
 import {
   hexToRgb, getContrastTextColor, fetchImageBuffer, ReportHospitalInfo,
 } from '../../shared/services/report-letterhead.pdf';
-import { formatPatientAge, isPediatricPatient } from '../../shared/utils/patient-age';
-import { getPatientVitalDefinitions } from '../../shared/utils/patient-vitals';
+import { formatPatientAge } from '../../shared/utils/patient-age';
+import { getPatientVitalDefinitions, getPatientVitalsHeading, getVitalsCategory } from '../../shared/utils/patient-vitals';
 
 // The letterhead helpers now live in shared/services/report-letterhead.pdf.ts
 // (reused by other report PDFs) — re-exported for existing importers.
@@ -298,10 +298,11 @@ export async function buildDischargeSummaryPdf(
       const v = a.vitals;
       const withUnit = (val: number | string | null | undefined, unit: string): string =>
         val === null || val === undefined || val === '' ? '—' : `${val} ${unit}`;
-      const pediatric = isPediatricPatient(p.age, p.ageUnit);
-      const vitalDefinitions = getPatientVitalDefinitions(pediatric);
+      // Vitals set comes only from the admission's department.
+      const category = getVitalsCategory(a.vitalsProfile);
+      const vitalDefinitions = getPatientVitalDefinitions(category);
       if (v && vitalDefinitions.some(({ key }) => v[key] !== null && v[key] !== undefined && v[key] !== '')) {
-        sectionHeading(pediatric ? 'Pediatric Vitals' : 'Non-Pediatric Vitals');
+        sectionHeading(getPatientVitalsHeading(category));
         const vitalCells: Array<[string, string]> = vitalDefinitions.map((definition) => [
           definition.label,
           withUnit(v[definition.key], definition.unit),

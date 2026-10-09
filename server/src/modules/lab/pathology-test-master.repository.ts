@@ -6,12 +6,21 @@ export interface PathologyTestMasterUpdate {
   clinicalNote?:        string | null;
   comment?:             string | null;
   correlateClinically?: string;
+  isEnabled?:           boolean;
 }
 
 export class PathologyTestMasterRepository {
   async findAll(tenantId: string): Promise<IPathologyTestMaster[]> {
     assertDbConnected();
     return PathologyTestMasterModel.find({ tenantId });
+  }
+
+  // templateKeys the tenant has disabled. A missing row (never seeded) or a
+  // row saved before `isEnabled` existed counts as enabled.
+  async findDisabledKeys(tenantId: string): Promise<string[]> {
+    assertDbConnected();
+    const rows = await PathologyTestMasterModel.find({ tenantId, isEnabled: false }, { templateKey: 1 }).lean();
+    return rows.map((r) => r.templateKey);
   }
 
   async findByKey(tenantId: string, templateKey: string): Promise<IPathologyTestMaster | null> {
@@ -28,7 +37,7 @@ export class PathologyTestMasterRepository {
       seeds.map((seed) => ({
         updateOne: {
           filter: { tenantId, templateKey: seed.templateKey },
-          update: { $setOnInsert: { tenantId, ...seed, updatedBy: null } },
+          update: { $setOnInsert: { tenantId, ...seed, isEnabled: true, updatedBy: null } },
           upsert: true,
         },
       })),

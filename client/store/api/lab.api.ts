@@ -100,7 +100,17 @@ export const labApi = baseApi.injectEndpoints({
       providesTags: ['LabTestMaster'],
     }),
 
-    // Also invalidates 'Lab' — request details carry each test's content.
+    // Catalog test names disabled in the Test Master — hidden from the New /
+    // Edit Pathology Request Test Type dropdown. Readable by every role that
+    // creates or edits pathology requests; refreshed by any master update.
+    listDisabledPathologyTests: build.query<string[], void>({
+      query: () => '/api/lab/pathology/disabled-tests',
+      transformResponse: (raw: ApiSuccess<string[]>) => raw.data,
+      providesTags: ['LabTestMaster'],
+    }),
+
+    // Also invalidates 'Lab' — request details carry each test's content, and
+    // Billing's test types drop disabled tests.
     updatePathologyTestMaster: build.mutation<
       PathologyTestMasterEntry,
       { templateKey: string } & UpdatePathologyTestMasterRequest
@@ -276,6 +286,7 @@ export const labApi = baseApi.injectEndpoints({
 export const {
   useListPathologyTestMasterQuery,
   useUpdatePathologyTestMasterMutation,
+  useListDisabledPathologyTestsQuery,
   useListPathologyRequestsQuery,
   useGetPathologyRequestQuery,
   useCreatePathologyRequestMutation,

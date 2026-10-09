@@ -316,15 +316,7 @@ describe('Download / Print layout', () => {
   // a TJ array) removed, so whole words can be matched by their hex encoding.
   const unkerned = (buf: Buffer) => decompressContentStreams(buf).toLowerCase().replace(/>\s*-?[\d.]+\s*</g, '');
 
-  test('renders non-pediatric vitals in the required order', async () => {
-    const content = unkerned(await buildDischargeSummaryPdf(makeData(), { print: true }));
-    const positions = ['BP', 'PR', 'SpO2', 'RBS', 'Temperature', 'Weight']
-      .map((label) => content.indexOf(hex(label)));
-    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
-    expect(positions).toEqual([...positions].sort((x, y) => x - y));
-  });
-
-  test('renders pediatric vitals in the required order for ages expressed in months', async () => {
+  test('no department renders SpO2 → Temp → BP → Pulse → Height → Weight under a plain heading, even for an infant', async () => {
     const base = makeData({ opdVisits: [], labRequests: [] });
     const data = {
       ...base,
@@ -339,8 +331,34 @@ describe('Download / Print layout', () => {
       },
     };
     const content = unkerned(await buildDischargeSummaryPdf(data, { print: true }));
-    const positions = ['PR', 'RR', 'SpO2', 'BP', 'Height/Length', 'Weight', 'Head Circumference']
+    expect(content).not.toContain(hex('PEDIATRIC VITALS'));
+    const positions = ['SpO2', 'Temperature', 'BP', 'Pulse', 'Height', 'Weight']
       .map((label) => content.indexOf(hex(label)));
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
+    expect(content).not.toContain(hex('Head Circumference'));
+  });
+
+  test.each([
+    ['PEDIATRIC', 40, 'YEARS', 'PEDIATRIC VITALS', ['PR', 'RR', 'SpO2', 'BP', 'Height/Length', 'Weight', 'Head Circumference']],
+    ['NON_PEDIATRIC', 5, 'MONTHS', 'NON-PEDIATRIC VITALS', ['BP', 'PR', 'SpO2', 'RBS', 'Temperature', 'Weight']],
+  ] as const)('a %s department picks the vitals set, whatever the patient age', async (profile, age, ageUnit, heading, labels) => {
+    const base = makeData({ opdVisits: [], labRequests: [] });
+    const data = {
+      ...base,
+      patient: { ...base.patient, age, ageUnit },
+      admission: {
+        ...base.admission,
+        vitalsProfile: profile,
+        vitals: {
+          ...base.admission.vitals!,
+          pulse: 120, respiratoryRate: 30, spo2: 98, bloodPressure: '90/60', height: 65, weight: 6.5, headCircumference: 40,
+        },
+      },
+    };
+    const content = unkerned(await buildDischargeSummaryPdf(data, { print: true }));
+    expect(content).toContain(hex(heading));
+    const positions = labels.map((label) => content.indexOf(hex(label)));
     positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
     expect(positions).toEqual([...positions].sort((x, y) => x - y));
   });

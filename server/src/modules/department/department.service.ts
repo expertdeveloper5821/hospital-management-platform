@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { departmentRepository } from './department.repository';
-import { IDepartment } from './department.model';
+import { IDepartment, VitalsProfile } from './department.model';
 import { userRepository } from '../user/user.repository';
 import { auditService } from '../../shared/services/audit.service';
 import { AuditEntityType, PaginatedResult } from '../../shared/types/common.types';
@@ -8,7 +8,70 @@ import { ConflictError, NotFoundError, AppError } from '../../shared/middleware/
 import { UserRole } from '../../shared/types/common.types';
 import { CreateDepartmentRequest, UpdateDepartmentRequest } from './department.types';
 
+// System departments every tenant gets (seeded lazily on first department
+// list — see ensureVitalsDepartments). Created with no doctors; the hospital
+// assigns its own. Their vitalsProfile decides which vitals set an OPD
+// visit / IPD admission in that department records.
+// Descriptions are left blank. LEGACY_SEED_DESCRIPTIONS is the placeholder
+// text an earlier version seeded, cleared on the next seed check.
+const LEGACY_SEED_DESCRIPTIONS = ['Pediatric vitals', 'Non-Pediatric vitals'];
+const VITALS_DEPARTMENT_SEEDS: { vitalsProfile: VitalsProfile; name: string }[] = [
+  { vitalsProfile: 'PEDIATRIC',     name: 'Pediatric' },
+  { vitalsProfile: 'NON_PEDIATRIC', name: 'Non-Pediatric' },
+];
+
 export class DepartmentService {
+  // Creates the Pediatric / Non-Pediatric departments for this tenant if they
+  // have never existed. Missing rows only, never overwriting: a department
+  // the hospital already created under the same name is adopted (tagged with
+  // the profile) instead of duplicated, and a seeded one the hospital later
+  // renamed or deleted is left alone. A concurrent seed of the same profile
+  // loses on the { tenantId, vitalsProfile } unique index and is ignored.
+  async ensureVitalsDepartments(tenantId: string): Promise<void> {
+    const claimed = new Set(await departmentRepository.findClaimedVitalsProfiles(tenantId));
+    if (claimed.size > 0) {
+      await departmentRepository.clearSeededVitalsDescriptions(tenantId, LEGACY_SEED_DESCRIPTIONS);
+    }
+    for (const seed of VITALS_DEPARTMENT_SEEDS) {
+      if (claimed.has(seed.vitalsProfile)) continue;
+      try {
+        const sameName = await departmentRepository.findByName(tenantId, seed.name);
+        if (sameName) {
+          if (!sameName.vitalsProfile) {
+            await departmentRepository.update(tenantId, sameName.departmentId, { vitalsProfile: seed.vitalsProfile });
+          }
+          continue;
+        }
+        await departmentRepository.save({
+          departmentId:  `DEPT-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`,
+          tenantId,
+          name:          seed.name,
+          description:   null,
+          headDoctorId:  null,
+          vitalsProfile: seed.vitalsProfile,
+        });
+      } catch (err) {
+        if ((err as { code?: number }).code !== 11000) throw err;
+      }
+    }
+  }
+
+  // The vitals profile of the department an OPD visit / IPD admission
+  // belongs to — null for any other department (or none), which records the
+  // Non-Pediatric layout.
+  async getVitalsProfile(tenantId: string, departmentId: string | null | undefined): Promise<VitalsProfile | null> {
+    if (!departmentId) return null;
+    const department = await departmentRepository.findById(tenantId, departmentId);
+    return department?.vitalsProfile ?? null;
+  }
+
+  // An explicitly chosen department on an OPD visit / IPD admission must be a
+  // live department of this tenant.
+  async assertDepartmentExists(tenantId: string, departmentId: string): Promise<void> {
+    const department = await departmentRepository.findById(tenantId, departmentId);
+    if (!department) throw new AppError('Department not found', 400);
+  }
+
   async createDepartment(
     tenantId:  string,
     data:      CreateDepartmentRequest,
@@ -92,6 +155,7 @@ export class DepartmentService {
   }
 
   async listDepartments(tenantId: string): Promise<IDepartment[]> {
+    await this.ensureVitalsDepartments(tenantId);
     return departmentRepository.findAll(tenantId);
   }
 
@@ -101,6 +165,7 @@ export class DepartmentService {
     page:     number,
     limit:    number,
   ): Promise<PaginatedResult<IDepartment>> {
+    await this.ensureVitalsDepartments(tenantId);
     const search = filters.search?.trim() || undefined;
     const matchedDepartmentIds = search
       ? await userRepository.findDepartmentIdsByDoctorName(tenantId, search)

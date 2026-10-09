@@ -23,6 +23,7 @@ const createVisitSchema = z.object({
   patientId:      z.string().min(1),
   doctorIds:      z.array(z.string().min(1)).optional(),
   nurseIds:       z.array(z.string().min(1)).optional(),
+  departmentId:   z.string().min(1).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   notes:          notesSchema,
 });
@@ -58,6 +59,7 @@ const updateVisitSchema = z.object({
   patientId:      z.string().min(1).optional(),
   doctorIds:      z.array(z.string().min(1)).optional(),
   nurseIds:       z.array(z.string().min(1)).optional(),
+  departmentId:   z.string().min(1).optional(),
   visitDate:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
   // No `.min(1)` here (unlike completeVisitSchema below, where a diagnosis is
   // mandatory to finalize a visit) — an OPEN/IN_PROGRESS visit's diagnosis
@@ -131,6 +133,9 @@ function toResponse(v: IOPDVisit) {
       respiratoryRate: v.vitals?.respiratoryRate ?? null,
       headCircumference: v.vitals?.headCircumference ?? null,
     },
+    // Saved value only (set at completion). The single-visit read (getVisit)
+    // overrides it with the live slip date — see OPDService.getVisitValidTill.
+    validTill:      v.validTill ?? null,
     createdAt:      v.createdAt,
     updatedAt:      v.updatedAt,
   };
@@ -198,7 +203,8 @@ export async function getVisit(req: Request, res: Response, next: NextFunction):
     const tenantId = req.user!.tenantId!;
     const visit = await opdService.getVisitById(tenantId, req.params.visitId);
     await assertVisitReadable(tenantId, visit, req);
-    res.status(200).json({ status: 'success', data: toResponse(visit) });
+    const validTill = await opdService.getVisitValidTill(tenantId, visit);
+    res.status(200).json({ status: 'success', data: { ...toResponse(visit), validTill } });
   } catch (err) { next(err); }
 }
 
@@ -245,7 +251,7 @@ const NURSE_EDITABLE_FIELDS = new Set(['notes', 'vitals']);
 // OPDService.updateVisit) plus vitals. Reassigning nurses on an existing visit
 // is also open to DOCTOR/HOSPITAL_ADMIN (full edit access); a Nurse is still
 // kept off it by NURSE_EDITABLE_FIELDS.
-const RECEPTIONIST_EDITABLE_FIELDS = new Set(['patientId', 'visitDate', 'notes', 'doctorIds', 'nurseIds', 'vitals']);
+const RECEPTIONIST_EDITABLE_FIELDS = new Set(['patientId', 'visitDate', 'notes', 'doctorIds', 'nurseIds', 'departmentId', 'vitals']);
 
 // Changing which patient a visit belongs to is a Receptionist-only correction
 // — every other role's edit access is unchanged and never includes it.

@@ -32,6 +32,8 @@ jest.mock('../../../src/modules/lab/pathology-test-master.repository', () => ({
   pathologyTestMasterRepository: {
     findAll:       jest.fn().mockResolvedValue([]),
     insertMissing: jest.fn().mockResolvedValue(undefined),
+    // Every test enabled unless a test overrides it.
+    findDisabledKeys: jest.fn().mockResolvedValue([]),
   },
 }));
 import { auditService } from '../../../src/shared/services/audit.service';
@@ -982,5 +984,67 @@ describe('LabService — submitPathologyTestReport', () => {
     const recipients = (mockNotifSvc.sendNotification as jest.Mock).mock.calls.map((c) => c[0]).sort();
     expect(recipients).toEqual([DOCTOR, 'nurse-1'].sort());
     expect(JSON.stringify((auditService.log as jest.Mock).mock.calls)).not.toContain('"9"');
+  });
+});
+
+describe('LabService — disabled Test Master tests', () => {
+  let service: LabService;
+  const CBC = 'CBC (Complete Blood Count)';
+  const ESR = 'ESR';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new LabService();
+    mockPatientRepo.findByPatientId = jest.fn().mockResolvedValue({ patientId: 'patient-001' });
+    mockNotifSvc.sendToRole         = jest.fn().mockResolvedValue(undefined);
+    mockAuditSvc.log                = jest.fn().mockResolvedValue(undefined);
+    (pathologyTestMasterRepository.findDisabledKeys as jest.Mock).mockResolvedValue(['CBC']);
+  });
+
+  afterEach(() => {
+    (pathologyTestMasterRepository.findDisabledKeys as jest.Mock).mockResolvedValue([]);
+  });
+
+  test('create rejects a disabled test (400) without saving', async () => {
+    mockLabRepo.savePathology = jest.fn();
+    await expect(service.createPathologyRequest(
+      { patientId: 'patient-001', testType: `${ESR}, ${CBC}`, referredBy: 'SELF' }, TENANT, DOCTOR,
+    )).rejects.toMatchObject({ statusCode: 400, message: expect.stringMatching(/CBC \(Complete Blood Count\) is disabled/) });
+    expect(mockLabRepo.savePathology).not.toHaveBeenCalled();
+  });
+
+  test('create allows enabled and non-catalog tests', async () => {
+    mockLabRepo.savePathology = jest.fn().mockResolvedValue(makePathologyDoc({ testType: `${ESR}, Blood Culture` }));
+    await expect(service.createPathologyRequest(
+      { patientId: 'patient-001', testType: `${ESR}, Blood Culture`, referredBy: 'SELF' }, TENANT, DOCTOR,
+    )).resolves.toBeDefined();
+  });
+
+  test('edit keeps an already-requested disabled test', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ testType: CBC }));
+    mockLabRepo.updatePathology   = jest.fn().mockResolvedValue(makePathologyDoc({ testType: `${CBC}, ${ESR}` }));
+    await expect(
+      service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { testType: `${CBC}, ${ESR}` }),
+    ).resolves.toBeDefined();
+  });
+
+  test('edit rejects newly adding a disabled test (400)', async () => {
+    mockLabRepo.findPathologyById = jest.fn().mockResolvedValue(makePathologyDoc({ testType: ESR }));
+    mockLabRepo.updatePathology   = jest.fn();
+    await expect(
+      service.editPathologyRequest('req-path-001', TENANT, DOCTOR, { testType: `${ESR}, ${CBC}` }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockLabRepo.updatePathology).not.toHaveBeenCalled();
+  });
+
+  test('listTestTypes hides Pathology test types containing a disabled test', async () => {
+    mockLabRepo.listDistinctTestTypes = jest.fn().mockResolvedValue([
+      { category: 'PATHOLOGY', name: CBC },
+      { category: 'PATHOLOGY', name: `${ESR}, ${CBC}` },
+      { category: 'PATHOLOGY', name: ESR },
+      { category: 'RADIOLOGY', name: 'Chest X-Ray' },
+    ]);
+    const names = (await service.listTestTypes(TENANT)).map((t) => t.name);
+    expect(names).toEqual(['Chest X-Ray', ESR]);
   });
 });

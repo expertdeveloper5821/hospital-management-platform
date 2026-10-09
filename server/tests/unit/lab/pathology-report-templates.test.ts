@@ -59,6 +59,70 @@ const CATALOG = [
   'Urea',
   'Creatinine',
   'Vitamin Profile',
+  // Added in the fourth batch (catalog now 70 tests).
+  'Haemoglobin (Hb)',
+  'TLC (Total Leucocyte Count)',
+  'DLC (Differential Leucocyte Count)',
+  'PCV / HCT (Packed Cell Volume / Haematocrit)',
+  'Platelet Count (PLT)',
+  'AEC (Absolute Eosinophil Count)',
+  'BT (Bleeding Time)',
+  'CT (Clotting Time)',
+  'MP (Malaria Parasite - Peripheral Smear)',
+  'MP Card (Malaria Rapid Antigen Test)',
+  'Blood Sugar - Fasting',
+  'Blood Sugar - Post-Prandial (PP)',
+  'Blood Sugar - Random',
+  'SGOT (AST)',
+  'SGPT (ALT)',
+  'Serum Albumin',
+  'Total Protein',
+  'Serum Sodium (Na+)',
+  'Serum Potassium (K+)',
+  'Serum Triglycerides',
+  'Serum Cholesterol (Total)',
+  'D-Dimer',
+  'LDH (Lactate Dehydrogenase)',
+  // Added in the fifth batch (catalog now 109 tests).
+  'VDRL (Syphilis Screening)',
+  'RA Factor (Rheumatoid Factor)',
+  'ASO Titer (Anti-Streptolysin O)',
+  'H. Pylori (Helicobacter pylori)',
+  'Urine Bile Salts (BS)',
+  'Urine Bile Pigments (BP)',
+  'Semen Analysis',
+  'T3 (Total Triiodothyronine)',
+  'T4 (Total Thyroxine)',
+  'TSH (Thyroid Stimulating Hormone)',
+  'FT3 (Free Triiodothyronine)',
+  'FT4 (Free Thyroxine)',
+  'Prolactin (PRL)',
+  'LH (Luteinising Hormone)',
+  'FSH (Follicle Stimulating Hormone)',
+  'Testosterone (Total)',
+  'Serum Iron',
+  'Total IgE',
+  'PSA Total (Prostate Specific Antigen)',
+  'PSA Free (Free / Total PSA Ratio)',
+  'ACE (Angiotensin Converting Enzyme)',
+  'ANA (Antinuclear Antibody)',
+  'CA-125',
+  'Anti-CCP (Anti-Cyclic Citrullinated Peptide)',
+  'E2 (Estradiol)',
+  'HBsAg Quantitative (Surface Antigen)',
+  'Beta HCG (Serum Quantitative)',
+  'TORCH Profile',
+  'TB Platinum (IGRA)',
+  'Microalbumin (Urine Albumin / Creatinine Ratio)',
+  'Allergy Profile',
+  'ANC Profile (Antenatal)',
+  'Dual Marker (First Trimester Screen)',
+  'Triple Marker (Second Trimester Screen)',
+  'Thalassemia Profile',
+  'Serum Lithium',
+  'Coombs Test - Direct (DAT)',
+  'Coombs Test - Indirect (IAT)',
+  'Folic Acid (Vitamin B9)',
 ];
 
 const keysOf = (testName: string) => findReportTemplate(testName).parameters.map((p) => p.key);
@@ -71,9 +135,207 @@ describe('Pathology report templates — catalog coverage', () => {
     expect(t.parameters.length).toBeGreaterThan(0);
   });
 
-  test('the catalog has 47 tests, each with a distinct template key', () => {
-    expect(CATALOG).toHaveLength(47);
-    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(47);
+  test('the catalog has 109 tests, each with a distinct template key', () => {
+    expect(CATALOG).toHaveLength(109);
+    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(109);
+  });
+
+  test('no two catalog names collide after normalisation, and none contains a top-level comma', () => {
+    const norm = CATALOG.map((n) => n.trim().replace(/\s+/g, ' ').toLowerCase());
+    expect(new Set(norm).size).toBe(CATALOG.length);
+    for (const name of CATALOG) expect(splitPathologyTests(name)).toEqual([name]);
+  });
+
+  test.each([
+    ['Haemoglobin (Hb)',                             'HB',            ['hemoglobin']],
+    ['TLC (Total Leucocyte Count)',                  'TLC',           ['wbc']],
+    ['DLC (Differential Leucocyte Count)',           'DLC',           ['neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils']],
+    ['PCV / HCT (Packed Cell Volume / Haematocrit)', 'PCV',           ['hematocrit']],
+    ['Platelet Count (PLT)',                         'PLT',           ['platelets']],
+    ['AEC (Absolute Eosinophil Count)',              'AEC',           ['aec']],
+    ['BT (Bleeding Time)',                           'BT',            ['bleedingTime']],
+    ['CT (Clotting Time)',                           'CT',            ['clottingTime']],
+    ['MP (Malaria Parasite - Peripheral Smear)',     'MP_SMEAR',      ['smear', 'stages']],
+    ['MP Card (Malaria Rapid Antigen Test)',         'MP_CARD',       ['pfAntigen', 'pvAntigen']],
+    ['Blood Sugar - Fasting',                        'SUGAR_FASTING', ['fasting']],
+    ['Blood Sugar - Post-Prandial (PP)',             'SUGAR_PP',      ['postPrandial']],
+    ['Blood Sugar - Random',                         'SUGAR_RANDOM',  ['random']],
+    ['SGOT (AST)',                                   'SGOT',          ['sgot']],
+    ['SGPT (ALT)',                                   'SGPT',          ['sgpt']],
+    ['Serum Albumin',                                'ALBUMIN',       ['albumin']],
+    ['Total Protein',                                'TOTAL_PROTEIN', ['totalProtein']],
+    ['Serum Sodium (Na+)',                           'SODIUM',        ['sodium']],
+    ['Serum Potassium (K+)',                         'POTASSIUM',     ['potassium']],
+    ['Serum Triglycerides',                          'TRIGLYCERIDES', ['triglycerides']],
+    ['Serum Cholesterol (Total)',                    'CHOLESTEROL',   ['totalCholesterol']],
+    ['D-Dimer',                                      'D_DIMER',       ['dDimer']],
+    ['LDH (Lactate Dehydrogenase)',                  'LDH',           ['ldh']],
+  ])('fourth-batch test "%s" (%s) has exactly its own parameters', (name, key, expected) => {
+    expect(findReportTemplate(name).key).toBe(key);
+    expect(keysOf(name)).toEqual(expected);
+  });
+
+  test('standalone tests share the unit and reference range of the panel parameter they mirror', () => {
+    const param = (test: string, key: string) => findReportTemplate(test).parameters.find((p) => p.key === key)!;
+    const pairs: Array<[string, string, string]> = [
+      ['Haemoglobin (Hb)', 'CBC (Complete Blood Count)', 'hemoglobin'],
+      ['TLC (Total Leucocyte Count)', 'CBC (Complete Blood Count)', 'wbc'],
+      ['DLC (Differential Leucocyte Count)', 'CBC (Complete Blood Count)', 'neutrophils'],
+      ['DLC (Differential Leucocyte Count)', 'CBC (Complete Blood Count)', 'eosinophils'],
+      ['PCV / HCT (Packed Cell Volume / Haematocrit)', 'CBC (Complete Blood Count)', 'hematocrit'],
+      ['Platelet Count (PLT)', 'CBC (Complete Blood Count)', 'platelets'],
+      ['Blood Sugar - Fasting', 'Blood Sugar (Fasting / Post-Prandial / Random)', 'fasting'],
+      ['Blood Sugar - Post-Prandial (PP)', 'Blood Sugar (Fasting / Post-Prandial / Random)', 'postPrandial'],
+      ['Blood Sugar - Random', 'Blood Sugar (Fasting / Post-Prandial / Random)', 'random'],
+      ['SGOT (AST)', 'LFT (Liver Function Test)', 'sgot'],
+      ['SGPT (ALT)', 'LFT (Liver Function Test)', 'sgpt'],
+      ['Serum Albumin', 'LFT (Liver Function Test)', 'albumin'],
+      ['Total Protein', 'LFT (Liver Function Test)', 'totalProtein'],
+      ['Serum Sodium (Na+)', 'Serum Electrolytes (Sodium, Potassium, Chloride)', 'sodium'],
+      ['Serum Potassium (K+)', 'Serum Electrolytes (Sodium, Potassium, Chloride)', 'potassium'],
+    ];
+    for (const [standalone, panel, key] of pairs) {
+      const a = param(standalone, key);
+      const b = param(panel, key);
+      expect({ standalone, key, unit: a.unit, range: a.range, m: a.rangeMale, f: a.rangeFemale })
+        .toEqual({ standalone, key, unit: b.unit, range: b.range, m: b.rangeMale, f: b.rangeFemale });
+    }
+  });
+
+  test('fourth-batch flags: exclusive D-Dimer cut-off, gender-specific LDH, positive MP smear / card', () => {
+    const p = (test: string, key: string) => findReportTemplate(test).parameters.find((x) => x.key === key)!;
+    expect(computeFlag(p('D-Dimer', 'dDimer'), '0.49', null)).toBeNull();
+    expect(computeFlag(p('D-Dimer', 'dDimer'), '0.5', null)).toBe('HIGH');
+    expect(computeFlag(p('LDH (Lactate Dehydrogenase)', 'ldh'), '220', 'MALE')).toBeNull();
+    expect(computeFlag(p('LDH (Lactate Dehydrogenase)', 'ldh'), '220', 'FEMALE')).toBe('HIGH');
+    expect(resolveReferenceText(p('LDH (Lactate Dehydrogenase)', 'ldh'), null)).toBe('M: 135 - 225; F: 135 - 214');
+    expect(computeFlag(p('MP (Malaria Parasite - Peripheral Smear)', 'smear'), 'P. vivax Seen', null)).toBe('ABNORMAL');
+    expect(computeFlag(p('MP (Malaria Parasite - Peripheral Smear)', 'smear'), 'Not Seen', null)).toBeNull();
+    expect(computeFlag(p('MP Card (Malaria Rapid Antigen Test)', 'pfAntigen'), 'Positive', null)).toBe('ABNORMAL');
+    expect(computeFlag(p('BT (Bleeding Time)', 'bleedingTime'), '6', null)).toBe('HIGH');
+    expect(computeFlag(p('CT (Clotting Time)', 'clottingTime'), '8', null)).toBeNull();
+    expect(computeFlag(p('AEC (Absolute Eosinophil Count)', 'aec'), '600', null)).toBe('HIGH');
+    expect(computeFlag(p('Serum Triglycerides', 'triglycerides'), '150', null)).toBe('HIGH');
+    expect(computeFlag(p('Serum Cholesterol (Total)', 'totalCholesterol'), '199', null)).toBeNull();
+  });
+
+  test.each([
+    ['VDRL (Syphilis Screening)',                       'VDRL',            ['vdrl', 'vdrlTitre']],
+    ['RA Factor (Rheumatoid Factor)',                   'RA_FACTOR',       ['raLatex', 'raFactor']],
+    ['ASO Titer (Anti-Streptolysin O)',                 'ASO',             ['asoLatex', 'aso']],
+    ['H. Pylori (Helicobacter pylori)',                 'H_PYLORI',        ['method', 'hPylori']],
+    ['Urine Bile Salts (BS)',                           'URINE_BS',        ['bileSalts']],
+    ['Urine Bile Pigments (BP)',                        'URINE_BP',        ['bilePigments']],
+    ['Semen Analysis',                                  'SEMEN',           ['abstinence', 'volume', 'appearance', 'liquefaction', 'viscosity', 'ph',
+      'concentration', 'totalCount', 'progressive', 'nonProgressive', 'immotile', 'totalMotility', 'vitality', 'normalForms',
+      'leucocytes', 'rbcs', 'agglutination']],
+    ['T3 (Total Triiodothyronine)',                     'T3',              ['t3']],
+    ['T4 (Total Thyroxine)',                            'T4',              ['t4']],
+    ['TSH (Thyroid Stimulating Hormone)',               'TSH',             ['tsh']],
+    ['FT3 (Free Triiodothyronine)',                     'FT3',             ['ft3']],
+    ['FT4 (Free Thyroxine)',                            'FT4',             ['ft4']],
+    ['Prolactin (PRL)',                                 'PROLACTIN',       ['prolactin']],
+    ['LH (Luteinising Hormone)',                        'LH',              ['lh']],
+    ['FSH (Follicle Stimulating Hormone)',              'FSH',             ['fsh']],
+    ['Testosterone (Total)',                            'TESTOSTERONE',    ['testosterone']],
+    ['Serum Iron',                                      'SERUM_IRON',      ['serumIron']],
+    ['Total IgE',                                       'TOTAL_IGE',       ['totalIge']],
+    ['PSA Total (Prostate Specific Antigen)',           'PSA_TOTAL',       ['totalPsa']],
+    ['PSA Free (Free / Total PSA Ratio)',               'PSA_FREE',        ['totalPsa', 'freePsa', 'percentFreePsa']],
+    ['ACE (Angiotensin Converting Enzyme)',             'ACE',             ['ace']],
+    ['ANA (Antinuclear Antibody)',                      'ANA',             ['method', 'ana', 'titre', 'pattern']],
+    ['CA-125',                                          'CA_125',          ['ca125']],
+    ['Anti-CCP (Anti-Cyclic Citrullinated Peptide)',    'ANTI_CCP',        ['antiCcp']],
+    ['E2 (Estradiol)',                                  'E2',              ['estradiol']],
+    ['HBsAg Quantitative (Surface Antigen)',            'HBSAG_QUANT',     ['hbsagQuant']],
+    ['Beta HCG (Serum Quantitative)',                   'BETA_HCG',        ['betaHcg']],
+    ['TORCH Profile',                                   'TORCH',           ['toxoIgg', 'toxoIgm', 'rubellaIgg', 'rubellaIgm', 'cmvIgg', 'cmvIgm', 'hsvIgg', 'hsvIgm']],
+    ['TB Platinum (IGRA)',                              'TB_PLATINUM',     ['nil', 'tbAntigen', 'mitogen', 'tbAgMinusNil', 'result']],
+    ['Microalbumin (Urine Albumin / Creatinine Ratio)', 'MICROALBUMIN',    ['urineAlbumin', 'urineCreatinine', 'acr']],
+    ['Allergy Profile',                                 'ALLERGY_PROFILE', ['totalIge', 'method', 'allergensTested', 'positiveAllergens', 'interpretation']],
+    ['ANC Profile (Antenatal)',                         'ANC_PROFILE',     ['hemoglobin', 'aboGroup', 'rhType', 'ogtt2h', 'hiv', 'hbsag', 'vdrl', 'urineAlbumin', 'urineSugar']],
+    ['Dual Marker (First Trimester Screen)',            'DUAL_MARKER',     ['gestationalAge', 'freeBhcg', 'freeBhcgMom', 'pappA', 'pappAMom', 'riskT21', 'riskT18', 'screenResult']],
+    ['Triple Marker (Second Trimester Screen)',         'TRIPLE_MARKER',   ['gestationalAge', 'afp', 'afpMom', 'hcg', 'hcgMom', 'ue3', 'ue3Mom', 'riskT21', 'riskT18', 'screenResult']],
+    ['Thalassemia Profile',                             'THALASSEMIA',     ['hemoglobin', 'rbc', 'mcv', 'mch', 'rdw', 'mentzerIndex', 'hbA', 'hbA2', 'hbF', 'abnormalHb', 'interpretation']],
+    ['Serum Lithium',                                   'LITHIUM',         ['lithium']],
+    ['Coombs Test - Direct (DAT)',                      'COOMBS_DIRECT',   ['dat', 'grade']],
+    ['Coombs Test - Indirect (IAT)',                    'COOMBS_INDIRECT', ['iat', 'titre']],
+    ['Folic Acid (Vitamin B9)',                         'FOLIC_ACID',      ['vitaminB9']],
+  ])('fifth-batch test "%s" (%s) has exactly its own parameters', (name, key, expected) => {
+    expect(findReportTemplate(name).key).toBe(key);
+    expect(keysOf(name)).toEqual(expected);
+  });
+
+  test('fifth-batch standalone tests share the unit and range of the panel parameter they mirror', () => {
+    const param = (test: string, key: string) => findReportTemplate(test).parameters.find((p) => p.key === key)!;
+    const pairs: Array<[string, string, string]> = [
+      ['T3 (Total Triiodothyronine)', 'Thyroid Profile (T3, T4, TSH)', 't3'],
+      ['T4 (Total Thyroxine)', 'Thyroid Profile (T3, T4, TSH)', 't4'],
+      ['TSH (Thyroid Stimulating Hormone)', 'Thyroid Profile (T3, T4, TSH)', 'tsh'],
+      ['Serum Iron', 'Iron Profile / Iron Studies', 'serumIron'],
+      ['Folic Acid (Vitamin B9)', 'Vitamin Profile', 'vitaminB9'],
+      ['PSA Free (Free / Total PSA Ratio)', 'PSA Total (Prostate Specific Antigen)', 'totalPsa'],
+      ['Allergy Profile', 'Total IgE', 'totalIge'],
+      ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'rbc'],
+      ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'mcv'],
+      ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'rdw'],
+    ];
+    for (const [standalone, panel, key] of pairs) {
+      const a = param(standalone, key);
+      const b = param(panel, key);
+      expect({ standalone, key, unit: a.unit, range: a.range, m: a.rangeMale, f: a.rangeFemale })
+        .toEqual({ standalone, key, unit: b.unit, range: b.range, m: b.rangeMale, f: b.rangeFemale });
+    }
+  });
+
+  test('fifth-batch flags: exclusive cut-offs, sexed hormones, unflagged phase ranges and qualitative results', () => {
+    const p = (test: string, key: string) => findReportTemplate(test).parameters.find((x) => x.key === key)!;
+    // Exclusive "< X" cut-offs flag X itself.
+    expect(computeFlag(p('RA Factor (Rheumatoid Factor)', 'raFactor'), '13.9', null)).toBeNull();
+    expect(computeFlag(p('RA Factor (Rheumatoid Factor)', 'raFactor'), '14', null)).toBe('HIGH');
+    expect(computeFlag(p('HBsAg Quantitative (Surface Antigen)', 'hbsagQuant'), '0.05', null)).toBe('HIGH');
+    expect(computeFlag(p('Anti-CCP (Anti-Cyclic Citrullinated Peptide)', 'antiCcp'), '16', null)).toBeNull();
+    expect(computeFlag(p('Triple Marker (Second Trimester Screen)', 'afpMom'), '2.5', null)).toBe('HIGH');
+    expect(computeFlag(p('TB Platinum (IGRA)', 'tbAgMinusNil'), '0.35', null)).toBe('HIGH');
+    expect(computeFlag(p('Microalbumin (Urine Albumin / Creatinine Ratio)', 'acr'), '45', null)).toBe('HIGH');
+    // WHO 2021 semen limits are lower limits only.
+    expect(computeFlag(p('Semen Analysis', 'concentration'), '15', null)).toBe('LOW');
+    expect(computeFlag(p('Semen Analysis', 'concentration'), '16', null)).toBeNull();
+    expect(computeFlag(p('Semen Analysis', 'normalForms'), '80', null)).toBeNull();
+    // Gender-specific.
+    expect(computeFlag(p('Prolactin (PRL)', 'prolactin'), '20', 'MALE')).toBe('HIGH');
+    expect(computeFlag(p('Prolactin (PRL)', 'prolactin'), '20', 'FEMALE')).toBeNull();
+    // Cycle-phase female ranges are printed but never flagged.
+    const phased: Array<[string, string]> = [
+      ['LH (Luteinising Hormone)', 'lh'], ['FSH (Follicle Stimulating Hormone)', 'fsh'], ['E2 (Estradiol)', 'estradiol'],
+    ];
+    for (const [test, key] of phased) {
+      expect(computeFlag(p(test, key), '9999', 'FEMALE')).toBeNull();
+      expect(resolveReferenceText(p(test, key), 'FEMALE')).toMatch(/^Follicular: .*Postmenopause: /);
+    }
+    expect(computeFlag(p('LH (Luteinising Hormone)', 'lh'), '9', 'MALE')).toBe('HIGH');
+    // A positive pregnancy result is reported, not flagged.
+    expect(computeFlag(p('Beta HCG (Serum Quantitative)', 'betaHcg'), '25000', 'FEMALE')).toBeNull();
+    // Qualitative.
+    expect(computeFlag(p('VDRL (Syphilis Screening)', 'vdrl'), 'Reactive', null)).toBe('ABNORMAL');
+    expect(computeFlag(p('VDRL (Syphilis Screening)', 'vdrlTitre'), '1:8', null)).toBeNull();
+    expect(computeFlag(p('TORCH Profile', 'rubellaIgg'), 'Positive', null)).toBeNull();
+    expect(computeFlag(p('TORCH Profile', 'rubellaIgm'), 'Positive', null)).toBe('ABNORMAL');
+    expect(computeFlag(p('Coombs Test - Direct (DAT)', 'dat'), 'Positive', null)).toBe('ABNORMAL');
+    expect(computeFlag(p('Thalassemia Profile', 'hbA2'), '4.8', null)).toBe('HIGH');
+  });
+
+  test('every template string fits the PDF font (Latin-1), except the original Pregnancy Test name', () => {
+    for (const t of PATHOLOGY_REPORT_TEMPLATES) {
+      const strings = [t.key === 'PREGNANCY' ? '' : t.testName];
+      for (const prm of t.parameters) {
+        strings.push(prm.name, prm.unit ?? '', prm.section ?? '', prm.referenceText ?? '',
+          prm.range?.text ?? '', prm.rangeMale?.text ?? '', prm.rangeFemale?.text ?? '', ...(prm.options ?? []));
+      }
+      for (const str of strings) {
+        expect({ key: t.key, str, latin1: /^[\x20-\xFF]*$/.test(str) }).toEqual({ key: t.key, str, latin1: true });
+      }
+    }
   });
 
   test('one template per catalog test, no extras, and unique parameter keys within each', () => {

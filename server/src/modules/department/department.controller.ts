@@ -38,6 +38,7 @@ function toResponse(d: IDepartment) {
     name:          d.name,
     description:   d.description ?? null,
     headDoctorId:  d.headDoctorId ?? null,
+    vitalsProfile: d.vitalsProfile ?? null,
     tenantId:      d.tenantId,
     createdAt:     d.createdAt,
     updatedAt:     d.updatedAt,

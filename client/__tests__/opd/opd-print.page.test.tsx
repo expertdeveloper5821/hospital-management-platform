@@ -20,8 +20,13 @@ jest.mock('@/store/api/patient.api', () => ({
   useGetPatientByIdQuery: (...args: unknown[]) => mockGetPatient(...args),
 }));
 
+const mockDepartments = [
+  { departmentId: 'DEPT-PED', name: 'Pediatric', vitalsProfile: 'PEDIATRIC' },
+  { departmentId: 'DEPT-NON', name: 'Non-Pediatric', vitalsProfile: 'NON_PEDIATRIC' },
+  { departmentId: 'DEPT-DEN', name: 'Dental', vitalsProfile: null },
+];
 jest.mock('@/store/api/department.api', () => ({
-  useListDepartmentsQuery: () => ({ data: [] }),
+  useListDepartmentsQuery: () => ({ data: mockDepartments }),
 }));
 
 jest.mock('@/store/api/user.api', () => ({
@@ -103,50 +108,58 @@ describe('OPD Parcha print page — Vitals section', () => {
     jest.clearAllMocks();
   });
 
-  test('renders the non-pediatric vitals set in order', () => {
-    setup({
-      vitals: { weight: 68.5, height: 172, bloodPressure: '120/80', sugar: 95, bodyTemperature: 98.6, spo2: 97, pulse: 76 },
-    });
-    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+  const order = (container: HTMLElement, labels: string[]) => {
+    const text = container.textContent ?? '';
+    return labels.map((label) => text.indexOf(label));
+  };
+  const FULL_VITALS = {
+    weight: 6.5, height: 65, bloodPressure: '90/60', sugar: 95,
+    bodyTemperature: 98.6, spo2: 98, pulse: 120, respiratoryRate: 30, headCircumference: 40,
+  };
 
-    expect(screen.getByText('Vitals')).toBeInTheDocument();
-    expect(screen.queryByText('Non-Pediatric Vitals')).not.toBeInTheDocument();
-    expect(screen.getByText('Weight')).toBeInTheDocument();
-    expect(screen.getByText('68.5')).toBeInTheDocument();
-    expect(screen.getByText('BP')).toBeInTheDocument();
-    expect(screen.getByText('120/80')).toBeInTheDocument();
-    expect(screen.getByText('RBS')).toBeInTheDocument();
-    expect(screen.getByText('95')).toBeInTheDocument();
-    expect(screen.getByText('Temp')).toBeInTheDocument();
-    expect(screen.getByText('98.6')).toBeInTheDocument();
-    expect(screen.getByText('SpO₂')).toBeInTheDocument();
-    expect(screen.getByText('97')).toBeInTheDocument();
-    expect(screen.getByText('PR')).toBeInTheDocument();
-    expect(screen.getByText('76')).toBeInTheDocument();
-  });
+  test('Pediatric department prints PR → RR → SpO₂ → BP → Height → Weight → Head Circ. for an adult', () => {
+    setup({ departmentId: 'DEPT-PED', vitals: FULL_VITALS }); // BASE_PATIENT is an adult
+    const { container } = render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
-  test('renders the pediatric vitals set for a patient whose age is in months', () => {
-    setup({
-      vitals: {
-        weight: 6.5, height: 65, bloodPressure: '90/60', sugar: 95,
-        bodyTemperature: 98.6, spo2: 98, pulse: 120, respiratoryRate: 30, headCircumference: 40,
-      },
-    });
-    mockGetPatient.mockReturnValue({
-      data: { ...BASE_PATIENT, dateOfBirth: null, age: 18, ageUnit: 'MONTHS' },
-      isLoading: false,
-      isError: false,
-    });
-    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
-
-    expect(screen.getByText('Vitals')).toBeInTheDocument();
-    expect(screen.queryByText('Pediatric Vitals')).not.toBeInTheDocument();
-    for (const label of ['PR', 'RR', 'SpO₂', 'BP', 'Height', 'Weight', 'Head Circ.']) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
+    const positions = order(container, ['PR', 'RR', 'SpO₂', 'BP', 'Height', 'Weight', 'Head Circ.']);
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
     expect(screen.queryByText('RBS')).not.toBeInTheDocument();
     expect(screen.queryByText('Temp')).not.toBeInTheDocument();
   });
+
+  test('Non-Pediatric department prints BP → PR → SpO₂ → RBS → Temp → Weight for an infant', () => {
+    setup({ departmentId: 'DEPT-NON', vitals: FULL_VITALS });
+    mockGetPatient.mockReturnValue({
+      data: { ...BASE_PATIENT, dateOfBirth: null, age: 5, ageUnit: 'MONTHS' }, isLoading: false, isError: false,
+    });
+    const { container } = render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    const positions = order(container, ['BP', 'PR', 'SpO₂', 'RBS', 'Temp', 'Weight']);
+    positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+    expect(positions).toEqual([...positions].sort((x, y) => x - y));
+    expect(screen.queryByText('RR')).not.toBeInTheDocument();
+    expect(screen.queryByText('Head Circ.')).not.toBeInTheDocument();
+  });
+
+  test.each([['DEPT-DEN'], [null]] as const)(
+    'department %s prints SpO₂ → Temp → BP → Pulse → Height → Weight, even for an infant',
+    (departmentId) => {
+      setup({ departmentId, vitals: FULL_VITALS });
+      mockGetPatient.mockReturnValue({
+        data: { ...BASE_PATIENT, dateOfBirth: null, age: 5, ageUnit: 'MONTHS' }, isLoading: false, isError: false,
+      });
+      const { container } = render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+      expect(screen.getByText('Vitals')).toBeInTheDocument();
+      const positions = order(container, ['SpO₂', 'Temp', 'BP', 'Pulse', 'Height', 'Weight']);
+      positions.forEach((pos) => expect(pos).toBeGreaterThan(-1));
+      expect(positions).toEqual([...positions].sort((x, y) => x - y));
+      for (const label of ['PR', 'RR', 'RBS', 'Head Circ.']) {
+        expect(screen.queryByText(label)).not.toBeInTheDocument();
+      }
+    },
+  );
 
   test('a vital that was never recorded renders as a blank line, not a placeholder like "N/A" or "—"', () => {
     setup(); // BASE_VISIT.vitals is all null
@@ -161,7 +174,7 @@ describe('OPD Parcha print page — Vitals section', () => {
   });
 
   test('a partially-recorded vitals set shows saved fields and leaves the rest blank', () => {
-    setup({ vitals: { weight: 70, height: null, bloodPressure: null, sugar: 110, bodyTemperature: null, spo2: null, pulse: null } });
+    setup({ vitals: { weight: 70, height: null, bloodPressure: null, sugar: null, bodyTemperature: null, spo2: null, pulse: 110 } });
     render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
 
     expect(screen.getByText('70')).toBeInTheDocument();
@@ -271,5 +284,23 @@ describe('OPD Parcha print page — unrelated content unchanged', () => {
 
     expect(screen.getByText('17 May 2026')).toBeInTheDocument();
     expect(screen.getByText(/valid for 3 days/)).toBeInTheDocument();
+  });
+
+  test('prints the server-resolved Valid Till (e.g. a completed visit\'s saved date) in IST, ignoring the current setting', () => {
+    // 2026-05-18T18:30Z is 19 May 00:00 IST — a UTC rendering would say 18 May.
+    setup({ status: 'COMPLETED', validTill: '2026-05-18T18:30:00.000Z' });
+    mockGetOpdSettings.mockReturnValue({ data: { validityDays: 30 }, isLoading: false, isError: false });
+    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    expect(screen.getByText('19 May 2026')).toBeInTheDocument();
+    expect(screen.queryByText('18 May 2026')).not.toBeInTheDocument();
+  });
+
+  test('fallback without a server Valid Till counts the IST creation day as day one at the IST midnight boundary', () => {
+    // 2026-05-14T18:30Z is 15 May 00:00 IST (still 14 May in UTC).
+    setup({ createdAt: '2026-05-14T18:30:00.000Z', validTill: undefined });
+    render(<OPDParchaPrintPage params={{ visitId: 'OPD-PRINT001' }} />);
+
+    expect(screen.getByText('19 May 2026')).toBeInTheDocument();
   });
 });

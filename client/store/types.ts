@@ -227,6 +227,9 @@ export interface OPDVisitResponse {
   prescription:   string | null;
   notes:          string | null;
   vitals:         OPDVitals;
+  // Slip Valid Till (00:00 IST of the last valid day). GET /api/opd/visits/:id
+  // always resolves it; list rows only carry the value saved at completion.
+  validTill?:     string | null;
   createdAt:      string;
   updatedAt:      string;
 }
@@ -235,6 +238,7 @@ export interface CreateOPDVisitRequest {
   patientId:      string;
   doctorIds?:     string[];
   nurseIds?:      string[]; // optional OPD nurse assignment(s)
+  departmentId?:  string; // department picked on the form (Pediatric / Non-Pediatric pick the vitals set)
   visitDate?:     string; // YYYY-MM-DD
   notes?:         string;
 }
@@ -267,6 +271,7 @@ export interface UpdateOPDVisitRequest {
   patientId?:      string;   // Receptionist-only
   doctorIds?:      string[];
   nurseIds?:       string[]; // Receptionist-only
+  departmentId?:   string;   // explicit department change
   visitDate?:      string;
   diagnosis?:      string;
   prescription?:   string;
@@ -382,17 +387,22 @@ export interface PathologyTestClinicalContent {
 export interface PathologyTestMasterEntry extends PathologyTestClinicalContent {
   templateKey:   string;
   testName:      string;
+  // false = hidden from this hospital's Test Type dropdown and rejected on new
+  // requests. Existing requests/reports are unaffected.
+  isEnabled:     boolean;
   updatedBy:     string | null;
   updatedByName: string | null;
   updatedAt:     string;
 }
 
 // PATCH /api/lab/pathology/test-master/:templateKey — empty clinicalNote /
-// comment clears it; correlateClinically can be edited but not cleared.
+// comment clears it; correlateClinically can be edited but not cleared;
+// isEnabled enables / disables the test (not allowed for GENERIC).
 export interface UpdatePathologyTestMasterRequest {
   clinicalNote?:        string | null;
   comment?:             string | null;
   correlateClinically?: string;
+  isEnabled?:           boolean;
 }
 
 export interface PathologyTestReport {
@@ -611,6 +621,7 @@ export interface CreateAdmissionRequest {
   wardId:           string;
   bedId:            string;
   assignedDoctorIds?: string[];
+  departmentId?:    string; // department picked on the form (Pediatric / Non-Pediatric pick the vitals set)
   packageId?:       string;
 }
  
@@ -1040,11 +1051,16 @@ export interface ChecklistItem {
 }
 // ─── Department ───────────────────────────────────────────────────────────────
 
+// Set on the seeded Pediatric / Non-Pediatric departments only — selecting
+// one picks that vitals set for an OPD visit / IPD admission.
+export type VitalsProfile = 'PEDIATRIC' | 'NON_PEDIATRIC';
+
 export interface DepartmentResponse {
   departmentId:  string;
   name:          string;
   description:   string | null;
   headDoctorId:  string | null;
+  vitalsProfile?: VitalsProfile | null;
   tenantId:      string;
   createdAt:     string;
   updatedAt:     string;

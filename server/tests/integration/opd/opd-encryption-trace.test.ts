@@ -17,6 +17,11 @@ jest.mock('../../../src/modules/patient/patient.repository', () => ({
     findNamesByPatientIds: jest.fn().mockResolvedValue(new Map()),
   },
 }));
+// completeVisit freezes the slip's Valid Till, which reads the tenant's OPD
+// validity setting — there is no tenant document in this trace.
+jest.mock('../../../src/modules/tenant/tenant.service', () => ({
+  tenantService: { getOpdSettings: jest.fn().mockResolvedValue({ validityDays: 5 }) },
+}));
 
 const ENVELOPE = /^enc:v1:/;
 const TENANT = 'tenant-trace';

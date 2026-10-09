@@ -23,6 +23,8 @@ const BASE = {
 const PATH_ID  = '11111111-1111-4111-8111-111111111111';
 const RADIO_ID = '22222222-2222-4222-8222-222222222222';
 
+// Tests disabled in the Test Master (GET /api/lab/pathology/disabled-tests).
+let mockDisabledTests: string[] = [];
 let mockPathologyRows: unknown[] = [];
 const mockEditPathology = jest.fn();
 const mockEditRadiology = jest.fn();
@@ -40,6 +42,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useUploadPathologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useUploadRadiologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useEditPathologyRequestMutation:    () => [mockEditPathology, { isLoading: false }],
+  useListDisabledPathologyTestsQuery: () => ({ data: mockDisabledTests }),
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [mockEditRadiology, { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
@@ -78,6 +81,7 @@ const chips    = () => within(combobox()).getAllByRole('button', { name: /^Remov
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDisabledTests = [];
   mockEditPathology.mockReturnValue({ unwrap: () => Promise.resolve({}) });
   mockEditRadiology.mockReturnValue({ unwrap: () => Promise.resolve({}) });
 });
@@ -91,17 +95,19 @@ describe('Edit Pathology Request — Test Type multi-select', () => {
     expect(screen.queryByRole('textbox', { name: 'Test Type' })).not.toBeInTheDocument();
   });
 
-  test('offers the same 40-test catalog, searchable, with current tests marked selected', async () => {
+  test('offers the same 109-test catalog, searchable, with current tests marked selected', async () => {
     const user = userEvent.setup();
     await openEdit(user, CBC);
     await user.click(combobox());
     const options = within(screen.getByRole('listbox')).getAllByRole('option');
-    expect(options).toHaveLength(40);
+    expect(options).toHaveLength(109);
     expect(screen.getByRole('option', { name: CBC })).toHaveAttribute('aria-selected', 'true');
     await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'serum');
     expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual([
       'Serum Electrolytes (Sodium, Potassium, Chloride)', 'Serum Ferritin', 'Serum Calcium',
       'Serum Magnesium', 'Serum Phosphorus', 'Serum Amylase', 'Serum Lipase',
+      'Serum Albumin', 'Serum Sodium (Na+)', 'Serum Potassium (K+)', 'Serum Triglycerides', 'Serum Cholesterol (Total)',
+      'Serum Iron', 'Beta HCG (Serum Quantitative)', 'Serum Lithium',
     ]);
   });
 
@@ -156,6 +162,27 @@ describe('Edit Pathology Request — Test Type multi-select', () => {
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
     expect(screen.getByText(/Too many tests selected/)).toBeInTheDocument();
     expect(mockEditPathology).not.toHaveBeenCalled();
+  });
+});
+
+describe('Edit Pathology Request — tests disabled in the Test Master', () => {
+  test('a disabled test is not offered for adding', async () => {
+    mockDisabledTests = [LIPID];
+    const user = userEvent.setup();
+    await openEdit(user, CBC);
+    await user.click(combobox());
+    const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    expect(names).toHaveLength(108);
+    expect(names).not.toContain(LIPID);
+  });
+
+  test('a disabled test already on the request stays as a chip and is saved unchanged', async () => {
+    mockDisabledTests = [CBC];
+    const user = userEvent.setup();
+    await openEdit(user, `${CBC}, ${THYROID}`);
+    expect(chips()).toEqual([CBC, THYROID]);
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(mockEditPathology).toHaveBeenCalledWith(expect.objectContaining({ testType: `${CBC}, ${THYROID}` }));
   });
 });
 

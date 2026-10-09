@@ -1,7 +1,7 @@
 import { pathologyTestMasterRepository, PathologyTestMasterUpdate } from './pathology-test-master.repository';
 import { IPathologyTestMaster } from './pathology-test-master.model';
 import { PATHOLOGY_TEST_MASTER_SEEDS } from './pathology-test-master.defaults';
-import { GENERIC_TEMPLATE_KEY } from './pathology-report-templates';
+import { GENERIC_TEMPLATE_KEY, PATHOLOGY_REPORT_TEMPLATES, findReportTemplate } from './pathology-report-templates';
 import {
   PathologyTestClinicalContent,
   PathologyTestMasterResponse,
@@ -10,7 +10,7 @@ import {
 import { userRepository } from '../user/user.repository';
 import { auditService }   from '../../shared/services/audit.service';
 import { AuditEntityType } from '../../shared/types/common.types';
-import { NotFoundError } from '../../shared/middleware/error-handler';
+import { NotFoundError, ValidationError } from '../../shared/middleware/error-handler';
 
 const SEED_ORDER = new Map(PATHOLOGY_TEST_MASTER_SEEDS.map((s, i) => [s.templateKey, i]));
 
@@ -59,6 +59,27 @@ export class PathologyTestMasterService {
     return rows.map((r) => this.toResponse(r, names));
   }
 
+  // Catalog test names (catalog order) this tenant has disabled — hidden from
+  // the Test Type dropdowns and rejected on new selections.
+  async disabledTestNames(tenantId: string): Promise<string[]> {
+    const disabled = new Set(await pathologyTestMasterRepository.findDisabledKeys(tenantId));
+    return PATHOLOGY_REPORT_TEMPLATES.filter((t) => disabled.has(t.key)).map((t) => t.testName);
+  }
+
+  // Throws if any of `testNames` is a disabled catalog test. Tests outside the
+  // catalog (GENERIC) can't be disabled, so they always pass.
+  async assertTestsEnabled(tenantId: string, testNames: string[]): Promise<void> {
+    if (testNames.length === 0) return;
+    const disabled = new Set(await pathologyTestMasterRepository.findDisabledKeys(tenantId));
+    if (disabled.size === 0) return;
+    const blocked = testNames.filter((name) => disabled.has(findReportTemplate(name).key));
+    if (blocked.length) {
+      throw new ValidationError(
+        `${blocked.join(', ')} ${blocked.length === 1 ? 'is' : 'are'} disabled for this hospital and cannot be selected.`,
+      );
+    }
+  }
+
   async update(
     tenantId:    string,
     templateKey: string,
@@ -69,18 +90,23 @@ export class PathologyTestMasterService {
     const masters  = await this.loadMasterMap(tenantId);
     const previous = masters.get(templateKey);
     if (!previous) throw new NotFoundError('Test not found in the Test Master');
+    // "Other / Unlisted Tests" isn't a selectable test, so it has no switch.
+    if (input.isEnabled !== undefined && templateKey === GENERIC_TEMPLATE_KEY) {
+      throw new ValidationError('Other / Unlisted Tests cannot be enabled or disabled.');
+    }
 
     const changes: PathologyTestMasterUpdate = {};
     if (input.clinicalNote        !== undefined) changes.clinicalNote        = input.clinicalNote;
     if (input.comment             !== undefined) changes.comment             = input.comment;
     if (input.correlateClinically !== undefined) changes.correlateClinically = input.correlateClinically;
+    if (input.isEnabled           !== undefined) changes.isEnabled           = input.isEnabled;
 
     const updated = await pathologyTestMasterRepository.update(tenantId, templateKey, changes, userId);
     if (!updated) throw new NotFoundError('Test not found in the Test Master');
 
     // Configuration text, not patient data — logged in full.
     try {
-      const before: Record<string, unknown> = { ...toContent(previous) };
+      const before: Record<string, unknown> = { ...toContent(previous), isEnabled: previous.isEnabled !== false };
       await auditService.log({
         entityType:    AuditEntityType.PATHOLOGY_TEST_MASTER,
         entityId:      templateKey,
@@ -106,6 +132,7 @@ export class PathologyTestMasterService {
       templateKey:   row.templateKey,
       testName:      row.testName,
       ...toContent(row),
+      isEnabled:     row.isEnabled !== false,
       updatedBy:     row.updatedBy ?? null,
       updatedByName: row.updatedBy ? names.get(row.updatedBy) ?? null : null,
       updatedAt:     row.updatedAt.toISOString(),

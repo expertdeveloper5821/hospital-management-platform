@@ -143,6 +143,36 @@ function calculateReportValues(
     if (iron !== null && finalTibc !== null && finalTibc > 0) set('transferrinSaturation', (iron / finalTibc) * 100);
     else clear('transferrinSaturation');
   }
+  if (report.templateKey === 'SEMEN') {
+    const volume = val('volume');
+    const concentration = val('concentration');
+    if (volume !== null && concentration !== null) set('totalCount', volume * concentration); else clear('totalCount');
+    const pr = val('progressive');
+    const np = val('nonProgressive');
+    if (pr !== null && np !== null && pr + np <= 100) set('totalMotility', pr + np); else clear('totalMotility');
+  }
+  if (report.templateKey === 'PSA_FREE') {
+    const total = val('totalPsa');
+    const free = val('freePsa');
+    if (total !== null && free !== null && total > 0 && free <= total) set('percentFreePsa', (free / total) * 100);
+    else clear('percentFreePsa');
+  }
+  if (report.templateKey === 'TB_PLATINUM') {
+    const nil = val('nil');
+    const tbAntigen = val('tbAntigen');
+    if (nil !== null && tbAntigen !== null) set('tbAgMinusNil', tbAntigen - nil); else clear('tbAgMinusNil');
+  }
+  if (report.templateKey === 'MICROALBUMIN') {
+    const albumin = val('urineAlbumin');
+    const creatinine = val('urineCreatinine');
+    if (albumin !== null && creatinine !== null && creatinine > 0) set('acr', (albumin / creatinine) * 100);
+    else clear('acr');
+  }
+  if (report.templateKey === 'THALASSEMIA') {
+    const mcv = val('mcv');
+    const rbc = val('rbc');
+    if (mcv !== null && rbc !== null && rbc > 0) set('mentzerIndex', mcv / rbc); else clear('mentzerIndex');
+  }
   return values;
 }
 

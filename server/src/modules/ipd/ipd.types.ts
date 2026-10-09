@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgeUnit } from '../patient/patient.types';
+import type { VitalsProfile } from '../department/department.model';
 import { stripRichTextTags, sanitizeRichTextHtml } from '../../shared/utils/validation';
 
 // ─── AdmissionStatus ──────────────────────────────────────────────────────────
@@ -36,6 +37,9 @@ export const CreateAdmissionSchema = z.object({
   wardId:            mongoIdSchema('wardId'),
   bedId:             mongoIdSchema('bedId'),
   assignedDoctorIds: z.array(z.string().min(1)).optional(),
+  // Department picked on the form — stored as-is (it decides the
+  // admission's vitals set); omitted → the first doctor's department.
+  departmentId:      z.string().min(1).optional(),
   // Optional. When sent, wardId must be the package's linked ward
   // (IPDService.createAdmission).
   packageId:         z.string().min(1).optional(),
@@ -220,6 +224,9 @@ export interface DischargeSummaryAdmission {
   // The admission's recorded vitals; the PDF omits the section when absent
   // or when nothing was recorded.
   vitals?:              IPDVitals | null;
+  // The admission department's vitals profile — picks the vitals set and
+  // heading; null/absent for any other department (Non-Pediatric layout).
+  vitalsProfile?:       VitalsProfile | null;
 }
 
 export interface DischargeSummaryLabRequest {

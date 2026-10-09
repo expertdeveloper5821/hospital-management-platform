@@ -400,7 +400,9 @@ export function buildCreateOptimisticRecord(
       fullName:     null,
       doctorIds:    body.doctorIds ?? [],
       nurseIds:     body.nurseIds ?? [],
-      departmentId: null, // resolved server-side at sync — never guessed client-side
+      // The department picked on the form is stored as-is; without one it is
+      // resolved server-side at sync from the doctors — never guessed here.
+      departmentId: (body.departmentId as string | undefined) ?? null,
       visitDate:    body.visitDate ?? now.slice(0, 10),
       queueNumber:  PENDING_QUEUE_NUMBER,
       status:       'OPEN',
@@ -423,7 +425,8 @@ export function buildCreateOptimisticRecord(
       bedId:             body.bedId,
       bedNumber:         '',
       assignedDoctorIds: body.assignedDoctorIds ?? [],
-      departmentId:      null, // resolved server-side at sync — never guessed client-side
+      // Same as OPD_VISIT: the picked department as-is, else resolved at sync.
+      departmentId:      (body.departmentId as string | undefined) ?? null,
       status:            'ADMITTED',
       admissionDate:     now,
       dischargeDate:     null,

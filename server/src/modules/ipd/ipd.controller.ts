@@ -181,8 +181,10 @@ const updateAdmissionSchema = z.object({
   assignedDoctorIds: z.array(z.string().min(1)).optional(),
   wardId:            z.string().min(1).optional(),
   bedId:             z.string().min(1).optional(),
+  // Explicit department change — wins over re-stamping from the doctors.
+  departmentId:      z.string().min(1).optional(),
   vitals:            ipdVitalsSchema,
-}).refine((d) => d.patientId || d.assignedDoctorIds || d.wardId || d.bedId || d.vitals, {
+}).refine((d) => d.patientId || d.assignedDoctorIds || d.wardId || d.bedId || d.departmentId || d.vitals, {
   message: 'Provide at least one field to update',
 });
 

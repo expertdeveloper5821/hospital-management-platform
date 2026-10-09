@@ -149,10 +149,14 @@ export class PaymentRepository {
   // used by OPDService.getPaymentValidity to find the payment that governs
   // the current validity window. Only COMPLETED payments count: a PENDING/
   // FAILED/CANCELLED Razorpay attempt never granted validity.
+  // `createdAtOrBefore` limits it to payments made by that instant (the
+  // payment that covered an earlier OPD visit — see
+  // OPDService.getVisitValidTill).
   async findLatestCompletedByPatientAndReferenceType(
-    tenantId:      string,
-    patientId:     string,
-    referenceType: PaymentReferenceType,
+    tenantId:           string,
+    patientId:          string,
+    referenceType:      PaymentReferenceType,
+    createdAtOrBefore?: Date,
   ): Promise<IPayment | null> {
     assertDbConnected();
     return PaymentModel.findOne({
@@ -160,6 +164,7 @@ export class PaymentRepository {
       patientId,
       referenceType,
       status: PaymentStatus.COMPLETED,
+      ...(createdAtOrBefore && { createdAt: { $lte: createdAtOrBefore } }),
     }).sort({ createdAt: -1 });
   }
 
@@ -176,10 +181,16 @@ export class PaymentRepository {
     patientId:     string,
     doctorIds:     string[],
     referenceType: PaymentReferenceType,
+    createdAtOrBefore?: Date,
   ): Promise<IPayment | null> {
     assertDbConnected();
     const rows = await PaymentModel.aggregate([
-      { $match: { tenantId, patientId, referenceType, status: PaymentStatus.COMPLETED } },
+      {
+        $match: {
+          tenantId, patientId, referenceType, status: PaymentStatus.COMPLETED,
+          ...(createdAtOrBefore && { createdAt: { $lte: createdAtOrBefore } }),
+        },
+      },
       {
         $lookup: {
           from: 'opd_visits',

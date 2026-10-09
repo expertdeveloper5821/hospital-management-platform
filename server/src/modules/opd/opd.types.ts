@@ -32,6 +32,9 @@ export interface CreateOPDVisitRequest {
   patientId:      string;
   doctorIds?:     string[];
   nurseIds?:      string[]; // optional OPD nurse assignment(s) — see OPDService.createVisit
+  // Department picked on the form — stored as-is (Pediatric / Non-Pediatric
+  // pick the vitals set); omitted → resolved from the first doctor.
+  departmentId?:  string;
   visitDate?:     string; // YYYY-MM-DD, defaults to today
   notes?:         string;
 }
@@ -61,6 +64,7 @@ export interface UpdateOPDVisitRequest {
   patientId?:      string;   // Receptionist-only (see opd.controller.ts)
   doctorIds?:      string[];
   nurseIds?:       string[]; // Receptionist-only (see opd.controller.ts)
+  departmentId?:   string;   // explicit department change — wins over doctor re-resolution
   visitDate?:      string; // YYYY-MM-DD — triggers queue number recalculation
   diagnosis?:      string;
   prescription?:   string;
@@ -97,7 +101,7 @@ export interface OPDPaymentValidityResponse {
   reason:             OPDPaymentValidityReason;
   latestPaymentId:    string | null;
   latestPaymentDate:  Date | null;
-  validUntil:         Date | null; // last calendar day the latest payment covers (inclusive)
+  validUntil:         Date | null; // 00:00 IST of the last calendar day the latest payment covers (inclusive)
   validityDays:       number;
 }
 
@@ -115,6 +119,7 @@ export interface OPDVisitResponse {
   prescription:   string | null;
   notes:          string | null;
   vitals:         OPDVitals;
+  validTill?:     Date | null; // slip Valid Till — see OPDService.getVisitValidTill
   createdAt:      Date;
   updatedAt:      Date;
 }

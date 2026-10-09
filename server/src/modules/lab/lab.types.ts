@@ -225,8 +225,12 @@ export const UpdatePathologyTestMasterSchema = z.object({
     .min(1, 'Please Correlate Clinically text is required.')
     .max(PATHOLOGY_CORRELATE_MAX, `Please Correlate Clinically text cannot exceed ${PATHOLOGY_CORRELATE_MAX} characters.`)
     .optional(),
+  // false hides the test from new pathology requests (Test Type dropdown and
+  // API); true restores it. Existing requests and reports are never affected.
+  isEnabled: z.boolean().optional(),
 }).strict().refine(
-  (v) => v.clinicalNote !== undefined || v.comment !== undefined || v.correlateClinically !== undefined,
+  (v) => v.clinicalNote !== undefined || v.comment !== undefined || v.correlateClinically !== undefined
+    || v.isEnabled !== undefined,
   'Provide at least one field to update.',
 );
 
@@ -241,6 +245,7 @@ export interface PathologyTestClinicalContent {
 export interface PathologyTestMasterResponse extends PathologyTestClinicalContent {
   templateKey:   string;
   testName:      string;
+  isEnabled:     boolean;
   // null on a seeded row that has never been edited.
   updatedBy:     string | null;
   updatedByName: string | null;

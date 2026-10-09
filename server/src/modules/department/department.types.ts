@@ -1,3 +1,5 @@
+import { VitalsProfile } from './department.model';
+
 export interface CreateDepartmentRequest {
   name:         string;
   description?: string;
@@ -15,6 +17,7 @@ export interface DepartmentResponse {
   name:          string;
   description:   string | null;
   headDoctorId:  string | null;
+  vitalsProfile: VitalsProfile | null;
   tenantId:      string;
   createdAt:     Date;
   updatedAt:     Date;

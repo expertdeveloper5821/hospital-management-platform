@@ -108,7 +108,19 @@ export async function listPathologyTestMaster(
   } catch (err) { next(err); }
 }
 
-// PATCH /api/lab/pathology/test-master/:templateKey — edit one test's content.
+// GET /api/lab/pathology/disabled-tests — catalog test names this hospital has
+// disabled in the Test Master; the Test Type dropdowns hide them.
+export async function listDisabledPathologyTests(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const result = await labService.listDisabledPathologyTests(req.user!.tenantId as string);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// PATCH /api/lab/pathology/test-master/:templateKey — edit one test's content
+// and/or enable / disable it.
 // Audit logging happens in PathologyTestMasterService.
 export async function updatePathologyTestMaster(
   req: Request, res: Response, next: NextFunction,
