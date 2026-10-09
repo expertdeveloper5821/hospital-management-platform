@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import {
   useListUsersQuery,
   useCreateUserMutation,
-  useUpdateUserRoleMutation,
-  useUpdateUserEmailMutation,
+  useUpdateUserMutation,
   useDeactivateUserMutation,
   useReactivateUserMutation,
 } from '@/store/api/user.api';
+import type { UpdateUserRequest } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useAppSelector } from '@/store/hooks';
 import { UserRole } from '@/store/types';
@@ -21,10 +22,11 @@ import { Badge } from '@/components/ui/badge';
 import { DialogOverlay } from '@/components/ui/dialog-overlay';
 import { DoctorActivePatientsDialog, type BlockedRoleChange } from '@/components/staff/DoctorActivePatientsDialog';
 import { RoleChangeConflictDialog, type RoleChangeConflict } from '@/components/staff/RoleChangeConflictDialog';
-import { DropdownMenu, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { serialNumber, serialOffset } from '@/lib/serial-number';
 import {
+  UserX,
+  UserCheck,
   Users,
   RefreshCw,
   UserPlus,
@@ -33,10 +35,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Search,
-  Mail,
-  ShieldCheck,
-  UserX,
-  UserCheck,
+  Pencil,
 } from 'lucide-react';
 import { NavForm } from '@/components/ui/form';
 
@@ -59,6 +58,66 @@ const ASSIGNABLE_ROLES = [
 
 const USER_NAME_RE = /^[A-Za-z][A-Za-z .'-]{1,199}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Uttarakhand Medical Council Registration No. — 1–20 uppercase alphanumeric
+// characters with optional hyphens/spaces as separators (leading/trailing
+// separator rejected). Mirrors the server's ukmcNoSchema so client + server
+// can never disagree about what a valid value looks like. Normalised (trim,
+// uppercase, collapsed separator runs) before submit on both sides.
+const UKMC_NO_RE = /^[A-Z0-9](?:[A-Z0-9 -]{0,18}[A-Z0-9])?$/;
+
+/** Shared client-side Zod schema for the Create User and Edit User forms. */
+const userFormSchema = z.object({
+  name:  z.string().trim()
+    .min(2, 'Name must be at least 2 characters.')
+    .max(200, 'Name must be at most 200 characters.')
+    .regex(USER_NAME_RE, 'Only letters, spaces, and common name punctuation are allowed.'),
+  email: z.string().trim().toLowerCase()
+    .email('Enter a valid email address.')
+    .max(254, 'Email must be at most 254 characters.'),
+  role:  z.custom<UserRole>((v) => (ASSIGNABLE_ROLES as readonly UserRole[]).includes(v), 'Select a valid role.'),
+  ukmcNo: z.string().trim().toUpperCase()
+    .regex(UKMC_NO_RE, 'UKMC No. may contain 1–20 letters, digits, hyphens, or spaces (no leading/trailing separator).'),
+});
+
+type UserFormValues = z.infer<typeof userFormSchema>;
+
+/**
+ * Validate a user form against the shared schema, plus the role-conditional
+ * rule (UKMC No. is mandatory for DOCTOR — empty or invalid only for them;
+ * other roles never carry or send the field).
+ * Returns `null` when valid, else the first error message.
+ */
+function validateUserForm(
+  values: { name: string; email: string; role: UserRole; ukmcNo: string },
+): string | null {
+  const base = userFormSchema.omit({ ukmcNo: true }).safeParse(values);
+  if (!base.success) {
+    return base.error.issues[0]?.message ?? 'Invalid form data.';
+  }
+  if (values.role === UserRole.DOCTOR) {
+    const normalised = values.ukmcNo.trim().toUpperCase().replace(/\s+|-{2,}/g, ' ');
+    if (!UKMC_NO_RE.test(normalised)) {
+      return values.ukmcNo.trim().length === 0
+        ? 'UKMC No. is required for doctors.'
+        : 'UKMC No. may contain 1–20 letters, digits, hyphens, or spaces (no leading/trailing separator).';
+    }
+  }
+  return null;
+}
+
+/** Empty string when null/undefined so inputs prefill cleanly. */
+function ukmcInputValue(ukmcNo: string | null | undefined): string {
+  return ukmcNo ?? '';
+}
+
+/**
+ * Canonical form stored/sent: trimmed, uppercased, separator runs (spaces,
+ * hyphens) collapsed to a single space. Mirrors the server-side transform in
+ * ukmcNoSchema, so what the client sends is already canonical.
+ */
+function normaliseUkmcNo(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+|-{2,}/g, ' ');
+}
 
 // Fixed size so every Status pill (Active / Inactive) renders identically —
 // same width, height, padding, and centered text regardless of label length.
@@ -90,6 +149,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
   const [name,         setName]         = useState('');
   const [email,        setEmail]        = useState('');
   const [role,         setRole]         = useState<UserRole>(UserRole.STAFF);
+  const [ukmcNo,       setUkmcNo]       = useState('');
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [error,         setError]         = useState<string | null>(null);
 
@@ -100,24 +160,27 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
     e.preventDefault();
     setError(null);
 
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim().toLowerCase();
+    const values = {
+      name:   name.trim(),
+      email:  email.trim().toLowerCase(),
+      role,
+      ukmcNo: normaliseUkmcNo(ukmcNo),
+    };
 
-    if (!USER_NAME_RE.test(trimmedName)) {
-      setError('Enter a valid full name using letters, spaces, and common name punctuation only.');
-      return;
-    }
-    if (!EMAIL_RE.test(trimmedEmail)) {
-      setError('Enter a valid email address.');
+    const validationError = validateUserForm(values);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
     try {
       await createUser({
-        name:          trimmedName,
-        email:         trimmedEmail,
+        name:          values.name,
+        email:         values.email,
         role,
         departmentIds: DEPARTMENT_ROLES.has(role) && departmentIds.length ? departmentIds : undefined,
+        // Only sent for doctors — the backend clears it for everyone else.
+        ukmcNo:        role === UserRole.DOCTOR ? values.ukmcNo : undefined,
       }).unwrap();
       onClose();
     } catch (err: unknown) {
@@ -136,7 +199,10 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
           </button>
         </div>
 
-        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
+        {/* noValidate: jsdom/browser constraint validation on `required`/
+            `pattern` would block the submit event before the shared Zod
+            schema ever runs, so our styled error banner would never show. */}
+        <NavForm onSubmit={handleSubmit} noValidate className="flex flex-col min-h-0">
           <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pt-5 pb-4 space-y-4">
             <div className="space-y-2">
               <Label htmlFor="cu-name">Full Name</Label>
@@ -174,7 +240,7 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
               <select
                 id="cu-role"
                 value={role}
-                onChange={(e) => { setRole(e.target.value as UserRole); setDepartmentIds([]); }}
+                onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); setDepartmentIds([]); }}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {ASSIGNABLE_ROLES.map((r) => (
@@ -182,6 +248,24 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
                 ))}
               </select>
             </div>
+
+            {role === UserRole.DOCTOR && (
+              <div className="space-y-2">
+                <Label htmlFor="cu-ukmc">UKMC No.</Label>
+                <Input
+                  id="cu-ukmc"
+                  placeholder="UK-REG-12345"
+                  value={ukmcNo}
+                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); }}
+                  maxLength={20}
+                  required
+                  aria-required="true"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Uttarakhand Medical Council Registration Number (required for doctors).
+                </p>
+              </div>
+            )}
 
             {DEPARTMENT_ROLES.has(role) && (
               <div className="space-y-2">
@@ -325,76 +409,252 @@ function UserTableSkeleton() {
   );
 }
 
-// ─── User Actions Menu (kebab) ─────────────────────────────────────────────────────────
+// ─── Edit User Modal ──────────────────────────────────────────────────────────
 
-interface UserActionsMenuProps {
+interface EditUserModalProps {
+  user:     UserResponse;
+  /** Role gate — mirrors PATCH /api/users/:userId (backend HOSPITAL_ADMIN + HR). */
+  canEditProfile: boolean;
+  canDeactivate: boolean;
+  /** Deactivation stays inside the dialog as a secondary footer action. */
+  onDeactivate: (user: UserResponse) => void;
+  onReactivate: (user: UserResponse) => void;
+  /** Structured 409 from the combined PATCH surfaces in the shared dialog. */
+  onConflict: (conflict: RoleChangeConflict) => void;
+  reactivating: boolean;
+  onClose:  () => void;
+}
+
+/**
+ * Direct edit dialog replacing the old kebab menu's inline email/role editors.
+ * Validates with the shared userFormSchema, submits one PATCH through
+ * useUpdateUserMutation (tag invalidation updates the table instantly), and
+ * routes structured 409s to the same conflict dialogs as before.
+ */
+function EditUserModal({
+  user,
+  canEditProfile,
+  canDeactivate,
+  onDeactivate,
+  onReactivate,
+  onConflict,
+  reactivating,
+  onClose,
+}: EditUserModalProps) {
+  const [name,    setName]    = useState(user.name);
+  const [email,   setEmail]   = useState(user.email);
+  const [role,    setRole]    = useState<UserRole>(user.role);
+  const [ukmcNo,  setUkmcNo]  = useState(ukmcInputValue(user.ukmcNo));
+  const [error,   setError]   = useState<string | null>(null);
+
+  const [updateUser, { isLoading }] = useUpdateUserMutation();
+
+  const isActive = user.isActive;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const values = {
+      name:   name.trim(),
+      email:  email.trim().toLowerCase(),
+      role,
+      ukmcNo: normaliseUkmcNo(ukmcNo),
+    };
+
+    const validationError = validateUserForm(values);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    // Only send fields that actually changed so a no-op save never triggers a
+    // spurious conflict 409 (e.g. role change conflict when role is unchanged).
+    const body: UpdateUserRequest = {};
+    if (values.name !== user.name)                     body.name   = values.name;
+    if (values.email !== user.email)                   body.email  = values.email;
+    if (role !== user.role)                            body.role   = role;
+    const storedUkmc = ukmcInputValue(user.ukmcNo);
+    if (role === UserRole.DOCTOR && values.ukmcNo !== storedUkmc) body.ukmcNo = values.ukmcNo;
+    // Role left DOCTOR → explicitly clear the stored value.
+    if (user.role === UserRole.DOCTOR && role !== UserRole.DOCTOR) body.ukmcNo = null;
+
+    if (Object.keys(body).length === 0) {
+      onClose(); // nothing to save
+      return;
+    }
+
+    try {
+      await updateUser({ userId: user.userId, body }).unwrap();
+      onClose();
+    } catch (err: unknown) {
+      const e = err as {
+        status?: number;
+        data?: { message?: string; details?: Record<string, unknown> };
+      };
+      // Surface backend error messages; structured 409 conflict payloads are
+      // handled by the parent (same DoctorActivePatientsDialog /
+      // RoleChangeConflictDialog contract as before) via onErrorConflict.
+      const details = e.data?.details as Record<string, unknown> | undefined;
+      const code    = typeof details?.code === 'string' ? details.code : undefined;
+      if (e.status === 409 && code) {
+        onConflict({
+          userName:      user.name,
+          code,
+          message:       e.data?.message ?? 'The change was rejected.',
+          details:       details ?? {},
+          requestedRole: body.role ?? null,
+        });
+        return;
+      }
+      const msg = e.data?.message;
+      setError(msg ?? 'Failed to update user.');
+    }
+  }
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="bg-background rounded-lg border shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between shrink-0 px-4 sm:px-6 pt-4 sm:pt-6">
+          <h2 className="text-lg font-semibold">Edit User</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors" aria-label="Close edit user dialog">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* noValidate: same rationale as the Create User form above. */}
+        <NavForm onSubmit={handleSubmit} noValidate className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 pt-5 pb-4 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="eu-name">Full Name</Label>
+              <Input
+                id="eu-name"
+                placeholder="Dr. Priya Sharma"
+                value={name}
+                onChange={(e) => { setName(sanitizeUserName(e.target.value)); setError(null); }}
+                minLength={2}
+                maxLength={200}
+                pattern="[A-Za-z][A-Za-z .'-]{1,199}"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="eu-email">Email</Label>
+              <Input
+                id="eu-email"
+                type="email"
+                placeholder="staff@hospital.com"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                maxLength={254}
+                required
+              />
+            </div>
+            {canEditProfile && (
+              <div className="space-y-2">
+                <Label htmlFor="eu-role">Role</Label>
+                <select
+                  id="eu-role"
+                  value={role}
+                  onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {ASSIGNABLE_ROLES.map((r) => (
+                    <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {role === UserRole.DOCTOR && (
+              <div className="space-y-2">
+                <Label htmlFor="eu-ukmc">UKMC No.</Label>
+                <Input
+                  id="eu-ukmc"
+                  placeholder="UK-REG-12345"
+                  value={ukmcNo}
+                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); }}
+                  maxLength={20}
+                  required
+                  aria-required="true"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Uttarakhand Medical Council Registration Number (required for doctors).
+                </p>
+              </div>
+            )}
+
+            {error && (
+              <p className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</p>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center gap-3 shrink-0 px-4 sm:px-6 pt-1 pb-4 sm:pb-6">
+            {/* Danger zone (left side) — deactivation/reactivation live here now,
+                replacing the old kebab row actions. */}
+            <div>
+              {isActive && canDeactivate && (
+                <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive"
+                  onClick={() => { onClose(); onDeactivate(user); }} disabled={isLoading}>
+                  <UserX className="h-4 w-4 mr-1" /> Deactivate
+                </Button>
+              )}
+              {!isActive && canDeactivate && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => { onReactivate(user); onClose(); }} disabled={reactivating}>
+                  <UserCheck className="h-4 w-4 mr-1" /> {reactivating ? 'Reactivating…' : 'Reactivate'}
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" onClick={onClose} disabled={isLoading}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </NavForm>
+      </div>
+    </DialogOverlay>
+  );
+}
+
+// ─── Row Edit Button (direct Edit, no kebab) ─────────────────────────────────
+
+interface RowEditButtonProps {
   user: UserResponse;
   currentUserId?: string;
   canEditEmail: boolean;
   canDeactivate: boolean;
-  reactivating: boolean;
-  onEditEmail: (user: UserResponse) => void;
-  onEditRole:  (user: UserResponse) => void;
-  onDeactivate: (user: UserResponse) => void;
-  onReactivate: (user: UserResponse) => void;
+  onEdit: (user: UserResponse) => void;
 }
 
 /**
- * Kebab menu consolidating the per-row actions that used to be separate inline
- * buttons (Edit Email / Edit Role / Deactivate / Reactivate). Pure presentation:
- * every option funnels into the same handlers UsersTab has always owned, so all
- * existing state flow (openEmailEdit / openRoleEdit / deactivate confirm modal /
- * reactivate mutation) is unchanged.
+ * Direct 'Edit' button replacing the old kebab menu. Visibility mirrors the
+ * old kebab's rule: shown only when the viewer has at least one available
+ * action for the row (otherwise the cell is empty, never a dead button).
  */
-function UserActionsMenu({
-  user,
-  currentUserId,
-  canEditEmail,
-  canDeactivate,
-  reactivating,
-  onEditEmail,
-  onEditRole,
-  onDeactivate,
-  onReactivate,
-}: UserActionsMenuProps) {
-  // Role editing is available for any user other than the current user (self),
-  // mirroring the old Edit Role button's visibility rule.
+function RowEditButton({ user, currentUserId, canEditEmail, canDeactivate, onEdit }: RowEditButtonProps) {
   const canEditRole = user.userId !== currentUserId;
   const isActive = user.isActive;
 
-  // Hide the kebab entirely when the viewer has no available action for this
-  // row (e.g. ADMIN viewing an inactive user) instead of a dead button.
   const hasAnyAction = isActive
     ? (canEditEmail || canEditRole || canDeactivate)
     : canDeactivate;
   if (!hasAnyAction) return null;
 
   return (
-    <DropdownMenu label={`Actions for ${user.name}`} triggerClassName="h-7 w-7">
-      {isActive && canEditEmail && (
-        <DropdownMenuItem icon={Mail} onClick={() => onEditEmail(user)}>
-          Edit Email
-        </DropdownMenuItem>
-      )}
-      {isActive && canEditRole && (
-        <DropdownMenuItem icon={ShieldCheck} onClick={() => onEditRole(user)}>
-          Edit Role
-        </DropdownMenuItem>
-      )}
-      {isActive && (canEditEmail || canEditRole) && canDeactivate && (
-        <DropdownMenuSeparator />
-      )}
-      {isActive && canDeactivate && (
-        <DropdownMenuItem icon={UserX} destructive onClick={() => onDeactivate(user)}>
-          Deactivate
-        </DropdownMenuItem>
-      )}
-      {!isActive && canDeactivate && (
-        <DropdownMenuItem icon={UserCheck} disabled={reactivating} onClick={() => onReactivate(user)}>
-          Reactivate
-        </DropdownMenuItem>
-      )}
-    </DropdownMenu>
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 px-2 text-xs"
+      onClick={() => onEdit(user)}
+      aria-label={`Edit user ${user.name}`}
+    >
+      <Pencil className="h-3.5 w-3.5 mr-1" />
+      Edit
+    </Button>
   );
 }
 
@@ -417,15 +677,10 @@ function UsersTab() {
   const [sortBy,        setSortBy]        = useState<SortByField>('createdAt');
   const [sortOrder,     setSortOrder]     = useState<'asc' | 'desc'>('desc');
   const [showCreate,    setShowCreate]    = useState(false);
-  const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
-  const [newRole,       setNewRole]       = useState<UserRole>(UserRole.STAFF);
-  const [roleError,     setRoleError]     = useState<string | null>(null);
-  // Inline email editing mirrors the Edit Role pattern: one row edits at a
-  // time, Save commits through RTK Query, Cancel discards. Independent state
-  // from role editing so cancelling one never disturbs the other.
-  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
-  const [newEmail,      setNewEmail]      = useState('');
-  const [emailError,    setEmailError]    = useState<string | null>(null);
+  // Direct Edit dialog (replaces the old kebab menu's inline email/role
+  // editors): the full user row being edited lives in modal state so the
+  // form pre-fills from it and one edit is open at a time.
+  const [editTarget,    setEditTarget]    = useState<UserResponse | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<UserResponse | null>(null);
   const [deactivateError,  setDeactivateError]  = useState<string | null>(null);
   // Doctor role-change restriction — the structured 409 payload (one blocked
@@ -465,8 +720,6 @@ function UsersTab() {
 
   const router = useRouter();
 
-  const [updateUserRole, { isLoading: updatingRole }] = useUpdateUserRoleMutation();
-  const [updateUserEmail, { isLoading: updatingEmail }] = useUpdateUserEmailMutation();
   const [deactivateUser, { isLoading: deactivating }] = useDeactivateUserMutation();
   const [reactivateUser, { isLoading: reactivating }] = useReactivateUserMutation();
 
@@ -487,112 +740,25 @@ function UsersTab() {
     setPage(1);
   }
 
-  function openRoleEdit(user: UserResponse) {
-    setRoleError(null);
-    setEditingRoleId(user.userId);
-    setNewRole(user.role);
-    // One row edits at a time — same convention as the email editor.
-    setEditingEmailId(null);
-  }
-
-  function cancelRoleEdit() {
-    setRoleError(null);
-    setEditingRoleId(null);
-    setBlockedRoleChange(null);
-    setRoleConflict(null);
-  }
-
-  function openEmailEdit(user: UserResponse) {
-    setEmailError(null);
-    setEditingEmailId(user.userId);
-    setNewEmail(user.email);
-    // One row edits at a time — same convention as the role editor.
-    setEditingRoleId(null);
-  }
-
-  function cancelEmailEdit() {
-    setEmailError(null);
-    setEditingEmailId(null);
-  }
-
-  async function handleEmailSave(userId: string) {
-    setEmailError(null);
-    const trimmedEmail = newEmail.trim().toLowerCase();
-
-    // Local validation first, matching the Create User form's EMAIL_RE.
-    if (!EMAIL_RE.test(trimmedEmail)) {
-      setEmailError('Enter a valid email address.');
+  // Structured 409 from the Edit User dialog. Route DOCTOR_ACTIVE_PATIENTS to
+  // the specialist doctor dialog (breakdown UI), everything else to the
+  // generic conflict dialog — same contract as the old inline role editor.
+  function handleEditConflict(conflict: RoleChangeConflict) {
+    if (
+      conflict.code === 'DOCTOR_ACTIVE_PATIENTS' &&
+      typeof conflict.details.activePatients === 'number'
+    ) {
+      const breakdown = conflict.details.breakdown as { opd?: number; ipd?: number } | undefined;
+      setBlockedRoleChange({
+        userId:         editTarget?.userId ?? '',
+        userName:       conflict.userName,
+        requestedRole:  conflict.requestedRole ?? UserRole.STAFF,
+        activePatients: conflict.details.activePatients as number,
+        breakdown:      { opd: breakdown?.opd ?? 0, ipd: breakdown?.ipd ?? 0 },
+      });
       return;
     }
-
-    try {
-      await updateUserEmail({ userId, email: trimmedEmail }).unwrap();
-      setEditingEmailId(null);
-    } catch (err: unknown) {
-      // Surface backend rejections (e.g. 409 duplicate email in tenant) instead
-      // of silently closing the editor as if the change succeeded.
-      const msg = (err as { data?: { message?: string } })?.data?.message;
-      setEmailError(msg ?? 'Failed to update email.');
-    }
-  }
-
-  async function handleRoleSave(userId: string) {
-    setRoleError(null);
-    try {
-      await updateUserRole({ userId, role: newRole }).unwrap();
-      setEditingRoleId(null);
-    } catch (err: unknown) {
-      const e = err as {
-        status?: number;
-        data?: { message?: string; details?: Record<string, unknown> };
-      };
-
-      // Structured 409: the doctor still has active patients. Open the modal
-      // instead of the inline error — detection is by details.code, never by
-      // message text. The inline editor stays open at the pre-save value so
-      // the admin can retry after reassignment.
-      const details = e.data?.details as Record<string, unknown> | undefined;
-      const code    = typeof details?.code === 'string' ? details.code : undefined;
-      if (e.status === 409 && code === 'DOCTOR_ACTIVE_PATIENTS' && typeof details!['activePatients'] === 'number') {
-        const user = users.find((u) => u.userId === userId);
-        if (user) {
-          const breakdown = details!['breakdown'] as { opd?: number; ipd?: number } | undefined;
-          setBlockedRoleChange({
-            userId:         user.userId,
-            userName:       user.name,
-            requestedRole:  newRole,
-            activePatients: details!['activePatients'] as number,
-            breakdown:      { opd: breakdown?.opd ?? 0, ipd: breakdown?.ipd ?? 0 },
-          });
-          return; // modal replaces the inline error for this case
-        }
-      }
-
-      // Every OTHER structured 409 (NURSE_ACTIVE_ENTRIES, WARD_ROSTER_CONFLICT,
-      // PATHOLOGY/RADIOLOGY_ACTIVE_REQUEST, FINANCE_UNRECONCILED,
-      // OPEN_PAYMENT_LEASE, STAFF_ACTIVE_SESSION, LAST_ADMIN_CONFLICT,
-      // USER_INACTIVE) opens the generic conflict dialog so the admin sees the
-      // exact counts/breakdown/error code the backend returned — same contract
-      // as the doctor dialog above, never a bare inline message.
-      if (e.status === 409 && code) {
-        const user = users.find((u) => u.userId === userId);
-        if (user) {
-          setRoleConflict({
-            userName:      user.name,
-            code,
-            message:       e.data?.message ?? 'The role change was rejected.',
-            details:       details ?? {},
-            requestedRole: newRole,
-          });
-          return; // dialog replaces the inline error for this case
-        }
-      }
-
-      // All other rejections (403 self/escalation, 404, unstructured 409, 500,
-      // network) keep the inline error behavior.
-      const msg = e.data?.message;
-      setRoleError(msg ?? 'Failed to update role.');
-    }
+    setRoleConflict(conflict);
   }
 
   async function handleDeactivateConfirm() {
@@ -717,33 +883,7 @@ function UsersTab() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="font-medium truncate">{user.name}</p>
-                          {editingEmailId === user.userId ? (
-                            <div className="mt-1 flex flex-col gap-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Input
-                                  type="email"
-                                  value={newEmail}
-                                  onChange={(e) => { setNewEmail(e.target.value); setEmailError(null); }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleEmailSave(user.userId);
-                                    if (e.key === 'Escape') cancelEmailEdit();
-                                  }}
-                                  maxLength={254}
-                                  aria-label="Edit email"
-                                  className="h-7 w-44 text-xs"
-                                />
-                                <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingEmail} onClick={() => handleEmailSave(user.userId)}>
-                                  Save
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelEmailEdit}>
-                                  Cancel
-                                </Button>
-                              </div>
-                              {emailError && <p className="text-xs text-destructive">{emailError}</p>}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                          )}
+                          <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                           <p className="text-xs text-muted-foreground font-mono truncate">{user.userId}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0">
@@ -756,42 +896,15 @@ function UsersTab() {
                         </div>
                       </div>
 
-                      {editingRoleId === user.userId ? (
-                        <div className="flex flex-col gap-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              value={newRole}
-                              onChange={(e) => setNewRole(e.target.value as UserRole)}
-                              className="h-8 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            >
-                              {ASSIGNABLE_ROLES.map((r) => (
-                                <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-                              ))}
-                            </select>
-                            <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
-                              Save
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelRoleEdit}>
-                              Cancel
-                            </Button>
-                          </div>
-                          {roleError && <p className="text-xs text-destructive">{roleError}</p>}
-                        </div>
-                      ) : (
-                        <div className="flex justify-end">
-                          <UserActionsMenu
-                            user={user}
-                            currentUserId={currentUserId}
-                            canEditEmail={canEditEmail}
-                            canDeactivate={canDeactivate}
-                            reactivating={reactivating}
-                            onEditEmail={openEmailEdit}
-                            onEditRole={openRoleEdit}
-                            onDeactivate={(u) => { setDeactivateError(null); setDeactivateTarget(u); }}
-                            onReactivate={handleReactivate}
-                          />
-                        </div>
-                      )}
+                      <div className="flex justify-end">
+                        <RowEditButton
+                          user={user}
+                          currentUserId={currentUserId}
+                          canEditEmail={canEditEmail}
+                          canDeactivate={canDeactivate}
+                          onEdit={() => { setDeactivateError(null); setEditTarget(user); }}
+                        />
+                      </div>
                     </div>
                   ))
               }
@@ -828,60 +941,10 @@ function UsersTab() {
                             <div className="text-xs text-muted-foreground font-mono">{user.userId}</div>
                           </td>
                           <td className="px-4 py-3 max-w-[260px]">
-                            {editingEmailId === user.userId ? (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <Input
-                                    type="email"
-                                    value={newEmail}
-                                    onChange={(e) => { setNewEmail(e.target.value); setEmailError(null); }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') handleEmailSave(user.userId);
-                                      if (e.key === 'Escape') cancelEmailEdit();
-                                    }}
-                                    maxLength={254}
-                                    autoFocus
-                                    aria-label="Edit email"
-                                    className="h-7 w-44 text-xs"
-                                  />
-                                  <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingEmail} onClick={() => handleEmailSave(user.userId)}>
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelEmailEdit}>
-                                    Cancel
-                                  </Button>
-                                </div>
-                                {emailError && <p className="text-xs text-destructive">{emailError}</p>}
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground block truncate" title={user.email}>{user.email}</span>
-                            )}
+                            <span className="text-muted-foreground block truncate" title={user.email}>{user.email}</span>
                           </td>
                           <td className="px-4 py-3">
-                            {editingRoleId === user.userId ? (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2">
-                                  <select
-                                    value={newRole}
-                                    onChange={(e) => setNewRole(e.target.value as UserRole)}
-                                    className="h-7 rounded border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                  >
-                                    {ASSIGNABLE_ROLES.map((r) => (
-                                      <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
-                                    ))}
-                                  </select>
-                                  <Button size="sm" className="h-7 px-2 text-xs" disabled={updatingRole} onClick={() => handleRoleSave(user.userId)}>
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={cancelRoleEdit}>
-                                    Cancel
-                                  </Button>
-                                </div>
-                                {roleError && <p className="text-xs text-destructive">{roleError}</p>}
-                              </div>
-                            ) : (
-                              <span>{user.role.replace(/_/g, ' ')}</span>
-                            )}
+                            <span>{user.role.replace(/_/g, ' ')}</span>
                           </td>
                           <td className="px-4 py-3">
                             <Badge variant={user.isActive ? 'success' : 'destructive'} className={STATUS_BADGE_CLASS}>
@@ -893,19 +956,12 @@ function UsersTab() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-end">
-                              {/* Kebab stays available even while a row editor is open —
-                                  picking an action just switches editors (handlers reset
-                                  their own state, one editor at a time). */}
-                              <UserActionsMenu
+                              <RowEditButton
                                 user={user}
                                 currentUserId={currentUserId}
                                 canEditEmail={canEditEmail}
                                 canDeactivate={canDeactivate}
-                                reactivating={reactivating}
-                                onEditEmail={openEmailEdit}
-                                onEditRole={openRoleEdit}
-                                onDeactivate={(u) => { setDeactivateError(null); setDeactivateTarget(u); }}
-                                onReactivate={handleReactivate}
+                                onEdit={() => { setDeactivateError(null); setEditTarget(user); }}
                               />
                             </div>
                           </td>
@@ -943,6 +999,19 @@ function UsersTab() {
 
       {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} />}
 
+      {editTarget && (
+        <EditUserModal
+          user={editTarget}
+          canEditProfile={canEditEmail}
+          canDeactivate={canDeactivate}
+          reactivating={reactivating}
+          onDeactivate={(u) => { setDeactivateError(null); setDeactivateTarget(u); }}
+          onReactivate={handleReactivate}
+          onConflict={handleEditConflict}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
       {deactivateTarget && (
         <DeactivateModal
           user={deactivateTarget}
@@ -959,7 +1028,6 @@ function UsersTab() {
           onClose={() => setBlockedRoleChange(null)}
           onGoToPatients={() => {
             setBlockedRoleChange(null);
-            setEditingRoleId(null);
             router.push('/patients');
           }}
         />

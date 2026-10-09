@@ -87,6 +87,8 @@ export interface UserResponse {
   email:         string;
   name:          string;
   role:          UserRole;
+  /** Uttarakhand Medical Council Registration No. — set only for DOCTOR role, else null. */
+  ukmcNo:        string | null;
   departmentIds: string[];
   isActive:      boolean;
   isFirstLogin:  boolean;
