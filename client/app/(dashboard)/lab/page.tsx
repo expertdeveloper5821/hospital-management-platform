@@ -79,7 +79,7 @@ function formatDay(iso: string) {
 const STATUS_BADGE_CLASS = 'w-28 justify-center text-center whitespace-nowrap';
 
 function statusVariant(s: LabRequestStatus): 'warning' | 'info' | 'success' {
-  // Fixed semantic statuses — never tenant-brand-colored.
+
   if (s === 'PENDING')     return 'warning';
   if (s === 'IN_PROGRESS') return 'info';
   return 'success';
