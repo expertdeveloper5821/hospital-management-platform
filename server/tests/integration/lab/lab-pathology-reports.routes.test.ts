@@ -729,6 +729,251 @@ describe('Additional catalog tests — same structured workflow', () => {
   });
 });
 
+// ─── Fourth catalog batch (70 tests in total) ─────────────────────────────────
+
+describe('Fourth-batch catalog tests — same structured workflow', () => {
+  const FOURTH_BATCH: Array<[string, string]> = [
+    ['Haemoglobin (Hb)', 'HB'],
+    ['TLC (Total Leucocyte Count)', 'TLC'],
+    ['DLC (Differential Leucocyte Count)', 'DLC'],
+    ['PCV / HCT (Packed Cell Volume / Haematocrit)', 'PCV'],
+    ['Platelet Count (PLT)', 'PLT'],
+    ['AEC (Absolute Eosinophil Count)', 'AEC'],
+    ['BT (Bleeding Time)', 'BT'],
+    ['CT (Clotting Time)', 'CT'],
+    ['MP (Malaria Parasite - Peripheral Smear)', 'MP_SMEAR'],
+    ['MP Card (Malaria Rapid Antigen Test)', 'MP_CARD'],
+    ['Blood Sugar - Fasting', 'SUGAR_FASTING'],
+    ['Blood Sugar - Post-Prandial (PP)', 'SUGAR_PP'],
+    ['Blood Sugar - Random', 'SUGAR_RANDOM'],
+    ['SGOT (AST)', 'SGOT'],
+    ['SGPT (ALT)', 'SGPT'],
+    ['Serum Albumin', 'ALBUMIN'],
+    ['Total Protein', 'TOTAL_PROTEIN'],
+    ['Serum Sodium (Na+)', 'SODIUM'],
+    ['Serum Potassium (K+)', 'POTASSIUM'],
+    ['Serum Triglycerides', 'TRIGLYCERIDES'],
+    ['Serum Cholesterol (Total)', 'CHOLESTEROL'],
+    ['D-Dimer', 'D_DIMER'],
+    ['LDH (Lactate Dehydrogenase)', 'LDH'],
+  ];
+  const HB     = 'Haemoglobin (Hb)';
+  const DLC    = 'DLC (Differential Leucocyte Count)';
+  const DDIMER = 'D-Dimer';
+  const MPCARD = 'MP Card (Malaria Rapid Antigen Test)';
+  const NA     = 'Serum Sodium (Na+)';
+
+  test('each of the 23 new test names is stored exactly and opens its own dedicated form', async () => {
+    for (const [name, key] of FOURTH_BATCH) {
+      const id = await createRequest(name);
+      const res = await getDetail(id, UserRole.PATHOLOGIST);
+      expect(res.body.data.testType).toBe(name);
+      expect(res.body.data.testReports).toEqual([expect.objectContaining({ testIndex: 0, testName: name, templateKey: key })]);
+      expect(res.body.data.testReports[0].fields.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('editing Test Type to new tests switches the report forms to them', async () => {
+    const id = await createRequest(CBC);
+    const res = await request(app).patch(`/api/lab/pathology/${id}`).set(auth(UserRole.PATHOLOGIST))
+      .send({ testType: `${HB}, ${NA}` });
+    expect(res.status).toBe(200);
+    const detail = await getDetail(id, UserRole.PATHOLOGIST);
+    expect(detail.body.data.testReports.map((r: { testName: string; templateKey: string }) => [r.testName, r.templateKey]))
+      .toEqual([[HB, 'HB'], [NA, 'SODIUM']]);
+  });
+
+  test('multi-test submit: validation, flags, encrypted storage, completion', async () => {
+    const id = await createRequest(`${HB}, ${DLC}, ${DDIMER}, ${MPCARD}`);
+    await markPaid(id);
+
+    // DLC must total 99 - 101%, like the CBC differential.
+    const badDlc = await submit(id, 1, { testName: DLC, values: {
+      neutrophils: '60', lymphocytes: '30', monocytes: '5', eosinophils: '2', basophils: '0',
+    } });
+    expect(badDlc.status).toBe(400);
+    expect(badDlc.body.message).toMatch(/DLC total must be between 99% and 101%/);
+    // Select options are validated against the template.
+    expect((await submit(id, 3, { testName: MPCARD, values: { pfAntigen: 'Maybe' } })).status).toBe(400);
+
+    await submit(id, 0, { testName: HB, values: { hemoglobin: '11.2' } }).expect(200);
+    await submit(id, 1, { testName: DLC, values: {
+      neutrophils: '62', lymphocytes: '30', monocytes: '5', eosinophils: '2', basophils: '1',
+    } }).expect(200);
+    await submit(id, 2, { testName: DDIMER, values: { dDimer: '1.8' } }).expect(200);
+    const res = await submit(id, 3, { testName: MPCARD, values: { pfAntigen: 'Positive', pvAntigen: 'Negative' } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('COMPLETED');
+
+    const byName = Object.fromEntries(res.body.data.testReports.map((r: { testName: string; result: { values: Array<{ key: string; value: string; unit: string | null; flag: string | null; referenceRange: string | null }> } }) =>
+      [r.testName, r.result.values.map((v) => [v.key, v.value, v.unit, v.flag, v.referenceRange])]));
+    // PAT-001 is MALE → male haemoglobin range.
+    expect(byName[HB]).toEqual([['hemoglobin', '11.2', 'g/dL', 'LOW', '13.0 - 17.0']]);
+    expect(byName[DLC]).toHaveLength(5);
+    expect(byName[DDIMER]).toEqual([['dDimer', '1.8', 'µg/mL FEU', 'HIGH', '< 0.50']]);
+    expect(byName[MPCARD]).toEqual([
+      ['pfAntigen', 'Positive', null, 'ABNORMAL', 'Negative'],
+      ['pvAntigen', 'Negative', null, null, 'Negative'],
+    ]);
+
+    const raw = await mongoose.connection.collection('pathology_requests').findOne({ requestId: id });
+    expect(raw!.testReports.map((r: { testName: string }) => r.testName)).toEqual([HB, DLC, DDIMER, MPCARD]);
+    expect(raw!.testReports.every((r: { resultData: string }) => r.resultData.startsWith('enc:v1:'))).toBe(true);
+  });
+
+  test('the doctor sees the result and the PDF prints the test, its parameter and its Test Master clinical note', async () => {
+    const id = await createRequest(DDIMER);
+    await markPaid(id);
+    await submit(id, 0, { testName: DDIMER, values: { dDimer: '0.3' } }).expect(200);
+
+    const view = await getDetail(id, UserRole.DOCTOR);
+    expect(view.status).toBe(200);
+    expect(view.body.data.testReports[0].result.values[0]).toEqual(expect.objectContaining({ key: 'dDimer', value: '0.3', flag: null }));
+
+    const pdf = await getPdf(id, 0);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    const text = pdfText(pdf.body as Buffer);
+    expect(text).toContain('D-Dimer (Quantitative)');
+    expect(text).toContain('0.3');
+    expect(text).toContain('fibrin degradation product');
+  });
+});
+
+// ─── Fifth catalog batch (109 tests in total) ─────────────────────────────────
+
+describe('Fifth-batch catalog tests — same structured workflow', () => {
+  const FIFTH_BATCH: Array<[string, string]> = [
+    ['VDRL (Syphilis Screening)', 'VDRL'],
+    ['RA Factor (Rheumatoid Factor)', 'RA_FACTOR'],
+    ['ASO Titer (Anti-Streptolysin O)', 'ASO'],
+    ['H. Pylori (Helicobacter pylori)', 'H_PYLORI'],
+    ['Urine Bile Salts (BS)', 'URINE_BS'],
+    ['Urine Bile Pigments (BP)', 'URINE_BP'],
+    ['Semen Analysis', 'SEMEN'],
+    ['T3 (Total Triiodothyronine)', 'T3'],
+    ['T4 (Total Thyroxine)', 'T4'],
+    ['TSH (Thyroid Stimulating Hormone)', 'TSH'],
+    ['FT3 (Free Triiodothyronine)', 'FT3'],
+    ['FT4 (Free Thyroxine)', 'FT4'],
+    ['Prolactin (PRL)', 'PROLACTIN'],
+    ['LH (Luteinising Hormone)', 'LH'],
+    ['FSH (Follicle Stimulating Hormone)', 'FSH'],
+    ['Testosterone (Total)', 'TESTOSTERONE'],
+    ['Serum Iron', 'SERUM_IRON'],
+    ['Total IgE', 'TOTAL_IGE'],
+    ['PSA Total (Prostate Specific Antigen)', 'PSA_TOTAL'],
+    ['PSA Free (Free / Total PSA Ratio)', 'PSA_FREE'],
+    ['ACE (Angiotensin Converting Enzyme)', 'ACE'],
+    ['ANA (Antinuclear Antibody)', 'ANA'],
+    ['CA-125', 'CA_125'],
+    ['Anti-CCP (Anti-Cyclic Citrullinated Peptide)', 'ANTI_CCP'],
+    ['E2 (Estradiol)', 'E2'],
+    ['HBsAg Quantitative (Surface Antigen)', 'HBSAG_QUANT'],
+    ['Beta HCG (Serum Quantitative)', 'BETA_HCG'],
+    ['TORCH Profile', 'TORCH'],
+    ['TB Platinum (IGRA)', 'TB_PLATINUM'],
+    ['Microalbumin (Urine Albumin / Creatinine Ratio)', 'MICROALBUMIN'],
+    ['Allergy Profile', 'ALLERGY_PROFILE'],
+    ['ANC Profile (Antenatal)', 'ANC_PROFILE'],
+    ['Dual Marker (First Trimester Screen)', 'DUAL_MARKER'],
+    ['Triple Marker (Second Trimester Screen)', 'TRIPLE_MARKER'],
+    ['Thalassemia Profile', 'THALASSEMIA'],
+    ['Serum Lithium', 'LITHIUM'],
+    ['Coombs Test - Direct (DAT)', 'COOMBS_DIRECT'],
+    ['Coombs Test - Indirect (IAT)', 'COOMBS_INDIRECT'],
+    ['Folic Acid (Vitamin B9)', 'FOLIC_ACID'],
+  ];
+  const SEMEN  = 'Semen Analysis';
+  const PSA    = 'PSA Free (Free / Total PSA Ratio)';
+  const MALB   = 'Microalbumin (Urine Albumin / Creatinine Ratio)';
+  const TB     = 'TB Platinum (IGRA)';
+  const THAL   = 'Thalassemia Profile';
+  const VDRL   = 'VDRL (Syphilis Screening)';
+  const TSH    = 'TSH (Thyroid Stimulating Hormone)';
+
+  test('each of the 39 new test names is stored exactly and opens its own dedicated form', async () => {
+    for (const [name, key] of FIFTH_BATCH) {
+      const id = await createRequest(name);
+      const res = await getDetail(id, UserRole.PATHOLOGIST);
+      expect(res.body.data.testType).toBe(name);
+      expect(res.body.data.testReports).toEqual([expect.objectContaining({ testIndex: 0, testName: name, templateKey: key })]);
+      expect(res.body.data.testReports[0].fields.length).toBeGreaterThan(0);
+      expect(res.body.data.testReports[0].clinicalContent.clinicalNote).toEqual(expect.any(String));
+    }
+  });
+
+  test('editing Test Type to new tests switches the report forms to them', async () => {
+    const id = await createRequest(CBC);
+    const res = await request(app).patch(`/api/lab/pathology/${id}`).set(auth(UserRole.PATHOLOGIST))
+      .send({ testType: `${TSH}, ${VDRL}` });
+    expect(res.status).toBe(200);
+    const detail = await getDetail(id, UserRole.PATHOLOGIST);
+    expect(detail.body.data.testReports.map((r: { testName: string; templateKey: string }) => [r.testName, r.templateKey]))
+      .toEqual([[TSH, 'TSH'], [VDRL, 'VDRL']]);
+  });
+
+  test('multi-test submit: calculated fields, validation, flags, encrypted storage, completion', async () => {
+    const id = await createRequest(`${SEMEN}, ${PSA}, ${MALB}, ${TB}, ${THAL}`);
+    await markPaid(id);
+
+    // Motility percentages over 100% and Free PSA above Total PSA are rejected.
+    const badSemen = await submit(id, 0, { testName: SEMEN, values: { progressive: '60', nonProgressive: '30', immotile: '20' } });
+    expect(badSemen.status).toBe(400);
+    expect(badSemen.body.message).toMatch(/cannot total more than 100%/);
+    const badPsa = await submit(id, 1, { testName: PSA, values: { totalPsa: '2', freePsa: '3' } });
+    expect(badPsa.status).toBe(400);
+    expect(badPsa.body.message).toMatch(/Free PSA cannot exceed Total PSA/);
+    // Select options are validated against the template.
+    expect((await submit(id, 3, { testName: TB, values: { result: 'Maybe' } })).status).toBe(400);
+
+    await submit(id, 0, { testName: SEMEN, values: {
+      volume: '2.5', concentration: '20', progressive: '35', nonProgressive: '10', immotile: '55', appearance: 'Grey-Opalescent',
+    } }).expect(200);
+    await submit(id, 1, { testName: PSA, values: { totalPsa: '6', freePsa: '0.6' } }).expect(200);
+    await submit(id, 2, { testName: MALB, values: { urineAlbumin: '45', urineCreatinine: '100' } }).expect(200);
+    await submit(id, 3, { testName: TB, values: { nil: '0.1', tbAntigen: '1.25', mitogen: '10', result: 'Positive' } }).expect(200);
+    const res = await submit(id, 4, { testName: THAL, values: { mcv: '62', rbc: '6.2', hbA2: '5.1' } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('COMPLETED');
+
+    const byName = Object.fromEntries(res.body.data.testReports.map((r: { testName: string; result: { values: Array<{ key: string; value: string; flag: string | null }> } }) =>
+      [r.testName, Object.fromEntries(r.result.values.map((v) => [v.key, [v.value, v.flag]]))]));
+    expect(byName[SEMEN].totalCount).toEqual(['50', null]);
+    expect(byName[SEMEN].totalMotility).toEqual(['45', null]);
+    expect(byName[PSA].percentFreePsa).toEqual(['10', 'LOW']);
+    expect(byName[PSA].totalPsa).toEqual(['6', 'HIGH']);
+    expect(byName[MALB].acr).toEqual(['45', 'HIGH']);
+    expect(byName[TB].tbAgMinusNil).toEqual(['1.15', 'HIGH']);
+    expect(byName[TB].result).toEqual(['Positive', 'ABNORMAL']);
+    expect(byName[THAL].mentzerIndex).toEqual(['10', 'LOW']);
+    expect(byName[THAL].hbA2).toEqual(['5.1', 'HIGH']);
+
+    const raw = await mongoose.connection.collection('pathology_requests').findOne({ requestId: id });
+    expect(raw!.testReports.map((r: { testName: string }) => r.testName)).toEqual([SEMEN, PSA, MALB, TB, THAL]);
+    expect(raw!.testReports.every((r: { resultData: string }) => r.resultData.startsWith('enc:v1:'))).toBe(true);
+  });
+
+  test('the doctor sees the result and the PDF prints the test, its parameter and its Test Master texts', async () => {
+    const id = await createRequest(VDRL);
+    await markPaid(id);
+    await submit(id, 0, { testName: VDRL, values: { vdrl: 'Reactive', vdrlTitre: '1:8' } }).expect(200);
+
+    const view = await getDetail(id, UserRole.DOCTOR);
+    expect(view.status).toBe(200);
+    expect(view.body.data.testReports[0].result.values[0]).toEqual(expect.objectContaining({ key: 'vdrl', value: 'Reactive', flag: 'ABNORMAL' }));
+
+    const pdf = await getPdf(id, 0);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toBe('application/pdf');
+    const text = pdfText(pdf.body as Buffer);
+    expect(text).toContain('VDRL (Qualitative)');
+    expect(text).toContain('1:8');
+    expect(text).toContain('non-treponemal screening test');
+    expect(text).toContain('confirmed by a treponemal test');
+  });
+});
+
 // ─── Editing Test Type (Edit Pathology Request multi-select) ──────────────────
 
 describe('PATCH /api/lab/pathology/:requestId — editing Test Type', () => {

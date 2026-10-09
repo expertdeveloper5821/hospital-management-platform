@@ -165,7 +165,7 @@ describe('GET /api/lab/pathology/test-master', () => {
     expect(rows.slice(0, -1).every((r) => !!r.clinicalNote)).toBe(true);
     expect(rows.every((r) => !!r.correlateClinically)).toBe(true);
     // Comments only where a test-specific comment is needed.
-    expect(rows.filter((r) => r.comment).map((r) => r.templateKey).sort()).toEqual(['ANTI_HCV', 'HBSAG', 'HIV']);
+    expect(rows.filter((r) => r.comment).map((r) => r.templateKey).sort()).toEqual(['ANTI_HCV', 'HBSAG', 'HIV', 'VDRL']);
     expect(await PathologyTestMasterModel.countDocuments({ tenantId })).toBe(rows.length);
   });
 
@@ -361,5 +361,140 @@ describe('Clinical Notes / Comment saved with a submitted report', () => {
     const id = await createPaidRequest(CBC);
     expect((await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' }, clinicalNote: 'x'.repeat(2001) })).status).toBe(400);
     expect((await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' }, comment: 'x'.repeat(2001) })).status).toBe(400);
+  });
+});
+
+// ─── Enable / Disable tests ──────────────────────────────────────────────────
+
+describe('Test Master — enable / disable tests', () => {
+  const ESR = 'ESR';
+
+  const listDisabled = (role: string = UserRole.DOCTOR) =>
+    request(app).get('/api/lab/pathology/disabled-tests').set(auth(role));
+  const createRequest = (testType: string, role: string = UserRole.HOSPITAL_ADMIN) =>
+    request(app).post('/api/lab/pathology').set(auth(role)).send({ patientId: 'PAT-001', testType, referredBy: doctorId });
+  const editRequest = (requestId: string, body: Record<string, unknown>) =>
+    request(app).patch(`/api/lab/pathology/${requestId}`).set(auth(UserRole.HOSPITAL_ADMIN)).send(body);
+
+  test('every test is enabled by default', async () => {
+    const res = await listMaster();
+    expect(res.body.data.every((r: { isEnabled: boolean }) => r.isEnabled === true)).toBe(true);
+    expect((await listDisabled()).body.data).toEqual([]);
+  });
+
+  test('a row saved before the flag existed reads as enabled', async () => {
+    await mongoose.connection.collection('pathology_test_masters').insertOne({
+      tenantId, templateKey: 'CBC', testName: CBC, clinicalNote: 'Legacy', comment: null,
+      correlateClinically: 'x', updatedBy: null, createdAt: new Date(), updatedAt: new Date(),
+    });
+    const cbc = (await listMaster()).body.data.find((r: { templateKey: string }) => r.templateKey === 'CBC');
+    expect(cbc).toEqual(expect.objectContaining({ clinicalNote: 'Legacy', isEnabled: true }));
+    expect((await listDisabled()).body.data).toEqual([]);
+    expect((await createRequest(CBC)).status).toBe(201);
+  });
+
+  test('disabling hides the test and blocks it on new requests; re-enabling restores it', async () => {
+    const res = await patchMaster('CBC', { isEnabled: false }, UserRole.HOSPITAL_ADMIN);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(expect.objectContaining({ templateKey: 'CBC', isEnabled: false, updatedByName: 'Lab Admin' }));
+    // Other content is untouched.
+    expect(res.body.data.clinicalNote).toMatch(/Complete Blood Count/);
+    expect(auditService.log).toHaveBeenCalledWith(expect.objectContaining({
+      entityType: AuditEntityType.PATHOLOGY_TEST_MASTER, entityId: 'CBC', action: 'UPDATE', tenantId,
+      previousValue: { isEnabled: true }, newValue: expect.objectContaining({ isEnabled: false }),
+    }));
+
+    expect((await listDisabled()).body.data).toEqual([CBC]);
+    const blocked = await createRequest(CBC, UserRole.RECEPTIONIST);
+    expect(blocked.status).toBe(400);
+    expect(blocked.body.message).toMatch(/CBC \(Complete Blood Count\) is disabled/);
+    expect((await createRequest(`${ESR}, ${CBC}`)).status).toBe(400);
+    expect((await createRequest(ESR)).status).toBe(201);
+
+    await patchMaster('CBC', { isEnabled: true }).expect(200);
+    expect((await listDisabled()).body.data).toEqual([]);
+    expect((await createRequest(`${ESR}, ${CBC}`)).status).toBe(201);
+  });
+
+  test('existing requests, reports and PDFs are preserved; an edit may keep but not newly add a disabled test', async () => {
+    const id = await createPaidRequest(`${CBC}, ${HBSAG}`);
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '14' } }).expect(200);
+    await patchMaster('CBC', { isEnabled: false }).expect(200);
+    await patchMaster('HIV', { isEnabled: false }).expect(200);
+
+    const detail = await request(app).get(`/api/lab/pathology/${id}`).set(auth(UserRole.DOCTOR));
+    expect(detail.status).toBe(200);
+    expect(detail.body.data.testType).toBe(`${CBC}, ${HBSAG}`);
+    expect(detail.body.data.testReports[0].result).not.toBeNull();
+    expect((await getPdf(id, 0)).status).toBe(200);
+
+    // Keeping the already-requested (now disabled) CBC is fine.
+    expect((await editRequest(id, { testType: `${CBC}, ${HBSAG}, ${ESR}`, priority: 'URGENT' })).status).toBe(200);
+    // Newly adding a disabled test is not.
+    const res = await editRequest(id, { testType: `${CBC}, ${HBSAG}, ${HIV}` });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/HIV 1 & 2 Screening is disabled/);
+    // The report can still be amended.
+    await submit(id, 0, { testName: CBC, values: { hemoglobin: '13' } }).expect(200);
+  });
+
+  test('tests outside the catalog cannot be disabled and are always allowed', async () => {
+    expect((await patchMaster('GENERIC', { isEnabled: false })).status).toBe(400);
+    expect((await createRequest('Blood Culture')).status).toBe(201);
+  });
+
+  test('rejects a non-boolean isEnabled', async () => {
+    expect((await patchMaster('CBC', { isEnabled: 'no' })).status).toBe(400);
+  });
+
+  test.each([UserRole.DOCTOR, UserRole.NURSE, UserRole.RECEPTIONIST, UserRole.MANAGER, UserRole.RADIOLOGIST])(
+    '%s cannot enable or disable a test (403)', async (role) => {
+      expect((await patchMaster('CBC', { isEnabled: false }, role)).status).toBe(403);
+      expect((await listDisabled()).body.data).toEqual([]);
+    },
+  );
+
+  test.each([
+    UserRole.DOCTOR, UserRole.NURSE, UserRole.RECEPTIONIST, UserRole.MANAGER, UserRole.PATHOLOGIST, UserRole.HOSPITAL_ADMIN,
+  ])('%s can read the disabled tests', async (role) => {
+    expect((await listDisabled(role)).status).toBe(200);
+  });
+
+  test('a Radiologist cannot read the disabled tests (403)', async () => {
+    expect((await listDisabled(UserRole.RADIOLOGIST)).status).toBe(403);
+  });
+
+  test('is per hospital — another tenant\'s settings never apply', async () => {
+    const otherTenant = 'other-tenant';
+    await PathologyTestMasterModel.create({
+      tenantId: otherTenant, templateKey: 'ESR', testName: ESR, correlateClinically: 'x', isEnabled: false,
+    });
+    await PathologyTestMasterModel.create({
+      tenantId: otherTenant, templateKey: 'CBC', testName: CBC, correlateClinically: 'x',
+    });
+    expect((await listDisabled()).body.data).toEqual([]);
+    expect((await createRequest(ESR)).status).toBe(201);
+
+    await patchMaster('CBC', { isEnabled: false }).expect(200);
+    expect((await PathologyTestMasterModel.findOne({ tenantId: otherTenant, templateKey: 'CBC' }))!.isEnabled).toBe(true);
+  });
+
+  test('Billing: a disabled test is not offered as a Lab Test type and cannot be charged', async () => {
+    await createRequest(CBC).expect(201);
+    await createRequest(ESR).expect(201);
+    await patchMaster('CBC', { isEnabled: false }).expect(200);
+
+    const types = await request(app).get('/api/lab/test-types').set(auth(UserRole.RECEPTIONIST));
+    expect(types.status).toBe(200);
+    const names = types.body.data.map((t: { name: string }) => t.name);
+    expect(names).toContain(ESR);
+    expect(names).not.toContain(CBC);
+
+    const charge = await request(app).post('/api/charges').set(auth(UserRole.HOSPITAL_ADMIN)).send({
+      patientId: 'PAT-001', category: 'LAB_TEST', description: 'CBC', amount: 100,
+      testTypeId: `PATHOLOGY:${CBC}`, testTypeName: CBC,
+    });
+    expect(charge.status).toBe(400);
+    expect(await mongoose.connection.collection('charges').countDocuments({ tenantId })).toBe(0);
   });
 });

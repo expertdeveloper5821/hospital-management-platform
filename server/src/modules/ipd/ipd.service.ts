@@ -26,6 +26,7 @@ import {
 import { patientRepository }    from '../patient/patient.repository';
 import { userRepository }       from '../user/user.repository';
 import { departmentRepository } from '../department/department.repository';
+import { departmentService } from '../department/department.service';
 import { tenantRepository }     from '../tenant/tenant.repository';
 import { labRepository }        from '../lab/lab.repository';
 import { paymentRepository }    from '../payment/payment.repository';
@@ -45,8 +46,9 @@ import {
 import { PatientModel } from '../patient/patient.model';
 import { stripRichTextTags } from '../../shared/utils/validation';
 import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
-import { formatPatientAge, isPediatricPatient, resolvePatientAge } from '../../shared/utils/patient-age';
-import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel } from '../../shared/utils/patient-vitals';
+import { formatPatientAge, resolvePatientAge } from '../../shared/utils/patient-age';
+import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel, getVitalsCategory } from '../../shared/utils/patient-vitals';
+import type { VitalsProfile } from '../department/department.model';
 
 
 // Shape a partial (or missing) vitals update/read always merges onto — keeps
@@ -182,6 +184,7 @@ function buildIpdParchaOverlay(
   departmentName: string | null,
   doctorNames:    string,
   staffNameMap:   Map<string, string>,
+  vitalsProfile:  VitalsProfile | null = null,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
@@ -201,9 +204,10 @@ function buildIpdParchaOverlay(
     fieldRows.push({ label: 'Doctor(s) / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  const pediatric = isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth);
-  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(pediatric).map((definition) => ({
-    label: getPatientVitalSlipLabel(definition, pediatric),
+  // Vitals set comes only from the department (never the patient's age).
+  const category = getVitalsCategory(vitalsProfile);
+  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(category).map((definition) => ({
+    label: getPatientVitalSlipLabel(definition, category),
     value: formatPatientVitalValue(admission.vitals, definition),
   }));
 
@@ -454,6 +458,10 @@ export class IPDService {
       }
     }
 
+    // [6b] A department picked on the form wins over the doctor-derived one
+    // (it also decides which vitals set the admission records).
+    if (input.departmentId) await departmentService.assertDepartmentExists(tenantId, input.departmentId);
+
     // [7]+[8] Create the admission and occupy the bed atomically. The
     // partial unique indexes on IPDAdmission (ipd.model.ts) are the final
     // race-condition arbiter under concurrent or offline-replayed creates —
@@ -470,7 +478,7 @@ export class IPDService {
         bedNumber:         bed.bedNumber,
         wardName:          ward.name,
         assignedDoctorIds: assignedDoctorIds,
-        departmentId:      doctorDepartmentId,
+        departmentId:      input.departmentId ?? doctorDepartmentId,
         status:           AdmissionStatus.ADMITTED,
         admissionDate:    new Date(),
         dischargeDate:    null,
@@ -537,9 +545,10 @@ export class IPDService {
     ]);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const departmentName = admission.departmentId
-      ? (await departmentRepository.findById(tenantId, admission.departmentId))?.name ?? null
+    const department = admission.departmentId
+      ? await departmentRepository.findById(tenantId, admission.departmentId)
       : null;
+    const departmentName = department?.name ?? null;
     const doctorNameMap = await userRepository.findNamesByIds(tenantId, admission.assignedDoctorIds ?? []);
     const doctorNames = (admission.assignedDoctorIds ?? [])
       .map((id) => doctorNameMap.get(id))
@@ -549,7 +558,9 @@ export class IPDService {
     const noteAuthorIds = [...new Set(admission.progressNotes.map((n) => n.doctorId))];
     const staffNameMap = await userRepository.findNamesByIds(tenantId, noteAuthorIds);
 
-    const overlay = buildIpdParchaOverlay(admission, patient, departmentName, doctorNames, staffNameMap);
+    const overlay = buildIpdParchaOverlay(
+      admission, patient, departmentName, doctorNames, staffNameMap, department?.vitalsProfile ?? null,
+    );
     return { templateBytes, overlay };
   }
 
@@ -561,6 +572,7 @@ export class IPDService {
       assignedDoctorIds?: string[];
       wardId?:            string;
       bedId?:             string;
+      departmentId?:      string;
       vitals?:            Partial<IPDVitals>;
     },
     userId: string,
@@ -603,12 +615,19 @@ export class IPDService {
       }
       prevValue.assignedDoctorIds = admission.assignedDoctorIds;
       fields.assignedDoctorIds    = input.assignedDoctorIds;
-      if (input.assignedDoctorIds.length > 0) {
+      if (input.departmentId) {
+        // Explicit department handled below — never overwritten by the doctors.
+      } else if (input.assignedDoctorIds.length > 0) {
         const firstDoctor = await userRepository.findById(tenantId, input.assignedDoctorIds[0]);
         fields.departmentId = firstDoctor?.departmentIds?.[0] ?? null;
       } else {
         fields.departmentId = null;
       }
+    }
+    if (input.departmentId && input.departmentId !== admission.departmentId) {
+      await departmentService.assertDepartmentExists(tenantId, input.departmentId);
+      prevValue.departmentId = admission.departmentId;
+      fields.departmentId    = input.departmentId;
     }
 
     // ── Bed / ward change ───────────────────────────────────────────────────
@@ -664,11 +683,12 @@ export class IPDService {
     // re-checked here — the controller's VITALS_EDITABLE_ROLES gate is the
     // sole check on who may send this field.
     if (input.vitals !== undefined) {
+      // Below 0.5 kg is only allowed in the Pediatric department (the one
+      // this save leaves the record in) — never decided by patient age.
       if (input.vitals.weight != null && input.vitals.weight < 0.5) {
-        const patientId = input.patientId ?? admission.patientId;
-        const patient = await patientRepository.findByPatientId(tenantId, patientId);
-        if (!patient || !isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth)) {
-          throw new ValidationError('Weight must be at least 0.5 kg for non-pediatric patients.');
+        const effectiveDepartmentId = fields.departmentId !== undefined ? fields.departmentId : admission.departmentId;
+        if (await departmentService.getVitalsProfile(tenantId, effectiveDepartmentId) !== 'PEDIATRIC') {
+          throw new ValidationError('Weight must be at least 0.5 kg outside the Pediatric department.');
         }
       }
       // admission.vitals is a Mongoose subdocument, not a plain object — its
@@ -1050,6 +1070,7 @@ export class IPDService {
         wardName:            admission.wardName,
         bedNumber:           admission.bedNumber,
         departmentName:      admission.departmentId ? departmentNameMap.get(admission.departmentId) ?? null : null,
+        vitalsProfile:       departmentEntries.find(([id]) => id === admission.departmentId)?.[1]?.vitalsProfile ?? null,
         assignedDoctorNames: namesFor(admission.assignedDoctorIds),
         assignedNurseNames:  namesFor(ward?.assignedNurseIds ?? []),
         admissionDate:       admission.admissionDate.toISOString(),

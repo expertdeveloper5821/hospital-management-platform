@@ -14,7 +14,7 @@ import {
 } from '@/store/api/ipd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useListUsersQuery }    from '@/store/api/user.api';
-import { useGetPatientByIdQuery, useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useSearchPatientsQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListPackagesQuery }    from '@/store/api/packages.api';
 import { useAppSelector }       from '@/store/hooks';
@@ -45,8 +45,9 @@ import { NavForm } from '@/components/ui/form';
 import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import {
   formatVitalValue,
-  getPatientCategory,
   getVitalDefinitions,
+  getVitalsCategory,
+  getVitalsHeading,
   parsePatientVital,
   type VitalKey,
 } from '@/lib/patient-vitals';
@@ -102,7 +103,7 @@ type VitalsErrors = Partial<Record<VitalKey, string>>;
 // message instead of a payload when any field fails.
 function parseVitalsInputs(
   inputs: VitalsInputState,
-  category: ReturnType<typeof getPatientCategory>,
+  category: ReturnType<typeof getVitalsCategory>,
 ): { vitals: Partial<IPDVitals> } | { errors: VitalsErrors } {
   const vitals: Record<string, number | string | null> = {};
   const errors: VitalsErrors = {};
@@ -411,11 +412,6 @@ function AdmissionPanel({
   // Receptionist-only patient correction — null means "unchanged".
   const [editPatient,    setEditPatient]    = useState<PatientResponse | null>(null);
   const [pickingPatient, setPickingPatient] = useState(false);
-  const vitalsPatientId = mode === 'edit' && editPatient
-    ? editPatient.patientId
-    : admission.patientId;
-  const { data: vitalsPatient } = useGetPatientByIdQuery(vitalsPatientId, { skip: !vitalsPatientId });
-  const vitalsCategory = getPatientCategory(vitalsPatient?.patientId === vitalsPatientId ? vitalsPatient : null);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteAdmission, { isLoading: deleting }] = useDeleteAdmissionMutation();
@@ -464,6 +460,9 @@ function AdmissionPanel({
   const { data: bedsData }        = useListBedsQuery(wardId, { skip: !wardId || mode !== 'edit' });
 
   const departments = departmentsData ?? [];
+  // Vitals set follows the department only — the one being picked while
+  // editing, the saved one otherwise — never the patient's age.
+  const vitalsCategory = getVitalsCategory(mode === 'edit' ? selectedDepartmentId : admission.departmentId, departments);
   const allDoctors  = doctorsPage?.data ?? [];
   const wards       = wardsData ?? [];
   const allBeds     = bedsData ?? [];
@@ -553,7 +552,7 @@ function AdmissionPanel({
       return;
     }
 
-    const body: { patientId?: string; assignedDoctorIds?: string[]; wardId?: string; bedId?: string; vitals?: Partial<IPDVitals> } = {};
+    const body: { patientId?: string; assignedDoctorIds?: string[]; wardId?: string; bedId?: string; departmentId?: string; vitals?: Partial<IPDVitals> } = {};
     // Patient correction — Receptionist-only (the backend rejects it from every other role).
     if (canEditPatient && editPatient && editPatient.patientId !== admission.patientId) {
       body.patientId = editPatient.patientId;
@@ -566,6 +565,8 @@ function AdmissionPanel({
       editDoctorIds.length !== currentDoctorIds.length ||
       editDoctorIds.some((id, i) => id !== currentDoctorIds[i]);
     if (doctorsChanged && editDoctorIds.length > 0) body.assignedDoctorIds = editDoctorIds;
+    // The picked department is saved as-is (Pediatric / Non-Pediatric pick the vitals set).
+    if (departmentChanged && selectedDepartmentId) body.departmentId = selectedDepartmentId;
     if (wardId !== admission.wardId)         body.wardId            = wardId;
     // Only include bedId when it's a non-empty, valid value different from current
     if (bedId && bedId !== admission.bedId)  body.bedId             = bedId;
@@ -589,7 +590,7 @@ function AdmissionPanel({
       return;
     }
 
-    const hasAdmissionChanges = !!(body.patientId || body.assignedDoctorIds || body.wardId || body.bedId || body.vitals);
+    const hasAdmissionChanges = !!(body.patientId || body.assignedDoctorIds || body.wardId || body.bedId || body.departmentId || body.vitals);
     if (!hasAdmissionChanges && !prescriptionChanged) {
       setMode('view');
       return;
@@ -680,7 +681,7 @@ function AdmissionPanel({
               ))}
               <div className="mt-3 pt-3 border-t space-y-0">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                  {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                  {getVitalsHeading(vitalsCategory)}
                 </p>
                 {getVitalDefinitions(vitalsCategory).map((definition) => (
                   <div key={definition.key}>
@@ -855,7 +856,7 @@ function AdmissionPanel({
               {canEditVitals && (
                 <div className="space-y-3 pt-2 border-t">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    {vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                    {getVitalsHeading(vitalsCategory)}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     {getVitalDefinitions(vitalsCategory).map((definition) => {
@@ -1081,6 +1082,8 @@ function NewAdmissionModal({ wards, onClose }: NewAdmissionModalProps) {
         wardId,
         bedId,
         ...(selectedDoctors.length ? { assignedDoctorIds: selectedDoctors.map((d) => d.userId) } : {}),
+        // Saved as the admission's department (Pediatric / Non-Pediatric pick the vitals set).
+        ...(selectedDepartmentId ? { departmentId: selectedDepartmentId } : {}),
         ...(selectedPackage ? { packageId: selectedPackage.packageId } : {}),
       }).unwrap();
       await createManualPayment({

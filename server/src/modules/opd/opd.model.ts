@@ -58,6 +58,7 @@ export interface IOPDVisit extends Document {
   prescription:   string | null;
   notes:          string | null;
   vitals:         IOPDVitals;
+  validTill:      Date | null; // frozen at completion — see OPDService.getVisitValidTill
   createdAt:      Date;
   updatedAt:      Date;
 }
@@ -83,6 +84,11 @@ const OPDVisitSchema = new Schema<IOPDVisit>(
     // relies on. Encrypted at rest alongside diagnosis/prescription/notes —
     // see ENCRYPTED_CLINICAL_FIELDS.objectFields below.
     vitals:         { type: OPDVitalsSchema, default: () => ({}) },
+    // Slip "Valid Till" (00:00 IST of the last valid day), saved only when the
+    // visit is COMPLETED so a later Branding validity change never rewrites a
+    // finished visit. Null on pending visits (computed live from the current
+    // setting) and on visits completed before this field existed.
+    validTill:      { type: Date, default: null },
   },
   { timestamps: true, collection: 'opd_visits' },
 );

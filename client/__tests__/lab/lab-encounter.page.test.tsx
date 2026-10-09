@@ -62,6 +62,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useUploadPathologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useUploadRadiologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useEditPathologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
+  useListDisabledPathologyTestsQuery: () => ({ data: [] }),
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],

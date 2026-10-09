@@ -130,3 +130,71 @@ describe('DepartmentService — listDepartmentsPaginated', () => {
     );
   });
 });
+
+// The Pediatric / Non-Pediatric departments pick an OPD visit's / IPD
+// admission's vitals set and are seeded lazily, missing rows only.
+describe('DepartmentService — ensureVitalsDepartments', () => {
+  const deptRepo = departmentRepository as jest.Mocked<typeof departmentRepository>;
+  let service: DepartmentService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service = new DepartmentService();
+    deptRepo.findByName.mockResolvedValue(null);
+  });
+
+  test('creates both departments with no doctors when the tenant has neither', async () => {
+    deptRepo.findClaimedVitalsProfiles.mockResolvedValue([]);
+
+    await service.ensureVitalsDepartments('t1');
+
+    expect(deptRepo.save).toHaveBeenCalledTimes(2);
+    expect(deptRepo.save).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 't1', name: 'Pediatric', vitalsProfile: 'PEDIATRIC', headDoctorId: null, description: null,
+    }));
+    expect(deptRepo.save).toHaveBeenCalledWith(expect.objectContaining({
+      tenantId: 't1', name: 'Non-Pediatric', vitalsProfile: 'NON_PEDIATRIC', headDoctorId: null, description: null,
+    }));
+  });
+
+  test('never re-creates a profile already claimed (including a renamed or deleted one)', async () => {
+    deptRepo.findClaimedVitalsProfiles.mockResolvedValue(['PEDIATRIC', 'NON_PEDIATRIC']);
+
+    await service.ensureVitalsDepartments('t1');
+
+    expect(deptRepo.save).not.toHaveBeenCalled();
+    expect(deptRepo.update).not.toHaveBeenCalled();
+  });
+
+  test('blanks only the placeholder description an earlier seed wrote', async () => {
+    deptRepo.findClaimedVitalsProfiles.mockResolvedValue(['PEDIATRIC', 'NON_PEDIATRIC']);
+
+    await service.ensureVitalsDepartments('t1');
+
+    expect(deptRepo.clearSeededVitalsDescriptions).toHaveBeenCalledWith('t1', ['Pediatric vitals', 'Non-Pediatric vitals']);
+  });
+
+  test('adopts an existing department with the same name instead of duplicating it', async () => {
+    deptRepo.findClaimedVitalsProfiles.mockResolvedValue(['NON_PEDIATRIC']);
+    deptRepo.findByName.mockResolvedValue({ departmentId: 'DEPT-OLD', name: 'pediatric', vitalsProfile: null } as never);
+
+    await service.ensureVitalsDepartments('t1');
+
+    expect(deptRepo.update).toHaveBeenCalledWith('t1', 'DEPT-OLD', { vitalsProfile: 'PEDIATRIC' });
+    expect(deptRepo.save).not.toHaveBeenCalled();
+  });
+
+  test('ignores a concurrent seed that loses on the unique index', async () => {
+    deptRepo.findClaimedVitalsProfiles.mockResolvedValue([]);
+    deptRepo.save.mockRejectedValue(Object.assign(new Error('dup'), { code: 11000 }));
+
+    await expect(service.ensureVitalsDepartments('t1')).resolves.toBeUndefined();
+  });
+
+  test('getVitalsProfile reads the department profile, null for none', async () => {
+    deptRepo.findById.mockResolvedValue({ departmentId: 'DEPT-PED', vitalsProfile: 'PEDIATRIC' } as never);
+
+    await expect(service.getVitalsProfile('t1', 'DEPT-PED')).resolves.toBe('PEDIATRIC');
+    await expect(service.getVitalsProfile('t1', null)).resolves.toBeNull();
+  });
+});

@@ -19,19 +19,39 @@ const CLINICAL_NOTE_MAX = 2000;
 const COMMENT_MAX       = 2000;
 const CORRELATE_MAX     = 1000;
 
+// "Other / Unlisted Tests" — not a selectable test, so it has no switch.
+// Mirrors the backend's GENERIC_TEMPLATE_KEY.
+const GENERIC_TEMPLATE_KEY = 'GENERIC';
+
 const TEXTAREA_CLASS =
   'w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
 
 /**
  * Lab → Test Master: each pathology test's Clinical Note, Comment and
- * "Please Correlate Clinically" footer, as printed on its report. Reports
- * always use the currently saved values. Lab staff only (PATHOLOGIST /
- * HOSPITAL_ADMIN) — mirrors the backend's requireRole.
+ * "Please Correlate Clinically" footer, as printed on its report, and whether
+ * the test is enabled for this hospital (a disabled test is hidden from the
+ * Test Type dropdown). Reports always use the currently saved values. Lab
+ * staff only (PATHOLOGIST / HOSPITAL_ADMIN) — mirrors the backend's requireRole.
  */
 export function PathologyTestMaster() {
   const { data, isLoading, isError, refetch } = useListPathologyTestMasterQuery();
+  const [update] = useUpdatePathologyTestMasterMutation();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<PathologyTestMasterEntry | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState('');
+
+  async function toggleEnabled(entry: PathologyTestMasterEntry) {
+    setToggleError('');
+    setToggling(entry.templateKey);
+    try {
+      await update({ templateKey: entry.templateKey, isEnabled: !entry.isEnabled }).unwrap();
+    } catch (err: any) {
+      setToggleError(err?.data?.message ?? `Failed to update ${entry.testName}. Please try again.`);
+    } finally {
+      setToggling(null);
+    }
+  }
 
   const q = search.trim().toLowerCase();
   const rows = (data ?? []).filter((t) => !q || t.testName.toLowerCase().includes(q));
@@ -41,6 +61,7 @@ export function PathologyTestMaster() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
           Clinical content printed on each pathology test report. Changes apply to every report generated afterwards.
+          Disabled tests are hidden from the Test Type list for new requests.
         </p>
         <div className="relative w-full sm:w-72">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -53,6 +74,10 @@ export function PathologyTestMaster() {
           />
         </div>
       </div>
+
+      {toggleError && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{toggleError}</p>
+      )}
 
       {isLoading ? (
         <p className="py-10 text-center text-sm text-muted-foreground">Loading tests…</p>
@@ -69,20 +94,35 @@ export function PathologyTestMaster() {
                 <th className="px-3 py-2 font-medium">Test</th>
                 <th className="px-3 py-2 font-medium">Clinical Note</th>
                 <th className="px-3 py-2 font-medium">Comment</th>
+                <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium sr-only">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={4} className="px-3 py-8 text-center text-muted-foreground">No tests match your search.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No tests match your search.</td></tr>
               ) : rows.map((t) => (
-                <tr key={t.templateKey} className="border-t align-top">
-                  <td className="px-3 py-2 font-medium break-words min-w-[10rem]">{t.testName}</td>
+                <tr key={t.templateKey} className={`border-t align-top${t.isEnabled ? '' : ' bg-muted/30'}`}>
+                  <td className={`px-3 py-2 font-medium break-words min-w-[10rem]${t.isEnabled ? '' : ' text-muted-foreground'}`}>
+                    {t.testName}
+                  </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     <span className="line-clamp-2 break-words">{t.clinicalNote ?? '—'}</span>
                   </td>
                   <td className="px-3 py-2">
                     {t.comment ? <Badge variant="secondary">Configured</Badge> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {t.templateKey === GENERIC_TEMPLATE_KEY ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <EnabledSwitch
+                        label={`Enable ${t.testName}`}
+                        checked={t.isEnabled}
+                        disabled={toggling === t.templateKey}
+                        onToggle={() => toggleEnabled(t)}
+                      />
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(t)} aria-label={`Edit ${t.testName}`}>
@@ -97,6 +137,35 @@ export function PathologyTestMaster() {
       )}
 
       {editing && <TestMasterEditModal entry={editing} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function EnabledSwitch({ label, checked, disabled, onToggle }: {
+  label: string; checked: boolean; disabled: boolean; onToggle: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={onToggle}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 ${
+          checked ? 'bg-primary' : 'bg-muted-foreground/30'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 rounded-full bg-background shadow transition-transform ${
+            checked ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+      <span className={`text-xs ${checked ? 'text-foreground' : 'text-muted-foreground'}`}>
+        {checked ? 'Enabled' : 'Disabled'}
+      </span>
     </div>
   );
 }

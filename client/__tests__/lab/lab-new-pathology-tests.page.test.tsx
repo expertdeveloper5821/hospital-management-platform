@@ -12,6 +12,8 @@ const PATIENT = { patientId: 'PAT-001', fullName: 'John Doe', mobileNumber: '999
 
 const mockCreatePathology = jest.fn();
 const mockCreateRadiology = jest.fn();
+// Tests disabled in the Test Master (GET /api/lab/pathology/disabled-tests).
+let mockDisabledTests: string[] = [];
 
 jest.mock('@/store/api/lab.api', () => ({
   useListPathologyRequestsQuery:      () => ({ data: { data: [], total: 0, totalPages: 1 }, isFetching: false, refetch: jest.fn() }),
@@ -21,6 +23,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useUploadPathologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useUploadRadiologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useEditPathologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
+  useListDisabledPathologyTestsQuery: () => ({ data: mockDisabledTests }),
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
@@ -59,6 +62,7 @@ const CREATED = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockDisabledTests = [];
   mockCreatePathology.mockReturnValue({ unwrap: () => Promise.resolve(CREATED) });
 });
 
@@ -75,16 +79,16 @@ async function referOther(user: ReturnType<typeof userEvent.setup>, name = 'Dr. 
 }
 
 describe('New Pathology Request — Test Type multi-select', () => {
-  test('offers the 40 catalog tests (original 20 + 20 added, names exact) and is searchable', async () => {
+  test('offers the 109 catalog tests (names exact, in catalog order) and is searchable', async () => {
     const user = userEvent.setup();
     await openNewPathologyRequest(user);
 
     await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
     const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
-    expect(names).toHaveLength(40);
+    expect(names).toHaveLength(109);
     expect(names.slice(0, 2)).toEqual(['CBC (Complete Blood Count)', 'ESR']);
     expect(names[19]).toBe('Troponin I');
-    expect(names.slice(20)).toEqual([
+    expect(names.slice(20, 40)).toEqual([
       'Peripheral Blood Smear (PBS)', 'Reticulocyte Count', 'Iron Profile / Iron Studies', 'Serum Ferritin',
       'Serum Calcium', 'Serum Magnesium', 'Serum Phosphorus', 'Serum Amylase', 'Serum Lipase',
       'Total & Direct Bilirubin', 'Alkaline Phosphatase (ALP)', 'Procalcitonin (PCT)',
@@ -92,9 +96,36 @@ describe('New Pathology Request — Test Type multi-select', () => {
       'Widal Test', 'Typhoid IgM', 'Pregnancy Test (Urine β-hCG)', 'Stool Routine & Microscopy',
       'Stool Occult Blood Test (FOBT)',
     ]);
+    expect(names.slice(40, 47)).toEqual([
+      'DP Profile', 'C-Peptide', 'Fasting Insulin', 'Sputum AFB', 'Urea', 'Creatinine', 'Vitamin Profile',
+    ]);
+    expect(names.slice(47, 70)).toEqual([
+      'Haemoglobin (Hb)', 'TLC (Total Leucocyte Count)', 'DLC (Differential Leucocyte Count)',
+      'PCV / HCT (Packed Cell Volume / Haematocrit)', 'Platelet Count (PLT)', 'AEC (Absolute Eosinophil Count)',
+      'BT (Bleeding Time)', 'CT (Clotting Time)', 'MP (Malaria Parasite - Peripheral Smear)',
+      'MP Card (Malaria Rapid Antigen Test)', 'Blood Sugar - Fasting', 'Blood Sugar - Post-Prandial (PP)',
+      'Blood Sugar - Random', 'SGOT (AST)', 'SGPT (ALT)', 'Serum Albumin', 'Total Protein',
+      'Serum Sodium (Na+)', 'Serum Potassium (K+)', 'Serum Triglycerides', 'Serum Cholesterol (Total)',
+      'D-Dimer', 'LDH (Lactate Dehydrogenase)',
+    ]);
+    expect(names.slice(70)).toEqual([
+      'VDRL (Syphilis Screening)', 'RA Factor (Rheumatoid Factor)', 'ASO Titer (Anti-Streptolysin O)',
+      'H. Pylori (Helicobacter pylori)', 'Urine Bile Salts (BS)', 'Urine Bile Pigments (BP)', 'Semen Analysis',
+      'T3 (Total Triiodothyronine)', 'T4 (Total Thyroxine)', 'TSH (Thyroid Stimulating Hormone)',
+      'FT3 (Free Triiodothyronine)', 'FT4 (Free Thyroxine)', 'Prolactin (PRL)', 'LH (Luteinising Hormone)',
+      'FSH (Follicle Stimulating Hormone)', 'Testosterone (Total)', 'Serum Iron', 'Total IgE',
+      'PSA Total (Prostate Specific Antigen)', 'PSA Free (Free / Total PSA Ratio)',
+      'ACE (Angiotensin Converting Enzyme)', 'ANA (Antinuclear Antibody)', 'CA-125',
+      'Anti-CCP (Anti-Cyclic Citrullinated Peptide)', 'E2 (Estradiol)', 'HBsAg Quantitative (Surface Antigen)',
+      'Beta HCG (Serum Quantitative)', 'TORCH Profile', 'TB Platinum (IGRA)',
+      'Microalbumin (Urine Albumin / Creatinine Ratio)', 'Allergy Profile', 'ANC Profile (Antenatal)',
+      'Dual Marker (First Trimester Screen)', 'Triple Marker (Second Trimester Screen)', 'Thalassemia Profile',
+      'Serum Lithium', 'Coombs Test - Direct (DAT)', 'Coombs Test - Indirect (IAT)', 'Folic Acid (Vitamin B9)',
+    ]);
 
     await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'vitamin');
-    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Vitamin D (25-OH)', 'Vitamin B12']);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Vitamin D (25-OH)', 'Vitamin B12', 'Vitamin Profile', 'Folic Acid (Vitamin B9)']);
   });
 
   // Heavy multi-select + combobox typing in jsdom regularly exceeds the 5s
@@ -195,5 +226,48 @@ describe('New Pathology Request — Referred By "Other"', () => {
     await referOther(user, '  Dr. Mehta  ');
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));
     expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({ referredBy: 'OTHER:Dr. Mehta' }));
+  });
+});
+
+describe('New Pathology Request — tests disabled in the Test Master', () => {
+  test('a disabled test is hidden from the Test Type list and search; the rest stay in order', async () => {
+    mockDisabledTests = ['ESR', 'HIV 1 & 2 Screening'];
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+
+    await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
+    const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
+    expect(names).toHaveLength(107);
+    expect(names).not.toContain('ESR');
+    expect(names).not.toContain('HIV 1 & 2 Screening');
+    expect(names.slice(0, 2)).toEqual(['CBC (Complete Blood Count)', 'Blood Sugar (Fasting / Post-Prandial / Random)']);
+
+    await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'hiv');
+    expect(within(screen.getByRole('listbox')).queryAllByRole('option')).toHaveLength(0);
+  });
+
+  test('a re-enabled test is offered again and can be submitted', async () => {
+    mockDisabledTests = [];
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(109);
+    await user.click(screen.getByRole('option', { name: 'ESR' }));
+    await referOther(user);
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }));
+    expect(mockCreatePathology).toHaveBeenCalledWith(expect.objectContaining({ testType: 'ESR' }));
+  });
+
+  test('shows the backend error when a test was disabled after the form opened', async () => {
+    mockCreatePathology.mockReturnValue({
+      unwrap: () => Promise.reject({ status: 400, data: { message: 'ESR is disabled for this hospital and cannot be selected.' } }),
+    });
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
+    await user.click(screen.getByRole('option', { name: 'ESR' }));
+    await referOther(user);
+    await user.click(screen.getByRole('button', { name: 'Submit Request' }));
+    expect(await screen.findByText('ESR is disabled for this hospital and cannot be selected.')).toBeInTheDocument();
   });
 });

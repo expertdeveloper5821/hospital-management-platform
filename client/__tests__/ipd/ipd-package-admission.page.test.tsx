@@ -60,6 +60,7 @@ jest.mock('@/store/api/user.api', () => ({
 
 jest.mock('@/store/api/patient.api', () => ({
   useSearchPatientsQuery: () => ({ data: { data: [] }, isFetching: false }),
+  useGetPatientByIdQuery: () => ({ data: undefined }),
 }));
 
 jest.mock('@/store/api/department.api', () => ({

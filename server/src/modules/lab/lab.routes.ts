@@ -28,6 +28,7 @@ import {
   getAllPathologyTestReportsPdf,
   listPathologyTestMaster,
   updatePathologyTestMaster,
+  listDisabledPathologyTests,
 } from './lab.controller';
 
 const router = express.Router();
@@ -62,6 +63,18 @@ router.patch(
   updatePathologyTestMaster,
 );
 
+// Tests disabled in the Test Master — read by every role that creates or
+// edits a pathology request (POST/PATCH /pathology), to hide them from the
+// Test Type dropdown. Also registered before /pathology/:requestId.
+router.get(
+  '/pathology/disabled-tests',
+  requireRole(
+    UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST,
+    UserRole.RECEPTIONIST, UserRole.MANAGER,
+  ),
+  listDisabledPathologyTests,
+);
+
 router.post(
   '/pathology',
   requireRole(UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.NURSE, UserRole.PATHOLOGIST, UserRole.RECEPTIONIST),
@@ -83,14 +96,14 @@ router.get(
 
 router.patch(
   '/pathology/:requestId',
-  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST),
   idempotencyGuard('lab.pathology.update'),
   editPathologyRequest,
 );
 
 router.delete(
   '/pathology/:requestId',
-  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(UserRole.PATHOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST),
   deletePathologyRequest,
 );
 
@@ -143,14 +156,14 @@ router.get(
 
 router.patch(
   '/radiology/:requestId',
-  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST),
   idempotencyGuard('lab.radiology.update'),
   editRadiologyRequest,
 );
 
 router.delete(
   '/radiology/:requestId',
-  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER),
+  requireRole(UserRole.RADIOLOGIST, UserRole.DOCTOR, UserRole.HOSPITAL_ADMIN, UserRole.MANAGER, UserRole.RECEPTIONIST),
   deleteRadiologyRequest,
 );
 

@@ -12,7 +12,7 @@ describe('Pathology Test Master seeds', () => {
     const catalog = PATHOLOGY_TEST_MASTER_SEEDS.filter((s) => s.templateKey !== GENERIC_TEMPLATE_KEY);
     expect(catalog.every((s) => !!s.clinicalNote?.trim())).toBe(true);
     expect(PATHOLOGY_TEST_MASTER_SEEDS.filter((s) => s.comment).map((s) => s.templateKey).sort())
-      .toEqual(['ANTI_HCV', 'HBSAG', 'HIV']);
+      .toEqual(['ANTI_HCV', 'HBSAG', 'HIV', 'VDRL']);
     expect(PATHOLOGY_TEST_MASTER_SEEDS.every((s) => !!s.correlateClinically.trim())).toBe(true);
   });
 

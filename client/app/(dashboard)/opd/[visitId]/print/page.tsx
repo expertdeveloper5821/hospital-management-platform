@@ -12,7 +12,7 @@ import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { formatPatientResponseAge } from '@/lib/patient-age';
-import { getPatientCategory, getVitalDefinitions, getVitalSlipLabel } from '@/lib/patient-vitals';
+import { getVitalDefinitions, getVitalSlipLabel, getVitalsCategory } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', {
@@ -29,8 +29,10 @@ function hasText(value: string | null | undefined): boolean {
   return !!value && value.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim() !== '';
 }
 
-// Count the OPD creation date as day one and do calendar arithmetic in the
-// hospital's timezone so the printed date is stable across browser locales.
+// The server resolves Valid Till (visit.validTill — anchored on the covering
+// payment, frozen once the visit is completed; see OPDService.getVisitValidTill).
+// This is only the fallback for a response without it: the same rule (anchor
+// date is day one), with calendar arithmetic in IST.
 function computeValidTill(createdAt: string, validityDays: number): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -123,7 +125,8 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   const doctors = usersData?.data ?? [];
 
   const ready = !visitLoading && !patientLoading && !opdSettingsLoading && !!visit && !!patient && !!opdSettings;
-  const vitalsCategory = getPatientCategory(patient);
+  // Vitals set follows the department only, never the patient's age.
+  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments);
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own
@@ -240,7 +243,7 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
             {/* Row 2 */}
             <Field label="Age / Gender"  value={`${formatPatientResponseAge(patient) ?? '—'} / ${toDisplay(patient.gender)}`} />
             <Field label="Mobile Number" value={patient.mobileNumber} />
-            <Field label="Valid Till"    value={formatDate(computeValidTill(visit.createdAt, opdSettings.validityDays))} />
+            <Field label="Valid Till"    value={formatDate(visit.validTill ?? computeValidTill(visit.createdAt, opdSettings.validityDays))} />
 
             {/* Row 3 — always rendered (blank when unassigned) so the
                 Address row below keeps its own line. */}

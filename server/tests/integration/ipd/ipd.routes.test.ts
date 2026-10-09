@@ -31,6 +31,7 @@ import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
 import { WardModel }   from '../../../src/modules/ipd/ward.model';
 import { BedModel }    from '../../../src/modules/ipd/bed.model';
 import { PatientModel } from '../../../src/modules/patient/patient.model';
+import { DepartmentModel } from '../../../src/modules/department/department.model';
 import { OPDVisitModel } from '../../../src/modules/opd/opd.model';
 import { TenantStatus, UserRole } from '../../../src/shared/types/common.types';
 import { AdmissionStatus } from '../../../src/modules/ipd/ipd.types';
@@ -1624,7 +1625,7 @@ describe('DELETE /api/ipd/admissions/:admissionId', () => {
 });
 
 describe('IPD vitals are per admission', () => {
-  test('allows a newborn weight below 0.5 kg when the age is recorded in days', async () => {
+  test('rejects a weight below 0.5 kg with no department, even for a newborn (age is never used)', async () => {
     const tenant = await seedTenant();
     const patient = await seedPatient(toId(tenant));
     await PatientModel.updateOne(
@@ -1639,8 +1640,58 @@ describe('IPD vitals are per admission', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ vitals: { weight: 0.2 } });
 
-    expect(res.status).toBe(200);
-    expect(res.body.data.vitals.weight).toBe(0.2);
+    expect(res.status).toBe(400);
+  });
+
+  test.each([
+    ['PEDIATRIC', 40, 'YEARS', 200],
+    ['NON_PEDIATRIC', 1, 'DAYS', 400],
+    [null, 1, 'DAYS', 400],
+  ] as const)('a %s-department admission decides the sub-0.5 kg weight rule, not the age', async (profile, age, ageUnit, status) => {
+    const tenant = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    await PatientModel.updateOne({ tenantId: toId(tenant), patientId: patient.patientId }, { $set: { age, ageUnit } });
+    await DepartmentModel.create({ departmentId: 'DEPT-V', tenantId: toId(tenant), name: profile ? 'Vitals Dept' : 'Dental', vitalsProfile: profile });
+    await seedAdmission(toId(tenant));
+    await IPDAdmissionModel.updateOne({ admissionId: ADM_RC_ID }, { $set: { departmentId: 'DEPT-V' } });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const res = await request(app)
+      .patch(`/api/ipd/admissions/${ADM_RC_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ vitals: { weight: 0.2 } });
+
+    expect(res.status).toBe(status);
+  });
+
+  test('stores the department picked at admission and lets an edit change it', async () => {
+    const tenant  = await seedTenant();
+    const patient = await seedPatient(toId(tenant));
+    const ward    = await seedWard(toId(tenant));
+    const bed     = await seedBed(toId(ward), toId(tenant));
+    await DepartmentModel.create({ departmentId: 'DEPT-PED', tenantId: toId(tenant), name: 'Pediatric', vitalsProfile: 'PEDIATRIC' });
+    await DepartmentModel.create({ departmentId: 'DEPT-CAR', tenantId: toId(tenant), name: 'Cardiology' });
+    const token = makeToken('rc-001', toId(tenant), UserRole.RECEPTIONIST);
+
+    const created = await request(app)
+      .post('/api/ipd/admissions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ patientId: patient.patientId, wardId: toId(ward), bedId: toId(bed), departmentId: 'DEPT-PED' });
+    expect(created.status).toBe(201);
+    expect(created.body.data.departmentId).toBe('DEPT-PED');
+
+    const updated = await request(app)
+      .patch(`/api/ipd/admissions/${created.body.data.admissionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ departmentId: 'DEPT-CAR' });
+    expect(updated.status).toBe(200);
+    expect(updated.body.data.departmentId).toBe('DEPT-CAR');
+
+    const unknown = await request(app)
+      .patch(`/api/ipd/admissions/${created.body.data.admissionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ departmentId: 'DEPT-MISSING' });
+    expect(unknown.status).toBe(400);
   });
 
   test('a new admission starts with empty vitals even when an earlier admission recorded them', async () => {

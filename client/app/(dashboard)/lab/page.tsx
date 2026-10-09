@@ -16,6 +16,7 @@ import {
   useCollectRadiologyPaymentMutation,
   useGetPathologyRequestQuery,
   useGetRadiologyRequestQuery,
+  useListDisabledPathologyTestsQuery,
 } from '@/store/api/lab.api';
 import { useLazyGetReceiptUrlQuery } from '@/store/api/payment.api';
 import { useSearchPatientsQuery } from '@/store/api/patient.api';
@@ -78,7 +79,7 @@ function formatDay(iso: string) {
 const STATUS_BADGE_CLASS = 'w-28 justify-center text-center whitespace-nowrap';
 
 function statusVariant(s: LabRequestStatus): 'warning' | 'info' | 'success' {
-  // Fixed semantic statuses — never tenant-brand-colored.
+
   if (s === 'PENDING')     return 'warning';
   if (s === 'IN_PROGRESS') return 'info';
   return 'success';
@@ -271,6 +272,68 @@ const PATHOLOGY_TEST_TYPES = [
   'Urea',
   'Creatinine',
   'Vitamin Profile',
+  'Haemoglobin (Hb)',
+  'TLC (Total Leucocyte Count)',
+  'DLC (Differential Leucocyte Count)',
+  'PCV / HCT (Packed Cell Volume / Haematocrit)',
+  'Platelet Count (PLT)',
+  'AEC (Absolute Eosinophil Count)',
+  'BT (Bleeding Time)',
+  'CT (Clotting Time)',
+  'MP (Malaria Parasite - Peripheral Smear)',
+  'MP Card (Malaria Rapid Antigen Test)',
+  'Blood Sugar - Fasting',
+  'Blood Sugar - Post-Prandial (PP)',
+  'Blood Sugar - Random',
+  'SGOT (AST)',
+  'SGPT (ALT)',
+  'Serum Albumin',
+  'Total Protein',
+  'Serum Sodium (Na+)',
+  'Serum Potassium (K+)',
+  'Serum Triglycerides',
+  'Serum Cholesterol (Total)',
+  'D-Dimer',
+  'LDH (Lactate Dehydrogenase)',
+  'VDRL (Syphilis Screening)',
+  'RA Factor (Rheumatoid Factor)',
+  'ASO Titer (Anti-Streptolysin O)',
+  'H. Pylori (Helicobacter pylori)',
+  'Urine Bile Salts (BS)',
+  'Urine Bile Pigments (BP)',
+  'Semen Analysis',
+  'T3 (Total Triiodothyronine)',
+  'T4 (Total Thyroxine)',
+  'TSH (Thyroid Stimulating Hormone)',
+  'FT3 (Free Triiodothyronine)',
+  'FT4 (Free Thyroxine)',
+  'Prolactin (PRL)',
+  'LH (Luteinising Hormone)',
+  'FSH (Follicle Stimulating Hormone)',
+  'Testosterone (Total)',
+  'Serum Iron',
+  'Total IgE',
+  'PSA Total (Prostate Specific Antigen)',
+  'PSA Free (Free / Total PSA Ratio)',
+  'ACE (Angiotensin Converting Enzyme)',
+  'ANA (Antinuclear Antibody)',
+  'CA-125',
+  'Anti-CCP (Anti-Cyclic Citrullinated Peptide)',
+  'E2 (Estradiol)',
+  'HBsAg Quantitative (Surface Antigen)',
+  'Beta HCG (Serum Quantitative)',
+  'TORCH Profile',
+  'TB Platinum (IGRA)',
+  'Microalbumin (Urine Albumin / Creatinine Ratio)',
+  'Allergy Profile',
+  'ANC Profile (Antenatal)',
+  'Dual Marker (First Trimester Screen)',
+  'Triple Marker (Second Trimester Screen)',
+  'Thalassemia Profile',
+  'Serum Lithium',
+  'Coombs Test - Direct (DAT)',
+  'Coombs Test - Indirect (IAT)',
+  'Folic Acid (Vitamin B9)',
 ] as const;
 
 // Option ids are index-based so the listbox's DOM ids stay free of spaces/parens.
@@ -283,6 +346,15 @@ const pathologyTestName = (id: string) =>
   ?? (id.startsWith(NON_CATALOG_TEST_PREFIX) ? id.slice(NON_CATALOG_TEST_PREFIX.length) : id);
 const pathologyTestIdFor = (name: string) =>
   PATHOLOGY_TEST_OPTIONS.find((o) => o.name === name)?.userId ?? `${NON_CATALOG_TEST_PREFIX}${name}`;
+
+// The catalog minus tests this hospital disabled in the Test Master (the
+// backend rejects them too). `keepIds` — tests already on a request — stay
+// listed so Edit never drops a test disabled after it was requested.
+function availablePathologyTestOptions(disabledTests: string[] | undefined, keepIds: string[] = []) {
+  if (!disabledTests?.length) return PATHOLOGY_TEST_OPTIONS;
+  const disabled = new Set(disabledTests);
+  return PATHOLOGY_TEST_OPTIONS.filter((o) => !disabled.has(o.name) || keepIds.includes(o.userId));
+}
 
 // Mirrors the backend's CreatePathologyRequestSchema testType max length.
 const TEST_TYPE_MAX_LENGTH = 200;
@@ -325,6 +397,9 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
   const doctors = isDoctorSelf
     ? [...(doctorsData?.data ?? [])].sort((a, b) => (a.userId === profile?.userId ? -1 : b.userId === profile?.userId ? 1 : 0))
     : (doctorsData?.data ?? []);
+
+  const { data: disabledTests } = useListDisabledPathologyTestsQuery(undefined, { skip: type !== 'pathology' });
+  const testOptions = availablePathologyTestOptions(disabledTests);
 
   const [createPathology, { isLoading: creatingPath }] = useCreatePathologyRequestMutation();
   const [createRadiology, { isLoading: creatingRad  }] = useCreateRadiologyRequestMutation();
@@ -437,7 +512,7 @@ function NewRequestModal({ type, onClose, onCreated }: NewRequestModalProps) {
                 <PeopleMultiSelect
                   labelId="nr-testtype-label"
                   noun="tests"
-                  options={PATHOLOGY_TEST_OPTIONS}
+                  options={testOptions}
                   getLabel={pathologyTestName}
                   selectedIds={testIds}
                   onChange={setTestIds}
@@ -795,8 +870,11 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
   const [typeField, setTypeField] = useState(isPathology ? pathDoc.testType : radioDoc.imagingType);
   // Pathology: the request's tests as selected chips in the same multi-select
   // as New Request, in their stored order (duplicates collapse).
-  const [testIds,   setTestIds]   = useState<string[]>(() =>
+  const [initialTestIds] = useState<string[]>(() =>
     isPathology ? [...new Set(splitTests(pathDoc.testType).map(pathologyTestIdFor))] : []);
+  const [testIds,   setTestIds]   = useState<string[]>(initialTestIds);
+  const { data: disabledTests } = useListDisabledPathologyTestsQuery(undefined, { skip: !isPathology });
+  const testOptions = availablePathologyTestOptions(disabledTests, initialTestIds);
   const [notes,     setNotes]     = useState(request.notes ?? '');
   const [priority,  setPriority]  = useState<LabRequestPriority>(request.priority);
   const [status,    setStatus]    = useState<'PENDING' | 'IN_PROGRESS'>(
@@ -879,7 +957,7 @@ function EditRequestModal({ request, type, onClose }: EditRequestModalProps) {
                 <PeopleMultiSelect
                   labelId="er-testtype-label"
                   noun="tests"
-                  options={PATHOLOGY_TEST_OPTIONS}
+                  options={testOptions}
                   getLabel={pathologyTestName}
                   selectedIds={testIds}
                   onChange={setTestIds}
@@ -1697,8 +1775,8 @@ export default function LabPage() {
   // through the structured report form (the backend has no upload route).
   const canUploadFile = activeTab === 'pathology' ? false : canUploadRadiology;
 
-  const canEditPathology   = ['PATHOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
-  const canEditRadiology   = ['RADIOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER'].includes(role ?? '');
+  const canEditPathology   = ['PATHOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role ?? '');
+  const canEditRadiology   = ['RADIOLOGIST', 'DOCTOR', 'HOSPITAL_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role ?? '');
   const canEdit   = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
   const canDelete = activeTab === 'pathology' ? canEditPathology   : canEditRadiology;
 

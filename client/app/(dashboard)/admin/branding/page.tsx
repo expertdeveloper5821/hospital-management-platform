@@ -464,7 +464,8 @@ function OpdSettingsSection({ tenantId }: { tenantId?: string }) {
         <p className="text-sm text-muted-foreground mt-1">
           Number of days a completed OPD payment remains valid — a patient can have new OPD
           visits created within this window without paying again. This period also controls
-          the OPD slip&apos;s Valid Till date, counting the OPD creation date as day one. Once it lapses,
+          the OPD slip&apos;s Valid Till date, counting the payment date as day one. Completed OPD
+          visits keep the Valid Till they were completed with. Once it lapses,
           the next OPD visit requires a new payment.
         </p>
       </div>

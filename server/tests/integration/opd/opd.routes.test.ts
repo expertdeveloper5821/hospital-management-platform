@@ -27,6 +27,7 @@ import app                from '../../../src/app';
 import { UserModel }      from '../../../src/modules/auth/auth.model';
 import { TenantModel }    from '../../../src/modules/tenant/tenant.model';
 import { PatientModel }   from '../../../src/modules/patient/patient.model';
+import { DepartmentModel } from '../../../src/modules/department/department.model';
 import { OPDVisitModel }  from '../../../src/modules/opd/opd.model';
 import { OpdNurseAssignmentModel } from '../../../src/modules/opd/opd-nurse-assignment.model';
 import { IPDAdmissionModel } from '../../../src/modules/ipd/ipd.model';
@@ -1840,7 +1841,7 @@ describe('OPD Vitals', () => {
     expect(res.status).toBe(400);
   });
 
-  test('200 — accepts a sub-0.5 kg weight for a pediatric patient recorded in days', async () => {
+  test('400 — rejects a sub-0.5 kg weight with no department, even for a newborn (age is never used)', async () => {
     const tenant = await seedTenant();
     const tid = tenant._id.toString();
     const patient = await seedPatient(tid);
@@ -1857,8 +1858,30 @@ describe('OPD Vitals', () => {
       .set(bearer(token))
       .send({ vitals: { weight: 0.2 } });
 
-    expect(res.status).toBe(200);
-    expect(res.body.data.vitals.weight).toBe(0.2);
+    expect(res.status).toBe(400);
+  });
+
+  test.each([
+    ['PEDIATRIC', 40, 'YEARS', 200],
+    ['NON_PEDIATRIC', 2, 'DAYS', 400],
+    [null, 2, 'DAYS', 400],
+  ] as const)('a %s-department visit decides the sub-0.5 kg weight rule, not the age', async (profile, age, ageUnit, status) => {
+    const tenant = await seedTenant();
+    const tid = tenant._id.toString();
+    const patient = await seedPatient(tid);
+    await PatientModel.updateOne({ tenantId: tid, patientId: patient.patientId }, { $set: { age, ageUnit } });
+    await DepartmentModel.create({ departmentId: 'DEPT-V', tenantId: tid, name: profile ? 'Vitals Dept' : 'Dental', vitalsProfile: profile });
+    const doctor = await seedUser(tid, `doc-vit-${String(profile).toLowerCase()}@h.com`, UserRole.DOCTOR);
+    await seedVisit(tid, { visitId: 'OPD-VIT-DEPT', doctorIds: [doctor._id.toString()] });
+    await OPDVisitModel.updateOne({ visitId: 'OPD-VIT-DEPT' }, { $set: { departmentId: 'DEPT-V' } });
+    const token = tokenFor(doctor._id.toString(), tid, UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch('/api/opd/visits/OPD-VIT-DEPT')
+      .set(bearer(token))
+      .send({ vitals: { weight: 0.2 } });
+
+    expect(res.status).toBe(status);
   });
 
   test('200 — a valid blood pressure with 3-digit systolic is accepted', async () => {
@@ -2478,6 +2501,7 @@ describe('GET /api/opd/patients/:patientId/payment-validity', () => {
   test('200 — VALID when the latest payment is within the default 15-day window', async () => {
     const tenant = await seedTenant();
     const tid    = tenant._id.toString();
+    await TenantModel.findByIdAndUpdate(tid, { $set: { 'opdSettings.validityDays': 15 } });
     await seedPatient(tid);
     await seedOpdPayment(tid, { createdAt: daysAgo(5) });
     const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
@@ -2618,6 +2642,7 @@ describe('GET /api/opd/patients/:patientId/payment-validity', () => {
     test('200 — VALID when the payment is tied to a visit with the requested doctor, within the window', async () => {
       const tenant = await seedTenant();
       const tid    = tenant._id.toString();
+      await TenantModel.findByIdAndUpdate(tid, { $set: { 'opdSettings.validityDays': 15 } });
       await seedPatient(tid);
       await seedVisit(tid, { visitId: 'OPD-DOC1', doctorIds: ['doc-1'] });
       await seedOpdPayment(tid, { visitId: 'OPD-DOC1', createdAt: daysAgo(5) });
@@ -3846,5 +3871,82 @@ describe('Clinical field encryption at rest — OPD diagnosis/prescription', () 
     expect(logged).toContain('diagnosis');
     expect(logged).toContain('prescription');
     expect(logged).toContain('notes');
+  });
+});
+
+// ─── OPD Valid Till: slip ↔ fee check, completion freeze, Branding changes ───
+describe('OPD Valid Till — slip, fee check, completion and Branding changes', () => {
+  const istDay = (iso: string) => toIstDateKey(new Date(iso));
+
+  test('200 — fee check boundary: Day 1 payment with a 5-day window is valid through Day 5 only', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await TenantModel.findByIdAndUpdate(tid, { $set: { 'opdSettings.validityDays': 5 } });
+    await seedPatient(tid);
+    await seedPatient(tid, 'PAT-TEST0002');
+    await seedOpdPayment(tid, { createdAt: daysAgo(4) });                                        // today is Day 5
+    await seedOpdPayment(tid, { patientId: 'PAT-TEST0002', visitId: 'OPD-X2', createdAt: daysAgo(5) }); // today is Day 6
+    const rc    = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const token = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    const lastDay = await request(app).get('/api/opd/patients/PAT-TEST0001/payment-validity').set(bearer(token));
+    expect(lastDay.body.data.reason).toBe('VALID');
+    expect(istDay(lastDay.body.data.validUntil)).toBe(todayDateStr());
+
+    const dayAfter = await request(app).get('/api/opd/patients/PAT-TEST0002/payment-validity').set(bearer(token));
+    expect(dayAfter.body.data.reason).toBe('EXPIRED');
+    expect(istDay(dayAfter.body.data.validUntil)).toBe(toIstDateKey(daysAgo(1)));
+  });
+
+  test('200 — slip matches the fee check; completed visit keeps its Valid Till after a Branding change, pending visit follows it', async () => {
+    const tenant = await seedTenant();
+    const tid    = tenant._id.toString();
+    await TenantModel.findByIdAndUpdate(tid, { $set: { 'opdSettings.validityDays': 5 } });
+    await seedPatient(tid);
+    await seedPatient(tid, 'PAT-TEST0002');
+    await seedVisit(tid, { visitId: 'OPD-DONE' });
+    await seedVisit(tid, { visitId: 'OPD-PEND', patientId: 'PAT-TEST0002' });
+    await seedOpdPayment(tid, { visitId: 'OPD-DONE', createdAt: daysAgo(1) });
+    await seedOpdPayment(tid, { visitId: 'OPD-PEND', patientId: 'PAT-TEST0002', createdAt: daysAgo(1) });
+    const admin      = await seedUser(tid, 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const adminToken = tokenFor(admin._id.toString(), tid, UserRole.HOSPITAL_ADMIN);
+    const rc         = await seedUser(tid, 'rc@h.com', UserRole.RECEPTIONIST);
+    const rcToken    = tokenFor(rc._id.toString(), tid, UserRole.RECEPTIONIST);
+
+    // Under 5 days: paid yesterday (Day 1) → last valid day is 3 days from today.
+    const slip = await request(app).get('/api/opd/visits/OPD-DONE').set(bearer(adminToken));
+    expect(slip.status).toBe(200);
+    expect(istDay(slip.body.data.validTill)).toBe(toIstDateKey(daysAgo(-3)));
+    const fee = await request(app).get('/api/opd/patients/PAT-TEST0001/payment-validity').set(bearer(rcToken));
+    expect(fee.body.data.validUntil).toBe(slip.body.data.validTill);
+
+    const done = await request(app)
+      .patch('/api/opd/visits/OPD-DONE/complete')
+      .set(bearer(adminToken))
+      .send({ diagnosis: 'Viral fever' });
+    expect(done.status).toBe(200);
+    expect(done.body.data.validTill).toBe(slip.body.data.validTill);
+
+    // Branding change: 5 → 10 days.
+    const settings = await request(app)
+      .patch(`/api/tenants/${tid}/opd-settings`)
+      .set(bearer(adminToken))
+      .send({ validityDays: 10 });
+    expect(settings.status).toBe(200);
+
+    const doneAfter = await request(app).get('/api/opd/visits/OPD-DONE').set(bearer(adminToken));
+    expect(doneAfter.body.data.validTill).toBe(slip.body.data.validTill);
+    const doneFee = await request(app).get('/api/opd/patients/PAT-TEST0001/payment-validity').set(bearer(rcToken));
+    expect(doneFee.body.data.validUntil).toBe(slip.body.data.validTill);
+
+    const pendAfter = await request(app).get('/api/opd/visits/OPD-PEND').set(bearer(adminToken));
+    expect(istDay(pendAfter.body.data.validTill)).toBe(toIstDateKey(daysAgo(-8)));
+    const pendFee = await request(app).get('/api/opd/patients/PAT-TEST0002/payment-validity').set(bearer(rcToken));
+    expect(pendFee.body.data.validUntil).toBe(pendAfter.body.data.validTill);
+
+    // Only the completed visit has a saved Valid Till.
+    const stored = await OPDVisitModel.find({ tenantId: tid }).lean();
+    expect(stored.find((v) => v.visitId === 'OPD-DONE')?.validTill?.toISOString()).toBe(slip.body.data.validTill);
+    expect(stored.find((v) => v.visitId === 'OPD-PEND')?.validTill ?? null).toBeNull();
   });
 });

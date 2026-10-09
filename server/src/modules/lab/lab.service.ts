@@ -531,13 +531,17 @@ function applyPathologyCalculations(
     if (hb !== null && rbc !== null && rbc > 0) setIfBlank('mch', (hb * 10) / rbc);
     if (hb !== null && hct !== null && hct > 0) setIfBlank('mchc', (hb * 100) / hct);
     if ((values.hematocrit ?? '').trim() === '' && rbc !== null && mcv !== null) setIfBlank('hematocrit', (rbc * mcv) / 10);
+  }
+
+  if (template.key === 'CBC' || template.key === 'DLC') {
     const diffKeys = ['neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils'];
     const diff = diffKeys
       .map((key) => val(key))
       .filter((v): v is number => v !== null);
     if (diff.length === diffKeys.length) {
       const total = diff.reduce((sum, v) => sum + v, 0);
-      if (total < 99 || total > 101) errors.push('CBC differential total must be between 99% and 101%.');
+      const label = template.key === 'CBC' ? 'CBC differential' : 'DLC';
+      if (total < 99 || total > 101) errors.push(`${label} total must be between 99% and 101%.`);
     }
   }
 
@@ -626,6 +630,45 @@ function applyPathologyCalculations(
     }
     const finalTibc = val('tibc');
     if (iron !== null && finalTibc !== null && finalTibc > 0) setIfBlank('transferrinSaturation', (iron / finalTibc) * 100);
+  }
+
+  if (template.key === 'SEMEN') {
+    const volume = val('volume');
+    const concentration = val('concentration');
+    if (volume !== null && concentration !== null) setIfBlank('totalCount', volume * concentration);
+    const pr = val('progressive');
+    const np = val('nonProgressive');
+    const im = val('immotile');
+    if ((pr ?? 0) + (np ?? 0) + (im ?? 0) > 100) errors.push('Sperm motility percentages cannot total more than 100%.');
+    else if (pr !== null && np !== null) setIfBlank('totalMotility', pr + np);
+  }
+
+  if (template.key === 'PSA_FREE') {
+    const total = val('totalPsa');
+    const free = val('freePsa');
+    if (total !== null && free !== null) {
+      if (free > total) errors.push('Free PSA cannot exceed Total PSA.');
+      else if (total > 0) setIfBlank('percentFreePsa', (free / total) * 100);
+    }
+  }
+
+  if (template.key === 'TB_PLATINUM') {
+    const nil = val('nil');
+    const tbAntigen = val('tbAntigen');
+    if (nil !== null && tbAntigen !== null) setIfBlank('tbAgMinusNil', tbAntigen - nil);
+  }
+
+  if (template.key === 'MICROALBUMIN') {
+    const albumin = val('urineAlbumin');
+    const creatinine = val('urineCreatinine');
+    // mg/L ÷ (mg/dL × 0.01 g/L per mg/dL) = mg/g.
+    if (albumin !== null && creatinine !== null && creatinine > 0) setIfBlank('acr', (albumin / creatinine) * 100);
+  }
+
+  if (template.key === 'THALASSEMIA') {
+    const mcv = val('mcv');
+    const rbc = val('rbc');
+    if (mcv !== null && rbc !== null && rbc > 0) setIfBlank('mentzerIndex', mcv / rbc);
   }
 
   if (errors.length) throw new ValidationError(errors.join(' '));
@@ -838,6 +881,9 @@ export class LabService {
       throw new NotFoundError('Patient not found');
     }
 
+    // Covers every entry point, including Billing-created requests.
+    await pathologyTestMasterService.assertTestsEnabled(tenantId, splitPathologyTests(input.testType));
+
     const requester = await userRepository.findById(tenantId, userId);
     await this.assertValidReferredBy(tenantId, input.referredBy);
 
@@ -930,6 +976,10 @@ export class LabService {
 
   async listPathologyTestMaster(tenantId: string): Promise<PathologyTestMasterResponse[]> {
     return pathologyTestMasterService.list(tenantId);
+  }
+
+  async listDisabledPathologyTests(tenantId: string): Promise<string[]> {
+    return pathologyTestMasterService.disabledTestNames(tenantId);
   }
 
   async updatePathologyTestMaster(
@@ -1389,6 +1439,14 @@ export class LabService {
     ) {
       throw new ForbiddenError('Only Hospital Admin or Pathologist can change the status of a pathology request');
     }
+    // Only newly added tests are checked — a test disabled after it was
+    // requested stays on the request.
+    if (input.testType !== undefined) {
+      const existing = new Set(splitPathologyTests(doc.testType));
+      await pathologyTestMasterService.assertTestsEnabled(
+        tenantId, splitPathologyTests(input.testType).filter((t) => !existing.has(t)),
+      );
+    }
 
     const editableKeys = ['testType', 'notes', 'priority', 'status'] as const;
     const previousValue: Record<string, unknown> = {};
@@ -1449,8 +1507,12 @@ export class LabService {
     await this.assertNotPaid(tenantId, 'pathology', doc);
 
     if (doc.status === LabRequestStatus.COMPLETED) {
-      if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
-        throw new ForbiddenError('Only Hospital Admin or Manager can delete a completed pathology request');
+      if (
+        userRole !== UserRole.HOSPITAL_ADMIN &&
+        userRole !== UserRole.MANAGER &&
+        userRole !== UserRole.RECEPTIONIST
+      ) {
+        throw new ForbiddenError('Only Hospital Admin, Manager, or Receptionist can delete a completed pathology request');
       }
     }
 
@@ -1541,8 +1603,12 @@ export class LabService {
     await this.assertNotPaid(tenantId, 'radiology', doc);
 
     if (doc.status === LabRequestStatus.COMPLETED) {
-      if (userRole !== UserRole.HOSPITAL_ADMIN && userRole !== UserRole.MANAGER) {
-        throw new ForbiddenError('Only Hospital Admin or Manager can delete a completed radiology request');
+      if (
+        userRole !== UserRole.HOSPITAL_ADMIN &&
+        userRole !== UserRole.MANAGER &&
+        userRole !== UserRole.RECEPTIONIST
+      ) {
+        throw new ForbiddenError('Only Hospital Admin, Manager, or Receptionist can delete a completed radiology request');
       }
     }
 
@@ -1677,8 +1743,16 @@ export class LabService {
   // ─── Test types ────────────────────────────────────────────────────────────
 
   async listTestTypes(tenantId: string): Promise<LabTestTypeResponse[]> {
-    const rows = await labRepository.listDistinctTestTypes(tenantId);
+    const [rows, disabledNames] = await Promise.all([
+      labRepository.listDistinctTestTypes(tenantId),
+      pathologyTestMasterService.disabledTestNames(tenantId),
+    ]);
+    // A Pathology test type containing a disabled test can't be requested, so
+    // it isn't offered for a new Lab Test charge either.
+    const disabled = new Set(disabledNames);
     return rows
+      .filter((r) => r.category !== 'PATHOLOGY'
+        || !splitPathologyTests(r.name).some((t) => disabled.has(findReportTemplate(t).testName)))
       .map((r) => ({ id: `${r.category}:${r.name}`, name: r.name, category: r.category }))
       .sort((a, b) => a.name.localeCompare(b.name) || a.category.localeCompare(b.category));
   }

@@ -19,6 +19,7 @@ import { paymentRepository } from '../../../src/modules/payment/payment.reposito
 import { tenantService }     from '../../../src/modules/tenant/tenant.service';
 import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
 import { departmentService } from '../../../src/modules/department/department.service';
+import { departmentRepository } from '../../../src/modules/department/department.repository';
 import { userRepository }    from '../../../src/modules/user/user.repository';
 import { OPDService }        from '../../../src/modules/opd/opd.service';
 import { OPDVisitStatus, OPDPaymentValidityReason } from '../../../src/modules/opd/opd.types';
@@ -38,6 +39,7 @@ const mockPaymentRepo    = paymentRepository as jest.Mocked<typeof paymentReposi
 const mockTenantSvc      = tenantService     as jest.Mocked<typeof tenantService>;
 const mockTenantRepo     = tenantRepository  as jest.Mocked<typeof tenantRepository>;
 const mockDepartmentSvc  = departmentService as jest.Mocked<typeof departmentService>;
+const mockDepartmentRepo = departmentRepository as jest.Mocked<typeof departmentRepository>;
 const mockUserRepo       = userRepository    as jest.Mocked<typeof userRepository>;
 const mockS3Service      = s3Service         as jest.Mocked<typeof s3Service>;
 
@@ -84,6 +86,13 @@ describe('OPDService — example-based', () => {
     // Default: no resolvable department (matches the common case of no/blank
     // doctorIds in most fixtures below) — individual tests override this.
     mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue(null);
+    // Default: no OPD payments at all and a 5-day validity window, so the
+    // Valid Till lookups (completeVisit / getParchaPdfContext) never pick up
+    // a payment left over from another test.
+    mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+    mockPaymentRepo.findCompletedByReference.mockResolvedValue(null as never);
+    mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(null as never);
+    mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType.mockResolvedValue(null as never);
   });
 
   // ── createVisit ────────────────────────────────────────────────────────────
@@ -168,6 +177,21 @@ describe('OPDService — example-based', () => {
       expect(mockOpdRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ departmentId: 'DEPT-CARDIO' }),
       );
+    });
+
+    test('stores the department picked on the form instead of the doctor-derived one', async () => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+      mockOpdRepo.countByDate.mockResolvedValue(0);
+      mockOpdRepo.save.mockResolvedValue(makeVisit({ doctorIds: ['doc-1'] }) as never);
+      mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue('DEPT-CARDIO');
+
+      await service.createVisit(
+        't1', { ...VALID_CREATE_REQ, doctorIds: ['doc-1'], departmentId: 'DEPT-PED' }, 'user-1', UserRole.HOSPITAL_ADMIN,
+      );
+
+      expect(mockDepartmentSvc.assertDepartmentExists).toHaveBeenCalledWith('t1', 'DEPT-PED');
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).not.toHaveBeenCalled();
+      expect(mockOpdRepo.save).toHaveBeenCalledWith(expect.objectContaining({ departmentId: 'DEPT-PED' }));
     });
 
     test('departmentId is null when no doctor is assigned', async () => {
@@ -564,6 +588,20 @@ describe('OPDService — example-based', () => {
       expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).toHaveBeenCalledWith('t1', []);
       const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
       expect(updateArg.departmentId).toBeNull();
+    });
+
+    test('an explicitly changed department wins over doctor re-resolution', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ doctorIds: ['doc-old'] }) as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ doctorIds: ['doc-new'] }) as never);
+      mockDepartmentSvc.resolveDepartmentFromDoctorIds.mockResolvedValue('DEPT-NEW');
+
+      await service.updateVisit(
+        't1', 'OPD-TEST0001', { doctorIds: ['doc-new'], departmentId: 'DEPT-PED' }, 'admin-1', UserRole.HOSPITAL_ADMIN,
+      );
+
+      expect(mockDepartmentSvc.resolveDepartmentFromDoctorIds).not.toHaveBeenCalled();
+      const updateArg = (mockOpdRepo.update.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+      expect(updateArg.departmentId).toBe('DEPT-PED');
     });
 
     test('leaves departmentId untouched when doctorIds is not part of the update', async () => {
@@ -1155,26 +1193,28 @@ describe('OPDService — example-based', () => {
       expect(result.paymentRequired).toBe(true);
     });
 
-    test('boundary — payment made exactly validityDays ago is still VALID (inclusive)', async () => {
+    test('boundary — today is the last valid day (payment day counts as day one) → still VALID', async () => {
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
+        .mockResolvedValue(makePayment({ createdAt: daysAgo(14) }) as never);
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
+      expect(result.paymentRequired).toBe(false);
+      expect(toIstDateKey(result.validUntil!)).toBe(toIstDateKey(new Date()));
+    });
+
+    test('boundary — payment made exactly validityDays ago is EXPIRED (no extra day)', async () => {
       mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
       mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
         .mockResolvedValue(makePayment({ createdAt: daysAgo(15) }) as never);
 
       const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
 
-      expect(result.reason).toBe(OPDPaymentValidityReason.VALID);
-      expect(result.paymentRequired).toBe(false);
-    });
-
-    test('boundary — the day after validityDays has elapsed is EXPIRED', async () => {
-      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 15 });
-      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType
-        .mockResolvedValue(makePayment({ createdAt: daysAgo(16) }) as never);
-
-      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
-
       expect(result.reason).toBe(OPDPaymentValidityReason.EXPIRED);
       expect(result.paymentRequired).toBe(true);
+      expect(toIstDateKey(result.validUntil!)).toBe(toIstDateKey(daysAgo(1)));
     });
 
     test('configurable validity — the same payment age can be VALID or EXPIRED depending on the tenant setting', async () => {
@@ -1396,30 +1436,42 @@ describe('OPDService — example-based', () => {
       expect(result?.overlay.fieldRows).toContainEqual({ label: 'Valid Till', value: '19 May 2026' });
       expect(result?.overlay.footerText).toBe('This is valid for 5 days.');
       expect(result?.overlay.vitalsHeading).toBe('Vitals');
+      // No department → SpO2 → Temp → BP → Pulse → Height → Weight.
       expect(result?.overlay.vitals).toEqual([
-        { label: 'BP', value: '120/80' },
-        { label: 'PR', value: '76' },
         { label: 'SpO2', value: '97' },
-        { label: 'RBS', value: '95' },
         { label: 'Temp', value: '98.6' },
+        { label: 'BP', value: '120/80' },
+        { label: 'Pulse', value: '76' },
+        { label: 'Height', value: '172' },
         { label: 'Weight', value: '68.5' },
       ]);
     });
 
-    test('formats pediatric slip vitals with short labels and no units', async () => {
-      mockTenantRepo.findById.mockResolvedValue({
-        branding: { parchaTemplateUrl: 'parcha.pdf' },
-      } as never);
+    test.each([
+      ['PEDIATRIC', 40, 'YEARS', ['PR', 'RR', 'SpO2', 'BP', 'Height', 'Weight', 'Head Circ.']],
+      ['NON_PEDIATRIC', 5, 'MONTHS', ['BP', 'PR', 'SpO2', 'RBS', 'Temp', 'Weight']],
+      [null, 5, 'MONTHS', ['SpO2', 'Temp', 'BP', 'Pulse', 'Height', 'Weight']],
+    ] as const)('a %s department picks its slip vitals, whatever the patient age', async (profile, age, ageUnit, labels) => {
+      mockTenantRepo.findById.mockResolvedValue({ branding: { parchaTemplateUrl: 'parcha.pdf' } } as never);
       mockPatientRepo.findByPatientId.mockResolvedValue({
-        fullName: 'Ravi Kumar',
-        patientId: 'PAT-ABCD1234',
-        dateOfBirth: null,
-        age: 18,
-        ageUnit: 'MONTHS',
-        gender: 'MALE',
-        mobileNumber: '9876543210',
-        address: '',
-        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        fullName: 'Ravi Kumar', patientId: 'PAT-ABCD1234', dateOfBirth: null, age, ageUnit,
+        gender: 'MALE', mobileNumber: '9876543210', address: '', createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      } as never);
+      mockS3Service.getFile.mockResolvedValue(Buffer.from('pdf'));
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+      mockDepartmentRepo.findById.mockResolvedValue({ name: 'Dept', vitalsProfile: profile } as never);
+
+      const result = await service.getParchaPdfContext('t1', { ...makeVisit(), departmentId: 'DEPT-X' } as never);
+
+      expect(result?.overlay.vitals.map((v) => v.label)).toEqual(labels);
+    });
+
+    test('an infant with no department gets the default slip vitals, never the pediatric set', async () => {
+      mockTenantRepo.findById.mockResolvedValue({ branding: { parchaTemplateUrl: 'parcha.pdf' } } as never);
+      mockPatientRepo.findByPatientId.mockResolvedValue({
+        fullName: 'Ravi Kumar', patientId: 'PAT-ABCD1234', dateOfBirth: null, age: 18, ageUnit: 'MONTHS',
+        gender: 'MALE', mobileNumber: '9876543210', address: '', createdAt: new Date('2026-01-01T00:00:00.000Z'),
       } as never);
       mockS3Service.getFile.mockResolvedValue(Buffer.from('pdf'));
       mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
@@ -1434,16 +1486,156 @@ describe('OPDService — example-based', () => {
       };
       const result = await service.getParchaPdfContext('t1', visit as never);
 
-      expect(result?.overlay.vitalsHeading).toBe('Vitals');
-      expect(result?.overlay.vitals).toEqual([
-        { label: 'PR', value: '120' },
-        { label: 'RR', value: '30' },
-        { label: 'SpO2', value: '98' },
-        { label: 'BP', value: '90/60' },
-        { label: 'Height', value: '65' },
-        { label: 'Weight', value: '6.5' },
-        { label: 'Head Circ.', value: '40' },
-      ]);
+      expect(result?.overlay.vitals.map((v) => v.label)).toEqual(['SpO2', 'Temp', 'BP', 'Pulse', 'Height', 'Weight']);
+    });
+
+    test('anchors Valid Till on the visit\'s own OPD payment date', async () => {
+      mockTenantRepo.findById.mockResolvedValue({ branding: { parchaTemplateUrl: 'parcha.pdf' } } as never);
+      mockPatientRepo.findByPatientId.mockResolvedValue({
+        fullName: 'Ravi Kumar', patientId: 'PAT-ABCD1234', dateOfBirth: null,
+        gender: 'MALE', mobileNumber: '9876543210', address: '', createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      } as never);
+      mockS3Service.getFile.mockResolvedValue(Buffer.from('pdf'));
+      mockUserRepo.findNamesByIds.mockResolvedValue(new Map());
+      // Visit created 14 May 23:50 IST, its payment recorded 15 May 00:10 IST.
+      mockPaymentRepo.findCompletedByReference.mockResolvedValue(
+        { createdAt: new Date('2026-05-14T18:40:00.000Z') } as never,
+      );
+
+      const visit = { ...makeVisit(), createdAt: new Date('2026-05-14T18:20:00.000Z') };
+      const result = await service.getParchaPdfContext('t1', visit as never);
+
+      expect(result?.overlay.fieldRows).toContainEqual({ label: 'Valid Till', value: '19 May 2026' });
+    });
+  });
+
+  // ── OPD Valid Till (slip) ↔ payment-validity (fee check) ───────────────────
+  describe('OPD Valid Till — slip and fee check', () => {
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const daysAgo = (n: number) => new Date(Date.now() - n * MS_PER_DAY);
+
+    beforeEach(() => {
+      mockPatientRepo.findByPatientId.mockResolvedValue(BASE_PATIENT as never);
+    });
+
+    test('the slip of the paid visit and the fee check report the same last valid day', async () => {
+      const payment = { paymentId: 'pay-1', referenceId: 'OPD-PAID', createdAt: daysAgo(2) };
+      const paidVisit = { ...makeVisit({ visitId: 'OPD-PAID' }), createdAt: daysAgo(2) };
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(payment as never);
+      mockPaymentRepo.findCompletedByReference.mockResolvedValue(payment as never);
+      mockOpdRepo.findByVisitId.mockResolvedValue(paidVisit as never);
+
+      const validity = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+      const slip     = await service.getVisitValidTill('t1', paidVisit as never);
+
+      expect(slip.getTime()).toBe(validity.validUntil!.getTime());
+      // 5-day window, paid 2 days ago (day 1) → last valid day is 2 days from today.
+      expect(toIstDateKey(slip)).toBe(toIstDateKey(daysAgo(-2)));
+      expect(validity.reason).toBe(OPDPaymentValidityReason.VALID);
+    });
+
+    test('a follow-up visit let through on an earlier payment prints that payment\'s Valid Till, not its own creation date + N', async () => {
+      const payment = { paymentId: 'pay-1', referenceId: 'OPD-PAID', createdAt: daysAgo(3) };
+      mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType.mockResolvedValue(payment as never);
+      mockOpdRepo.findByVisitId.mockResolvedValue(null as never);
+
+      const followUp = { ...makeVisit({ visitId: 'OPD-FOLLOWUP', doctorIds: ['doc-1'] }), createdAt: daysAgo(1) };
+      const slip = await service.getVisitValidTill('t1', followUp as never);
+
+      expect(toIstDateKey(slip)).toBe(toIstDateKey(daysAgo(-1))); // paid 3 days ago + 4 more days
+      expect(mockPaymentRepo.findLatestCompletedByPatientDoctorsAndReferenceType)
+        .toHaveBeenCalledWith('t1', 'PAT-ABCD1234', ['doc-1'], 'OPD_VISIT', followUp.createdAt);
+    });
+
+    test('an earlier payment that had already lapsed on the visit day does not anchor the slip', async () => {
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(
+        { paymentId: 'pay-old', createdAt: daysAgo(30) } as never,
+      );
+
+      const visit = { ...makeVisit(), createdAt: daysAgo(0) };
+      const slip = await service.getVisitValidTill('t1', visit as never);
+
+      expect(toIstDateKey(slip)).toBe(toIstDateKey(daysAgo(-4))); // own creation date is day one
+    });
+
+    test('a pending visit follows a Branding validity change', async () => {
+      mockPaymentRepo.findCompletedByReference.mockResolvedValue({ createdAt: daysAgo(0) } as never);
+      const visit = { ...makeVisit(), createdAt: daysAgo(0) };
+
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+      const before = await service.getVisitValidTill('t1', visit as never);
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 10 });
+      const after = await service.getVisitValidTill('t1', visit as never);
+
+      expect(toIstDateKey(before)).toBe(toIstDateKey(daysAgo(-4)));
+      expect(toIstDateKey(after)).toBe(toIstDateKey(daysAgo(-9)));
+    });
+
+    test('a completed visit keeps its saved Valid Till after a Branding validity change', async () => {
+      const saved = new Date('2026-05-18T18:30:00.000Z');
+      const completed = { ...makeVisit({ status: OPDVisitStatus.COMPLETED }), validTill: saved };
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 30 });
+
+      const slip = await service.getVisitValidTill('t1', completed as never);
+
+      expect(slip).toBe(saved);
+      expect(mockTenantSvc.getOpdSettings).not.toHaveBeenCalled();
+    });
+
+    test('a visit completed before validTill existed is computed (historical record left untouched)', async () => {
+      mockPaymentRepo.findCompletedByReference.mockResolvedValue(
+        { createdAt: new Date('2026-05-15T05:00:00.000Z') } as never,
+      );
+      const legacy = { ...makeVisit({ status: OPDVisitStatus.COMPLETED }), validTill: null };
+
+      const slip = await service.getVisitValidTill('t1', legacy as never);
+
+      expect(toIstDateKey(slip)).toBe('2026-05-19');
+      expect(mockOpdRepo.update).not.toHaveBeenCalled();
+    });
+
+    test('completeVisit saves the Valid Till computed under the current setting', async () => {
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit() as never);
+      mockOpdRepo.update.mockResolvedValue(makeVisit({ status: OPDVisitStatus.COMPLETED }) as never);
+      mockPaymentRepo.findCompletedByReference.mockResolvedValue(
+        { createdAt: new Date('2026-05-15T05:00:00.000Z') } as never,
+      );
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 3 });
+
+      await service.completeVisit('t1', 'OPD-TEST0001', { diagnosis: 'Flu' }, 'doctor-1');
+
+      const saved = (mockOpdRepo.update.mock.calls[0][2] as { validTill: Date }).validTill;
+      expect(saved.toISOString()).toBe('2026-05-16T18:30:00.000Z'); // 17 May 00:00 IST
+    });
+
+    test('the fee check honours the paid visit\'s frozen Valid Till once that visit is completed', async () => {
+      // Paid 2 days ago; completed under a 2-day window (last day: yesterday).
+      // Branding was later raised to 30 days — the patient must still pay.
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(
+        { paymentId: 'pay-1', referenceId: 'OPD-PAID', createdAt: daysAgo(2) } as never,
+      );
+      mockOpdRepo.findByVisitId.mockResolvedValue({
+        ...makeVisit({ visitId: 'OPD-PAID', status: OPDVisitStatus.COMPLETED }),
+        validTill: toIstMidnight(daysAgo(1)),
+      } as never);
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 30 });
+
+      const result = await service.getPaymentValidity('t1', 'PAT-ABCD1234');
+
+      expect(result.reason).toBe(OPDPaymentValidityReason.EXPIRED);
+      expect(toIstDateKey(result.validUntil!)).toBe(toIstDateKey(daysAgo(1)));
+    });
+
+    test('the fee check follows a Branding change while the paid visit is still pending', async () => {
+      mockPaymentRepo.findLatestCompletedByPatientAndReferenceType.mockResolvedValue(
+        { paymentId: 'pay-1', referenceId: 'OPD-PAID', createdAt: daysAgo(6) } as never,
+      );
+      mockOpdRepo.findByVisitId.mockResolvedValue(makeVisit({ visitId: 'OPD-PAID' }) as never);
+
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 5 });
+      expect((await service.getPaymentValidity('t1', 'PAT-ABCD1234')).reason).toBe(OPDPaymentValidityReason.EXPIRED);
+      mockTenantSvc.getOpdSettings.mockResolvedValue({ validityDays: 10 });
+      expect((await service.getPaymentValidity('t1', 'PAT-ABCD1234')).reason).toBe(OPDPaymentValidityReason.VALID);
     });
   });
 });

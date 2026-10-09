@@ -12,16 +12,25 @@ const MASTER = [
   {
     templateKey: 'CBC', testName: 'CBC (Complete Blood Count)',
     clinicalNote: 'CBC evaluates red cells, white cells and platelets.', comment: null,
-    correlateClinically: 'Correlate clinically.', updatedBy: null, updatedByName: null, updatedAt: '2026-10-06T00:00:00.000Z',
+    correlateClinically: 'Correlate clinically.', isEnabled: true,
+    updatedBy: null, updatedByName: null, updatedAt: '2026-10-06T00:00:00.000Z',
   },
   {
     templateKey: 'HIV', testName: 'HIV 1 & 2 Screening',
     clinicalNote: 'HIV screening note.', comment: 'This is a screening test.',
-    correlateClinically: 'Correlate clinically.', updatedBy: null, updatedByName: null, updatedAt: '2026-10-06T00:00:00.000Z',
+    correlateClinically: 'Correlate clinically.', isEnabled: true,
+    updatedBy: null, updatedByName: null, updatedAt: '2026-10-06T00:00:00.000Z',
   },
 ];
 
+const GENERIC = {
+  templateKey: 'GENERIC', testName: 'Other / Unlisted Tests', clinicalNote: null, comment: null,
+  correlateClinically: 'Correlate clinically.', isEnabled: true,
+  updatedBy: null, updatedByName: null, updatedAt: '2026-10-06T00:00:00.000Z',
+};
+
 const mockUpdate = jest.fn();
+let mockMaster: Array<Record<string, unknown>> = MASTER;
 
 jest.mock('@/store/api/lab.api', () => ({
   useListPathologyRequestsQuery:  () => ({ data: undefined, isFetching: false, refetch: jest.fn() }),
@@ -30,6 +39,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useCreateRadiologyRequestMutation: () => [jest.fn(), { isLoading: false }],
   useUploadRadiologyReportMutation:   () => [jest.fn(), { isLoading: false }],
   useEditPathologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
+  useListDisabledPathologyTestsQuery: () => ({ data: [] }),
   useDeletePathologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
   useEditRadiologyRequestMutation:    () => [jest.fn(), { isLoading: false }],
   useDeleteRadiologyRequestMutation:  () => [jest.fn(), { isLoading: false }],
@@ -37,7 +47,7 @@ jest.mock('@/store/api/lab.api', () => ({
   useCollectRadiologyPaymentMutation: () => [jest.fn(), { isLoading: false }],
   useGetPathologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
   useGetRadiologyRequestQuery:        () => ({ data: undefined, isLoading: false }),
-  useListPathologyTestMasterQuery:    () => ({ data: MASTER, isLoading: false, isError: false, refetch: jest.fn() }),
+  useListPathologyTestMasterQuery:    () => ({ data: mockMaster, isLoading: false, isError: false, refetch: jest.fn() }),
   useUpdatePathologyTestMasterMutation: () => [mockUpdate, { isLoading: false }],
 }));
 
@@ -66,6 +76,7 @@ import LabPage from '@/app/(dashboard)/lab/page';
 beforeEach(() => {
   mockUpdate.mockReset();
   mockRole = 'PATHOLOGIST';
+  mockMaster = MASTER;
 });
 
 async function openTestMaster() {
@@ -138,5 +149,48 @@ describe('Lab → Test Master tab', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(within(dialog).getByText('Please Correlate Clinically text is required.')).toBeInTheDocument();
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  test('every test shows an Enabled switch; Other / Unlisted Tests has none', async () => {
+    mockMaster = [...MASTER, GENERIC];
+    await openTestMaster();
+    expect(screen.getByRole('switch', { name: 'Enable CBC (Complete Blood Count)' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: 'Enable HIV 1 & 2 Screening' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('switch', { name: 'Enable Other / Unlisted Tests' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
+  });
+
+  test('toggling an enabled test disables it', async () => {
+    mockUpdate.mockReturnValue({ unwrap: () => Promise.resolve({ ...MASTER[0], isEnabled: false }) });
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('switch', { name: 'Enable CBC (Complete Blood Count)' }));
+    expect(mockUpdate).toHaveBeenCalledWith({ templateKey: 'CBC', isEnabled: false });
+  });
+
+  test('a disabled test is shown as Disabled and toggling re-enables it', async () => {
+    mockMaster = [{ ...MASTER[0], isEnabled: false }, MASTER[1]];
+    mockUpdate.mockReturnValue({ unwrap: () => Promise.resolve(MASTER[0]) });
+    const user = await openTestMaster();
+    const toggle = screen.getByRole('switch', { name: 'Enable CBC (Complete Blood Count)' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(within(screen.getAllByRole('row')[1]).getByText('Disabled')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(mockUpdate).toHaveBeenCalledWith({ templateKey: 'CBC', isEnabled: true });
+  });
+
+  test('shows the error when toggling fails', async () => {
+    mockUpdate.mockReturnValue({ unwrap: () => Promise.reject({ data: { message: 'Forbidden' } }) });
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('switch', { name: 'Enable HIV 1 & 2 Screening' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Forbidden');
+  });
+
+  test('search narrows the list so a test can be found and toggled', async () => {
+    mockUpdate.mockReturnValue({ unwrap: () => Promise.resolve({ ...MASTER[1], isEnabled: false }) });
+    const user = await openTestMaster();
+    await user.type(screen.getByLabelText('Search tests'), 'hiv');
+    expect(screen.getAllByRole('switch')).toHaveLength(1);
+    await user.click(screen.getByRole('switch', { name: 'Enable HIV 1 & 2 Screening' }));
+    expect(mockUpdate).toHaveBeenCalledWith({ templateKey: 'HIV', isEnabled: false });
   });
 });

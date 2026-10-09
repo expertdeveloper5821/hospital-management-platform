@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { ArrowLeft, User, Stethoscope, FileText, Calendar, Activity } from 'lucide-react';
 import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
-import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
-import { formatVitalValue, getPatientCategory, getVitalDefinitions } from '@/lib/patient-vitals';
+import { useListDepartmentsQuery } from '@/store/api/department.api';
+import { formatVitalValue, getVitalDefinitions, getVitalsCategory, getVitalsHeading } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -35,8 +35,9 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 export default function OPDVisitDetailPage({ params }: { params: { visitId: string } }) {
   const { visitId } = params;
   const { data: visit, isLoading, isError } = useGetOPDVisitByIdQuery(visitId);
-  const { data: patient } = useGetPatientByIdQuery(visit?.patientId ?? '', { skip: !visit });
-  const vitalsCategory = getPatientCategory(patient);
+  const { data: departments } = useListDepartmentsQuery();
+  // Vitals set follows the visit's department only, never the patient's age.
+  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments);
 
   if (isLoading) {
     return (
@@ -102,7 +103,7 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
           return parts.length > 0
             ? <DetailRow
                 icon={<Activity className="h-4 w-4" />}
-                label={vitalsCategory === 'PEDIATRIC' ? 'Pediatric Vitals' : 'Non-Pediatric Vitals'}
+                label={getVitalsHeading(vitalsCategory)}
                 value={parts.join(' · ')}
               />
             : null;

@@ -11,14 +11,16 @@ import { tenantService } from '../tenant/tenant.service';
 import { tenantRepository } from '../tenant/tenant.repository';
 import { userRepository } from '../user/user.repository';
 import { toIstMidnight } from '../attendance/attendance.timezone';
+import { computeValidTill, isWithinValidity } from './opd-validity';
 import { IOPDVisit } from './opd.model';
 import { AuditEntityType, PaginatedResult, UserRole } from '../../shared/types/common.types';
 import { auditService } from '../../shared/services/audit.service';
 import { s3Service } from '../../shared/services/s3.service';
 import { stripRichTextTags } from '../../shared/utils/validation';
 import { ParchaOverlayInput } from '../../shared/services/parcha-template.service';
-import { formatPatientAge, isPediatricPatient } from '../../shared/utils/patient-age';
-import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel } from '../../shared/utils/patient-vitals';
+import { formatPatientAge } from '../../shared/utils/patient-age';
+import { formatPatientVitalValue, getPatientVitalDefinitions, getPatientVitalSlipLabel, getVitalsCategory } from '../../shared/utils/patient-vitals';
+import type { VitalsProfile } from '../department/department.model';
 import { NotFoundError, ConflictError, ValidationError } from '../../shared/middleware/error-handler';
 import {
   OPDVisitStatus,
@@ -35,7 +37,6 @@ import {
   OPDQueueResult,
 } from './opd.types';
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 // Shape a partial (or missing) vitals update/read always merges onto — keeps
 // "no vitals recorded yet" and "some vitals cleared" both resolving to the
@@ -144,20 +145,14 @@ function formatParchaDate(date: Date): string {
   });
 }
 
-// The OPD creation date counts as day one. Normalize to the hospital's IST
-// calendar date before adding the remaining configured days.
-function computeValidTill(createdAt: Date, validityDays: number): Date {
-  const d = toIstMidnight(createdAt);
-  d.setTime(d.getTime() + (validityDays - 1) * MS_PER_DAY);
-  return d;
-}
-
 function buildOpdParchaOverlay(
   visit:          IOPDVisit,
   patient:        { fullName: string; patientId: string; dateOfBirth: string | null; age?: number | null; ageUnit?: 'YEARS' | 'MONTHS' | 'DAYS'; gender: string; mobileNumber: string; address: string; bloodGroup?: string | null; createdAt: Date },
   departmentName: string | null,
   doctorNames:    string,
   validityDays:   number,
+  validTill:      Date,
+  vitalsProfile:  VitalsProfile | null = null,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
@@ -168,14 +163,15 @@ function buildOpdParchaOverlay(
   if (patient.address)   fieldRows.push({ label: 'Address',     value: patient.address });
   if (patient.bloodGroup) fieldRows.push({ label: 'Blood Group', value: patient.bloodGroup });
   fieldRows.push({ label: 'Visit Date', value: formatParchaDate(visit.visitDate) });
-  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(computeValidTill(visit.createdAt, validityDays)) });
+  fieldRows.push({ label: 'Valid Till', value: formatParchaDate(validTill) });
   if (doctorNames || departmentName) {
     fieldRows.push({ label: 'Doctor / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  const pediatric = isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth);
-  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(pediatric).map((definition) => ({
-    label: getPatientVitalSlipLabel(definition, pediatric),
+  // Vitals set comes only from the department (never the patient's age).
+  const category = getVitalsCategory(vitalsProfile);
+  const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(category).map((definition) => ({
+    label: getPatientVitalSlipLabel(definition, category),
     value: formatPatientVitalValue(visit.vitals, definition),
   }));
 
@@ -237,11 +233,15 @@ export class OPDService {
     const queueNumber = (await opdRepository.countByDate(tenantId, visitDate)) + 1;
     const visitId = `OPD-${uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase()}`;
 
-    // Department is resolved from the assigned doctor(s), not the patient —
+    // The department picked on the form wins (it also decides which vitals
+    // set the visit records — see department.model.ts's vitalsProfile).
+    // Otherwise it is resolved from the assigned doctor(s), not the patient —
     // patients are no longer department-scoped (see CLAUDE.md), so
     // patient.departmentId is always null for anyone registered since that
     // change. Same "first doctor with a department wins" algorithm IPD uses.
-    const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, doctorIds);
+    if (data.departmentId) await departmentService.assertDepartmentExists(tenantId, data.departmentId);
+    const departmentId = data.departmentId
+      ?? await departmentService.resolveDepartmentFromDoctorIds(tenantId, doctorIds);
 
     // Nurse assignment is optional and can name more than one nurse for the
     // same visit. Omitting it (or submitting an empty list) leaves any
@@ -416,10 +416,12 @@ export class OPDService {
     // file. Role is not re-checked here: the route/controller already limit
     // vitals to DOCTOR/HOSPITAL_ADMIN/NURSE/RECEPTIONIST.
     if (data.vitals !== undefined) {
+      // Below 0.5 kg is only allowed in the Pediatric department (the one
+      // this save leaves the record in) — never decided by patient age.
       if (data.vitals.weight != null && data.vitals.weight < 0.5) {
-        const patient = await patientRepository.findByPatientId(tenantId, effectivePatientId);
-        if (!patient || !isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth)) {
-          throw new ValidationError('Weight must be at least 0.5 kg for non-pediatric patients.');
+        const vitalsProfile = await departmentService.getVitalsProfile(tenantId, data.departmentId ?? visit.departmentId);
+        if (vitalsProfile !== 'PEDIATRIC') {
+          throw new ValidationError('Weight must be at least 0.5 kg outside the Pediatric department.');
         }
       }
       // visit.vitals is a Mongoose subdocument, not a plain object — its
@@ -472,8 +474,15 @@ export class OPDService {
     // diagnosis/prescription/notes/vitals-only saves never do, but a direct
     // API caller might — doesn't re-run the department lookup/duplicate
     // check below or log a no-op departmentId "change" to the audit trail.
+    // An explicitly chosen department (the Edit form's Department dropdown)
+    // wins over the doctor-derived one, same as at creation.
     const doctorIdsChanged = data.doctorIds !== undefined && !isSameFieldValue(visit.doctorIds, data.doctorIds);
-    if (doctorIdsChanged) {
+    if (data.departmentId && data.departmentId !== visit.departmentId) {
+      await departmentService.assertDepartmentExists(tenantId, data.departmentId);
+      previousValue.departmentId = visit.departmentId;
+      newValue.departmentId      = data.departmentId;
+      updateData.departmentId    = data.departmentId;
+    } else if (doctorIdsChanged && !data.departmentId) {
       previousValue.departmentId = visit.departmentId;
       const departmentId = await departmentService.resolveDepartmentFromDoctorIds(tenantId, data.doctorIds!);
       newValue.departmentId   = departmentId;
@@ -634,9 +643,12 @@ export class OPDService {
       throw new ConflictError(`Cannot complete a visit with status ${visit.status}`);
     }
 
+    // Freeze the slip's Valid Till under the validity setting in force now, so
+    // a later Branding change never rewrites a completed visit.
     const updateData: Partial<IOPDVisit> = {
       status:    OPDVisitStatus.COMPLETED,
       diagnosis: data.diagnosis,
+      validTill: await this.getVisitValidTill(tenantId, visit),
     } as Partial<IOPDVisit>;
 
     // diagnosis is mandatory to complete a visit (completeVisitSchema enforces
@@ -862,17 +874,72 @@ export class OPDService {
     ]);
     if (!patient) throw new NotFoundError('Patient not found');
 
-    const departmentName = visit.departmentId
-      ? (await departmentRepository.findById(tenantId, visit.departmentId))?.name ?? null
+    const department = visit.departmentId
+      ? await departmentRepository.findById(tenantId, visit.departmentId)
       : null;
+    const departmentName = department?.name ?? null;
     const doctorNameMap = await userRepository.findNamesByIds(tenantId, visit.doctorIds ?? []);
     const doctorNames = (visit.doctorIds ?? [])
       .map((id) => doctorNameMap.get(id))
       .filter((n): n is string => !!n)
       .join(', ');
 
-    const overlay = buildOpdParchaOverlay(visit, patient, departmentName, doctorNames, validityDays);
+    const validTill = await this.getVisitValidTill(tenantId, visit, validityDays);
+    const overlay = buildOpdParchaOverlay(
+      visit, patient, departmentName, doctorNames, validityDays, validTill, department?.vitalsProfile ?? null,
+    );
     return { templateBytes, overlay };
+  }
+
+  // ─── OPD slip Valid Till ───────────────────────────────────────────────────
+  //
+  // The date printed on a visit's slip, using the same rule as
+  // getPaymentValidity (computeValidTill) so the slip and the fee check always
+  // agree. Anchored on the payment that covers the visit: its own completed
+  // OPD payment, else the earlier payment it was let through on (still valid on
+  // the visit's IST creation day), else — a free/unpaid visit — the visit's
+  // own creation date. A COMPLETED visit returns its frozen validTill; a
+  // pending one follows the current Branding setting. A visit completed before
+  // validTill existed has none saved and is computed the same way.
+  async getVisitValidTill(tenantId: string, visit: IOPDVisit, validityDays?: number): Promise<Date> {
+    if (visit.status === OPDVisitStatus.COMPLETED && visit.validTill) return visit.validTill;
+
+    const days = validityDays ?? (await tenantService.getOpdSettings(tenantId)).validityDays;
+
+    const ownPayment = await paymentRepository.findCompletedByReference(
+      tenantId, PaymentReferenceType.OPD_VISIT, visit.visitId,
+    );
+    if (ownPayment) return computeValidTill(ownPayment.createdAt, days);
+
+    const doctorIds = visit.doctorIds ?? [];
+    const coveringPayment = doctorIds.length > 0
+      ? await paymentRepository.findLatestCompletedByPatientDoctorsAndReferenceType(
+          tenantId, visit.patientId, doctorIds, PaymentReferenceType.OPD_VISIT, visit.createdAt,
+        )
+      : await paymentRepository.findLatestCompletedByPatientAndReferenceType(
+          tenantId, visit.patientId, PaymentReferenceType.OPD_VISIT, visit.createdAt,
+        );
+    if (coveringPayment) {
+      const coveredUntil = await this.getPaymentValidTill(tenantId, coveringPayment, days);
+      if (isWithinValidity(coveredUntil, visit.createdAt)) return coveredUntil;
+    }
+
+    return computeValidTill(visit.createdAt, days);
+  }
+
+  // Last day a completed OPD payment covers. Once the visit it paid for is
+  // COMPLETED, that visit's frozen validTill governs (so the fee check matches
+  // the printed slip); until then it follows the current setting.
+  private async getPaymentValidTill(
+    tenantId:     string,
+    payment:      { createdAt: Date; referenceId?: string | null },
+    validityDays: number,
+  ): Promise<Date> {
+    if (payment.referenceId) {
+      const paidVisit = await opdRepository.findByVisitId(tenantId, payment.referenceId);
+      if (paidVisit?.status === OPDVisitStatus.COMPLETED && paidVisit.validTill) return paidVisit.validTill;
+    }
+    return computeValidTill(payment.createdAt, validityDays);
   }
 
   async getPatientHistory(
@@ -967,11 +1034,13 @@ export class OPDService {
   // ─── OPD payment validity (Hospital-configurable validity window) ──────────
   //
   // Rule: a completed OPD payment covers this patient *for the doctor(s) it
-  // was paid against* for `opdSettings.validityDays` calendar days *after*
-  // the day it was made (inclusive of both the payment day and the last
-  // covered day) — e.g. a payment made on day 0 with validityDays=15 covers
-  // days 0 through 15 inclusive; day 16 is the first day a new payment is
-  // required. Day boundaries are computed in IST (hospital-local), matching
+  // was paid against* for `opdSettings.validityDays` calendar days, counting
+  // the payment day as day one (see computeValidTill in opd-validity.ts — the
+  // same rule the OPD slip's Valid Till uses) — e.g. a payment made on day 1
+  // with validityDays=5 covers days 1 through 5 inclusive; day 6 is the first
+  // day a new payment is required. Once the visit the payment was made for is
+  // COMPLETED, its frozen validTill governs instead of the current setting.
+  // Day boundaries are computed in IST (hospital-local), matching
   // the rest of the day-bucketed logic in this codebase (see
   // attendance.timezone.ts), so a server running in UTC never mis-expires a
   // payment near midnight IST.
@@ -1027,11 +1096,8 @@ export class OPDService {
       };
     }
 
-    const paymentDay = toIstMidnight(latestPayment.createdAt);
-    const validUntil = new Date(paymentDay.getTime() + validityDays * MS_PER_DAY);
-    const today       = toIstMidnight(new Date());
-
-    const isValid = today.getTime() <= validUntil.getTime();
+    const validUntil = await this.getPaymentValidTill(tenantId, latestPayment, validityDays);
+    const isValid    = isWithinValidity(validUntil);
 
     return {
       patientId,
