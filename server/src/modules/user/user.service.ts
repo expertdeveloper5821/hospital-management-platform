@@ -27,6 +27,15 @@ import { getFrontendBaseUrl } from '../../shared/utils/frontend-url';
 // provisioned only through tenant onboarding.
 const NON_ASSIGNABLE_ROLES: readonly UserRole[] = [UserRole.SUPER_ADMIN, UserRole.HOSPITAL_ADMIN];
 
+/**
+ * Canonical stored form of a UKMC registration number: trimmed, uppercased,
+ * separator runs (spaces / hyphens) collapsed to a single space. Mirrors the
+ * client-side normalisation and the controller's ukmcNoSchema transform.
+ */
+function normaliseUkmcNo(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+|-{2,}/g, ' ');
+}
+
 export class UserService {
   async createUser(tenantId: string, data: CreateUserRequest, createdBy: string): Promise<IUser> {
     // SUPER_ADMIN / HOSPITAL_ADMIN cannot be created via tenant user-management —
@@ -39,6 +48,13 @@ export class UserService {
     const existing = await userRepository.findByEmail(tenantId, data.email);
     if (existing) throw new ConflictError('A user with this email already exists in this tenant');
 
+    // UKMC No. is a doctor-only attribute and mandatory for DOCTOR.
+    if (data.role === UserRole.DOCTOR && (!data.ukmcNo || !data.ukmcNo.trim().replace(/\s+|-{2,}/g, ' '))) {
+      throw new ValidationError('UKMC No. is required when the user\u2019s role is DOCTOR', {
+        code: 'UKMC_REQUIRED',
+      });
+    }
+
     // Generate temporary password
     const tempPassword = crypto.randomBytes(8).toString('hex'); // 16-char hex
     const passwordHash = await bcrypt.hash(tempPassword, config.bcryptRounds);
@@ -50,6 +66,13 @@ export class UserService {
       passwordHash,
       role:         data.role,
       departmentIds: data.departmentIds ?? [],
+      // UKMC No. is a doctor-only attribute: store it for DOCTOR (normalise
+      // empty/zwhitespace-passthrough to null), clear it for everyone else.
+      // Canonical form: trimmed, uppercased, separator runs collapsed to a
+      // single space (mirrors the controller's ukmcNoSchema transform).
+      ukmcNo:       data.role === UserRole.DOCTOR && data.ukmcNo?.trim()
+        ? normaliseUkmcNo(data.ukmcNo)
+        : null,
       isActive:     true,
       isFirstLogin: true,
     });
@@ -566,23 +589,85 @@ export class UserService {
     const user = await userRepository.findById(tenantId, userId);
     if (!user) throw new NotFoundError('User not found');
 
+    // A user cannot change their own role (mirror of updateUserRole's guard,
+    // checked here because the combined PATCH may include a role change).
+    if (data.role !== undefined && data.role !== user.role) {
+      if (userId === requestedBy) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, data.role, requestedBy, 'SELF_ROLE_CHANGE');
+        throw new ForbiddenError('You cannot change your own role.');
+      }
+      if (NON_ASSIGNABLE_ROLES.includes(data.role)) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, data.role, requestedBy, 'ROLE_NOT_ASSIGNABLE');
+        throw new ForbiddenError(`The ${data.role} role cannot be assigned to a user.`);
+      }
+      if (!user.isActive) {
+        await this.logRoleChangeConflict(tenantId, userId, user.role, data.role, requestedBy, 'USER_INACTIVE');
+        throw new ConflictError(
+          'Cannot change the role of an inactive user. Reactivate them first, then retry.',
+          { code: 'USER_INACTIVE', userId, currentRole: user.role, requestedRole: data.role },
+        );
+      }
+    }
+
+    // Resolve the role AFTER any role change in this same request so the
+    // ukmcNo consistency rule applies to the final shape.
+    const resolvedRole = data.role ?? user.role;
+
+    if (data.role !== undefined && data.role !== user.role) {
+      // updateUserRole carries the full conflict-guard suite (last-admin,
+      // doctor active patients, nurse duty, etc.), the audit entry with the
+      // role-change conflict bookkeeping, and the re-login websocket signal.
+      await this.updateUserRole(tenantId, userId, data.role, requestedBy);
+    }
+
     if (data.email && data.email.toLowerCase() !== user.email) {
       const conflict = await userRepository.findByEmail(tenantId, data.email);
       if (conflict) throw new ConflictError('A user with this email already exists in this tenant');
     }
 
-    const updated = await userRepository.updateProfile(tenantId, userId, data);
+    // ukmcNo↔role consistency: a DOCTOR must have a UKMC No.; any non-doctor
+    // gets the field cleared regardless of what was sent. When the role is
+    // unchanged and no ukmcNo was sent, no candidate is required and the
+    // stored value is left alone.
+    const update: UpdateProfileRequest = { ...data, name: data.name ?? undefined, email: data.email ?? undefined };
+    delete (update as { role?: UserRole }).role; // role already applied via updateUserRole
+    if (resolvedRole === UserRole.DOCTOR) {
+      // Candidate value: what was sent wins; otherwise the stored value when
+      // the role is unchanged, or nothing when the role is newly DOCTOR.
+      const candidate = update.ukmcNo !== undefined
+        ? update.ukmcNo
+        : (data.role !== undefined && data.role !== user.role ? null : user.ukmcNo);
+      if (!candidate || (typeof candidate === 'string' && !candidate.trim().replace(/\s+|-{2,}/g, ' '))) {
+        throw new ValidationError('UKMC No. is required when the user\u2019s role is DOCTOR', {
+          code: 'UKMC_REQUIRED',
+        });
+      }
+      // Canonical form: trimmed, uppercased, separator runs collapsed (same
+      // normalisation as createUser).
+      update.ukmcNo = normaliseUkmcNo(candidate as string);
+    } else {
+      update.ukmcNo = null;
+    }
+
+    const updated = await userRepository.updateProfile(tenantId, userId, update);
     if (!updated) throw new NotFoundError('User not found');
 
-    await auditService.log({
-      entityType:    AuditEntityType.USER_ACCOUNT,
-      entityId:      userId,
-      action:        'UPDATE',
-      userId:        requestedBy,
-      tenantId,
-      previousValue: { name: user.name, email: user.email },
-      newValue:      data as Record<string, unknown>,
-    });
+    const changedProfile =
+      (update.name !== undefined && update.name !== user.name) ||
+      (update.email !== undefined && update.email.toLowerCase() !== user.email) ||
+      (update.ukmcNo !== undefined && update.ukmcNo !== user.ukmcNo) ||
+      update.departmentIds !== undefined;
+    if (changedProfile) {
+      await auditService.log({
+        entityType:    AuditEntityType.USER_ACCOUNT,
+        entityId:      userId,
+        action:        'UPDATE',
+        userId:        requestedBy,
+        tenantId,
+        previousValue: { name: user.name, email: user.email, ukmcNo: user.ukmcNo },
+        newValue:      data as Record<string, unknown>,
+      });
+    }
 
     return updated;
   }

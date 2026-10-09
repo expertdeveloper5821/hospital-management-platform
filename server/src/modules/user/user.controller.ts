@@ -19,11 +19,33 @@ const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   'image/webp': 'webp',
 };
 
+// Uttarakhand Medical Council Registration No. — uppercase alphanumeric with
+// optional hyphens/spaces as separators, 1–20 chars after normalisation.
+// Trimmed + uppercased + internal space/hyphen runs collapsed here so both API
+// paths store the same canonical form (e.g. 'uk reg-12345' → 'UK REG-12345');
+// empty string is rejected (use undefined/null to clear).
+const ukmcNoSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .transform((v) => v.replace(/\s+|-{2,}/g, ' ')) // collapse separator runs
+  .refine(
+    (v) => v.length <= 20,
+    { message: 'UKMC No. must be at most 20 characters' },
+  )
+  .refine(
+    (v) => /^[A-Z0-9](?:[A-Z0-9 -]*[A-Z0-9])?$/.test(v),
+    { message: 'UKMC No. must contain only letters, digits, hyphens, and spaces, starting/ending with a letter or digit' },
+  );
+
+const ukmcNoOptionalSchema = z.union([ukmcNoSchema, z.null()]).optional();
+
 const createUserSchema = z.object({
   email:        z.string().email().max(254),
   name:         z.string().min(1).max(200),
   role:         z.enum(Object.values(UserRole) as [string, ...string[]]),
   departmentIds: z.array(z.string().min(1)).optional(),
+  ukmcNo:       ukmcNoSchema.optional(),
 });
 
 const updateRoleSchema = z.object({
@@ -173,7 +195,7 @@ export async function createUser(req: Request, res: Response, next: NextFunction
     const body = createUserSchema.safeParse(req.body);
     if (!body.success) throw new ValidationError('Invalid request', { errors: body.error.flatten() });
     const user = await userService.createUser(req.user!.tenantId!, body.data as Parameters<typeof userService.createUser>[1], req.user!.userId);
-    res.status(201).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, departmentIds: user.departmentIds ?? [] } });
+    res.status(201).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, ukmcNo: user.ukmcNo ?? null, departmentIds: user.departmentIds ?? [] } });
   } catch (err) { next(err); }
 }
 
@@ -224,6 +246,7 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
       name:            user.name,
       phone:           user.phone ?? null,
       role:            user.role,
+      ukmcNo:          user.ukmcNo ?? null,
       departmentIds:   user.departmentIds ?? [],
       profileImageUrl: user.profileImageUrl ?? null,
       isActive:        user.isActive,
@@ -244,7 +267,7 @@ export async function getUserById(req: Request, res: Response, next: NextFunctio
   try {
     const { userId } = userIdParamSchema.parse(req.params);
     const user = await userService.getUserById(req.user!.tenantId!, userId);
-    res.status(200).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, departmentIds: user.departmentIds ?? [], isActive: user.isActive } });
+    res.status(200).json({ status: 'success', data: { userId: user._id, email: user.email, name: user.name, role: user.role, ukmcNo: user.ukmcNo ?? null, departmentIds: user.departmentIds ?? [], isActive: user.isActive } });
   } catch (err) { next(err); }
 }
 
@@ -277,9 +300,16 @@ export async function reactivateUser(req: Request, res: Response, next: NextFunc
 const updateProfileSchema = z.object({
   name:  z.string().min(1).max(200).optional(),
   email: z.string().email().max(254).optional(),
-}).refine((d) => d.name !== undefined || d.email !== undefined, {
-  message: 'At least one of name or email must be provided',
-});
+  role:  z.enum(Object.values(UserRole) as [string, ...string[]]).optional(),
+  ukmcNo: ukmcNoOptionalSchema,
+  departmentIds: z.array(z.string().min(1)).optional(),
+}).refine(
+  (d) => d.name !== undefined || d.email !== undefined || d.role !== undefined ||
+         d.ukmcNo !== undefined || d.departmentIds !== undefined,
+  {
+    message: 'At least one of name, email, role, ukmcNo, or departmentIds must be provided',
+  },
+);
 
 export async function updateUserProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -290,12 +320,12 @@ export async function updateUserProfile(req: Request, res: Response, next: NextF
     const user = await userService.updateUserProfile(
       req.user!.tenantId!,
       userId,
-      body.data,
+      body.data as Parameters<typeof userService.updateUserProfile>[2],
       req.user!.userId,
     );
     res.status(200).json({
       status: 'success',
-      data: { userId: user._id, email: user.email, name: user.name, role: user.role, isActive: user.isActive },
+      data: { userId: user._id, email: user.email, name: user.name, role: user.role, ukmcNo: user.ukmcNo ?? null, departmentIds: user.departmentIds ?? [], isActive: user.isActive },
     });
   } catch (err) { next(err); }
 }

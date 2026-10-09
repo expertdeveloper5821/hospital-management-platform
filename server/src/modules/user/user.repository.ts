@@ -128,6 +128,11 @@ export class UserRepository {
     const update: Partial<IUser> = {};
     if (data.name)  update.name  = data.name;
     if (data.email) update.email = data.email.toLowerCase();
+    // ukmcNo participates in the update only when explicitly sent: a string
+    // sets/overwrites it (already normalized by the service), null clears it.
+    // When absent, the stored value is untouched.
+    if (data.ukmcNo !== undefined) update.ukmcNo = data.ukmcNo;
+    if (data.departmentIds !== undefined) update.departmentIds = data.departmentIds;
     return UserModel.findOneAndUpdate({ _id: userId, tenantId }, update, { new: true });
   }
 

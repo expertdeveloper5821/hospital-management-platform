@@ -9,6 +9,7 @@ function normaliseUser(u: any): UserResponse {
     email:        u.email  ?? '',
     name:         typeof u.name === 'string' ? u.name : '',
     role:         u.role,
+    ukmcNo:       typeof u.ukmcNo === 'string' && u.ukmcNo ? u.ukmcNo : null,
     departmentIds: Array.isArray(u.departmentIds) ? u.departmentIds : [],
     isActive:     u.isActive     ?? true,
     isFirstLogin: u.isFirstLogin ?? false,
@@ -21,6 +22,18 @@ interface CreateUserRequest {
   email:        string;
   name:         string;
   role:         UserRole;
+  departmentIds?: string[];
+  /** Uttarakhand Medical Council Registration No. — required when role is DOCTOR. */
+  ukmcNo?:      string;
+}
+
+export interface UpdateUserRequest {
+  /** All fields are replaced with the values sent (partial union endpoint). */
+  name?:    string;
+  email?:   string;
+  role?:    UserRole;
+  /** Omit to leave the stored value untouched; send null to clear. */
+  ukmcNo?:  string | null;
   departmentIds?: string[];
 }
 
@@ -119,6 +132,14 @@ export const userApi = baseApi.injectEndpoints({
       invalidatesTags: ['User'],
     }),
 
+    // Combined edit (name + email + role + ukmcNo) for the Edit User dialog.
+    // Tag invalidation refetches both listUsers and getUserById on success.
+    updateUser: build.mutation<UserResponse, { userId: string; body: UpdateUserRequest }>({
+      query: ({ userId, body }) => ({ url: `/api/users/${userId}`, method: 'PATCH', body }),
+      transformResponse: (raw: ApiSuccess<UserResponse>) => normaliseUser(raw.data),
+      invalidatesTags: ['User'],
+    }),
+
     deactivateUser: build.mutation<{ message: string }, string>({
       query: (userId) => ({ url: `/api/users/${userId}/deactivate`, method: 'PATCH' }),
       transformResponse: (raw: ApiSuccess<{ message: string }>) => raw.data,
@@ -141,6 +162,7 @@ export const {
   useListUsersQuery,
   useGetUserByIdQuery,
   useCreateUserMutation,
+  useUpdateUserMutation,
   useUpdateUserRoleMutation,
   useUpdateUserEmailMutation,
   useDeactivateUserMutation,
