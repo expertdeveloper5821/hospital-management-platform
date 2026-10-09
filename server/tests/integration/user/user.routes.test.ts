@@ -100,14 +100,16 @@ describe('POST /api/users', () => {
     const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
     const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
 
+    // UKMC No. is mandatory for doctors (FEATURE: ukmcNo).
     const res = await request(app)
       .post('/api/users')
       .set(bearer(token))
-      .send({ email: 'newdoc@h.com', name: 'Dr New', role: UserRole.DOCTOR });
+      .send({ email: 'newdoc@h.com', name: 'Dr New', role: UserRole.DOCTOR, ukmcNo: 'UK-REG-00001' });
 
     expect(res.status).toBe(201);
     expect(res.body.data.email).toBe('newdoc@h.com');
     expect(res.body.data.role).toBe(UserRole.DOCTOR);
+    expect(res.body.data.ukmcNo).toBe('UK-REG-00001');
   });
 
   test('403 — cannot create a user with the Hospital Admin role', async () => {
@@ -158,13 +160,14 @@ describe('POST /api/users', () => {
     await request(app)
       .post('/api/users')
       .set(bearer(token))
-      .send({ email: 'dup@h.com', name: 'First', role: UserRole.DOCTOR });
+      .send({ email: 'dup@h.com', name: 'First', role: UserRole.DOCTOR, ukmcNo: 'UK-DUP-00001' });
 
-    // Duplicate
+    // Duplicate — role DOCTOR with a different ukmcNo: email is the conflict
+    // narrowly scoped to the tenant (409, not the doctor-ukmc rule).
     const res = await request(app)
       .post('/api/users')
       .set(bearer(token))
-      .send({ email: 'dup@h.com', name: 'Second', role: UserRole.DOCTOR });
+      .send({ email: 'dup@h.com', name: 'Second', role: UserRole.DOCTOR, ukmcNo: 'UK-DUP-00002' });
 
     expect(res.status).toBe(409);
   });
@@ -188,6 +191,51 @@ describe('POST /api/users', () => {
       .send({ email: 'x@h.com', name: 'X', role: UserRole.DOCTOR });
 
     expect(res.status).toBe(401);
+  });
+
+  // ── ukmcNo: separator normalisation + doctor-conditional requirement ────────
+
+  test('400 — doctor creation without ukmcNo is rejected', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'noukmc@h.com', name: 'Dr No UKMC', role: UserRole.DOCTOR });
+
+    expect(res.status).toBe(400);
+  });
+
+  test('201 — doctor creation normalises hyphens/spaces (canonical: uppercased, collapsed separators)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'sepdoc@h.com', name: 'Dr Separators', role: UserRole.DOCTOR, ukmcNo: '  uk reg--12345  ' });
+
+    expect(res.status).toBe(201);
+    // Canonicalisation: trimmed, uppercased; a hyphen run ≥2 collapses to one
+    // space (a separator); single hyphens are kept as separators.
+    expect(res.body.data.ukmcNo).toBe('UK REG 12345');
+  });
+
+  test('201 — non-doctor ignores ukmcNo and stores null', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .post('/api/users')
+      .set(bearer(token))
+      .send({ email: 'n2@h.com', name: 'Nurse Two', role: UserRole.NURSE, ukmcNo: 'UK-SHOULD-BE-IGNORED' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.ukmcNo).toBeNull();
   });
 
   test('403 — Doctor role cannot create users', async () => {
@@ -992,5 +1040,150 @@ describe('PATCH /api/users/:userId/role — doctor restriction', () => {
     expect(visit?.doctorIds).toEqual([doctorIdStr]);
     const admission = await IPDAdmissionModel.findOne({ tenantId, admissionId: 'adm-hist-02' });
     expect(admission?.assignedDoctorIds).toEqual([doctorIdStr]);
+  });
+});
+
+// ─── PATCH /api/users/:userId — combined edit (name/email/role/ukmcNo) ─────────
+describe('PATCH /api/users/:userId — combined update', () => {
+  test('200 — updates name and email in one call', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const target = await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${target._id}`)
+      .set(bearer(token))
+      .send({ name: 'Nina Rao-Verma', email: 'nina.verma@h.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ name: 'Nina Rao-Verma', email: 'nina.verma@h.com' });
+  });
+
+  test('200 — doctor edit normalises hyphenated ukmcNo to canonical form', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${doctor._id}`)
+      .set(bearer(token))
+      .send({ ukmcNo: 'uk reg--98765' });
+
+    expect(res.status).toBe(200);
+    // Same canonicalisation as create: hyphen runs collapse to one space.
+    expect(res.body.data.ukmcNo).toBe('UK REG 98765');
+  });
+
+  test('200 — role change away from DOCTOR clears ukmcNo', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await UserModel.findByIdAndUpdate(doctor._id, { ukmcNo: 'UK-OLD-00001' });
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${doctor._id}`)
+      .set(bearer(token))
+      .send({ role: UserRole.NURSE });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe(UserRole.NURSE);
+    expect(res.body.data.ukmcNo).toBeNull();
+  });
+
+  test('200 — role change into DOCTOR stores the provided ukmcNo', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenant._id.toString(), 'n@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurse._id}`)
+      .set(bearer(token))
+      .send({ role: UserRole.DOCTOR, ukmcNo: 'uk-reg-77777' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe(UserRole.DOCTOR);
+    expect(res.body.data.ukmcNo).toBe('UK-REG-77777');
+  });
+
+  test('400 — clearing ukmcNo on a doctor is rejected (UKMC_REQUIRED)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await UserModel.findByIdAndUpdate(doctor._id, { ukmcNo: 'UK-OLD-00002' });
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${doctor._id}`)
+      .set(bearer(token))
+      .send({ ukmcNo: null });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.code).toBe('UKMC_REQUIRED');
+  });
+
+  test('400 — role change into DOCTOR without ukmcNo is rejected (UKMC_REQUIRED)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurse  = await seedUser(tenant._id.toString(), 'n2@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurse._id}`)
+      .set(bearer(token))
+      .send({ role: UserRole.DOCTOR });
+
+    expect(res.status).toBe(400);
+    expect(res.body.details.code).toBe('UKMC_REQUIRED');
+  });
+
+  test('400 — separator-only ukmcNo on a doctor is rejected (UKMC_REQUIRED)', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const doctor = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    await UserModel.findByIdAndUpdate(doctor._id, { ukmcNo: 'UK-OLD-00003' });
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${doctor._id}`)
+      .set(bearer(token))
+      .send({ ukmcNo: '  --  ' });
+
+    // A separator-only value never survives the schema's canonical form
+    // (collapses to a bare space, which fails the shape regex) — rejected
+    // with 400 by the Zod layer before the service's UKMC_REQUIRED check.
+    expect(res.status).toBe(400);
+  });
+
+  test('409 — duplicate email within the tenant still conflicts via combined update', async () => {
+    const tenant = await seedTenant();
+    const admin  = await seedUser(tenant._id.toString(), 'admin@h.com', UserRole.HOSPITAL_ADMIN);
+    const nurseA = await seedUser(tenant._id.toString(), 'a@h.com', UserRole.NURSE);
+    await seedUser(tenant._id.toString(), 'taken@h.com', UserRole.NURSE);
+    const token  = tokenFor(admin._id.toString(), tenant._id.toString(), UserRole.HOSPITAL_ADMIN);
+
+    const res = await request(app)
+      .patch(`/api/users/${nurseA._id}`)
+      .set(bearer(token))
+      .send({ email: 'taken@h.com' });
+
+    expect(res.status).toBe(409);
+  });
+
+  test('403 — doctor role cannot use the combined update endpoint', async () => {
+    const tenant = await seedTenant();
+    const actor  = await seedUser(tenant._id.toString(), 'doc@h.com', UserRole.DOCTOR);
+    const target = await seedUser(tenant._id.toString(), 'nurse@h.com', UserRole.NURSE);
+    const token  = tokenFor(actor._id.toString(), tenant._id.toString(), UserRole.DOCTOR);
+
+    const res = await request(app)
+      .patch(`/api/users/${target._id}`)
+      .set(bearer(token))
+      .send({ name: 'Nope' });
+
+    expect(res.status).toBe(403);
   });
 });

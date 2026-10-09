@@ -37,6 +37,8 @@ export interface IUser extends Document {
   tenantId: string;
   email: string;
   name: string;
+  /** Uttarakhand Medical Council Registration No. — set only for DOCTOR role, else null. */
+  ukmcNo: string | null;
   phone: string | null;
   profileImageUrl: string | null;
   passwordHash: string;
@@ -60,6 +62,7 @@ const UserSchema = new Schema<IUser>(
     phone: { type: String, default: null, trim: true },
     profileImageUrl: { type: String, default: null },
     passwordHash: { type: String, required: true },
+    ukmcNo: { type: String, default: null, trim: true, uppercase: true },
     role:         { type: String, required: true, enum: Object.values(UserRole) },
     departmentIds: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },

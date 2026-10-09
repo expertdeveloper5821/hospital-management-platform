@@ -26,6 +26,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ValidationError,
 } from '../../../src/shared/middleware/error-handler';
 
 const mockRepo         = userRepository        as jest.Mocked<typeof userRepository>;
@@ -68,7 +69,7 @@ describe('UserService — example-based', () => {
 
     const result = await service.createUser(
       't1',
-      { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR },
+      { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR, ukmcNo: 'UK-REG-12345' },
       'admin-1',
     );
 
@@ -85,7 +86,7 @@ describe('UserService — example-based', () => {
     mockRepo.findByEmail.mockResolvedValue({ email: 'dr@h.com' } as never);
 
     await expect(
-      service.createUser('t1', { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR }, 'admin-1'),
+      service.createUser('t1', { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR, ukmcNo: 'UK-REG-12345' }, 'admin-1'),
     ).rejects.toThrow(ConflictError);
 
     expect(mockRepo.save).not.toHaveBeenCalled();
@@ -675,6 +676,166 @@ describe('UserService — example-based', () => {
       await expect(service.deactivateUser('t1', 'u-1', 'admin-1')).resolves.toBeUndefined();
       expect(mockIpdRepo.findWardIdsByNurse).toHaveBeenCalledWith('t1', 'u-1', { activeOnly: true });
       expect(mockRepo.setActive).toHaveBeenCalledWith('t1', 'u-1', false);
+    });
+  });
+
+  // ── ukmcNo (Uttarakhand Medical Council Registration No.) ────────────────────
+  describe('ukmcNo — createUser', () => {
+    test('DOCTOR creates require ukmcNo (UKMC_REQUIRED)', async () => {
+      mockRepo.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.createUser('t1', { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR }, 'admin-1'),
+      ).rejects.toMatchObject({ details: { code: 'UKMC_REQUIRED' } });
+      expect(mockRepo.save).not.toHaveBeenCalled();
+    });
+
+    test('DOCTOR with ukmcNo normalises to trimmed uppercase', async () => {
+      mockRepo.findByEmail.mockResolvedValue(null);
+      const saved = { _id: { toString: () => 'u3' }, email: 'dr@h.com', role: UserRole.DOCTOR };
+      mockRepo.save.mockResolvedValue(saved as never);
+      mockEmailSvc.sendWelcomeEmail.mockResolvedValue(undefined);
+
+      await service.createUser(
+        't1',
+        { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR, ukmcNo: '  uk-reg-12345  ' },
+        'admin-1',
+      );
+
+      expect(mockRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ role: UserRole.DOCTOR, ukmcNo: 'UK-REG-12345' }),
+      );
+    });
+
+    test('DOCTOR with empty-string ukmcNo is rejected', async () => {
+      mockRepo.findByEmail.mockResolvedValue(null);
+
+      await expect(
+        service.createUser('t1', { email: 'dr@h.com', name: 'Dr John', role: UserRole.DOCTOR, ukmcNo: '   ' }, 'admin-1'),
+      ).rejects.toMatchObject({ details: { code: 'UKMC_REQUIRED' } });
+    });
+
+    test('non-DOCTOR roles ignore ukmcNo and store null', async () => {
+      mockRepo.findByEmail.mockResolvedValue(null);
+      const saved = { _id: { toString: () => 'u4' }, email: 'n@h.com', role: UserRole.NURSE };
+      mockRepo.save.mockResolvedValue(saved as never);
+      mockEmailSvc.sendWelcomeEmail.mockResolvedValue(undefined);
+
+      await service.createUser(
+        't1',
+        { email: 'n@h.com', name: 'Nurse Joy', role: UserRole.NURSE, ukmcNo: 'UK-REG-99999' },
+        'admin-1',
+      );
+
+      expect(mockRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ role: UserRole.NURSE, ukmcNo: null }),
+      );
+    });
+  });
+
+  describe('ukmcNo + combined update — updateUserProfile', () => {
+    function doctorUser(overrides: Record<string, unknown> = {}) {
+      return {
+        _id: { toString: () => 'u-doc' },
+        name: 'Dr John',
+        email: 'dr@h.com',
+        role: UserRole.DOCTOR,
+        ukmcNo: 'UK-REG-12345',
+        isActive: true,
+        departmentIds: [],
+        ...overrides,
+      } as never;
+    }
+
+    test('editing an existing doctor without changing role or ukmcNo succeeds', async () => {
+      mockRepo.findById.mockResolvedValue(doctorUser());
+      mockRepo.updateProfile.mockResolvedValue(doctorUser({ name: 'Dr John Doe' }));
+
+      await service.updateUserProfile('t1', 'u-doc', { name: 'Dr John Doe' }, 'admin-1');
+
+      expect(mockRepo.updateProfile).toHaveBeenCalledWith('t1', 'u-doc', { name: 'Dr John Doe', ukmcNo: 'UK-REG-12345' });
+    });
+
+    test('DOCTOR cannot be edited without a ukmcNo when clearing it (UKMC_REQUIRED)', async () => {
+      mockRepo.findById.mockResolvedValue(doctorUser());
+
+      await expect(
+        service.updateUserProfile('t1', 'u-doc', { ukmcNo: null }, 'admin-1'),
+      ).rejects.toMatchObject({ details: { code: 'UKMC_REQUIRED' } });
+      expect(mockRepo.updateProfile).not.toHaveBeenCalled();
+    });
+
+    test('role change away from DOCTOR clears ukmcNo (forced null)', async () => {
+      mockRepo.findById.mockResolvedValue(doctorUser());
+      mockRepo.countActiveAdmins.mockResolvedValue(2);
+      mockRepo.updateRole.mockResolvedValue(undefined);
+      mockRepo.setActive.mockResolvedValue(undefined);
+      mockRepo.updateProfile.mockResolvedValue(doctorUser({ role: UserRole.NURSE, ukmcNo: null }));
+
+      await service.updateUserProfile('t1', 'u-doc', { role: UserRole.NURSE }, 'admin-1');
+
+      expect(mockRepo.updateRole).toHaveBeenCalledWith('t1', 'u-doc', UserRole.NURSE);
+      expect(mockRepo.updateProfile).toHaveBeenCalledWith('t1', 'u-doc', { role: undefined, ukmcNo: null });
+    });
+
+    test('role change into DOCTOR without ukmcNo is rejected (UKMC_REQUIRED)', async () => {
+      mockRepo.findById.mockResolvedValue({
+        _id: { toString: () => 'u-nurse' },
+        name: 'Nurse Joy',
+        email: 'n@h.com',
+        role: UserRole.NURSE,
+        ukmcNo: null,
+        isActive: true,
+        departmentIds: [],
+      } as never);
+
+      await expect(
+        service.updateUserProfile('t1', 'u-nurse', { role: UserRole.DOCTOR }, 'admin-1'),
+      ).rejects.toMatchObject({ details: { code: 'UKMC_REQUIRED' } });
+    });
+
+    test('role change into DOCTOR with ukmcNo stores it uppercased', async () => {
+      mockRepo.findById.mockResolvedValue({
+        _id: { toString: () => 'u-nurse' },
+        name: 'Nurse Joy',
+        email: 'n@h.com',
+        role: UserRole.NURSE,
+        ukmcNo: null,
+        isActive: true,
+        departmentIds: [],
+      } as never);
+      mockRepo.updateRole.mockResolvedValue(undefined);
+      mockRepo.setActive.mockResolvedValue(undefined);
+      mockRepo.updateProfile.mockResolvedValue({} as never);
+
+      await service.updateUserProfile('t1', 'u-nurse', { role: UserRole.DOCTOR, ukmcNo: 'uk-reg-77777' }, 'admin-1');
+
+      expect(mockRepo.updateProfile).toHaveBeenCalledWith(
+        't1', 'u-nurse', { role: undefined, ukmcNo: 'UK-REG-77777' },
+      );
+    });
+
+    test('changing email to an address used by another tenant user throws ConflictError', async () => {
+      mockRepo.findById.mockResolvedValue(doctorUser());
+      mockRepo.findByEmail.mockResolvedValue({ email: 'taken@h.com' } as never);
+
+      await expect(
+        service.updateUserProfile('t1', 'u-doc', { email: 'taken@h.com' }, 'admin-1'),
+      ).rejects.toThrow(ConflictError);
+    });
+
+    test('409 conflict from the role guard propagates out of the combined update', async () => {
+      // Doctor with an active OPD encounter — role change away from DOCTOR must
+      // be blocked by updateUserRole's doctor-workload guard (DOCTOR_ACTIVE_PATIENTS).
+      mockRepo.findById
+        .mockResolvedValueOnce(doctorUser())
+        .mockResolvedValueOnce(doctorUser());
+      mockOpdRepo.countActivePatientsByDoctor.mockResolvedValue([{ patientId: 'p1' } as never]);
+
+      await expect(
+        service.updateUserProfile('t1', 'u-doc', { role: UserRole.NURSE }, 'admin-1'),
+      ).rejects.toThrow(ConflictError);
+      expect(mockRepo.updateProfile).not.toHaveBeenCalled();
     });
   });
 });

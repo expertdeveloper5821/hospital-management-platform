@@ -5,6 +5,8 @@ export interface CreateUserRequest {
   name:         string;
   role:         UserRole;
   departmentIds?: string[];
+  /** Uttarakhand Medical Council Registration No. — required when role is DOCTOR. */
+  ukmcNo?:      string;
 }
 
 export interface UpdateRoleRequest {
@@ -14,6 +16,10 @@ export interface UpdateRoleRequest {
 export interface UpdateProfileRequest {
   name?:  string;
   email?: string;
+  role?:  UserRole;
+  /** Uppercase alphanumeric; null clears it. Forced to null when role is not DOCTOR. */
+  ukmcNo?: string | null;
+  departmentIds?: string[];
 }
 
 export interface UpdateMyProfileRequest {
@@ -32,6 +38,7 @@ export interface UserResponse {
   email:        string;
   name:         string;
   role:         UserRole;
+  ukmcNo:       string | null;
   departmentIds: string[];
   isActive:     boolean;
   isFirstLogin: boolean;
