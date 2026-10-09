@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Pencil, Search } from 'lucide-react';
+import { X, Pencil, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   useListPathologyTestMasterQuery,
   useUpdatePathologyTestMasterMutation,
@@ -19,9 +19,13 @@ const CLINICAL_NOTE_MAX = 2000;
 const COMMENT_MAX       = 2000;
 const CORRELATE_MAX     = 1000;
 
-// "Other / Unlisted Tests" — not a selectable test, so it has no switch.
-// Mirrors the backend's GENERIC_TEMPLATE_KEY.
+// "Other / Unlisted Tests" — not a selectable test, so it isn't listed here.
+// The backend keeps the row (its footer still prints on reports for tests
+// outside the catalog). Mirrors the backend's GENERIC_TEMPLATE_KEY.
 const GENERIC_TEMPLATE_KEY = 'GENERIC';
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 10;
 
 const TEXTAREA_CLASS =
   'w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring';
@@ -37,6 +41,8 @@ export function PathologyTestMaster() {
   const { data, isLoading, isError, refetch } = useListPathologyTestMasterQuery();
   const [update] = useUpdatePathologyTestMasterMutation();
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [editing, setEditing] = useState<PathologyTestMasterEntry | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [toggleError, setToggleError] = useState('');
@@ -53,8 +59,16 @@ export function PathologyTestMaster() {
     }
   }
 
+  // Search runs over the whole list (in the server's catalog order) before
+  // paging, so S.No. stays continuous across pages and a match on any page is
+  // found. The page is clamped so a shrinking result never leaves it empty.
   const q = search.trim().toLowerCase();
-  const rows = (data ?? []).filter((t) => !q || t.testName.toLowerCase().includes(q));
+  const filtered = (data ?? []).filter((t) =>
+    t.templateKey !== GENERIC_TEMPLATE_KEY && (!q || t.testName.toLowerCase().includes(q)));
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const offset      = (currentPage - 1) * pageSize;
+  const rows        = filtered.slice(offset, offset + pageSize);
 
   return (
     <div className="space-y-4">
@@ -67,7 +81,7 @@ export function PathologyTestMaster() {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             placeholder="Search tests"
             aria-label="Search tests"
             className="pl-8"
@@ -91,6 +105,7 @@ export function PathologyTestMaster() {
           <table className="w-full text-sm" aria-label="Pathology Test Master">
             <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
               <tr>
+                <th className="px-3 py-2 font-medium w-14">S.No.</th>
                 <th className="px-3 py-2 font-medium">Test</th>
                 <th className="px-3 py-2 font-medium">Clinical Note</th>
                 <th className="px-3 py-2 font-medium">Comment</th>
@@ -100,9 +115,10 @@ export function PathologyTestMaster() {
             </thead>
             <tbody>
               {rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">No tests match your search.</td></tr>
-              ) : rows.map((t) => (
+                <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">No tests match your search.</td></tr>
+              ) : rows.map((t, i) => (
                 <tr key={t.templateKey} className={`border-t align-top${t.isEnabled ? '' : ' bg-muted/30'}`}>
+                  <td className="px-3 py-2 tabular-nums text-muted-foreground">{offset + i + 1}</td>
                   <td className={`px-3 py-2 font-medium break-words min-w-[10rem]${t.isEnabled ? '' : ' text-muted-foreground'}`}>
                     {t.testName}
                   </td>
@@ -113,16 +129,12 @@ export function PathologyTestMaster() {
                     {t.comment ? <Badge variant="secondary">Configured</Badge> : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap">
-                    {t.templateKey === GENERIC_TEMPLATE_KEY ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <EnabledSwitch
-                        label={`Enable ${t.testName}`}
-                        checked={t.isEnabled}
-                        disabled={toggling === t.templateKey}
-                        onToggle={() => toggleEnabled(t)}
-                      />
-                    )}
+                    <EnabledSwitch
+                      label={`Enable ${t.testName}`}
+                      checked={t.isEnabled}
+                      disabled={toggling === t.templateKey}
+                      onToggle={() => toggleEnabled(t)}
+                    />
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(t)} aria-label={`Edit ${t.testName}`}>
@@ -133,6 +145,41 @@ export function PathologyTestMaster() {
               ))}
             </tbody>
           </table>
+          <div className="flex flex-col gap-3 border-t px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <label htmlFor="tm-page-size">Rows per page</label>
+              <select
+                id="tm-page-size"
+                value={pageSize}
+                onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                className="rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <span>
+                {filtered.length === 0
+                  ? '0 tests'
+                  : `${offset + 1}–${offset + rows.length} of ${filtered.length}`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Page {currentPage} of {totalPages}</span>
+              <Button
+                variant="outline" size="sm" aria-label="Previous page"
+                onClick={() => setPage(Math.max(1, currentPage - 1))}
+                disabled={currentPage <= 1}
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <Button
+                variant="outline" size="sm" aria-label="Next page"
+                onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+                disabled={currentPage >= totalPages}
+              >
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

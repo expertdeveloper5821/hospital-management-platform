@@ -974,6 +974,74 @@ describe('Fifth-batch catalog tests — same structured workflow', () => {
   });
 });
 
+// ─── Allergy Vaccine & Widal ELISA (catalog now 111 tests) ────────────────────
+
+describe('Allergy Vaccine and Widal ELISA — same structured workflow', () => {
+  const VACCINE = 'Allergy Vaccine';
+  const ELISA   = 'Widal ELISA';
+
+  test('both are stored exactly and open their own forms, separate from Allergy Profile / Widal Test', async () => {
+    const id = await createRequest(`${VACCINE}, ${ELISA}, Allergy Profile, Widal Test`);
+    const res = await getDetail(id, UserRole.PATHOLOGIST);
+    expect(res.body.data.testType).toBe(`${VACCINE}, ${ELISA}, Allergy Profile, Widal Test`);
+    expect(res.body.data.testReports.map((r: { testName: string; templateKey: string }) => [r.testName, r.templateKey]))
+      .toEqual([[VACCINE, 'ALLERGY_VACCINE'], [ELISA, 'WIDAL_ELISA'], ['Allergy Profile', 'ALLERGY_PROFILE'], ['Widal Test', 'WIDAL']]);
+    for (const r of res.body.data.testReports.slice(0, 2)) {
+      expect(r.clinicalContent.clinicalNote).toEqual(expect.any(String));
+    }
+  });
+
+  test('editing Test Type to the new tests switches the report forms to them', async () => {
+    const id = await createRequest(CBC);
+    const res = await request(app).patch(`/api/lab/pathology/${id}`).set(auth(UserRole.PATHOLOGIST))
+      .send({ testType: `${ELISA}, ${VACCINE}` });
+    expect(res.status).toBe(200);
+    const detail = await getDetail(id, UserRole.PATHOLOGIST);
+    expect(detail.body.data.testReports.map((r: { testName: string; templateKey: string }) => [r.testName, r.templateKey]))
+      .toEqual([[ELISA, 'WIDAL_ELISA'], [VACCINE, 'ALLERGY_VACCINE']]);
+  });
+
+  test('submit validates, flags, encrypts and completes; the PDF prints parameters and Test Master text', async () => {
+    const id = await createRequest(`${VACCINE}, ${ELISA}`);
+    await markPaid(id);
+
+    expect((await submit(id, 1, { testName: ELISA, values: { typhiIgmResult: 'Maybe' } })).status).toBe(400);
+    expect((await submit(id, 1, { testName: ELISA, values: { typhiIgm: 'abc' } })).status).toBe(400);
+
+    await submit(id, 0, { testName: VACCINE, values: {
+      totalIge: '420', method: 'Specific IgE (ELISA) - Inhalant panel', allergensTested: 'House dust mite, Parthenium, Cat dander',
+      positiveAllergens: 'House dust mite (Class 3), Parthenium (Class 2)', vaccineAllergens: 'House dust mite, Parthenium',
+    } }).expect(200);
+    const res = await submit(id, 1, { testName: ELISA, values: {
+      typhiIgm: '2.4', typhiIgmResult: 'Positive', typhiIgg: '0.5', typhiIggResult: 'Negative',
+    } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('COMPLETED');
+
+    const byName = Object.fromEntries(res.body.data.testReports.map((r: { testName: string; result: { values: Array<{ key: string; value: string; flag: string | null; unit: string | null }> } }) =>
+      [r.testName, Object.fromEntries(r.result.values.map((v) => [v.key, [v.value, v.flag, v.unit]]))]));
+    expect(byName[VACCINE].totalIge).toEqual(['420', 'HIGH', 'IU/mL']);
+    expect(byName[VACCINE].vaccineAllergens).toEqual(['House dust mite, Parthenium', null, null]);
+    expect(byName[ELISA].typhiIgm).toEqual(['2.4', 'HIGH', 'Index']);
+    expect(byName[ELISA].typhiIgmResult).toEqual(['Positive', 'ABNORMAL', null]);
+    expect(byName[ELISA].typhiIgg).toEqual(['0.5', null, 'Index']);
+    expect(byName[ELISA].typhiIggResult).toEqual(['Negative', null, null]);
+
+    const raw = await mongoose.connection.collection('pathology_requests').findOne({ requestId: id });
+    expect(raw!.testReports.every((r: { resultData: string }) => r.resultData.startsWith('enc:v1:'))).toBe(true);
+
+    const elisaText = pdfText((await getPdf(id, 1)).body as Buffer);
+    expect(elisaText).toContain('S. Typhi IgM (Index)');
+    expect(elisaText).toContain('Negative: < 0.9; Equivocal: 0.9 - 1.1; Positive: > 1.1');
+    expect(elisaText).toContain('Blood culture');
+    const vaccinePdf = await getPdf(id, 0);
+    expect(vaccinePdf.status).toBe(200);
+    const vaccineText = pdfText(vaccinePdf.body as Buffer);
+    expect(vaccineText).toContain('Allergens Selected for Vaccine (Immunotherapy)');
+    expect(vaccineText).toContain('allergen-specific immunotherapy');
+  });
+});
+
 // ─── Editing Test Type (Edit Pathology Request multi-select) ──────────────────
 
 describe('PATCH /api/lab/pathology/:requestId — editing Test Type', () => {

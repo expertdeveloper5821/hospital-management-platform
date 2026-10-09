@@ -10,6 +10,7 @@ import {
   useCancelRazorpayOrderMutation,
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
+  useExportPaymentsMutation,
 } from "@/store/api/payment.api";
 import { useAppSelector } from "@/store/hooks";
 import { DialogOverlay } from "@/components/ui/dialog-overlay";
@@ -19,6 +20,7 @@ import type {
   CreateManualPaymentRequest,
   CreateRazorpayOrderRequest,
   PatientResponse,
+  PaymentExportPeriod,
 } from "@/store/types";
 import { useLazySearchPatientsQuery } from "@/store/api/patient.api";
 import { Button } from "@/components/ui/button";
@@ -40,6 +42,7 @@ import {
   Clock,
   XCircle,
   BarChart3,
+  FileDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { serialNumber, serialOffset } from '@/lib/serial-number';
@@ -980,6 +983,199 @@ function SummaryCard({ dateFrom, dateTo }: SummaryCardProps) {
   );
 }
 
+// ─── Export Payments Modal ────────────────────────────────────────────────────
+// Downloads the collection-report CSV (GET /api/payments/export). Dates are
+// hospital (IST) calendar days; the server resolves each period to its IST
+// range, so the report never depends on the browser's timezone.
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+function istToday() {
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+const EXPORT_PERIODS: Array<{ value: PaymentExportPeriod; label: string }> = [
+  { value: "DAILY", label: "Daily" },
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "CUSTOM", label: "Custom" },
+];
+
+function ExportPaymentsModal({ onClose }: { onClose: () => void }) {
+  const today = istToday();
+  const [period, setPeriod] = useState<PaymentExportPeriod>("DAILY");
+  const [date, setDate] = useState(today);
+  const [month, setMonth] = useState(today.slice(0, 7));
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [error, setError] = useState("");
+  const [exportPayments, { isLoading }] = useExportPaymentsMutation();
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    if (period === "CUSTOM") {
+      if (!dateFrom || !dateTo) {
+        setError("From and To dates are required.");
+        return;
+      }
+      if (dateFrom > dateTo) {
+        setError("To date must be on or after From date.");
+        return;
+      }
+    } else if (period === "MONTHLY" ? !month : !date) {
+      setError("Please select a date.");
+      return;
+    }
+
+    try {
+      const { url, filename } = await exportPayments(
+        period === "CUSTOM"
+          ? { period, dateFrom, dateTo }
+          : { period, date: period === "MONTHLY" ? `${month}-01` : date },
+      ).unwrap();
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      onClose();
+    } catch (err: any) {
+      setError(err?.data?.message ?? "Failed to export payments.");
+    }
+  }
+
+  return (
+    <DialogOverlay className="items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-md max-h-[90vh] flex flex-col rounded-lg bg-background shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
+          <div>
+            <h2 className="text-base font-semibold">Export Payments</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Completed payments with Cash / UPI / Card totals (CSV, IST)
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 hover:bg-muted transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <NavForm onSubmit={handleSubmit} className="flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
+            {error && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
+
+            <div className="space-y-1.5">
+              <Label>Period *</Label>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {EXPORT_PERIODS.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setPeriod(value);
+                      setError("");
+                    }}
+                    className={cn(
+                      "rounded-md border py-2 text-sm font-medium transition-colors",
+                      period === value
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "hover:bg-muted",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {period === "MONTHLY" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-month">Month *</Label>
+                <Input
+                  id="ex-month"
+                  type="month"
+                  value={month}
+                  max={today.slice(0, 7)}
+                  onChange={(e) => setMonth(e.target.value)}
+                />
+              </div>
+            ) : period === "CUSTOM" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ex-from">From Date *</Label>
+                  <Input
+                    id="ex-from"
+                    type="date"
+                    value={dateFrom}
+                    max={today}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDateFrom(val);
+                      if (dateTo && val > dateTo) setDateTo("");
+                    }}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ex-to">To Date *</Label>
+                  <Input
+                    id="ex-to"
+                    type="date"
+                    value={dateTo}
+                    min={dateFrom || undefined}
+                    max={today}
+                    onChange={(e) => setDateTo(e.target.value)}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="ex-date">
+                  {period === "WEEKLY" ? "Any date in the week *" : "Date *"}
+                </Label>
+                <Input
+                  id="ex-date"
+                  type="date"
+                  value={date}
+                  max={today}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+                {period === "WEEKLY" && (
+                  <p className="text-xs text-muted-foreground">
+                    Exports the Monday–Sunday week containing this date.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 shrink-0 px-5 pb-5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? "Exporting…" : "Download CSV"}
+            </Button>
+          </div>
+        </NavForm>
+      </div>
+    </DialogOverlay>
+  );
+}
+
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -1046,6 +1242,7 @@ export default function PaymentsPage() {
   const [page, setPage] = useState(1);
   const [showManual, setShowManual] = useState(false);
   const [showRazorpay, setShowRazorpay] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [razorpaySuccess, setRazorpaySuccess] = useState(false);
   const [selected, setSelected] = useState<PaymentResponse | null>(null);
 
@@ -1126,16 +1323,26 @@ export default function PaymentsPage() {
             {hasFilters && " (filtered)"}
           </p>
         </div>
-        {canCreate && (
+        {(canCreate || canSummary) && (
           <div className="flex gap-2 flex-wrap">
-            <Button variant="outline" onClick={() => setShowRazorpay(true)}>
-              <CreditCard className="h-4 w-4 mr-2" />
-              Razorpay (UPI / Card)
-            </Button>
-            <Button onClick={() => setShowManual(true)}>
-              <Plus className="h-4 w-4 mr-2" />
-              Manual Payment
-            </Button>
+            {canSummary && (
+              <Button variant="outline" onClick={() => setShowExport(true)}>
+                <FileDown className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+            )}
+            {canCreate && (
+              <>
+                <Button variant="outline" onClick={() => setShowRazorpay(true)}>
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Razorpay (UPI / Card)
+                </Button>
+                <Button onClick={() => setShowManual(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Manual Payment
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1393,6 +1600,9 @@ export default function PaymentsPage() {
           onClose={() => setShowRazorpay(false)}
           onSuccess={handleRazorpaySuccess}
         />
+      )}
+      {showExport && (
+        <ExportPaymentsModal onClose={() => setShowExport(false)} />
       )}
 
       {/* Payment detail panel */}

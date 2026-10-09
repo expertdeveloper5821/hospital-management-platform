@@ -1,4 +1,8 @@
 import { baseApi } from './base.api';
+import { type FetchBaseQueryError } from '@reduxjs/toolkit/query';
+import type { RootState } from '../index';
+
+const BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8001').replace(/\/+$/, '');
 
 // The backend Zod schema requires full ISO datetime strings (z.string().datetime({ offset: true })).
 // HTML date inputs produce plain YYYY-MM-DD strings, so we convert here before sending.
@@ -14,6 +18,7 @@ import type {
   CreateManualPaymentRequest,
   CreateRazorpayOrderRequest,
   RazorpayOrderResponse,
+  PaymentExportRequest,
 } from '../types';
 
 export const paymentApi = baseApi.injectEndpoints({
@@ -105,6 +110,41 @@ export const paymentApi = baseApi.injectEndpoints({
       transformResponse: (raw: ApiSuccess<DepartmentRevenueResponse>) => raw.data,
       providesTags: ['Payment', 'Revenue'],
     }),
+
+    // Payment Export — downloads the collection-report CSV. Dates are sent as
+    // plain YYYY-MM-DD hospital (IST) calendar days; the server resolves the
+    // range, so the browser's own timezone never shifts it. Uses queryFn
+    // because the endpoint returns a raw file, not JSON.
+    exportPayments: build.mutation<{ url: string; filename: string }, PaymentExportRequest>({
+      queryFn: async ({ period, date, dateFrom, dateTo }, { getState }) => {
+        const token = (getState() as RootState).auth.token;
+        const params = new URLSearchParams({ period });
+        if (date)     params.set('date',     date);
+        if (dateFrom) params.set('dateFrom', dateFrom);
+        if (dateTo)   params.set('dateTo',   dateTo);
+        try {
+          const res = await fetch(`${BASE_URL}/api/payments/export?${params.toString()}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            cache:   'no-store',
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => null);
+            const err: FetchBaseQueryError = {
+              status: res.status,
+              data:   { message: body?.message ?? 'Failed to export payments' },
+            };
+            return { error: err };
+          }
+          const match    = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '');
+          const filename = match?.[1] ?? `payments-${period.toLowerCase()}.csv`;
+          const blob     = await res.blob();
+          return { data: { url: URL.createObjectURL(blob), filename } };
+        } catch {
+          const err: FetchBaseQueryError = { status: 'FETCH_ERROR', error: 'Network error' };
+          return { error: err };
+        }
+      },
+    }),
   }),
 });
 
@@ -117,4 +157,5 @@ export const {
   useLazyGetReceiptUrlQuery,
   useGetPaymentSummaryQuery,
   useGetDepartmentRevenueQuery,
+  useExportPaymentsMutation,
 } = paymentApi;

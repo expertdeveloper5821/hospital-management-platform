@@ -123,6 +123,9 @@ const CATALOG = [
   'Coombs Test - Direct (DAT)',
   'Coombs Test - Indirect (IAT)',
   'Folic Acid (Vitamin B9)',
+  // Added after the fifth batch (catalog now 111 tests).
+  'Allergy Vaccine',
+  'Widal ELISA',
 ];
 
 const keysOf = (testName: string) => findReportTemplate(testName).parameters.map((p) => p.key);
@@ -135,9 +138,9 @@ describe('Pathology report templates — catalog coverage', () => {
     expect(t.parameters.length).toBeGreaterThan(0);
   });
 
-  test('the catalog has 109 tests, each with a distinct template key', () => {
-    expect(CATALOG).toHaveLength(109);
-    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(109);
+  test('the catalog has 111 tests, each with a distinct template key', () => {
+    expect(CATALOG).toHaveLength(111);
+    expect(new Set(PATHOLOGY_REPORT_TEMPLATES.map((t) => t.key)).size).toBe(111);
   });
 
   test('no two catalog names collide after normalisation, and none contains a top-level comma', () => {
@@ -276,6 +279,7 @@ describe('Pathology report templates — catalog coverage', () => {
       ['Folic Acid (Vitamin B9)', 'Vitamin Profile', 'vitaminB9'],
       ['PSA Free (Free / Total PSA Ratio)', 'PSA Total (Prostate Specific Antigen)', 'totalPsa'],
       ['Allergy Profile', 'Total IgE', 'totalIge'],
+      ['Allergy Vaccine', 'Total IgE', 'totalIge'],
       ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'rbc'],
       ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'mcv'],
       ['Thalassemia Profile', 'CBC (Complete Blood Count)', 'rdw'],
@@ -323,6 +327,33 @@ describe('Pathology report templates — catalog coverage', () => {
     expect(computeFlag(p('TORCH Profile', 'rubellaIgm'), 'Positive', null)).toBe('ABNORMAL');
     expect(computeFlag(p('Coombs Test - Direct (DAT)', 'dat'), 'Positive', null)).toBe('ABNORMAL');
     expect(computeFlag(p('Thalassemia Profile', 'hbA2'), '4.8', null)).toBe('HIGH');
+  });
+
+  test.each([
+    ['Allergy Vaccine', 'ALLERGY_VACCINE', ['totalIge', 'method', 'allergensTested', 'positiveAllergens', 'vaccineAllergens', 'interpretation']],
+    ['Widal ELISA',     'WIDAL_ELISA',     ['typhiIgm', 'typhiIgmResult', 'typhiIgg', 'typhiIggResult']],
+  ])('"%s" (%s) is separate from Allergy Profile / Widal Test and has exactly its own parameters', (name, key, expected) => {
+    expect(findReportTemplate(name).key).toBe(key);
+    expect(keysOf(name)).toEqual(expected);
+  });
+
+  test('Widal ELISA: index cut-off flags 0.9 and above, units, sections and Negative / Equivocal / Positive result', () => {
+    const p = (key: string) => findReportTemplate('Widal ELISA').parameters.find((x) => x.key === key)!;
+    for (const key of ['typhiIgm', 'typhiIgg']) {
+      expect(p(key).unit).toBe('Index');
+      expect(resolveReferenceText(p(key), null)).toBe('Negative: < 0.9; Equivocal: 0.9 - 1.1; Positive: > 1.1');
+      expect(computeFlag(p(key), '0.89', null)).toBeNull();
+      expect(computeFlag(p(key), '0.9', null)).toBe('HIGH');
+      expect(computeFlag(p(key), '2.4', null)).toBe('HIGH');
+    }
+    for (const key of ['typhiIgmResult', 'typhiIggResult']) {
+      expect(p(key).options).toEqual(['Negative', 'Equivocal', 'Positive']);
+      expect(computeFlag(p(key), 'Negative', null)).toBeNull();
+      expect(computeFlag(p(key), 'Equivocal', null)).toBe('ABNORMAL');
+      expect(computeFlag(p(key), 'Positive', null)).toBe('ABNORMAL');
+    }
+    expect(p('typhiIgm').section).toBe('Salmonella Typhi IgM');
+    expect(p('typhiIggResult').section).toBe('Salmonella Typhi IgG');
   });
 
   test('every template string fits the PDF font (Latin-1), except the original Pregnancy Test name', () => {

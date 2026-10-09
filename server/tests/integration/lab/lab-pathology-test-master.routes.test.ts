@@ -438,6 +438,27 @@ describe('Test Master — enable / disable tests', () => {
     await submit(id, 0, { testName: CBC, values: { hemoglobin: '13' } }).expect(200);
   });
 
+  test('Allergy Vaccine and Widal ELISA are seeded enabled and toggle like every other test', async () => {
+    const VACCINE = 'Allergy Vaccine';
+    const ELISA   = 'Widal ELISA';
+    const rows = (await listMaster()).body.data as Array<{ templateKey: string; testName: string; isEnabled: boolean; clinicalNote: string | null }>;
+    for (const [key, name] of [['ALLERGY_VACCINE', VACCINE], ['WIDAL_ELISA', ELISA]]) {
+      expect(rows.find((r) => r.templateKey === key))
+        .toEqual(expect.objectContaining({ testName: name, isEnabled: true, clinicalNote: expect.any(String) }));
+    }
+
+    await patchMaster('ALLERGY_VACCINE', { isEnabled: false }).expect(200);
+    await patchMaster('WIDAL_ELISA', { isEnabled: false }).expect(200);
+    expect((await listDisabled()).body.data).toEqual([VACCINE, ELISA]);
+    expect((await createRequest(VACCINE)).status).toBe(400);
+    expect((await createRequest(ELISA)).status).toBe(400);
+
+    await patchMaster('ALLERGY_VACCINE', { isEnabled: true }).expect(200);
+    await patchMaster('WIDAL_ELISA', { isEnabled: true }).expect(200);
+    expect((await listDisabled()).body.data).toEqual([]);
+    expect((await createRequest(`${VACCINE}, ${ELISA}`)).status).toBe(201);
+  });
+
   test('tests outside the catalog cannot be disabled and are always allowed', async () => {
     expect((await patchMaster('GENERIC', { isEnabled: false })).status).toBe(400);
     expect((await createRequest('Blood Culture')).status).toBe(201);

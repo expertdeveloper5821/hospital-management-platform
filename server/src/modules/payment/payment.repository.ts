@@ -145,6 +145,60 @@ export class PaymentRepository {
     };
   }
 
+  // One keyset page of COMPLETED payments in [from, toExclusive) for the
+  // Payment Export, ordered by (createdAt, paymentId). Keyset rather than
+  // skip/limit so a page boundary can never skip or repeat a row while
+  // payments are being written concurrently. `after` is the last row of the
+  // previous page (null for the first page).
+  async findCompletedExportPage(
+    tenantId:    string,
+    from:        Date,
+    toExclusive: Date,
+    after:       { createdAt: Date; paymentId: string } | null,
+    limit:       number,
+  ): Promise<IPayment[]> {
+    assertDbConnected();
+    const filter: Record<string, unknown> = {
+      tenantId,
+      status:    PaymentStatus.COMPLETED,
+      createdAt: { $gte: from, $lt: toExclusive },
+    };
+    if (after) {
+      filter['$or'] = [
+        { createdAt: { $gt: after.createdAt } },
+        { createdAt: after.createdAt, paymentId: { $gt: after.paymentId } },
+      ];
+    }
+    const rows = await PaymentModel.find(
+      filter,
+      { paymentId: 1, patientId: 1, fullName: 1, amount: 1, paymentMethod: 1, description: 1, transactionId: 1, createdAt: 1 },
+    ).sort({ createdAt: 1, paymentId: 1 }).limit(limit).lean();
+    return rows as IPayment[];
+  }
+
+  // Non-COMPLETED payment counts in [from, toExclusive), by status — shown on
+  // the Payment Export as "excluded from totals".
+  async countNonCompletedByStatus(
+    tenantId:    string,
+    from:        Date,
+    toExclusive: Date,
+  ): Promise<Record<string, number>> {
+    assertDbConnected();
+    const rows = await PaymentModel.aggregate([
+      {
+        $match: {
+          tenantId,
+          status:    { $ne: PaymentStatus.COMPLETED },
+          createdAt: { $gte: from, $lt: toExclusive },
+        },
+      },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+    const counts: Record<string, number> = {};
+    for (const row of rows) counts[row._id as string] = row.count as number;
+    return counts;
+  }
+
   // Most recent COMPLETED payment of a given reference type for a patient —
   // used by OPDService.getPaymentValidity to find the payment that governs
   // the current validity window. Only COMPLETED payments count: a PENDING/

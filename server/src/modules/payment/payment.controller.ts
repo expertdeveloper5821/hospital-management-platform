@@ -7,6 +7,7 @@ import {
   ListPaymentsQuerySchema,
   PaymentSummaryQuerySchema,
   DepartmentRevenueQuerySchema,
+  ExportPaymentsQuerySchema,
 } from './payment.types';
 
 const paymentIdSchema = z.string().uuid('paymentId must be a valid UUID');
@@ -134,6 +135,29 @@ export async function getPaymentSummary(
     }
     const result = await paymentService.getPaymentSummary(req.user!.tenantId as string, parsed.data);
     res.status(200).json({ status: 'success', data: result });
+  } catch (err) { next(err); }
+}
+
+// ─── Payment export (collection report CSV) ──────────────────────────────────
+
+export async function exportPayments(
+  req: Request, res: Response, next: NextFunction,
+): Promise<void> {
+  try {
+    const parsed = ExportPaymentsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ status: 'error', message: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+    const { filename, csv } = await paymentService.exportPayments(
+      req.user!.tenantId as string, parsed.data, req.user!.email || req.user!.userId,
+    );
+    res.set({
+      'Content-Type':        'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control':       'no-store',
+    });
+    res.status(200).send(csv);
   } catch (err) { next(err); }
 }
 
