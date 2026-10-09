@@ -151,13 +151,17 @@ describe('Lab → Test Master tab', () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  test('every test shows an Enabled switch; Other / Unlisted Tests has none', async () => {
+  test('every test shows an Enabled switch; Other / Unlisted Tests is not listed at all', async () => {
     mockMaster = [...MASTER, GENERIC];
-    await openTestMaster();
+    const user = await openTestMaster();
     expect(screen.getByRole('switch', { name: 'Enable CBC (Complete Blood Count)' })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('switch', { name: 'Enable HIV 1 & 2 Screening' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.queryByRole('switch', { name: 'Enable Other / Unlisted Tests' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(2);
+    expect(screen.queryByText('Other / Unlisted Tests')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Other / Unlisted Tests' })).not.toBeInTheDocument();
+    expect(screen.getByText('1–2 of 2')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Search tests'), 'other');
+    expect(screen.getByText('No tests match your search.')).toBeInTheDocument();
   });
 
   test('toggling an enabled test disables it', async () => {
@@ -192,5 +196,78 @@ describe('Lab → Test Master tab', () => {
     expect(screen.getAllByRole('switch')).toHaveLength(1);
     await user.click(screen.getByRole('switch', { name: 'Enable HIV 1 & 2 Screening' }));
     expect(mockUpdate).toHaveBeenCalledWith({ templateKey: 'HIV', isEnabled: false });
+  });
+});
+
+// 23 tests: "Test 1" … "Test 23", catalog order, plus GENERIC (never listed).
+const MANY = [
+  ...Array.from({ length: 23 }, (_, i) => ({
+    ...MASTER[0], templateKey: `T${i + 1}`, testName: `Test ${i + 1}`, isEnabled: i !== 11,
+  })),
+  GENERIC,
+];
+
+function bodyRows() {
+  return within(screen.getByRole('table', { name: 'Pathology Test Master' })).getAllByRole('row').slice(1);
+}
+const serials = () => bodyRows().map((r) => within(r).getAllByRole('cell')[0].textContent);
+
+describe('Lab → Test Master pagination', () => {
+  beforeEach(() => { mockMaster = MANY; });
+
+  test('shows an S.No. column and 10 rows per page by default', async () => {
+    await openTestMaster();
+    expect(screen.getByRole('columnheader', { name: 'S.No.' })).toBeInTheDocument();
+    expect(bodyRows()).toHaveLength(10);
+    expect(serials()).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText('1–10 of 23')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+  });
+
+  test('serial numbers continue across pages', async () => {
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(serials()[0]).toBe('11');
+    expect(bodyRows()[0]).toHaveTextContent('Test 11');
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    expect(serials()).toEqual(['21', '22', '23']);
+    expect(screen.getByText('21–23 of 23')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Previous page' }));
+    expect(serials()[0]).toBe('11');
+  });
+
+  test('page size is configurable and resets to the first page', async () => {
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.selectOptions(screen.getByLabelText('Rows per page'), '25');
+    expect(bodyRows()).toHaveLength(23);
+    expect(serials()[22]).toBe('23');
+    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+  });
+
+  test('search covers every page, resets to page 1 and numbers the matches from 1', async () => {
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    await user.type(screen.getByLabelText('Search tests'), 'test 2');
+    // "Test 2" and "Test 20"–"Test 23".
+    expect(bodyRows().map((r) => within(r).getAllByRole('cell')[1].textContent))
+      .toEqual(['Test 2', 'Test 20', 'Test 21', 'Test 22', 'Test 23']);
+    expect(serials()).toEqual(['1', '2', '3', '4', '5']);
+    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument();
+  });
+
+  test('a test on a later page can be enabled / disabled', async () => {
+    mockUpdate.mockReturnValue({ unwrap: () => Promise.resolve({ ...MANY[11], isEnabled: true }) });
+    const user = await openTestMaster();
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+    const toggle = screen.getByRole('switch', { name: 'Enable Test 12' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+    expect(mockUpdate).toHaveBeenCalledWith({ templateKey: 'T12', isEnabled: true });
+    // Stays on the same page.
+    expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
   });
 });

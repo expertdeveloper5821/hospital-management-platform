@@ -115,6 +115,8 @@ const REACTIVITY     = ['Non-Reactive', 'Reactive'];
 const ABSENT_PRESENT = ['Absent', 'Present'];
 // Widal agglutination titres, lowest first.
 const WIDAL_TITRES   = ['< 1:20', '1:20', '1:40', '1:80', '1:160', '1:320', '1:640'];
+// Qualitative ELISA interpretation.
+const ELISA_RESULT   = ['Negative', 'Equivocal', 'Positive'];
 
 const DIFFERENTIAL = 'Differential Leucocyte Count';
 const RBC_INDICES  = 'Red Cell Indices';
@@ -942,6 +944,33 @@ export const PATHOLOGY_REPORT_TEMPLATES: PathologyReportTemplate[] = [
   {
     key: 'FOLIC_ACID', testName: 'Folic Acid (Vitamin B9)',
     parameters: [num('vitaminB9', 'Folic Acid (Vitamin B9)', 'ng/mL', r(3.1, 20.5, '3.1 - 20.5'))],
+  },
+  {
+    // Allergen-specific immunotherapy work-up: the vaccine is made up only of
+    // allergens the patient is sensitised to. Panels differ by laboratory, so
+    // allergens are recorded as reported (as in Allergy Profile).
+    key: 'ALLERGY_VACCINE', testName: 'Allergy Vaccine',
+    parameters: [
+      num('totalIge', 'Total IgE', 'IU/mL', r(0, 100, 'Adults: 0 - 100')),
+      text('method', 'Method / Panel', null),
+      text('allergensTested', 'Allergens Tested', null),
+      text('positiveAllergens', 'Allergens Detected (Specific IgE Class 1 and above)', null, 'None detected'),
+      text('vaccineAllergens', 'Allergens Selected for Vaccine (Immunotherapy)', null),
+      text('interpretation', 'Interpretation', null),
+    ],
+  },
+  {
+    // Salmonella Typhi IgM / IgG by ELISA, reported as an index (sample OD /
+    // cut-off OD): < 0.9 Negative, 0.9 - 1.1 Equivocal, > 1.1 Positive.
+    key: 'WIDAL_ELISA', testName: 'Widal ELISA',
+    parameters: [
+      num('typhiIgm', 'S. Typhi IgM (Index)', 'Index', below(0.9, 'Negative: < 0.9; Equivocal: 0.9 - 1.1; Positive: > 1.1'),
+        { section: 'Salmonella Typhi IgM' }),
+      select('typhiIgmResult', 'S. Typhi IgM Result', ELISA_RESULT, ['Negative'], { section: 'Salmonella Typhi IgM' }),
+      num('typhiIgg', 'S. Typhi IgG (Index)', 'Index', below(0.9, 'Negative: < 0.9; Equivocal: 0.9 - 1.1; Positive: > 1.1'),
+        { section: 'Salmonella Typhi IgG' }),
+      select('typhiIggResult', 'S. Typhi IgG Result', ELISA_RESULT, ['Negative'], { section: 'Salmonella Typhi IgG' }),
+    ],
   },
 ];
 

@@ -142,6 +142,44 @@ export const DepartmentRevenueQuerySchema = z.object({
 
 export type DepartmentRevenueQuery = z.infer<typeof DepartmentRevenueQuerySchema>;
 
+// Payment Export (collection report CSV). Dates are hospital-local (IST)
+// calendar days as YYYY-MM-DD — the server resolves them to instants (see
+// payment-export.ts), so the client's own timezone never shifts the range.
+// DAILY / WEEKLY / MONTHLY are anchored on `date` (default: today IST);
+// CUSTOM requires dateFrom + dateTo.
+export const PaymentExportPeriod = {
+  DAILY:   'DAILY',
+  WEEKLY:  'WEEKLY',
+  MONTHLY: 'MONTHLY',
+  CUSTOM:  'CUSTOM',
+} as const;
+
+export type PaymentExportPeriod = typeof PaymentExportPeriod[keyof typeof PaymentExportPeriod];
+
+const calendarDateSchema = z.string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+  .refine((s) => {
+    const [y, m, d] = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, 'Date is not a valid calendar date');
+
+export const ExportPaymentsQuerySchema = z.object({
+  period:   z.enum([PaymentExportPeriod.DAILY, PaymentExportPeriod.WEEKLY, PaymentExportPeriod.MONTHLY, PaymentExportPeriod.CUSTOM]),
+  date:     calendarDateSchema.optional(),
+  dateFrom: calendarDateSchema.optional(),
+  dateTo:   calendarDateSchema.optional(),
+}).superRefine((q, ctx) => {
+  if (q.period !== PaymentExportPeriod.CUSTOM) return;
+  if (!q.dateFrom) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dateFrom'], message: 'dateFrom is required for a custom range' });
+  if (!q.dateTo)   ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dateTo'],   message: 'dateTo is required for a custom range' });
+  if (q.dateFrom && q.dateTo && q.dateFrom > q.dateTo) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dateTo'], message: 'dateTo must be on or after dateFrom' });
+  }
+});
+
+export type ExportPaymentsQuery = z.infer<typeof ExportPaymentsQuerySchema>;
+
 // ─── Response shapes ──────────────────────────────────────────────────────────
 
 export interface PaymentResponse {

@@ -334,6 +334,8 @@ const PATHOLOGY_TEST_TYPES = [
   'Coombs Test - Direct (DAT)',
   'Coombs Test - Indirect (IAT)',
   'Folic Acid (Vitamin B9)',
+  'Allergy Vaccine',
+  'Widal ELISA',
 ] as const;
 
 // Option ids are index-based so the listbox's DOM ids stay free of spaces/parens.

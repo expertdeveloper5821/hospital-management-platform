@@ -90,6 +90,9 @@ const corsOptions: cors.CorsOptions = {
     'X-Correlation-ID',
     'Idempotency-Key',
   ],
+  // Lets the browser read the server-chosen filename of file downloads
+  // (e.g. GET /api/payments/export).
+  exposedHeaders: ['Content-Disposition'],
 };
 
 app.use(cors(corsOptions));

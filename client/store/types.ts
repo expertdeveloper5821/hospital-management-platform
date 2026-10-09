@@ -751,6 +751,17 @@ export interface RazorpayOrderResponse {
   keyId:           string;
 }
  
+// GET /api/payments/export — dates are hospital (IST) calendar days, YYYY-MM-DD.
+// DAILY/WEEKLY/MONTHLY anchor on `date` (default today); CUSTOM needs dateFrom/dateTo.
+export type PaymentExportPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'CUSTOM';
+
+export interface PaymentExportRequest {
+  period:    PaymentExportPeriod;
+  date?:     string;
+  dateFrom?: string;
+  dateTo?:   string;
+}
+
 export interface PaymentSummaryResponse {
   CASH:   number;
   CHEQUE: number;

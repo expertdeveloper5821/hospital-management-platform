@@ -20,7 +20,12 @@ import {
   DepartmentRevenueEntry,
   DepartmentRevenueBreakdown,
   LAB_PAYMENT_REFERENCE_TYPES,
+  ExportPaymentsQuery,
 } from './payment.types';
+import {
+  resolveExportRange, buildPaymentExportCsv, paymentExportFilename, toPaise,
+  PaymentExportRangeError, PaymentExportRow, PaymentExportMethodTotals,
+} from './payment-export';
 
 import { patientRepository }    from '../patient/patient.repository';
 import { labRepository }        from '../lab/lab.repository';
@@ -38,6 +43,11 @@ import config from '../../shared/config/env';
 
 // Pre-signed URL expiry: 1 hour
 const RECEIPT_URL_EXPIRY_SECONDS = 3600;
+
+// Payment Export: rows fetched per keyset page, and a hard cap so one request
+// can't build an unbounded CSV in memory (a narrower range is required instead).
+const EXPORT_PAGE_SIZE = 500;
+export const MAX_EXPORT_ROWS = 50_000;
 
 // Lets a caller (e.g. Lab payment collection) supply its own receipt PDF in
 // place of the generic one. Omitted → the existing generic receipt, unchanged.
@@ -627,6 +637,98 @@ export class PaymentService {
     query:    PaymentSummaryQuery,
   ): Promise<PaymentSummaryResponse> {
     return paymentRepository.sumByMethod(tenantId, query);
+  }
+
+  // ─── Payment Export (collection report CSV) ───────────────────────────────
+  // Same business rule as getPaymentSummary: only COMPLETED payments are
+  // collections. PENDING / FAILED / CANCELLED (incl. payments cancelled when
+  // their OPD visit was deleted) are excluded from rows and totals and only
+  // reported as counts. Totals are summed from the exported rows themselves
+  // (in paise), so the method breakdown always reconciles with the grand
+  // total and with the rows. Read-only — no audit entry (nothing mutates).
+
+  async exportPayments(
+    tenantId:    string,
+    query:       ExportPaymentsQuery,
+    generatedBy: string,
+    now:         Date = new Date(),
+  ): Promise<{ filename: string; csv: string }> {
+    let range;
+    try {
+      range = resolveExportRange(query, now);
+    } catch (err) {
+      if (err instanceof PaymentExportRangeError) throw new AppError(err.message, 400);
+      throw err;
+    }
+
+    const docs: IPayment[] = [];
+    const seen = new Set<string>();
+    let after: { createdAt: Date; paymentId: string } | null = null;
+    for (;;) {
+      const page = await paymentRepository.findCompletedExportPage(
+        tenantId, range.from, range.toExclusive, after, EXPORT_PAGE_SIZE,
+      );
+      for (const doc of page) {
+        if (seen.has(doc.paymentId)) continue;
+        seen.add(doc.paymentId);
+        docs.push(doc);
+      }
+      if (docs.length > MAX_EXPORT_ROWS) {
+        throw new AppError(
+          `Export exceeds ${MAX_EXPORT_ROWS} payments — please choose a shorter date range`, 422,
+        );
+      }
+      if (page.length < EXPORT_PAGE_SIZE) break;
+      const last = page[page.length - 1];
+      after = { createdAt: last.createdAt, paymentId: last.paymentId };
+    }
+
+    const [tenant, names, excluded] = await Promise.all([
+      tenantRepository.findById(tenantId),
+      docs.length > 0
+        ? patientRepository.findNamesByPatientIds(tenantId, [...new Set(docs.map((d) => d.patientId))])
+        : Promise.resolve(new Map<string, string>()),
+      paymentRepository.countNonCompletedByStatus(tenantId, range.from, range.toExclusive),
+    ]);
+
+    const methodTotals: PaymentExportMethodTotals = {
+      CASH: { count: 0, paise: 0 }, UPI: { count: 0, paise: 0 },
+      CARD: { count: 0, paise: 0 }, CHEQUE: { count: 0, paise: 0 },
+    };
+    let grandTotalPaise = 0;
+    const rows: PaymentExportRow[] = docs.map((doc) => {
+      const amountPaise = toPaise(doc.amount);
+      const bucket = methodTotals[doc.paymentMethod as keyof PaymentExportMethodTotals];
+      if (bucket) { bucket.count += 1; bucket.paise += amountPaise; }
+      grandTotalPaise += amountPaise;
+      return {
+        paymentId:     doc.paymentId,
+        createdAt:     doc.createdAt,
+        patientId:     doc.patientId,
+        patientName:   names.get(doc.patientId) ?? doc.fullName ?? null,
+        description:   doc.description,
+        paymentMethod: doc.paymentMethod,
+        transactionId: doc.transactionId ?? null,
+        amountPaise,
+      };
+    });
+
+    const csv = buildPaymentExportCsv({
+      hospitalName: tenant?.branding?.displayName || tenant?.name || 'Hospital',
+      range,
+      generatedAt:  now,
+      generatedBy,
+      rows,
+      methodTotals,
+      grandTotalPaise,
+      excludedCounts: {
+        PENDING:   excluded[PaymentStatus.PENDING]   ?? 0,
+        FAILED:    excluded[PaymentStatus.FAILED]    ?? 0,
+        CANCELLED: excluded[PaymentStatus.CANCELLED] ?? 0,
+      },
+    });
+
+    return { filename: paymentExportFilename(range), csv };
   }
 
   // ─── Department-wise revenue report ────────────────────────────────────────

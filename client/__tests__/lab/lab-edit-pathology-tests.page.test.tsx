@@ -95,12 +95,12 @@ describe('Edit Pathology Request — Test Type multi-select', () => {
     expect(screen.queryByRole('textbox', { name: 'Test Type' })).not.toBeInTheDocument();
   });
 
-  test('offers the same 109-test catalog, searchable, with current tests marked selected', async () => {
+  test('offers the same 111-test catalog, searchable, with current tests marked selected', async () => {
     const user = userEvent.setup();
     await openEdit(user, CBC);
     await user.click(combobox());
     const options = within(screen.getByRole('listbox')).getAllByRole('option');
-    expect(options).toHaveLength(109);
+    expect(options).toHaveLength(111);
     expect(screen.getByRole('option', { name: CBC })).toHaveAttribute('aria-selected', 'true');
     await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'serum');
     expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual([
@@ -172,7 +172,7 @@ describe('Edit Pathology Request — tests disabled in the Test Master', () => {
     await openEdit(user, CBC);
     await user.click(combobox());
     const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
-    expect(names).toHaveLength(108);
+    expect(names).toHaveLength(110);
     expect(names).not.toContain(LIPID);
   });
 

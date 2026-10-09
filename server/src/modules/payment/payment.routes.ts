@@ -15,6 +15,7 @@ import {
   getReceiptUrl,
   getPaymentSummary,
   getDepartmentRevenue,
+  exportPayments,
 } from './payment.controller';
 
 const router = express.Router();
@@ -74,6 +75,14 @@ router.get(
   '/summary/by-department',
   requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
   getDepartmentRevenue,
+);
+
+// GET /api/payments/export — collection report CSV (period totals by method).
+// Same roles as /summary, since the report carries collection totals.
+router.get(
+  '/export',
+  requireRole(UserRole.MANAGER, UserRole.FINANCE_MANAGER, UserRole.HOSPITAL_ADMIN, UserRole.ADMIN),
+  exportPayments,
 );
 
 // GET /api/payments/:paymentId/receipt — pre-signed download URL (U5-B-04)

@@ -79,13 +79,13 @@ async function referOther(user: ReturnType<typeof userEvent.setup>, name = 'Dr. 
 }
 
 describe('New Pathology Request — Test Type multi-select', () => {
-  test('offers the 109 catalog tests (names exact, in catalog order) and is searchable', async () => {
+  test('offers the 111 catalog tests (names exact, in catalog order) and is searchable', async () => {
     const user = userEvent.setup();
     await openNewPathologyRequest(user);
 
     await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
     const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
-    expect(names).toHaveLength(109);
+    expect(names).toHaveLength(111);
     expect(names.slice(0, 2)).toEqual(['CBC (Complete Blood Count)', 'ESR']);
     expect(names[19]).toBe('Troponin I');
     expect(names.slice(20, 40)).toEqual([
@@ -121,11 +121,16 @@ describe('New Pathology Request — Test Type multi-select', () => {
       'Microalbumin (Urine Albumin / Creatinine Ratio)', 'Allergy Profile', 'ANC Profile (Antenatal)',
       'Dual Marker (First Trimester Screen)', 'Triple Marker (Second Trimester Screen)', 'Thalassemia Profile',
       'Serum Lithium', 'Coombs Test - Direct (DAT)', 'Coombs Test - Indirect (IAT)', 'Folic Acid (Vitamin B9)',
+      'Allergy Vaccine', 'Widal ELISA',
     ]);
 
     await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'vitamin');
     expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent))
       .toEqual(['Vitamin D (25-OH)', 'Vitamin B12', 'Vitamin Profile', 'Folic Acid (Vitamin B9)']);
+    await user.clear(screen.getByRole('textbox', { name: 'Search tests' }));
+    await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'widal');
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Widal Test', 'Widal ELISA']);
   });
 
   // Heavy multi-select + combobox typing in jsdom regularly exceeds the 5s
@@ -237,7 +242,7 @@ describe('New Pathology Request — tests disabled in the Test Master', () => {
 
     await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
     const names = within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent);
-    expect(names).toHaveLength(107);
+    expect(names).toHaveLength(109);
     expect(names).not.toContain('ESR');
     expect(names).not.toContain('HIV 1 & 2 Screening');
     expect(names.slice(0, 2)).toEqual(['CBC (Complete Blood Count)', 'Blood Sugar (Fasting / Post-Prandial / Random)']);
@@ -246,12 +251,25 @@ describe('New Pathology Request — tests disabled in the Test Master', () => {
     expect(within(screen.getByRole('listbox')).queryAllByRole('option')).toHaveLength(0);
   });
 
+  test('Widal ELISA is listed beside Widal Test and hidden when disabled', async () => {
+    mockDisabledTests = ['Widal ELISA'];
+    const user = userEvent.setup();
+    await openNewPathologyRequest(user);
+    await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
+    await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'widal');
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Widal Test']);
+    await user.clear(screen.getByRole('textbox', { name: 'Search tests' }));
+    await user.type(screen.getByRole('textbox', { name: 'Search tests' }), 'allergy');
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Allergy Profile', 'Allergy Vaccine']);
+  });
+
   test('a re-enabled test is offered again and can be submitted', async () => {
     mockDisabledTests = [];
     const user = userEvent.setup();
     await openNewPathologyRequest(user);
     await user.click(screen.getByRole('combobox', { name: /Test Type/ }));
-    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(109);
+    expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(111);
     await user.click(screen.getByRole('option', { name: 'ESR' }));
     await referOther(user);
     await user.click(screen.getByRole('button', { name: 'Submit Request' }));

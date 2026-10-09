@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -11,7 +11,10 @@ jest.mock('@/store/api/payment.api', () => ({
   useCancelRazorpayOrderMutation:  () => [jest.fn(), { isLoading: false }],
   useLazyGetReceiptUrlQuery:       () => [jest.fn(), { isFetching: false }],
   useGetPaymentSummaryQuery:       () => ({ data: undefined, isFetching: false }),
+  useExportPaymentsMutation:       () => [mockExportPayments, { isLoading: false }],
 }));
+
+const mockExportPayments = jest.fn();
 
 jest.mock('@/store/api/patient.api', () => ({
   useLazySearchPatientsQuery: () => [jest.fn(), { data: undefined, isFetching: false }],
@@ -58,5 +61,90 @@ describe('PaymentsPage — Department-wise Revenue moved to /revenue', () => {
       expect(screen.queryByText('Department-wise Revenue')).not.toBeInTheDocument();
       unmount();
     }
+  });
+});
+
+describe('PaymentsPage — Export', () => {
+  beforeEach(() => {
+    mockExportPayments.mockReset();
+    mockExportPayments.mockReturnValue({
+      unwrap: () => Promise.resolve({ url: 'blob:test', filename: 'payments-daily-2026-10-09.csv' }),
+    });
+    (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = jest.fn();
+    jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  });
+
+  test.each(['MANAGER', 'FINANCE_MANAGER', 'HOSPITAL_ADMIN', 'ADMIN'])('%s sees the Export button', (role) => {
+    mockRole = role;
+    render(<PaymentsPage />);
+    expect(screen.getByRole('button', { name: /^export$/i })).toBeInTheDocument();
+  });
+
+  test('RECEPTIONIST does not see the Export button (same gate as the summary)', () => {
+    mockRole = 'RECEPTIONIST';
+    render(<PaymentsPage />);
+    expect(screen.queryByRole('button', { name: /^export$/i })).not.toBeInTheDocument();
+    // existing create actions unchanged
+    expect(screen.getByRole('button', { name: /manual payment/i })).toBeInTheDocument();
+  });
+
+  test('MANAGER sees Export but not the create actions (unchanged)', () => {
+    mockRole = 'MANAGER';
+    render(<PaymentsPage />);
+    expect(screen.queryByRole('button', { name: /manual payment/i })).not.toBeInTheDocument();
+  });
+
+  function openExport() {
+    mockRole = 'FINANCE_MANAGER';
+    render(<PaymentsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /^export$/i }));
+  }
+
+  test('Daily exports the selected date and downloads the file', async () => {
+    openExport();
+    fireEvent.change(screen.getByLabelText(/^date/i), { target: { value: '2026-10-01' } });
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'DAILY', date: '2026-10-01' }));
+    await waitFor(() => expect(screen.queryByText('Export Payments')).not.toBeInTheDocument());
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+  });
+
+  test('Weekly sends the anchor date', async () => {
+    openExport();
+    fireEvent.click(screen.getByRole('button', { name: 'Weekly' }));
+    fireEvent.change(screen.getByLabelText(/any date in the week/i), { target: { value: '2026-09-17' } });
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'WEEKLY', date: '2026-09-17' }));
+  });
+
+  test('Monthly sends the first day of the chosen month', async () => {
+    openExport();
+    fireEvent.click(screen.getByRole('button', { name: 'Monthly' }));
+    fireEvent.change(screen.getByLabelText(/^month/i), { target: { value: '2026-08' } });
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'MONTHLY', date: '2026-08-01' }));
+  });
+
+  test('Custom requires both dates, then sends the range', async () => {
+    openExport();
+    fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    expect(await screen.findByText(/from and to dates are required/i)).toBeInTheDocument();
+    expect(mockExportPayments).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/from date \*/i), { target: { value: '2026-09-01' } });
+    fireEvent.change(screen.getByLabelText(/to date \*/i),   { target: { value: '2026-09-15' } });
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'CUSTOM', dateFrom: '2026-09-01', dateTo: '2026-09-15' }));
+  });
+
+  test('shows the server error message and keeps the dialog open', async () => {
+    mockExportPayments.mockReturnValue({
+      unwrap: () => Promise.reject({ data: { message: 'dateTo cannot be in the future' } }),
+    });
+    openExport();
+    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    expect(await screen.findByText('dateTo cannot be in the future')).toBeInTheDocument();
+    expect(screen.getByText('Export Payments')).toBeInTheDocument();
   });
 });

@@ -671,6 +671,22 @@ const CONTENT: Record<string, { clinicalNote: string | null; comment?: string }>
       'defects. Serum folate reflects recent dietary intake; a fasting sample is preferred, and vitamin B12 status ' +
       'should be assessed at the same time.',
   },
+  ALLERGY_VACCINE: {
+    clinicalNote:
+      'Allergy vaccine (allergen-specific immunotherapy) is prepared only from allergens to which the patient is ' +
+      'sensitised and which correlate with the clinical symptoms. Sensitisation is shown by specific IgE (Class 1: ' +
+      '0.35 kU/L and above) or skin prick testing; a raised total IgE supports atopy but does not identify the ' +
+      'allergen. The vaccine composition, route (subcutaneous or sublingual), dose and schedule are decided by the ' +
+      'treating allergist.',
+  },
+  WIDAL_ELISA: {
+    clinicalNote:
+      'Widal ELISA detects Salmonella Typhi-specific IgM and IgG antibodies by enzyme immunoassay and is more ' +
+      'sensitive and specific than the tube Widal agglutination test. IgM appears towards the end of the first ' +
+      'week of fever and suggests acute infection; IgG rises later and may persist after past infection or ' +
+      'vaccination. An equivocal result should be repeated on a fresh sample after 7 - 10 days. Blood culture ' +
+      'remains the gold standard for the diagnosis of enteric fever; cut-offs are kit-dependent.',
+  },
 };
 
 // One seed row per catalog test (catalog order), then GENERIC.
