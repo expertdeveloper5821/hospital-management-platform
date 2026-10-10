@@ -68,7 +68,7 @@ describe('PaymentsPage — Export', () => {
   beforeEach(() => {
     mockExportPayments.mockReset();
     mockExportPayments.mockReturnValue({
-      unwrap: () => Promise.resolve({ url: 'blob:test', filename: 'payments-daily-2026-10-09.csv' }),
+      unwrap: () => Promise.resolve({ url: 'blob:test', filename: 'payments-daily-2026-10-09.pdf' }),
     });
     (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = jest.fn();
     jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -103,17 +103,19 @@ describe('PaymentsPage — Export', () => {
   test('Daily exports the selected date and downloads the file', async () => {
     openExport();
     fireEvent.change(screen.getByLabelText(/^date/i), { target: { value: '2026-10-01' } });
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'DAILY', date: '2026-10-01' }));
     await waitFor(() => expect(screen.queryByText('Export Payments')).not.toBeInTheDocument());
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    const anchor = (HTMLAnchorElement.prototype.click as jest.Mock).mock.contexts[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe('payments-daily-2026-10-09.pdf');
   });
 
   test('Weekly sends the anchor date', async () => {
     openExport();
     fireEvent.click(screen.getByRole('button', { name: 'Weekly' }));
     fireEvent.change(screen.getByLabelText(/any date in the week/i), { target: { value: '2026-09-17' } });
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'WEEKLY', date: '2026-09-17' }));
   });
 
@@ -121,20 +123,20 @@ describe('PaymentsPage — Export', () => {
     openExport();
     fireEvent.click(screen.getByRole('button', { name: 'Monthly' }));
     fireEvent.change(screen.getByLabelText(/^month/i), { target: { value: '2026-08' } });
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'MONTHLY', date: '2026-08-01' }));
   });
 
   test('Custom requires both dates, then sends the range', async () => {
     openExport();
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     expect(await screen.findByText(/from and to dates are required/i)).toBeInTheDocument();
     expect(mockExportPayments).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/from date \*/i), { target: { value: '2026-09-01' } });
     fireEvent.change(screen.getByLabelText(/to date \*/i),   { target: { value: '2026-09-15' } });
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     await waitFor(() => expect(mockExportPayments).toHaveBeenCalledWith({ period: 'CUSTOM', dateFrom: '2026-09-01', dateTo: '2026-09-15' }));
   });
 
@@ -143,7 +145,7 @@ describe('PaymentsPage — Export', () => {
       unwrap: () => Promise.reject({ data: { message: 'dateTo cannot be in the future' } }),
     });
     openExport();
-    fireEvent.click(screen.getByRole('button', { name: /download csv/i }));
+    fireEvent.click(screen.getByRole('button', { name: /download pdf/i }));
     expect(await screen.findByText('dateTo cannot be in the future')).toBeInTheDocument();
     expect(screen.getByText('Export Payments')).toBeInTheDocument();
   });

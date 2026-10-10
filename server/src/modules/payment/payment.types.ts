@@ -142,7 +142,7 @@ export const DepartmentRevenueQuerySchema = z.object({
 
 export type DepartmentRevenueQuery = z.infer<typeof DepartmentRevenueQuerySchema>;
 
-// Payment Export (collection report CSV). Dates are hospital-local (IST)
+// Payment Export (collection report PDF). Dates are hospital-local (IST)
 // calendar days as YYYY-MM-DD — the server resolves them to instants (see
 // payment-export.ts), so the client's own timezone never shifts the range.
 // DAILY / WEEKLY / MONTHLY are anchored on `date` (default: today IST);

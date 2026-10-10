@@ -216,6 +216,9 @@ describe('AdminPage — Edit User dialog: combined save', () => {
     await user.click(screen.getAllByRole('button', { name: /^save changes$/i })[0]);
 
     expect(screen.getAllByText('Enter a valid email address.').length).toBeGreaterThan(0);
+    // Rendered directly below the Email input, wired up for screen readers.
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true');
+    expect(emailInput).toHaveAccessibleDescription('Enter a valid email address.');
     expect(mockUpdateUser).not.toHaveBeenCalled();
   });
 
@@ -258,7 +261,42 @@ describe('AdminPage — Edit User dialog: combined save', () => {
     await user.click(screen.getAllByRole('button', { name: /^save changes$/i })[0]);
 
     expect(screen.getAllByText(/already exists in this tenant/i).length).toBeGreaterThan(0);
+    // The duplicate-email 409 renders under the Email field, not the banner.
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true');
+    expect(emailInput).toHaveAccessibleDescription('A user with this email already exists in this tenant');
     expect(queryEditDialog()).toBeInTheDocument();
+  });
+
+  test('server-side email field error renders below the Email input', async () => {
+    mockRole = 'HOSPITAL_ADMIN';
+    mockUsers = [nurseUser];
+    mockUpdateUser.mockImplementationOnce(() => ({
+      unwrap: () => Promise.reject({
+        status: 400,
+        data: {
+          message: 'Invalid request',
+          details: { errors: { formErrors: [], fieldErrors: { email: ['Invalid email'] } } },
+        },
+      }),
+    }));
+    render(<AdminPage />);
+
+    const user = userEvent.setup();
+    await openFirstEditDialog(user);
+
+    const emailInput = screen.getAllByLabelText(/^Email/)[0];
+    await user.clear(emailInput);
+    await user.type(emailInput, 'other@h.com');
+    await user.click(screen.getAllByRole('button', { name: /^save changes$/i })[0]);
+
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true');
+    expect(emailInput).toHaveAccessibleDescription('Invalid email');
+    expect(screen.queryByText('Invalid request')).not.toBeInTheDocument();
+
+    // Editing the field clears the error.
+    await user.type(emailInput, 'x');
+    expect(emailInput).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByText('Invalid email')).not.toBeInTheDocument();
   });
 
   test('structured 409 conflict opens the generic conflict dialog', async () => {
@@ -336,6 +374,9 @@ describe('AdminPage — UKMC No. in the dialogs (doctor-only)', () => {
     await user.type(screen.getAllByLabelText(/^Email/)[0], 'new.doc@h.com');
     await user.click(screen.getAllByRole('button', { name: /^create user$/i })[0]);
     expect(screen.getAllByText('UKMC No. is required for doctors.').length).toBeGreaterThan(0);
+    // Rendered directly below the UKMC No. input, wired up for screen readers.
+    expect(ukmcInput).toHaveAttribute('aria-invalid', 'true');
+    expect(ukmcInput).toHaveAccessibleDescription('UKMC No. is required for doctors.');
     expect(mockCreateUser).not.toHaveBeenCalled();
 
     // Providing one submits it uppercase.
@@ -387,6 +428,8 @@ describe('AdminPage — UKMC No. in the dialogs (doctor-only)', () => {
     await user.click(screen.getAllByRole('button', { name: /^save changes$/i })[0]);
 
     expect(screen.getAllByText('UKMC No. is required for doctors.').length).toBeGreaterThan(0);
+    expect(ukmcInput).toHaveAttribute('aria-invalid', 'true');
+    expect(ukmcInput).toHaveAccessibleDescription('UKMC No. is required for doctors.');
     expect(mockUpdateUser).not.toHaveBeenCalled();
   });
 

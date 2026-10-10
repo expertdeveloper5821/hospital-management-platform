@@ -984,7 +984,7 @@ function SummaryCard({ dateFrom, dateTo }: SummaryCardProps) {
 }
 
 // ─── Export Payments Modal ────────────────────────────────────────────────────
-// Downloads the collection-report CSV (GET /api/payments/export). Dates are
+// Downloads the collection-report PDF (GET /api/payments/export). Dates are
 // hospital (IST) calendar days; the server resolves each period to its IST
 // range, so the report never depends on the browser's timezone.
 
@@ -1054,7 +1054,7 @@ function ExportPaymentsModal({ onClose }: { onClose: () => void }) {
           <div>
             <h2 className="text-base font-semibold">Export Payments</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Completed payments with Cash / UPI / Card totals (CSV, IST)
+              Completed payments with Cash / UPI / Card totals (PDF, IST)
             </p>
           </div>
           <button
@@ -1167,7 +1167,7 @@ function ExportPaymentsModal({ onClose }: { onClose: () => void }) {
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Exporting…" : "Download CSV"}
+              {isLoading ? "Exporting…" : "Download PDF"}
             </Button>
           </div>
         </NavForm>

@@ -13,8 +13,9 @@ import { patientRepository } from '../../../src/modules/patient/patient.reposito
 import { tenantRepository }  from '../../../src/modules/tenant/tenant.repository';
 import { PaymentService, MAX_EXPORT_ROWS } from '../../../src/modules/payment/payment.service';
 import {
-  resolveExportRange, csvCell, toPaise, PaymentExportRangeError, paymentExportFilename,
+  resolveExportRange, toPaise, PaymentExportRangeError, paymentExportFilename, PaymentExportReport,
 } from '../../../src/modules/payment/payment-export';
+import * as exportPdf from '../../../src/modules/payment/payment-export.pdf';
 import { IPayment } from '../../../src/modules/payment/payment.model';
 import { ITenant }  from '../../../src/modules/tenant/tenant.model';
 import { AppError } from '../../../src/shared/middleware/error-handler';
@@ -78,21 +79,12 @@ describe('resolveExportRange (IST)', () => {
   });
 
   test('filename reflects period and span', () => {
-    expect(paymentExportFilename(resolveExportRange({ period: 'DAILY' }, NOW))).toBe('payments-daily-2026-10-09.csv');
-    expect(paymentExportFilename(resolveExportRange({ period: 'WEEKLY' }, NOW))).toBe('payments-weekly-2026-10-05_to_2026-10-11.csv');
+    expect(paymentExportFilename(resolveExportRange({ period: 'DAILY' }, NOW))).toBe('payments-daily-2026-10-09.pdf');
+    expect(paymentExportFilename(resolveExportRange({ period: 'WEEKLY' }, NOW))).toBe('payments-weekly-2026-10-05_to_2026-10-11.pdf');
   });
 });
 
-describe('CSV helpers', () => {
-  test('quotes commas/quotes/newlines and neutralises formula injection', () => {
-    expect(csvCell('a,b')).toBe('"a,b"');
-    expect(csvCell('say "hi"')).toBe('"say ""hi"""');
-    expect(csvCell('=HYPERLINK("x")')).toBe(`"'=HYPERLINK(""x"")"`);
-    expect(csvCell('+91')).toBe("'+91");
-    expect(csvCell(42)).toBe('42');
-    expect(csvCell(null)).toBe('');
-  });
-
+describe('amount helpers', () => {
   test('toPaise avoids floating point drift', () => {
     expect(toPaise(0.1) + toPaise(0.2)).toBe(30);
     expect(toPaise(1234.56)).toBe(123456);
@@ -109,15 +101,11 @@ function payment(i: number, method: string, amount: number, createdAt = new Date
   } as unknown as IPayment;
 }
 
-function dataRows(csv: string): string[] {
-  const lines = csv.split('\r\n');
-  const start = lines.findIndex((l) => l.startsWith('S.No,')) + 1;
-  const end   = lines.indexOf('', start);
-  return lines.slice(start, end);
-}
-
-function summaryLine(csv: string, label: string): string[] {
-  return csv.split('\r\n').find((l) => l.startsWith(`${label},`))!.split(',');
+// The service hands the finished report to the PDF renderer; capture it to
+// assert on rows and totals without parsing the PDF itself.
+let pdfSpy: jest.SpyInstance;
+function lastReport(): PaymentExportReport {
+  return pdfSpy.mock.calls[pdfSpy.mock.calls.length - 1][0];
 }
 
 describe('PaymentService.exportPayments', () => {
@@ -129,7 +117,10 @@ describe('PaymentService.exportPayments', () => {
     mockTenantRepo.findById = jest.fn().mockResolvedValue({ name: 'Narayan Hospital', branding: { displayName: 'Narayan Hospital' } } as unknown as ITenant);
     mockPatRepo.findNamesByPatientIds = jest.fn().mockResolvedValue(new Map([['PAT-NH01', 'Asha Verma']]));
     mockPayRepo.countNonCompletedByStatus = jest.fn().mockResolvedValue({ PENDING: 2, CANCELLED: 1 });
+    pdfSpy = jest.spyOn(exportPdf, 'buildPaymentExportPdf');
   });
+
+  afterEach(() => pdfSpy.mockRestore());
 
   test('pages through every keyset page until a short page, passing the last row as the cursor', async () => {
     const page1 = Array.from({ length: 500 }, (_, i) => payment(i, 'CASH', 10));
@@ -138,53 +129,60 @@ describe('PaymentService.exportPayments', () => {
     mockPayRepo.findCompletedExportPage = jest.fn()
       .mockResolvedValueOnce(page1).mockResolvedValueOnce(page2).mockResolvedValueOnce(page3);
 
-    const { csv, filename } = await service.exportPayments('tenant-001', { period: 'DAILY' }, 'fin@test.com', NOW);
+    const { pdf, filename } = await service.exportPayments('tenant-001', { period: 'DAILY' }, 'fin@test.com', NOW);
 
-    expect(filename).toBe('payments-daily-2026-10-09.csv');
+    expect(filename).toBe('payments-daily-2026-10-09.pdf');
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(mockPayRepo.findCompletedExportPage).toHaveBeenCalledTimes(3);
     const calls = mockPayRepo.findCompletedExportPage.mock.calls;
     expect(calls[0][3]).toBeNull();
     expect(calls[1][3]).toEqual({ createdAt: page1[499].createdAt, paymentId: 'pay-000499' });
     expect(calls[2][3]).toEqual({ createdAt: page2[499].createdAt, paymentId: 'pay-000999' });
 
-    expect(dataRows(csv)).toHaveLength(1003);
-    expect(summaryLine(csv, 'Cash')).toEqual(['Cash', '500', '5000.00']);
-    expect(summaryLine(csv, 'UPI')).toEqual(['UPI', '500', '10000.00']);
-    expect(summaryLine(csv, 'Card')).toEqual(['Card', '3', '91.50']);
-    expect(summaryLine(csv, 'Cheque')).toEqual(['Cheque', '0', '0.00']);
-    expect(summaryLine(csv, 'Grand Total')).toEqual(['Grand Total', '1003', '15091.50']);
-    expect(summaryLine(csv, 'Pending')).toEqual(['Pending', '2']);
-    expect(summaryLine(csv, 'Failed')).toEqual(['Failed', '0']);
-    expect(summaryLine(csv, 'Cancelled')).toEqual(['Cancelled', '1']);
+    const report = lastReport();
+    expect(report.rows).toHaveLength(1003);
+    expect(report.methodTotals).toEqual({
+      CASH:   { count: 500, paise: 500000 },
+      UPI:    { count: 500, paise: 1000000 },
+      CARD:   { count: 3,   paise: 9150 },
+      CHEQUE: { count: 0,   paise: 0 },
+    });
+    expect(report.grandTotalPaise).toBe(1509150);
+    expect(report.grandTotalPaise).toBe(report.rows.reduce((sum, r) => sum + r.amountPaise, 0));
+    expect(report.excludedCounts).toEqual({ PENDING: 2, FAILED: 0, CANCELLED: 1 });
   });
 
   test('never double-counts a payment returned on two pages', async () => {
     const dup = payment(1, 'CASH', 100);
     mockPayRepo.findCompletedExportPage = jest.fn().mockResolvedValueOnce([dup, dup]);
-    const { csv } = await service.exportPayments('tenant-001', { period: 'DAILY' }, 'x', NOW);
-    expect(summaryLine(csv, 'Grand Total')).toEqual(['Grand Total', '1', '100.00']);
+    await service.exportPayments('tenant-001', { period: 'DAILY' }, 'x', NOW);
+    expect(lastReport().rows).toHaveLength(1);
+    expect(lastReport().grandTotalPaise).toBe(10000);
   });
 
-  test('includes header metadata, IST date/time and patient name from the patient record', async () => {
+  test('passes header metadata and the patient name from the patient record', async () => {
     mockPayRepo.findCompletedExportPage = jest.fn().mockResolvedValueOnce([
       payment(1, 'UPI', 250, new Date('2026-10-08T19:15:00.000Z')), // 2026-10-09 00:45 IST
     ]);
-    const { csv } = await service.exportPayments('tenant-001', { period: 'DAILY' }, 'fin@test.com', NOW);
-    expect(csv.startsWith('﻿Payment Collection Report')).toBe(true);
-    expect(csv).toContain('Hospital,Narayan Hospital');
-    expect(csv).toContain('Report Type,Daily');
-    expect(csv).toContain('Period From,2026-10-09');
-    expect(csv).toContain('Period To,2026-10-09');
-    expect(csv).toContain('Generated At,2026-10-09 14:00 IST');
-    expect(csv).toContain('Generated By,fin@test.com');
-    expect(dataRows(csv)[0]).toBe('1,2026-10-09,00:45,pay-000001,PAT-NH01,Asha Verma,OPD Consultation,UPI,,250.00');
+    await service.exportPayments('tenant-001', { period: 'DAILY' }, 'fin@test.com', NOW);
+    const report = lastReport();
+    expect(report.hospitalName).toBe('Narayan Hospital');
+    expect(report.range).toMatchObject({ period: 'DAILY', fromKey: '2026-10-09', toKey: '2026-10-09' });
+    expect(report.generatedAt).toBe(NOW);
+    expect(report.generatedBy).toBe('fin@test.com');
+    expect(report.rows[0]).toEqual({
+      paymentId: 'pay-000001', createdAt: new Date('2026-10-08T19:15:00.000Z'), patientId: 'PAT-NH01',
+      patientName: 'Asha Verma', description: 'OPD Consultation', paymentMethod: 'UPI',
+      transactionId: null, amountPaise: 25000,
+    });
   });
 
   test('empty period exports zero totals', async () => {
     mockPayRepo.findCompletedExportPage = jest.fn().mockResolvedValueOnce([]);
-    const { csv } = await service.exportPayments('tenant-001', { period: 'MONTHLY' }, 'x', NOW);
-    expect(dataRows(csv)).toHaveLength(0);
-    expect(summaryLine(csv, 'Grand Total')).toEqual(['Grand Total', '0', '0.00']);
+    const { pdf } = await service.exportPayments('tenant-001', { period: 'MONTHLY' }, 'x', NOW);
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(lastReport().rows).toHaveLength(0);
+    expect(lastReport().grandTotalPaise).toBe(0);
     expect(mockPatRepo.findNamesByPatientIds).not.toHaveBeenCalled();
   });
 
