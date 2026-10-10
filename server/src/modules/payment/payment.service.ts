@@ -23,9 +23,10 @@ import {
   ExportPaymentsQuery,
 } from './payment.types';
 import {
-  resolveExportRange, buildPaymentExportCsv, paymentExportFilename, toPaise,
+  resolveExportRange, paymentExportFilename, toPaise,
   PaymentExportRangeError, PaymentExportRow, PaymentExportMethodTotals,
 } from './payment-export';
+import { buildPaymentExportPdf } from './payment-export.pdf';
 
 import { patientRepository }    from '../patient/patient.repository';
 import { labRepository }        from '../lab/lab.repository';
@@ -45,7 +46,7 @@ import config from '../../shared/config/env';
 const RECEIPT_URL_EXPIRY_SECONDS = 3600;
 
 // Payment Export: rows fetched per keyset page, and a hard cap so one request
-// can't build an unbounded CSV in memory (a narrower range is required instead).
+// can't build an unbounded report in memory (a narrower range is required instead).
 const EXPORT_PAGE_SIZE = 500;
 export const MAX_EXPORT_ROWS = 50_000;
 
@@ -639,7 +640,7 @@ export class PaymentService {
     return paymentRepository.sumByMethod(tenantId, query);
   }
 
-  // ─── Payment Export (collection report CSV) ───────────────────────────────
+  // ─── Payment Export (collection report PDF) ───────────────────────────────
   // Same business rule as getPaymentSummary: only COMPLETED payments are
   // collections. PENDING / FAILED / CANCELLED (incl. payments cancelled when
   // their OPD visit was deleted) are excluded from rows and totals and only
@@ -652,7 +653,7 @@ export class PaymentService {
     query:       ExportPaymentsQuery,
     generatedBy: string,
     now:         Date = new Date(),
-  ): Promise<{ filename: string; csv: string }> {
+  ): Promise<{ filename: string; pdf: Buffer }> {
     let range;
     try {
       range = resolveExportRange(query, now);
@@ -713,7 +714,7 @@ export class PaymentService {
       };
     });
 
-    const csv = buildPaymentExportCsv({
+    const pdf = await buildPaymentExportPdf({
       hospitalName: tenant?.branding?.displayName || tenant?.name || 'Hospital',
       range,
       generatedAt:  now,
@@ -728,7 +729,7 @@ export class PaymentService {
       },
     });
 
-    return { filename: paymentExportFilename(range), csv };
+    return { filename: paymentExportFilename(range), pdf };
   }
 
   // ─── Department-wise revenue report ────────────────────────────────────────

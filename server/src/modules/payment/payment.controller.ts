@@ -138,7 +138,7 @@ export async function getPaymentSummary(
   } catch (err) { next(err); }
 }
 
-// ─── Payment export (collection report CSV) ──────────────────────────────────
+// ─── Payment export (collection report PDF) ──────────────────────────────────
 
 export async function exportPayments(
   req: Request, res: Response, next: NextFunction,
@@ -149,15 +149,15 @@ export async function exportPayments(
       res.status(400).json({ status: 'error', message: 'Invalid query parameters', details: parsed.error.flatten().fieldErrors });
       return;
     }
-    const { filename, csv } = await paymentService.exportPayments(
+    const { filename, pdf } = await paymentService.exportPayments(
       req.user!.tenantId as string, parsed.data, req.user!.email || req.user!.userId,
     );
     res.set({
-      'Content-Type':        'text/csv; charset=utf-8',
+      'Content-Type':        'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control':       'no-store',
     });
-    res.status(200).send(csv);
+    res.status(200).send(pdf);
   } catch (err) { next(err); }
 }
 

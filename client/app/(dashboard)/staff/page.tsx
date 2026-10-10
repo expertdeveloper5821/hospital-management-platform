@@ -64,7 +64,7 @@ export default function StaffPage() {
   const canSeeIdCard = profile?.role === 'HOSPITAL_ADMIN' || profile?.role === 'HR';
 
   return (
-    <div className="px-5 pt-2 pb-5 space-y-4">
+    <div className="px-4 pt-2 pb-5 space-y-4 sm:px-5">
       <h1 className="text-2xl font-bold">Staff</h1>
 
       <div className="max-w-sm">
@@ -81,14 +81,14 @@ export default function StaffPage() {
       <div className="space-y-2">
         {users.map((user) => (
           <Card key={user.userId}>
-            <CardContent className="flex items-center justify-between py-3 px-4">
+            <CardContent className="flex flex-col gap-2 py-3 px-4 sm:flex-row sm:items-center sm:justify-between sm:gap-0">
               <div className="min-w-0">
                 <p className="font-medium truncate">{user.name || user.email}</p>
                 <p className="text-sm text-muted-foreground truncate">{user.email}</p>
               </div>
 
-              <div className="flex items-center gap-3 ml-4 shrink-0">
-                <span className="w-44 pr-4 text-sm font-bold text-muted-foreground whitespace-nowrap">{user.role}</span>
+              <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:ml-4 sm:shrink-0">
+                <span className="w-full text-sm font-bold text-muted-foreground sm:w-44 sm:pr-4 sm:whitespace-nowrap">{user.role}</span>
 
                 <Link href={`/staff/${user.userId}/documents`}>
                   <Button variant="outline" size="sm">Documents</Button>

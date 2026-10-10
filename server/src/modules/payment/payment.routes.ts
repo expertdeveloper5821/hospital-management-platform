@@ -77,7 +77,7 @@ router.get(
   getDepartmentRevenue,
 );
 
-// GET /api/payments/export — collection report CSV (period totals by method).
+// GET /api/payments/export — collection report PDF (period totals by method).
 // Same roles as /summary, since the report carries collection totals.
 router.get(
   '/export',

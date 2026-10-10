@@ -85,18 +85,18 @@ export default function StaffDocumentsPage() {
 };
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl mx-auto">
+    <div className="p-4 space-y-6 max-w-2xl mx-auto sm:p-6">
       <h1 className="text-2xl font-bold">Staff Documents</h1>
-      <p className="text-muted-foreground text-sm">User ID: {params.userId}</p>
+      <p className="text-muted-foreground text-sm break-all">User ID: {params.userId}</p>
 
       {checklist && (
         <Card>
           <CardHeader><CardTitle className="text-base">Onboarding Checklist</CardTitle></CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
               {checklist.map((item) => (
-                <div key={item.category} className="flex items-center justify-between border rounded p-2">
-                  <span className="capitalize">{item.category.replace(/_/g, ' ').toLowerCase()}</span>
+                <div key={item.category} className="flex items-center justify-between gap-2 border rounded p-2">
+                  <span className="capitalize min-w-0">{item.category.replace(/_/g, ' ').toLowerCase()}</span>
                   <Badge variant={item.status === 'complete' ? 'success' : 'warning'}>
                     {item.status === 'complete' ? '✓' : '✗'} {item.status}
                   </Badge>
@@ -129,7 +129,7 @@ export default function StaffDocumentsPage() {
             </div>
             <div>
               <Label htmlFor="file">File * (PDF, JPG, PNG — max 10 MB)</Label>
-              <input id="file" type="file" ref={fileRef} accept=".pdf,.jpg,.jpeg,.png" className="mt-1" />
+              <input id="file" type="file" ref={fileRef} accept=".pdf,.jpg,.jpeg,.png" className="mt-1 max-w-full" />
             </div>
             {uploadError && <p className="text-red-600 text-sm">{uploadError}</p>}
             <Button type="submit" disabled={uploading}>{uploading ? 'Uploading…' : 'Upload'}</Button>
@@ -142,15 +142,15 @@ export default function StaffDocumentsPage() {
           <CardHeader><CardTitle className="text-base">Documents ({documents.length})</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {documents.map((doc) => (
-              <div key={doc.documentId} className="flex items-start justify-between border rounded p-3 text-sm">
-                <div className="space-y-1">
-                  <p className="font-medium">{doc.documentName}</p>
+              <div key={doc.documentId} className="flex items-start justify-between gap-3 border rounded p-3 text-sm">
+                <div className="space-y-1 min-w-0">
+                  <p className="font-medium break-words">{doc.documentName}</p>
                   <p className="text-muted-foreground">{doc.category.replace(/_/g, ' ')}</p>
                   <p className="text-muted-foreground">{new Date(doc.createdAt).toLocaleDateString()}</p>
                   <a href={doc.presignedUrl} target="_blank" rel="noopener noreferrer"
                     className="text-blue-600 underline">Download</a>
                 </div>
-                <Button size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={() => setPendingDelete(doc)}>Delete</Button>
+                <Button size="sm" variant="outline" className="shrink-0 text-destructive hover:text-destructive" onClick={() => setPendingDelete(doc)}>Delete</Button>
               </div>
             ))}
           </CardContent>
@@ -167,7 +167,7 @@ export default function StaffDocumentsPage() {
             <div className="space-y-1">
               <h2 className="text-lg font-semibold">Delete document?</h2>
               <p className="text-sm text-muted-foreground">
-                &ldquo;{pendingDelete.documentName}&rdquo; will be permanently removed.
+                <span className="break-words">&ldquo;{pendingDelete.documentName}&rdquo;</span> will be permanently removed.
               </p>
             </div>
             <div className="flex gap-3">

@@ -23,7 +23,7 @@ export default function StaffIdCardPage() {
   const handleGenerate = () => generate(params.userId);
 
   return (
-    <div className="p-6 max-w-xl mx-auto space-y-6">
+    <div className="p-4 max-w-xl mx-auto space-y-6 sm:p-6">
       <h1 className="text-2xl font-bold">Staff ID Card</h1>
 
       {data && (
@@ -35,7 +35,7 @@ export default function StaffIdCardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <p><span className="font-medium">User ID:</span> {data.userId}</p>
+            <p className="break-all"><span className="font-medium">User ID:</span> {data.userId}</p>
             <p><span className="font-medium">Issued:</span> {data.issuedAt.slice(0, 10)}</p>
             <p><span className="font-medium">Expires:</span> {data.cardExpiresAt.slice(0, 10)}</p>
             <a

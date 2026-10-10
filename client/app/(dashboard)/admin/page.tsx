@@ -85,24 +85,58 @@ type UserFormValues = z.infer<typeof userFormSchema>;
  * Validate a user form against the shared schema, plus the role-conditional
  * rule (UKMC No. is mandatory for DOCTOR — empty or invalid only for them;
  * other roles never carry or send the field).
- * Returns `null` when valid, else the first error message.
+ * Returns the first form-level error, the Email error and the UKMC No. error
+ * separately (each `null` when valid) so the last two can render directly
+ * below their inputs.
  */
 function validateUserForm(
   values: { name: string; email: string; role: UserRole; ukmcNo: string },
-): string | null {
-  const base = userFormSchema.omit({ ukmcNo: true }).safeParse(values);
-  if (!base.success) {
-    return base.error.issues[0]?.message ?? 'Invalid form data.';
-  }
+): { form: string | null; email: string | null; ukmcNo: string | null } {
+  const base   = userFormSchema.omit({ ukmcNo: true }).safeParse(values);
+  const issues = base.success ? [] : base.error.issues;
+  const email  = issues.find((i) => i.path[0] === 'email')?.message ?? null;
+  const formIssue = issues.find((i) => i.path[0] !== 'email');
+  const form   = formIssue ? (formIssue.message || 'Invalid form data.') : null;
+  let ukmcNo: string | null = null;
   if (values.role === UserRole.DOCTOR) {
     const normalised = values.ukmcNo.trim().toUpperCase().replace(/\s+|-{2,}/g, ' ');
     if (!UKMC_NO_RE.test(normalised)) {
-      return values.ukmcNo.trim().length === 0
+      ukmcNo = values.ukmcNo.trim().length === 0
         ? 'UKMC No. is required for doctors.'
         : 'UKMC No. may contain 1–20 letters, digits, hyphens, or spaces (no leading/trailing separator).';
     }
   }
-  return null;
+  return { form, email, ukmcNo };
+}
+
+/**
+ * Server-side Email rejection — a Zod `fieldErrors.email` from the controller,
+ * or UserService's duplicate-email 409 (a plain ConflictError with no
+ * `details.code`, unlike the role-change conflicts) — so it renders under the
+ * field. `null` for any other error.
+ */
+function emailServerError(
+  status: number | undefined,
+  data?: { message?: string; details?: Record<string, unknown> },
+): string | null {
+  const details = data?.details;
+  if (status === 409 && typeof details?.code !== 'string' && data?.message && /email/i.test(data.message)) {
+    return data.message;
+  }
+  const fieldErrors = (details?.errors as { fieldErrors?: Record<string, string[] | undefined> } | undefined)?.fieldErrors;
+  return fieldErrors?.email?.[0] ?? null;
+}
+
+/**
+ * Server-side UKMC No. rejection — 400 `UKMC_REQUIRED` from UserService, or a
+ * Zod `fieldErrors.ukmcNo` from the controller — so it renders under the
+ * field too. `null` for any other error.
+ */
+function ukmcServerError(data?: { message?: string; details?: Record<string, unknown> }): string | null {
+  const details = data?.details;
+  if (details?.code === 'UKMC_REQUIRED') return data?.message ?? 'UKMC No. is required for doctors.';
+  const fieldErrors = (details?.errors as { fieldErrors?: Record<string, string[] | undefined> } | undefined)?.fieldErrors;
+  return fieldErrors?.ukmcNo?.[0] ?? null;
 }
 
 /** Empty string when null/undefined so inputs prefill cleanly. */
@@ -152,6 +186,8 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
   const [ukmcNo,       setUkmcNo]       = useState('');
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [error,         setError]         = useState<string | null>(null);
+  const [emailError,    setEmailError]    = useState<string | null>(null);
+  const [ukmcError,     setUkmcError]     = useState<string | null>(null);
 
   const [createUser, { isLoading }] = useCreateUserMutation();
   const { data: departments }       = useListDepartmentsQuery();
@@ -159,6 +195,8 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setEmailError(null);
+    setUkmcError(null);
 
     const values = {
       name:   name.trim(),
@@ -167,9 +205,11 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
       ukmcNo: normaliseUkmcNo(ukmcNo),
     };
 
-    const validationError = validateUserForm(values);
-    if (validationError) {
-      setError(validationError);
+    const validation = validateUserForm(values);
+    if (validation.form || validation.email || validation.ukmcNo) {
+      setError(validation.form);
+      setEmailError(validation.email);
+      setUkmcError(validation.ukmcNo);
       return;
     }
 
@@ -184,8 +224,11 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
       }).unwrap();
       onClose();
     } catch (err: unknown) {
-      const msg = (err as { data?: { message?: string } })?.data?.message;
-      setError(msg ?? 'Failed to create user.');
+      const { status, data } = (err ?? {}) as { status?: number; data?: { message?: string; details?: Record<string, unknown> } };
+      const emailMsg = emailServerError(status, data);
+      const ukmcMsg  = ukmcServerError(data);
+      if (emailMsg || ukmcMsg) { setEmailError(emailMsg); setUkmcError(ukmcMsg); return; }
+      setError(data?.message ?? 'Failed to create user.');
     }
   }
 
@@ -230,17 +273,23 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
                 onChange={(e) => {
                   setEmail(e.target.value);
                   setError(null);
+                  setEmailError(null);
                 }}
                 maxLength={254}
                 required
+                aria-invalid={!!emailError}
+                aria-describedby={emailError ? 'cu-email-error' : undefined}
               />
+              {emailError && (
+                <p id="cu-email-error" className="text-xs text-destructive" role="alert">{emailError}</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="cu-role">Role</Label>
               <select
                 id="cu-role"
                 value={role}
-                onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); setDepartmentIds([]); }}
+                onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); setUkmcError(null); setDepartmentIds([]); }}
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {ASSIGNABLE_ROLES.map((r) => (
@@ -256,11 +305,16 @@ function CreateUserModal({ onClose }: CreateUserModalProps) {
                   id="cu-ukmc"
                   placeholder="UK-REG-12345"
                   value={ukmcNo}
-                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); }}
+                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); setUkmcError(null); }}
                   maxLength={20}
                   required
                   aria-required="true"
+                  aria-invalid={!!ukmcError}
+                  aria-describedby={ukmcError ? 'cu-ukmc-error' : undefined}
                 />
+                {ukmcError && (
+                  <p id="cu-ukmc-error" className="text-xs text-destructive" role="alert">{ukmcError}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Uttarakhand Medical Council Registration Number (required for doctors).
                 </p>
@@ -446,6 +500,8 @@ function EditUserModal({
   const [role,    setRole]    = useState<UserRole>(user.role);
   const [ukmcNo,  setUkmcNo]  = useState(ukmcInputValue(user.ukmcNo));
   const [error,   setError]   = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [ukmcError, setUkmcError] = useState<string | null>(null);
 
   const [updateUser, { isLoading }] = useUpdateUserMutation();
 
@@ -454,6 +510,8 @@ function EditUserModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setEmailError(null);
+    setUkmcError(null);
 
     const values = {
       name:   name.trim(),
@@ -462,9 +520,11 @@ function EditUserModal({
       ukmcNo: normaliseUkmcNo(ukmcNo),
     };
 
-    const validationError = validateUserForm(values);
-    if (validationError) {
-      setError(validationError);
+    const validation = validateUserForm(values);
+    if (validation.form || validation.email || validation.ukmcNo) {
+      setError(validation.form);
+      setEmailError(validation.email);
+      setUkmcError(validation.ukmcNo);
       return;
     }
 
@@ -507,6 +567,9 @@ function EditUserModal({
         });
         return;
       }
+      const emailMsg = emailServerError(e.status, e.data);
+      const ukmcMsg  = ukmcServerError(e.data);
+      if (emailMsg || ukmcMsg) { setEmailError(emailMsg); setUkmcError(ukmcMsg); return; }
       const msg = e.data?.message;
       setError(msg ?? 'Failed to update user.');
     }
@@ -545,10 +608,15 @@ function EditUserModal({
                 type="email"
                 placeholder="staff@hospital.com"
                 value={email}
-                onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                onChange={(e) => { setEmail(e.target.value); setError(null); setEmailError(null); }}
                 maxLength={254}
                 required
+                aria-invalid={!!emailError}
+                aria-describedby={emailError ? 'eu-email-error' : undefined}
               />
+              {emailError && (
+                <p id="eu-email-error" className="text-xs text-destructive" role="alert">{emailError}</p>
+              )}
             </div>
             {canEditProfile && (
               <div className="space-y-2">
@@ -556,7 +624,7 @@ function EditUserModal({
                 <select
                   id="eu-role"
                   value={role}
-                  onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); }}
+                  onChange={(e) => { setRole(e.target.value as UserRole); setUkmcNo(''); setUkmcError(null); }}
                   className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   {ASSIGNABLE_ROLES.map((r) => (
@@ -573,11 +641,16 @@ function EditUserModal({
                   id="eu-ukmc"
                   placeholder="UK-REG-12345"
                   value={ukmcNo}
-                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); }}
+                  onChange={(e) => { setUkmcNo(e.target.value.toUpperCase()); setError(null); setUkmcError(null); }}
                   maxLength={20}
                   required
                   aria-required="true"
+                  aria-invalid={!!ukmcError}
+                  aria-describedby={ukmcError ? 'eu-ukmc-error' : undefined}
                 />
+                {ukmcError && (
+                  <p id="eu-ukmc-error" className="text-xs text-destructive" role="alert">{ukmcError}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
                   Uttarakhand Medical Council Registration Number (required for doctors).
                 </p>

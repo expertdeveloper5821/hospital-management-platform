@@ -111,7 +111,7 @@ export const paymentApi = baseApi.injectEndpoints({
       providesTags: ['Payment', 'Revenue'],
     }),
 
-    // Payment Export — downloads the collection-report CSV. Dates are sent as
+    // Payment Export — downloads the collection-report PDF. Dates are sent as
     // plain YYYY-MM-DD hospital (IST) calendar days; the server resolves the
     // range, so the browser's own timezone never shifts it. Uses queryFn
     // because the endpoint returns a raw file, not JSON.
@@ -136,7 +136,7 @@ export const paymentApi = baseApi.injectEndpoints({
             return { error: err };
           }
           const match    = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '');
-          const filename = match?.[1] ?? `payments-${period.toLowerCase()}.csv`;
+          const filename = match?.[1] ?? `payments-${period.toLowerCase()}.pdf`;
           const blob     = await res.blob();
           return { data: { url: URL.createObjectURL(blob), filename } };
         } catch {
