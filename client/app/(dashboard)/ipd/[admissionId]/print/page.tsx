@@ -118,8 +118,9 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
   const doctors = usersData?.data ?? [];
 
   const ready = !admissionLoading && !patientLoading && !!admission && !!patient;
-  // Vitals set follows the department only, never the patient's age.
-  const vitalsCategory = getVitalsCategory(admission?.departmentId, departments);
+  // Vitals set follows the department; with none, the patient's age decides
+  // (under 18 → pediatric set).
+  const vitalsCategory = getVitalsCategory(admission?.departmentId, departments, patient);
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own

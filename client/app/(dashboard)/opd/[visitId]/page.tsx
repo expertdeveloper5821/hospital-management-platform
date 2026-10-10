@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { ArrowLeft, User, Stethoscope, FileText, Calendar, Activity } from 'lucide-react';
 import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
+import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { formatVitalValue, getVitalDefinitions, getVitalsCategory, getVitalsHeading } from '@/lib/patient-vitals';
@@ -35,9 +36,11 @@ function DetailRow({ icon, label, value }: { icon: React.ReactNode; label: strin
 export default function OPDVisitDetailPage({ params }: { params: { visitId: string } }) {
   const { visitId } = params;
   const { data: visit, isLoading, isError } = useGetOPDVisitByIdQuery(visitId);
+  const { data: patient } = useGetPatientByIdQuery(visit?.patientId ?? '', { skip: !visit });
   const { data: departments } = useListDepartmentsQuery();
-  // Vitals set follows the visit's department only, never the patient's age.
-  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments);
+  // Vitals set follows the visit's department; with none, the patient's age
+  // decides (under 18 → pediatric set).
+  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments, patient);
 
   if (isLoading) {
     return (

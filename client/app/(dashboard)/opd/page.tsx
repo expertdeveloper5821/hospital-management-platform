@@ -14,7 +14,7 @@ import {
   useGetDoctorNurseAssignmentsQuery,
 } from '@/store/api/opd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
-import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useSearchPatientsQuery, useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListUsersQuery } from '@/store/api/user.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListWardsQuery } from '@/store/api/ipd.api';
@@ -301,9 +301,16 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // Vitals set follows the department only — the one being picked while
-  // editing, the saved one otherwise — never the patient's age.
-  const vitalsCategory = getVitalsCategory(mode === 'edit' ? selectedDepartmentId : visit.departmentId, editDepartments);
+  // The visit's patient age drives the fallback vitals set (see below).
+  const { data: patient } = useGetPatientByIdQuery(visit.patientId);
+  // Vitals set follows the department — the one being picked while editing,
+  // the saved one otherwise; with none, the patient's age decides (under 18
+  // → pediatric set).
+  const vitalsCategory = getVitalsCategory(
+    mode === 'edit' ? selectedDepartmentId : visit.departmentId,
+    editDepartments,
+    patient,
+  );
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();

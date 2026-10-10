@@ -1,4 +1,6 @@
 import type { VitalsProfile } from '../../modules/department/department.model';
+import { AgeUnit } from '../../modules/patient/patient.types';
+import { resolvePatientAge } from './patient-age';
 
 export type PatientVitalKey =
   | 'bloodPressure'
@@ -50,8 +52,35 @@ const DEFAULT_VITALS: PatientVitalDefinition[] = [
   { key: 'weight', label: 'Weight', unit: 'kg' },
 ];
 
-export function getVitalsCategory(vitalsProfile: VitalsProfile | null | undefined): VitalsCategory {
-  return vitalsProfile ?? 'DEFAULT';
+export interface PatientAgeInput {
+  age?: number | null;
+  ageUnit?: AgeUnit | null;
+  dateOfBirth?: string | Date | null;
+}
+
+// A patient younger than 18 years is pediatric. Uses resolvePatientAge's
+// contract: an explicit age (with its unit) wins over dateOfBirth.
+export function isPediatricPatient(age: number | null | undefined, ageUnit: AgeUnit | null | undefined): boolean {
+  if (age === null || age === undefined || !Number.isFinite(age) || age < 0) return false;
+  const unit = ageUnit ?? 'YEARS';
+  const years = unit === 'YEARS' ? age : unit === 'MONTHS' ? age / 12 : age / 365;
+  return years < 18;
+}
+
+// The department's vitalsProfile stays authoritative (Pediatric /
+// Non-Pediatric system departments). When the visit/admission carries no
+// profile at all, the patient's age decides: under 18 → the Pediatric set,
+// otherwise the Default set.
+export function getVitalsCategory(
+  vitalsProfile: VitalsProfile | null | undefined,
+  patient?: PatientAgeInput | null,
+): VitalsCategory {
+  if (vitalsProfile) return vitalsProfile;
+  const patientAge = patient
+    ? resolvePatientAge(patient.age, patient.ageUnit, patient.dateOfBirth)
+    : null;
+  if (patientAge && isPediatricPatient(patientAge.value, patientAge.unit)) return 'PEDIATRIC';
+  return 'DEFAULT';
 }
 
 export function getPatientVitalDefinitions(category: VitalsCategory): PatientVitalDefinition[] {

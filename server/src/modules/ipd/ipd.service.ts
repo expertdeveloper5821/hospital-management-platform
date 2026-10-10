@@ -204,8 +204,9 @@ function buildIpdParchaOverlay(
     fieldRows.push({ label: 'Doctor(s) / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  // Vitals set comes only from the department (never the patient's age).
-  const category = getVitalsCategory(vitalsProfile);
+  // The department's vitalsProfile wins; with none, the patient's age decides
+  // (under 18 → pediatric set).
+  const category = getVitalsCategory(vitalsProfile, patient);
   const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(category).map((definition) => ({
     label: getPatientVitalSlipLabel(definition, category),
     value: formatPatientVitalValue(admission.vitals, definition),

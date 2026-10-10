@@ -125,8 +125,9 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   const doctors = usersData?.data ?? [];
 
   const ready = !visitLoading && !patientLoading && !opdSettingsLoading && !!visit && !!patient && !!opdSettings;
-  // Vitals set follows the department only, never the patient's age.
-  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments);
+  // Vitals set follows the department; with none, the patient's age decides
+  // (under 18 → pediatric set).
+  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments, patient);
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own

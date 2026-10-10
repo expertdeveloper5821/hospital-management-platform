@@ -1,4 +1,4 @@
-import type { DepartmentResponse, VitalsProfile } from '@/store/types';
+import type { AgeUnit, DepartmentResponse, VitalsProfile } from '@/store/types';
 
 // The vitals set is decided only by the OPD visit's / IPD admission's
 // department, never by patient age: the Pediatric / Non-Pediatric system
@@ -36,11 +36,57 @@ export function getVitalsProfile(
   return departments?.find((d) => d.departmentId === departmentId)?.vitalsProfile ?? null;
 }
 
+export type PatientAgeInput = {
+  age?: number | null;
+  ageUnit?: AgeUnit | null;
+  dateOfBirth?: string | null;
+};
+
+// A patient younger than 18 years is pediatric. Resolves an explicit age +
+// its unit (YEARS / MONTHS / DAYS) first, then dateOfBirth, to whole years.
+export function isPediatricPatient(
+  age?: number | null,
+  ageUnit?: AgeUnit | null,
+  dateOfBirth?: string | null,
+): boolean {
+  let resolved: { value: number; unit: AgeUnit } | null = null;
+  if (age !== null && age !== undefined && Number.isFinite(age) && age >= 0) {
+    resolved = { value: age, unit: ageUnit ?? 'YEARS' };
+  } else if (dateOfBirth) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateOfBirth);
+    if (match) {
+      const dob = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+      if (!Number.isNaN(dob.getTime())) {
+        const today = new Date();
+        let years = today.getUTCFullYear() - dob.getUTCFullYear();
+        if (
+          today.getUTCMonth() < dob.getUTCMonth() ||
+          (today.getUTCMonth() === dob.getUTCMonth() && today.getUTCDate() < dob.getUTCDate())
+        ) years--;
+        resolved = { value: Math.max(0, years), unit: 'YEARS' };
+      }
+    }
+  }
+  if (!resolved) return false;
+  const years = resolved.unit === 'YEARS'
+    ? resolved.value
+    : resolved.unit === 'MONTHS' ? resolved.value / 12 : resolved.value / 365;
+  return years < 18;
+}
+
+// The department's vitalsProfile stays authoritative (Pediatric /
+// Non-Pediatric system departments). When the visit/admission has no profile
+// at all, the patient's age decides: under 18 → the Pediatric set, otherwise
+// the Default set.
 export function getVitalsCategory(
   departmentId: string | null | undefined,
   departments: DepartmentResponse[] | null | undefined,
+  patient?: PatientAgeInput | null,
 ): VitalsCategory {
-  return getVitalsProfile(departmentId, departments) ?? 'DEFAULT';
+  const profile = getVitalsProfile(departmentId, departments);
+  if (profile) return profile;
+  if (patient && isPediatricPatient(patient.age, patient.ageUnit, patient.dateOfBirth)) return 'PEDIATRIC';
+  return 'DEFAULT';
 }
 
 export function getVitalsHeading(category: VitalsCategory): string {
