@@ -14,7 +14,7 @@ import {
 } from '@/store/api/ipd.api';
 import { useCreateManualPaymentMutation, useListPaymentsQuery } from '@/store/api/payment.api';
 import { useListUsersQuery }    from '@/store/api/user.api';
-import { useSearchPatientsQuery } from '@/store/api/patient.api';
+import { useSearchPatientsQuery, useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
 import { useListPackagesQuery }    from '@/store/api/packages.api';
 import { useAppSelector }       from '@/store/hooks';
@@ -46,6 +46,7 @@ import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import {
   formatVitalValue,
   getVitalDefinitions,
+  getDepartmentNameById,
   getVitalsCategory,
   getVitalsHeading,
   parsePatientVital,
@@ -454,15 +455,20 @@ function AdmissionPanel({
   const vitalError = (key: keyof VitalsInputState, id: string) =>
     vitalsErrors[key] ? <p id={`${id}-error`} role="alert" className="text-xs text-destructive">{vitalsErrors[key]}</p> : null;
 
+  const { data: patient } = useGetPatientByIdQuery(admission.patientId);
   const { data: departmentsData } = useListDepartmentsQuery();
   const { data: doctorsPage }     = useListUsersQuery({ role: UserRole.DOCTOR, isActive: true, limit: 100 });
   const { data: wardsData }       = useListWardsQuery();
   const { data: bedsData }        = useListBedsQuery(wardId, { skip: !wardId || mode !== 'edit' });
 
   const departments = departmentsData ?? [];
-  // Vitals set follows the department only — the one being picked while
-  // editing, the saved one otherwise — never the patient's age.
-  const vitalsCategory = getVitalsCategory(mode === 'edit' ? selectedDepartmentId : admission.departmentId, departments);
+  // Vitals set follows the department — the one being picked while editing,
+  // the saved one otherwise; the department's NAME decides (Pediatric /
+  // Paediatric → pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(
+    mode === 'edit' ? selectedDepartmentId : admission.departmentId,
+    departments,
+  ));
   const allDoctors  = doctorsPage?.data ?? [];
   const wards       = wardsData ?? [];
   const allBeds     = bedsData ?? [];

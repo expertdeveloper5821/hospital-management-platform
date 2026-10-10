@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import type { ProgressNote } from '@/store/types';
 import { formatPatientResponseAge } from '@/lib/patient-age';
-import { getVitalDefinitions, getVitalSlipLabel, getVitalsCategory } from '@/lib/patient-vitals';
+import { getDepartmentNameById, getVitalDefinitions, getVitalSlipLabel, getVitalsCategory } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -118,8 +118,9 @@ export default function IPDAdmissionPrintPage({ params }: { params: { admissionI
   const doctors = usersData?.data ?? [];
 
   const ready = !admissionLoading && !patientLoading && !!admission && !!patient;
-  // Vitals set follows the department only, never the patient's age.
-  const vitalsCategory = getVitalsCategory(admission?.departmentId, departments);
+  // Vitals set follows the department name (Pediatric / Paediatric →
+  // pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(admission?.departmentId, departments));
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own

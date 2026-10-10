@@ -18,9 +18,9 @@ export interface PatientVitalDefinition {
 }
 
 // The vitals set is decided only by the OPD visit's / IPD admission's
-// department, never by patient age: the Pediatric / Non-Pediatric system
-// departments get their own set, every other department (or none) DEFAULT.
-export type VitalsCategory = VitalsProfile | 'DEFAULT';
+// department NAME, never by patient age: a Pediatric / Paediatric department
+// gets its own set, every other department (or none) DEFAULT.
+export type VitalsCategory = 'PEDIATRIC' | 'DEFAULT';
 
 const PEDIATRIC_VITALS: PatientVitalDefinition[] = [
   { key: 'pulse', label: 'PR', unit: 'bpm' },
@@ -32,37 +32,32 @@ const PEDIATRIC_VITALS: PatientVitalDefinition[] = [
   { key: 'headCircumference', label: 'Head Circumference', unit: 'cm' },
 ];
 
-const NON_PEDIATRIC_VITALS: PatientVitalDefinition[] = [
+const DEFAULT_VITALS: PatientVitalDefinition[] = [
   { key: 'bloodPressure', label: 'BP', unit: 'mmHg' },
   { key: 'pulse', label: 'PR', unit: 'bpm' },
   { key: 'spo2', label: 'SpO2', unit: '%' },
   { key: 'sugar', label: 'RBS', unit: 'mg/dL' },
-  { key: 'bodyTemperature', label: 'Temperature', unit: '°F' },
-  { key: 'weight', label: 'Weight', unit: 'kg' },
+  { key: 'bodyTemperature', label: 'Temp', unit: '°F' },
+  { key: 'weight', label: 'Wt', unit: 'kg' },
 ];
 
-const DEFAULT_VITALS: PatientVitalDefinition[] = [
-  { key: 'spo2', label: 'SpO2', unit: '%' },
-  { key: 'bodyTemperature', label: 'Temperature', unit: '°F' },
-  { key: 'bloodPressure', label: 'BP', unit: 'mmHg' },
-  { key: 'pulse', label: 'Pulse', unit: 'bpm' },
-  { key: 'height', label: 'Height', unit: 'cm' },
-  { key: 'weight', label: 'Weight', unit: 'kg' },
-];
-
-export function getVitalsCategory(vitalsProfile: VitalsProfile | null | undefined): VitalsCategory {
-  return vitalsProfile ?? 'DEFAULT';
+// The department NAME decides the vitals set — never patient age: a
+// Pediatric / Paediatric department gets the Pediatric set, and any other
+// department (or none) the Default set.
+export function getVitalsCategory(departmentName?: string | null): VitalsCategory {
+  if (!departmentName) return 'DEFAULT';
+  const d = departmentName.toLowerCase().trim();
+  if (d.includes('non')) return 'DEFAULT';
+  return (d.includes('pediatric') || d.includes('paediatric')) ? 'PEDIATRIC' : 'DEFAULT';
 }
 
 export function getPatientVitalDefinitions(category: VitalsCategory): PatientVitalDefinition[] {
   if (category === 'PEDIATRIC') return PEDIATRIC_VITALS;
-  if (category === 'NON_PEDIATRIC') return NON_PEDIATRIC_VITALS;
   return DEFAULT_VITALS;
 }
 
 export function getPatientVitalsHeading(category: VitalsCategory): string {
   if (category === 'PEDIATRIC') return 'Pediatric Vitals';
-  if (category === 'NON_PEDIATRIC') return 'Non-Pediatric Vitals';
   return 'Vitals';
 }
 
