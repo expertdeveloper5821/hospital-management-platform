@@ -12,7 +12,7 @@ import { useAppSelector } from '@/store/hooks';
 import { Button } from '@/components/ui/button';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { formatPatientResponseAge } from '@/lib/patient-age';
-import { getVitalDefinitions, getVitalSlipLabel, getVitalsCategory } from '@/lib/patient-vitals';
+import { getDepartmentNameById, getVitalDefinitions, getVitalSlipLabel, getVitalsCategory } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', {
@@ -125,9 +125,9 @@ export default function OPDParchaPrintPage({ params }: { params: { visitId: stri
   const doctors = usersData?.data ?? [];
 
   const ready = !visitLoading && !patientLoading && !opdSettingsLoading && !!visit && !!patient && !!opdSettings;
-  // Vitals set follows the department; with none, the patient's age decides
-  // (under 18 → pediatric set).
-  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments, patient);
+  // Vitals set follows the department name (Pediatric / Paediatric →
+  // pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(visit?.departmentId, departments));
   const printedRef = useRef(false);
 
   // Phones/tablets print through the OS print service (iOS adds its own

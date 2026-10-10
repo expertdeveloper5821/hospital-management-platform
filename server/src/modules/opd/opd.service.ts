@@ -152,7 +152,6 @@ function buildOpdParchaOverlay(
   doctorNames:    string,
   validityDays:   number,
   validTill:      Date,
-  vitalsProfile:  VitalsProfile | null = null,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
@@ -168,9 +167,9 @@ function buildOpdParchaOverlay(
     fieldRows.push({ label: 'Doctor / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  // The department's vitalsProfile wins; with none, the patient's age decides
-  // (under 18 → pediatric set).
-  const category = getVitalsCategory(vitalsProfile, patient);
+  // The department's NAME decides the vitals set (Pediatric / Paediatric →
+  // pediatric set).
+  const category = getVitalsCategory(departmentName);
   const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(category).map((definition) => ({
     label: getPatientVitalSlipLabel(definition, category),
     value: formatPatientVitalValue(visit.vitals, definition),
@@ -887,7 +886,7 @@ export class OPDService {
 
     const validTill = await this.getVisitValidTill(tenantId, visit, validityDays);
     const overlay = buildOpdParchaOverlay(
-      visit, patient, departmentName, doctorNames, validityDays, validTill, department?.vitalsProfile ?? null,
+      visit, patient, departmentName, doctorNames, validityDays, validTill,
     );
     return { templateBytes, overlay };
   }

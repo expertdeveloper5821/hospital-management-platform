@@ -61,6 +61,7 @@ import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import {
   formatVitalValue,
   getVitalDefinitions,
+  getDepartmentNameById,
   getVitalsCategory,
   getVitalsHeading,
   parsePatientVital,
@@ -301,16 +302,13 @@ function VisitPanel({ visit, onClose, onUpdate, canEdit, canComplete, canCancel,
   const [error,             setError]             = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  // The visit's patient age drives the fallback vitals set (see below).
-  const { data: patient } = useGetPatientByIdQuery(visit.patientId);
   // Vitals set follows the department — the one being picked while editing,
-  // the saved one otherwise; with none, the patient's age decides (under 18
-  // → pediatric set).
-  const vitalsCategory = getVitalsCategory(
+  // the saved one otherwise; the department's NAME decides (Pediatric /
+  // Paediatric → pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(
     mode === 'edit' ? selectedDepartmentId : visit.departmentId,
     editDepartments,
-    patient,
-  );
+  ));
 
   const [updateVisit,   { isLoading: updating  }] = useUpdateOPDVisitMutation();
   const [startConsultation, { isLoading: starting }] = useStartOPDConsultationMutation();

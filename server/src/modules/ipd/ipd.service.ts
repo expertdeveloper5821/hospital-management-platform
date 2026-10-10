@@ -184,7 +184,6 @@ function buildIpdParchaOverlay(
   departmentName: string | null,
   doctorNames:    string,
   staffNameMap:   Map<string, string>,
-  vitalsProfile:  VitalsProfile | null = null,
 ): ParchaOverlayInput {
   const fieldRows: ParchaOverlayInput['fieldRows'] = [
     { label: 'Patient Name', value: patient.fullName },
@@ -204,9 +203,9 @@ function buildIpdParchaOverlay(
     fieldRows.push({ label: 'Doctor(s) / Department', value: [doctorNames, departmentName].filter(Boolean).join(' — ') });
   }
 
-  // The department's vitalsProfile wins; with none, the patient's age decides
-  // (under 18 → pediatric set).
-  const category = getVitalsCategory(vitalsProfile, patient);
+  // The department's NAME decides the vitals set (Pediatric / Paediatric →
+  // pediatric set).
+  const category = getVitalsCategory(departmentName);
   const vitals: ParchaOverlayInput['vitals'] = getPatientVitalDefinitions(category).map((definition) => ({
     label: getPatientVitalSlipLabel(definition, category),
     value: formatPatientVitalValue(admission.vitals, definition),
@@ -560,7 +559,7 @@ export class IPDService {
     const staffNameMap = await userRepository.findNamesByIds(tenantId, noteAuthorIds);
 
     const overlay = buildIpdParchaOverlay(
-      admission, patient, departmentName, doctorNames, staffNameMap, department?.vitalsProfile ?? null,
+      admission, patient, departmentName, doctorNames, staffNameMap,
     );
     return { templateBytes, overlay };
   }

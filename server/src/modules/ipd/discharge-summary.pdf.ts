@@ -298,9 +298,9 @@ export async function buildDischargeSummaryPdf(
       const v = a.vitals;
       const withUnit = (val: number | string | null | undefined, unit: string): string =>
         val === null || val === undefined || val === '' ? '—' : `${val} ${unit}`;
-      // The department's vitalsProfile wins; with none, the patient's age
-      // decides (under 18 → pediatric set).
-      const category = getVitalsCategory(a.vitalsProfile, p);
+      // The department's NAME decides the vitals set (Pediatric / Paediatric
+      // → pediatric set).
+      const category = getVitalsCategory(a.departmentName);
       const vitalDefinitions = getPatientVitalDefinitions(category);
       if (v && vitalDefinitions.some(({ key }) => v[key] !== null && v[key] !== undefined && v[key] !== '')) {
         sectionHeading(getPatientVitalsHeading(category));

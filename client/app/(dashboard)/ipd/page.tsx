@@ -46,6 +46,7 @@ import { PeopleMultiSelect } from '@/components/ui/people-multi-select';
 import {
   formatVitalValue,
   getVitalDefinitions,
+  getDepartmentNameById,
   getVitalsCategory,
   getVitalsHeading,
   parsePatientVital,
@@ -462,13 +463,12 @@ function AdmissionPanel({
 
   const departments = departmentsData ?? [];
   // Vitals set follows the department — the one being picked while editing,
-  // the saved one otherwise; with none, the patient's age decides (under 18
-  // → pediatric set).
-  const vitalsCategory = getVitalsCategory(
+  // the saved one otherwise; the department's NAME decides (Pediatric /
+  // Paediatric → pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(
     mode === 'edit' ? selectedDepartmentId : admission.departmentId,
     departments,
-    patient,
-  );
+  ));
   const allDoctors  = doctorsPage?.data ?? [];
   const wards       = wardsData ?? [];
   const allBeds     = bedsData ?? [];

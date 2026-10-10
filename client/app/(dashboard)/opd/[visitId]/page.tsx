@@ -6,7 +6,7 @@ import { useGetOPDVisitByIdQuery } from '@/store/api/opd.api';
 import { useGetPatientByIdQuery } from '@/store/api/patient.api';
 import { RichTextDisplay } from '@/components/ui/rich-text-display';
 import { useListDepartmentsQuery } from '@/store/api/department.api';
-import { formatVitalValue, getVitalDefinitions, getVitalsCategory, getVitalsHeading } from '@/lib/patient-vitals';
+import { formatVitalValue, getDepartmentNameById, getVitalDefinitions, getVitalsCategory, getVitalsHeading } from '@/lib/patient-vitals';
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -38,9 +38,9 @@ export default function OPDVisitDetailPage({ params }: { params: { visitId: stri
   const { data: visit, isLoading, isError } = useGetOPDVisitByIdQuery(visitId);
   const { data: patient } = useGetPatientByIdQuery(visit?.patientId ?? '', { skip: !visit });
   const { data: departments } = useListDepartmentsQuery();
-  // Vitals set follows the visit's department; with none, the patient's age
-  // decides (under 18 → pediatric set).
-  const vitalsCategory = getVitalsCategory(visit?.departmentId, departments, patient);
+  // Vitals set follows the visit's department name (Pediatric / Paediatric
+  // → pediatric set).
+  const vitalsCategory = getVitalsCategory(getDepartmentNameById(visit?.departmentId, departments));
 
   if (isLoading) {
     return (
